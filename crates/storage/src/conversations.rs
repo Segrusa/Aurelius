@@ -870,7 +870,14 @@ pub fn work_folders(conn: &rusqlite::Connection, conversation: ConversationId) -
         )
         .optional()?;
     if let Some((p, m)) = found {
-        return Ok([p, m].into_iter().flatten().collect());
+        // A ticket with a worktree of its own (migration 42): its runs work there, on the
+        // ticket's branch, instead of in the project's folder. A worktree that is gone
+        // from disk does not count: the run then works in the project's folder as before.
+        let own = match crate::tickets::of_conversation(conn, conversation)? {
+            Some(ticket) => crate::tickets::worktree(conn, ticket)?.and_then(|w| w.path).filter(|path| std::path::Path::new(path).is_dir()),
+            None => None,
+        };
+        return Ok([own.or(p), m].into_iter().flatten().collect());
     }
     // A project conversation works in the project's folder alone.
     let project: Option<Option<String>> = conn

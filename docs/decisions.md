@@ -39,7 +39,7 @@ Kleinere punten, in dezelfde ronde beslist:
 
 | # | Beslissing | Status |
 |---|---|---|
-| D19 | Elk project toont de git-toestand van zijn map in het scherm **Changes**: wat nog niet gecommit is, de commits per branch en de branches, telkens met de diff. Alleen lezen: het scherm en de vier `git.*`-leesverzoeken (feature `project_git`) wijzigen niets aan de repository. Wat een client meegeeft (een branch, een commit, een pad) wordt gecontroleerd en kan nooit een optie van git worden of buiten de repository lezen. | gebouwd op de server en in de desktop- en webapp. Open: de mobiele app; een commit of branch koppelen aan zijn ticket; een worktree per ticket (ontwerpwijziging 4) |
+| D19 | Elk project toont de git-toestand van zijn map in het scherm **Changes**: wat nog niet gecommit is, de commits per branch en de branches, telkens met de diff. Alleen lezen: het scherm en de vier `git.*`-leesverzoeken (feature `project_git`) wijzigen niets aan de repository. Wat een client meegeeft (een branch, een commit, een pad) wordt gecontroleerd en kan nooit een optie van git worden of buiten de repository lezen. | gebouwd op de server en in de desktop- en webapp. Open: de mobiele app |
 
 ## Ontwerpwijzigingen waartoe besloten is
 
@@ -51,7 +51,9 @@ Nog niet gebouwd, in de volgorde waarin ze het meeste opleveren.
    - *Open:* de bordopdrachten van een board member (Start, plan goedkeuren, accepteren, terugsturen, annuleren) zetten de kolom nog zelf, vóór de motor de taak aanpast; ze worden wel tegen de tabel gecontroleerd. De motor gebruikt intern nog `open_parts` en `open_on_ticket` om te beslissen wanneer de eigenaar verdergaat.
 2. **Expliciet "klaar" en "vraag".** De tools `report_done` en `ask_board` in plaats van raden uit de laatste regel. Een run die zonder een van beide eindigt, vraagt aandacht en gaat niet naar Review.
 3. **Herstelbaar in plaats van definitief.** Een run die mislukt of onderbroken wordt, zet de taak op wachten met Hervatten op dezelfde sessie. Definitief mislukt is er alleen voor fouten die niet overgaan.
-4. **Een worktree en branch per ticket**, gemaakt door de server bij Start. Accepteren biedt mergen, een PR openen of bewaren (D7).
+4. **Een worktree en branch per ticket**, gemaakt door de server.
+   - *Gebouwd:* bij de eerste run van een ticket in een git-project maakt de server een branch `ticket/<nummer>-<titel>` vanaf de branch waar de projectmap op staat, uitgecheckt in een eigen worktree onder de data van de server. Alle runs van het ticket werken daar en krijgen dat te horen. Het ticket toont zijn branch; *See its changes* opent Changes op wat die branch heeft en zijn basis niet. Na het sluiten verdwijnt de worktree, behalve als er iets niet gecommit is; de branch blijft altijd. Per project uit te zetten.
+   - *Open:* Accepteren biedt nog niet aan te mergen of een PR te openen (D7); de server merget, pusht en verwijdert nooit zelf. De mobiele app toont de branch niet.
 5. **Eén manier van werk doorgeven** in plaats van `delegate_task` en `hand_off` naast elkaar, met het budget per ticket (D4).
 6. **Aanwezigheid.** Wie bekijkt dit ticket, wie beantwoordt deze goedkeuring, wie typt.
 7. **"Sinds je weg was".** Een overzicht per ticket uit de genummerde gebeurtenissenlog.

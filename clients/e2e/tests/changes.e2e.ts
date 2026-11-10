@@ -110,6 +110,14 @@ test("a project's changes, commits and branches are read from its repository", a
     if (SHOTS) await page.screenshot({ path: join(SHOTS, "changes-branches.png"), animations: "disabled" });
     await page.getByRole("button", { name: /feat\/login/ }).click();
     await expect(page.getByRole("button", { name: /Add the login/ })).toBeVisible();
+
+    // A ticket's branch against the one it was made from: only what it added, as one change.
+    await page.goto(`${daemon.origin}/changes?view=commits&rev=feat%2Flogin&base=main`);
+    await expect(page.getByText("Everything feat/login changed since main")).toBeVisible();
+    await expect(page.getByText("pub fn login() {}")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Add the login/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Say hi at the start/ })).toBeHidden();
+    if (SHOTS) await page.screenshot({ path: join(SHOTS, "changes-ticket-branch.png"), animations: "disabled" });
   } finally {
     owner.dispose();
     await daemon.dispose();

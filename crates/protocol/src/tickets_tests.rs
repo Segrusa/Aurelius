@@ -45,7 +45,7 @@ fn writes() -> Vec<Command> {
         Command::ArchiveTicket(ArchiveTicket { ticket_id: t }),
         Command::UpdateBoardColumns(UpdateBoardColumns { columns: vec![BoardColumnEdit { column_id: BoardColumnId::new(), name: "Ideas".into() }] }),
         Command::UpdateCompany(UpdateCompany { name: None, dispatcher: Some(SetDispatcher { employee_id: None }), tester: None }),
-        Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: ProjectId::new(), dispatcher: Some(SetDispatcher { employee_id: Some(EmployeeId::new()) }) }),
+        Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: None, project_id: ProjectId::new(), dispatcher: Some(SetDispatcher { employee_id: Some(EmployeeId::new()) }) }),
     ]
 }
 

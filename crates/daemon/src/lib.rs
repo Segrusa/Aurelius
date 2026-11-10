@@ -7,6 +7,7 @@ mod remote;
 mod browse;
 mod git;
 mod markdown;
+pub mod worktrees;
 mod uploads;
 mod dispatcher;
 mod runtimes;
@@ -450,6 +451,12 @@ async fn run_inner(
         power: aurelius_host::power::Power::default(),
         vault,
     });
+    // Worktrees of tickets that were closed while the server was down (or since the last run started).
+    tokio::spawn({
+        let shared = shared.clone();
+        async move { worktrees::sweep(&shared).await }
+    });
+
     // Every stored secret in the redactor before any run starts (SEC0 E16).
     {
         let s = shared.clone();

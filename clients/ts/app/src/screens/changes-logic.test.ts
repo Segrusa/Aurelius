@@ -1,6 +1,16 @@
 import type { GitBranch } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import { ago, changesLine, changesSearch, counts, parseDiff, splitPath, statusOf, trackLine } from "./changes-logic";
+import {
+  ago,
+  changesLine,
+  changesSearch,
+  counts,
+  parseDiff,
+  splitPath,
+  statusOf,
+  ticketChanges,
+  trackLine,
+} from "./changes-logic";
 
 const DIFF = `diff --git a/src/main.rs b/src/main.rs
 index 1111111..2222222 100644
@@ -74,6 +84,23 @@ describe("what the screen keeps in the URL", () => {
     });
     expect(changesSearch({ view: "changes", commit: "not-a-commit", rev: 3 })).toEqual({});
     expect(changesSearch({ view: "elsewhere" })).toEqual({});
+    // A base only narrows a branch that is named.
+    expect(changesSearch({ view: "commits", rev: "ticket/1-x", base: "main" })).toEqual({
+      view: "commits",
+      rev: "ticket/1-x",
+      base: "main",
+    });
+    expect(changesSearch({ view: "commits", base: "main" })).toEqual({ view: "commits" });
+  });
+
+  it("opens a ticket's branch against the one it was made from", () => {
+    expect(ticketChanges({ branch: "ticket/1-x", base_branch: "main" })).toEqual({
+      view: "commits",
+      rev: "ticket/1-x",
+      base: "main",
+    });
+    expect(ticketChanges({ branch: "ticket/1-x" })).toEqual({ view: "commits", rev: "ticket/1-x" });
+    expect(ticketChanges({})).toBeNull();
   });
 });
 

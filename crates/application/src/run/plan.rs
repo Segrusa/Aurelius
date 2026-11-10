@@ -58,6 +58,14 @@ fn tools_sentence(access: aurelius_domain::employee::AccessLevel, policy: &aurel
     })
 }
 
+/// What a run of a ticket with its own worktree is told (`aurelius_daemon::worktrees`).
+pub fn worktree_note(branch: &str, base: Option<&str>, path: &str) -> String {
+    let from = base.map(|b| format!(", made from {b}")).unwrap_or_default();
+    format!(
+        "This ticket has a git worktree and a branch of its own: you work in {path}, on the branch {branch}{from}. Everyone who works on this ticket works there.          Commit your work on this branch as you go, with messages that say what changed, so a board member can read what the ticket did.          Do not make another worktree or branch for this ticket, do not switch this worktree to another branch, and do not work in the project's main folder.          Do not merge this branch, push it or delete it: that is a board member's decision."
+    )
+}
+
 /// The Claude Design links of a run: the workspace's styleguide and this ticket's design.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct DesignLinks {
@@ -641,6 +649,15 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                         design: ticket.map(|(t, _)| aurelius_storage::tickets::design_url(conn, t)).transpose()?.flatten(),
                     }
                 };
+                // A ticket with a worktree of its own: the run is told where it is and what not to do there.
+                if !quick {
+                    let ticket = crate::conversation::discussion::run_discussion(conn, run_id)?;
+                    if let Some(own) = ticket.as_ref().and_then(|d| d.ticket()).map(|t| aurelius_storage::tickets::worktree(conn, t.id)).transpose()?.flatten() {
+                        if let Some(path) = own.path.as_deref().filter(|p| std::path::Path::new(p).is_dir()) {
+                            tail.push(worktree_note(&own.branch, own.base_branch.as_deref(), path));
+                        }
+                    }
+                }
                 let artifact_tool = !design.is_empty() && artifact_tool_offered(&config, access, work.is_some());
                 tail.extend(design_block(&design, artifact_tool));
 

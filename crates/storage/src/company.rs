@@ -111,13 +111,16 @@ pub fn update_columns(tx: &Transaction<'_>, columns: &[(BoardColumnId, String)])
 
 /// A project's settings that are given (`Some(None)` clears: the company's dispatcher again,
 /// no styleguide); returns the project's new version, one higher however many are given.
-pub fn update_project(tx: &Transaction<'_>, project: ProjectId, dispatcher: Option<Option<EmployeeId>>, styleguide: Option<Option<&str>>) -> Result<u64, StorageError> {
+pub fn update_project(tx: &Transaction<'_>, project: ProjectId, dispatcher: Option<Option<EmployeeId>>, styleguide: Option<Option<&str>>, ticket_worktrees: Option<bool>) -> Result<u64, StorageError> {
     let id = project.to_string();
     if let Some(dispatcher) = dispatcher {
         tx.execute("UPDATE projects SET dispatcher_employee_id = ?2 WHERE id = ?1", params![id, dispatcher.map(|d| d.to_string())])?;
     }
     if let Some(styleguide) = styleguide {
         tx.execute("UPDATE projects SET styleguide_url = ?2 WHERE id = ?1", params![id, styleguide])?;
+    }
+    if let Some(on) = ticket_worktrees {
+        tx.execute("UPDATE projects SET ticket_worktrees = ?2 WHERE id = ?1", params![id, on])?;
     }
     tx.execute("UPDATE projects SET version = version + 1, updated_at_ms = ?2 WHERE id = ?1", params![id, now_ms()])?;
     Ok(tx.query_row("SELECT version FROM projects WHERE id = ?1", [id], |r| r.get::<_, i64>(0))? as u64)

@@ -6,6 +6,9 @@ import type { GitBranch, GitChange } from "@aurelius/protocol";
 /** The server reads git (feature `project_git`); without it there is no Changes screen. */
 export const GIT_FEATURE = "project_git";
 
+/** A branch and a worktree per ticket (feature `ticket_worktrees`). */
+export const WORKTREES_FEATURE = "ticket_worktrees";
+
 export const CHANGES_VIEWS = ["changes", "commits", "branches"] as const;
 export type ChangesView = (typeof CHANGES_VIEWS)[number];
 
@@ -14,6 +17,8 @@ export interface ChangesSearch {
   view?: ChangesView;
   /** The branch whose commits are listed; none: where the work folder is. */
   rev?: string;
+  /** Only what `rev` has that this branch has not: what a ticket's branch did. */
+  base?: string;
   commit?: string;
   path?: string;
 }
@@ -27,6 +32,8 @@ export function changesSearch(search: Record<string, unknown>): ChangesSearch {
   if (view && view !== "changes") out.view = view;
   const rev = text(search.rev);
   if (rev) out.rev = rev;
+  const base = text(search.base);
+  if (rev && base) out.base = base;
   const commit = text(search.commit);
   if (commit && /^[0-9a-f]{4,64}$/i.test(commit)) out.commit = commit;
   const path = text(search.path);
@@ -156,6 +163,12 @@ export function counts(change: { added?: number | null; removed?: number | null 
 export function splitPath(path: string): { dir: string; name: string } {
   const at = path.lastIndexOf("/");
   return at < 0 ? { dir: "", name: path } : { dir: path.slice(0, at + 1), name: path.slice(at + 1) };
+}
+
+/** Where a ticket's work is read: the commits its branch has that its base has not. */
+export function ticketChanges(t: { branch?: string | null; base_branch?: string | null }): ChangesSearch | null {
+  if (!t.branch) return null;
+  return { view: "commits", rev: t.branch, ...(t.base_branch ? { base: t.base_branch } : {}) };
 }
 
 export const shortId = (id: string): string => id.slice(0, 8);

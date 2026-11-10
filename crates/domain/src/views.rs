@@ -33,6 +33,10 @@ pub struct ProjectSummary {
     /// link only: runs read the artifact themselves. Left out when none and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub styleguide_url: Option<String>,
+    /// Each ticket of this project works in a git worktree and on a branch of its own
+    /// (feature `ticket_worktrees`). Left out when off and by older servers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ticket_worktrees: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -10361,15 +10361,18 @@ sealed class Method {
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodGitDiff(
+          base: (src['base'] == null ? null : (src['base'] as String)),
           id: (src['id'] == null ? null : (src['id'] as String)),
           path: (src['path'] == null ? null : (src['path'] as String)),
           projectId: (src['project_id'] as String),
+          rev: (src['rev'] == null ? null : (src['rev'] as String)),
         );
         }
       case 'git.log':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodGitLog(
+          base: (src['base'] == null ? null : (src['base'] as String)),
           limit: (src['limit'] == null ? null : (src['limit'] as num).toInt()),
           path: (src['path'] == null ? null : (src['path'] as String)),
           projectId: (src['project_id'] as String),
@@ -11189,25 +11192,32 @@ final class MethodGitCommit extends Method {
 
 /// A unified diff: of commit `id` against its first parent, or without `id` of
 /// the work folder against its last commit (staged and not, untracked files as
-/// new). `path`: only that file.
+/// new). `path`: only that file. With `rev` and `base` (feature `ticket_worktrees`):
+/// everything `rev` changed since it left `base`, as one diff.
 final class MethodGitDiff extends Method {
   const MethodGitDiff({
+    this.base,
     this.id,
     this.path,
     required this.projectId,
+    this.rev,
   });
 
+  final String? base;
   final String? id;
   final String? path;
   final String projectId;
+  final String? rev;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'git.diff',
       'params': <String, dynamic>{
+      if (base != null) 'base': base,
       if (id != null) 'id': id,
       if (path != null) 'path': path,
       'project_id': projectId,
+      if (rev != null) 'rev': rev,
     },
     };
 }
@@ -11217,6 +11227,7 @@ final class MethodGitDiff extends Method {
 /// when given, after the first `skip`, at most `limit` (default 50, most `GIT_LOG_MAX`).
 final class MethodGitLog extends Method {
   const MethodGitLog({
+    this.base,
     this.limit,
     this.path,
     required this.projectId,
@@ -11224,6 +11235,9 @@ final class MethodGitLog extends Method {
     this.skip,
   });
 
+  /// Only the commits `rev` has that `base` has not (feature `ticket_worktrees`):
+  /// what a ticket's branch added to the branch it was made from.
+  final String? base;
   final int? limit;
   final String? path;
   final String projectId;
@@ -11234,6 +11248,7 @@ final class MethodGitLog extends Method {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'git.log',
       'params': <String, dynamic>{
+      if (base != null) 'base': base,
       if (limit != null) 'limit': limit,
       if (path != null) 'path': path,
       'project_id': projectId,
@@ -12793,6 +12808,7 @@ final class ProjectSummary {
     required this.name,
     required this.status,
     this.styleguideUrl,
+    this.ticketWorktrees,
     required this.version,
   });
 
@@ -12810,6 +12826,9 @@ final class ProjectSummary {
   /// The workspace's styleguide, a Claude Design artifact (feature `design_links`). A
   /// link only: runs read the artifact themselves. Left out when none and by older servers.
   final String? styleguideUrl;
+  /// Each ticket of this project works in a git worktree and on a branch of its own
+  /// (feature `ticket_worktrees`). Left out when off and by older servers.
+  final bool? ticketWorktrees;
   final int version;
 
   factory ProjectSummary.fromJson(Map<String, dynamic> json) => ProjectSummary(
@@ -12822,6 +12841,7 @@ final class ProjectSummary {
     name: (json['name'] as String),
     status: ProjectStatus.fromJson(json['status'] as String),
     styleguideUrl: (json['styleguide_url'] == null ? null : (json['styleguide_url'] as String)),
+    ticketWorktrees: (json['ticket_worktrees'] == null ? null : (json['ticket_worktrees'] as bool)),
     version: (json['version'] as num).toInt(),
   );
 
@@ -12835,6 +12855,7 @@ final class ProjectSummary {
     'name': name,
     'status': status.toJson(),
     if (styleguideUrl != null) 'styleguide_url': styleguideUrl,
+    if (ticketWorktrees != null) 'ticket_worktrees': ticketWorktrees,
     'version': version,
   };
 }
@@ -17740,6 +17761,8 @@ final class TicketView {
     this.archivedAtMs,
     required this.attachments,
     this.attention,
+    this.baseBranch,
+    this.branch,
     this.busy = const [],
     required this.column,
     required this.columnId,
@@ -17783,6 +17806,13 @@ final class TicketView {
   /// `ticket_state`): the server's one answer, so every client shows the same
   /// "Needs you". None: nothing. Left out then and by older servers.
   final TicketAttention? attention;
+  /// The branch `branch` was made from.
+  final String? baseBranch;
+  /// The ticket's own git branch (feature `ticket_worktrees`): its runs work on it, in
+  /// a worktree of their own, so `git.log { rev: branch, base: base_branch }` and
+  /// `git.diff` with the same two are what this ticket changed. Left out while it has
+  /// none (not started, no repository, switched off for the project) and by older servers.
+  final String? branch;
   /// What still works on the ticket (feature `ticket_state`): `ticket.accept`
   /// refuses while this is not empty. Left out when empty and by older servers.
   final List<String> busy;
@@ -17846,6 +17876,8 @@ final class TicketView {
     archivedAtMs: (json['archived_at_ms'] == null ? null : (json['archived_at_ms'] as num).toInt()),
     attachments: (json['attachments'] as List<dynamic>).map((x0) => MessageFileView.fromJson(x0 as Map<String, dynamic>)).toList(),
     attention: (json['attention'] == null ? null : TicketAttention.fromJson(json['attention'] as Map<String, dynamic>)),
+    baseBranch: (json['base_branch'] == null ? null : (json['base_branch'] as String)),
+    branch: (json['branch'] == null ? null : (json['branch'] as String)),
     busy: (json['busy'] == null ? const [] : (json['busy'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     column: ColumnKind.fromJson(json['column'] as String),
     columnId: (json['column_id'] as String),
@@ -17886,6 +17918,8 @@ final class TicketView {
     if (archivedAtMs != null) 'archived_at_ms': archivedAtMs,
     'attachments': attachments.map((x0) => x0.toJson()).toList(),
     if (attention != null) 'attention': attention?.toJson(),
+    if (baseBranch != null) 'base_branch': baseBranch,
+    if (branch != null) 'branch': branch,
     'busy': busy,
     'column': column.toJson(),
     'column_id': columnId,
@@ -18430,6 +18464,7 @@ final class UpdateProject {
     this.dispatcher,
     required this.projectId,
     this.styleguideUrl,
+    this.ticketWorktrees,
   });
 
   final SetDispatcher? dispatcher;
@@ -18437,17 +18472,22 @@ final class UpdateProject {
   /// The workspace's styleguide: a Claude Design artifact link
   /// (`ticket::valid_artifact_url`, feature `design_links`); an empty text clears it.
   final String? styleguideUrl;
+  /// Whether each ticket of this project works in a git worktree and on a branch of
+  /// its own (feature `ticket_worktrees`); off: in the project's folder, as before.
+  final bool? ticketWorktrees;
 
   factory UpdateProject.fromJson(Map<String, dynamic> json) => UpdateProject(
     dispatcher: (json['dispatcher'] == null ? null : SetDispatcher.fromJson(json['dispatcher'] as Map<String, dynamic>)),
     projectId: (json['project_id'] as String),
     styleguideUrl: (json['styleguide_url'] == null ? null : (json['styleguide_url'] as String)),
+    ticketWorktrees: (json['ticket_worktrees'] == null ? null : (json['ticket_worktrees'] as bool)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (dispatcher != null) 'dispatcher': dispatcher?.toJson(),
     'project_id': projectId,
     if (styleguideUrl != null) 'styleguide_url': styleguideUrl,
+    if (ticketWorktrees != null) 'ticket_worktrees': ticketWorktrees,
   };
 }
 

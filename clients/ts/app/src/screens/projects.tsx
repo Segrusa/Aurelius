@@ -30,6 +30,7 @@ import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { BoardScreen } from "./board";
+import { WORKTREES_FEATURE } from "./changes-logic";
 import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { canPin, pinnedFirst, togglePin } from "./employee-logic";
 import { pinKey, usePins } from "./employees";
@@ -52,7 +53,7 @@ import {
 import { overlays } from "./overlays-store";
 import { useFolderChooser } from "./run-tools";
 import { ScheduleDialog } from "./settings-advanced";
-import { openWeb } from "./settings-kit";
+import { openWeb, Switch } from "./settings-kit";
 import { TasksScreen } from "./tasks";
 import { taskStateLine } from "./tasks-logic";
 import { VaultBody } from "./vault";
@@ -838,6 +839,44 @@ function StyleguideRow({ project }: { project: ProjectSummary }) {
   );
 }
 
+/** A git worktree and a branch per ticket (feature `ticket_worktrees`), on unless switched off. */
+function WorktreesRow({ project }: { project: ProjectSummary }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const on = project.ticket_worktrees === true;
+  const set = async (next: boolean) => {
+    setBusy(true);
+    try {
+      await connection.write("project.update", { project_id: project.id, ticket_worktrees: next }, { retry: false });
+      await client.invalidateQueries({ queryKey: ["projects"] });
+    } catch (e) {
+      toast(failureOf(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <Setting name="Branch per ticket">
+        <Switch
+          label="A branch and a worktree per ticket"
+          on={on}
+          disabled={busy}
+          onChange={(next) => void set(next)}
+        />
+      </Setting>
+      <Setting name="">
+        <span {...stylex.props(styles.dim)}>
+          {on
+            ? "Each ticket works on a branch of its own, in its own copy of the folder: tickets do not write through each other, and Changes shows what each one did. Only in a git repository."
+            : "Every ticket works in the project's folder, on the branch it is on."}
+        </span>
+      </Setting>
+    </>
+  );
+}
+
 function WorkspaceSettings({
   project,
   dispatcher,
@@ -854,6 +893,7 @@ function WorkspaceSettings({
   return (
     <Panel title="WORKSPACE SETTINGS" right={<Button size="sm" label="Edit…" onClick={onEdit} />}>
       {features.includes(DESIGN_FEATURE) ? <StyleguideRow project={project} /> : null}
+      {features.includes(WORKTREES_FEATURE) ? <WorktreesRow project={project} /> : null}
       <Setting name="Folder">
         <code title={project.folder ?? undefined} {...stylex.props(styles.settingValue, styles.mono)}>
           {project.folder ?? "No folder"}

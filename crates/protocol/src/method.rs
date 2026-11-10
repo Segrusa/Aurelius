@@ -477,6 +477,10 @@ pub enum Method {
         project_id: ProjectId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rev: Option<String>,
+        /// Only the commits `rev` has that `base` has not (feature `ticket_worktrees`):
+        /// what a ticket's branch added to the branch it was made from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -489,12 +493,17 @@ pub enum Method {
     GitCommit { project_id: ProjectId, id: String },
     /// A unified diff: of commit `id` against its first parent, or without `id` of
     /// the work folder against its last commit (staged and not, untracked files as
-    /// new). `path`: only that file.
+    /// new). `path`: only that file. With `rev` and `base` (feature `ticket_worktrees`):
+    /// everything `rev` changed since it left `base`, as one diff.
     #[serde(rename = "git.diff")]
     GitDiff {
         project_id: ProjectId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rev: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<String>,
     },

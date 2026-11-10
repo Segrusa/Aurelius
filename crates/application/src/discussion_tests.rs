@@ -274,7 +274,7 @@ fn the_general_channel_wakes_the_ceo_and_a_project_channel_its_dispatcher() {
     assert_eq!(to, vec![s.ceo]);
     assert_eq!(last_woken(&s, s.ceo), (runs[0], orbit, 0));
     // With a dispatcher for the project: that one.
-    exec(&s, Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: Some(s.bo) }) })).unwrap();
+    exec(&s, Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: None, project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: Some(s.bo) }) })).unwrap();
     let (to, _) = send(&s, Some(orbit), "And now?").unwrap();
     assert_eq!(to, vec![s.bo]);
     let update = messages(&s, aurelius_storage_main_chat(&s, s.bo)).into_iter().last().unwrap();

@@ -65,6 +65,10 @@ pub struct UpdateProject {
     /// (`ticket::valid_artifact_url`, feature `design_links`); an empty text clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub styleguide_url: Option<String>,
+    /// Whether each ticket of this project works in a git worktree and on a branch of
+    /// its own (feature `ticket_worktrees`); off: in the project's folder, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_worktrees: Option<bool>,
 }
 
 impl UpdateCompany {

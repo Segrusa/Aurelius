@@ -299,6 +299,13 @@ pub mod feature {
     /// history and the text of every change, so a board member can check what
     /// employees did without a terminal on the server.
     pub const PROJECT_GIT: &str = "project_git";
+    /// A git worktree and a branch per ticket (additive): `TicketView::branch` and
+    /// `base_branch`, `ProjectSummary::ticket_worktrees` with `project.update
+    /// { ticket_worktrees }`, and `base` on `git.log` and `git.diff` (with `rev`): what
+    /// a branch has that its base has not. The server makes the worktree when a
+    /// ticket's first run starts and removes it when the ticket is closed with nothing
+    /// uncommitted in it; the branch stays. It never merges, pushes or deletes a branch.
+    pub const TICKET_WORKTREES: &str = "ticket_worktrees";
     /// A channel per ticket (protocol 5, additive; AUR-CHAT-001): the ticket's
     /// discussion is its channel, `#<number>-<slug>` (`ticket_channel_name`).
     /// `channel.list` names ticket channels only to connections whose
@@ -452,6 +459,7 @@ pub const FEATURES: &[&str] = &[
     feature::READ_PEEK,
     feature::TICKET_STATE,
     feature::PROJECT_GIT,
+    feature::TICKET_WORKTREES,
 ];
 
 /// Daemon → client.

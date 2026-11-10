@@ -143,7 +143,8 @@ abstract final class Methods {
   static const String gitCommit = 'git.commit';
   /// A unified diff: of commit `id` against its first parent, or without `id` of
   /// the work folder against its last commit (staged and not, untracked files as
-  /// new). `path`: only that file.
+  /// new). `path`: only that file. With `rev` and `base` (feature `ticket_worktrees`):
+  /// everything `rev` changed since it left `base`, as one diff.
   static const String gitDiff = 'git.diff';
   /// Commits of a project's repository, newest first: of `rev` (a branch, a tag or
   /// a commit id; none: where the work folder is), only those that touched `path`
@@ -765,22 +766,26 @@ Map<String, dynamic> gitCommit({required String id, required String projectId}) 
 
 /// A unified diff: of commit `id` against its first parent, or without `id` of
 /// the work folder against its last commit (staged and not, untracked files as
-/// new). `path`: only that file.
-Map<String, dynamic> gitDiff({String? id, String? path, required String projectId}) => <String, dynamic>{
+/// new). `path`: only that file. With `rev` and `base` (feature `ticket_worktrees`):
+/// everything `rev` changed since it left `base`, as one diff.
+Map<String, dynamic> gitDiff({String? base, String? id, String? path, required String projectId, String? rev}) => <String, dynamic>{
   'method': Methods.gitDiff,
   'params': <String, dynamic>{
+    if (base != null) 'base': base,
     if (id != null) 'id': id,
     if (path != null) 'path': path,
     'project_id': projectId,
+    if (rev != null) 'rev': rev,
   },
 };
 
 /// Commits of a project's repository, newest first: of `rev` (a branch, a tag or
 /// a commit id; none: where the work folder is), only those that touched `path`
 /// when given, after the first `skip`, at most `limit` (default 50, most `GIT_LOG_MAX`).
-Map<String, dynamic> gitLog({int? limit, String? path, required String projectId, String? rev, int? skip}) => <String, dynamic>{
+Map<String, dynamic> gitLog({String? base, int? limit, String? path, required String projectId, String? rev, int? skip}) => <String, dynamic>{
   'method': Methods.gitLog,
   'params': <String, dynamic>{
+    if (base != null) 'base': base,
     if (limit != null) 'limit': limit,
     if (path != null) 'path': path,
     'project_id': projectId,

@@ -3536,15 +3536,16 @@ export type Method =
   /**
    * A unified diff: of commit `id` against its first parent, or without `id` of
    * the work folder against its last commit (staged and not, untracked files as
-   * new). `path`: only that file.
+   * new). `path`: only that file. With `rev` and `base` (feature `ticket_worktrees`):
+   * everything `rev` changed since it left `base`, as one diff.
    */
-  | ({ method: "git.diff"; params: { id?: string | null; path?: string | null; project_id: string } })
+  | ({ method: "git.diff"; params: { base?: string | null; id?: string | null; path?: string | null; project_id: string; rev?: string | null } })
   /**
    * Commits of a project's repository, newest first: of `rev` (a branch, a tag or
    * a commit id; none: where the work folder is), only those that touched `path`
    * when given, after the first `skip`, at most `limit` (default 50, most `GIT_LOG_MAX`).
    */
-  | ({ method: "git.log"; params: { limit?: number | null; path?: string | null; project_id: string; rev?: string | null; skip?: number | null } })
+  | ({ method: "git.log"; params: { base?: string | null; limit?: number | null; path?: string | null; project_id: string; rev?: string | null; skip?: number | null } })
   /**
    * What a project's work folder looks like in git now (feature `project_git`):
    * the branch it is on, its uncommitted changes and its branches. Read-only, like
@@ -4057,6 +4058,11 @@ export interface ProjectSummary {
    * link only: runs read the artifact themselves. Left out when none and by older servers.
    */
   styleguide_url?: string | null;
+  /**
+   * Each ticket of this project works in a git worktree and on a branch of its own
+   * (feature `ticket_worktrees`). Left out when off and by older servers.
+   */
+  ticket_worktrees?: boolean;
   version: number;
 }
 
@@ -5816,6 +5822,17 @@ export interface TicketView {
    */
   attention?: TicketAttention | null;
   /**
+   * The branch `branch` was made from.
+   */
+  base_branch?: string | null;
+  /**
+   * The ticket's own git branch (feature `ticket_worktrees`): its runs work on it, in
+   * a worktree of their own, so `git.log { rev: branch, base: base_branch }` and
+   * `git.diff` with the same two are what this ticket changed. Left out while it has
+   * none (not started, no repository, switched off for the project) and by older servers.
+   */
+  branch?: string | null;
+  /**
    * What still works on the ticket (feature `ticket_state`): `ticket.accept`
    * refuses while this is not empty. Left out when empty and by older servers.
    */
@@ -6149,6 +6166,11 @@ export interface UpdateProject {
    * (`ticket::valid_artifact_url`, feature `design_links`); an empty text clears it.
    */
   styleguide_url?: string | null;
+  /**
+   * Whether each ticket of this project works in a git worktree and on a branch of
+   * its own (feature `ticket_worktrees`); off: in the project's folder, as before.
+   */
+  ticket_worktrees?: boolean | null;
 }
 
 export interface UpdateStatus {

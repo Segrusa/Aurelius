@@ -285,9 +285,9 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::MarkdownList { scope } => crate::markdown::list(shared, scope).await.map(ResponseBody::MarkdownFiles),
         Method::MarkdownGet { scope, path } => crate::markdown::read(shared, scope, path).await.map(ResponseBody::MarkdownFile),
         Method::GitOverview { project_id } => crate::git::overview(shared, project_id).await.map(ResponseBody::GitOverview),
-        Method::GitLog { project_id, rev, path, skip, limit } => crate::git::log(shared, project_id, rev, path, skip, limit).await.map(ResponseBody::GitLog),
+        Method::GitLog { project_id, rev, base, path, skip, limit } => crate::git::log(shared, project_id, rev, base, path, skip, limit).await.map(ResponseBody::GitLog),
         Method::GitCommit { project_id, id } => crate::git::commit(shared, project_id, id).await.map(ResponseBody::GitCommit),
-        Method::GitDiff { project_id, id, path } => crate::git::diff(shared, project_id, id, path).await.map(ResponseBody::GitDiff),
+        Method::GitDiff { project_id, id, rev, base, path } => crate::git::diff(shared, project_id, id, rev, base, path).await.map(ResponseBody::GitDiff),
         Method::SubagentList { conversation_id } => {
             let store = shared.store().clone();
             storage_task(move || store.read(|c| aurelius_storage::employees::running_subagents(c, conversation_id))).await.map(ResponseBody::Subagents)

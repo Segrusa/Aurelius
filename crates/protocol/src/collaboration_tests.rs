@@ -190,6 +190,8 @@ fn the_new_answers_have_their_wire_form() {
 fn ticket() -> TicketView {
     TicketView {
         design_url: None,
+        branch: None,
+        base_branch: None,
         attention: None,
         busy: Vec::new(),
         id: TicketId::new(),

@@ -392,7 +392,7 @@ const SELECT: &str = "SELECT k.id, k.number, k.project_id, p.name, k.title, db.s
         (EXISTS (SELECT 1 FROM tasks w WHERE w.ticket_id = k.id AND w.status = 'waiting' AND w.waiting_reason = 'login')
          OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state = 'ready' AND j.last_error_code = 'login'
                     AND json_extract(j.payload_json, '$.ticket_id') = k.id)),
-        k.responsible_user_id, ru.username, COALESCE(ru.disabled_at_ms IS NOT NULL, 0), k.design_url
+        k.responsible_user_id, ru.username, COALESCE(ru.disabled_at_ms IS NOT NULL, 0), k.design_url, k.branch, k.base_branch
      FROM tickets k
      JOIN projects p ON p.id = k.project_id
      JOIN board_columns c ON c.id = k.column_id
@@ -456,11 +456,130 @@ fn ticket_row(r: &Row<'_>) -> rusqlite::Result<(TicketView, Option<String>)> {
             responsible_username: r.get(32)?,
             responsible_disabled: r.get(33)?,
             design_url: r.get(34)?,
+            branch: r.get(35)?,
+            base_branch: r.get(36)?,
             attention: None,
             busy: Vec::new(),
         },
         description,
     ))
+}
+
+/// A ticket's own branch and where it is checked out (migration 42).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TicketWorktree {
+    pub branch: String,
+    /// The branch it was made from, and the commit that was on then.
+    pub base_branch: Option<String>,
+    pub base_commit: Option<String>,
+    /// The folder its runs work in; none: not checked out (any more).
+    pub path: Option<String>,
+}
+
+/// What a worktree is made for: the ticket, its project's folder, and what it has already.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeNeed {
+    pub ticket: TicketId,
+    pub number: u32,
+    pub title: String,
+    pub project: ProjectId,
+    /// The project's folder; none: it has none.
+    pub folder: Option<String>,
+    /// The project wants a worktree per ticket.
+    pub wanted: bool,
+    /// The ticket is closed or not started: it gets no (new) worktree.
+    pub open: bool,
+    pub has: Option<TicketWorktree>,
+}
+
+pub fn worktree(conn: &Connection, id: TicketId) -> Result<Option<TicketWorktree>, StorageError> {
+    let row: Option<(Option<String>, Option<String>, Option<String>, Option<String>)> = conn
+        .query_row("SELECT branch, base_branch, base_commit, worktree FROM tickets WHERE id = ?1", [id.to_string()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .optional()?;
+    Ok(row.and_then(|(branch, base_branch, base_commit, path)| Some(TicketWorktree { branch: branch?, base_branch, base_commit, path })))
+}
+
+/// The ticket has its branch checked out at `path` now (made from `base`, when it is new).
+pub fn set_worktree(tx: &Transaction<'_>, id: TicketId, branch: &str, base: Option<(&str, &str)>, path: &str) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET branch = ?2, worktree = ?3 WHERE id = ?1", params![id.to_string(), branch, path])?;
+    if let Some((base_branch, base_commit)) = base {
+        tx.execute("UPDATE tickets SET base_branch = ?2, base_commit = ?3 WHERE id = ?1", params![id.to_string(), base_branch, base_commit])?;
+    }
+    Ok(())
+}
+
+/// The ticket's worktree is gone; its branch stays.
+pub fn clear_worktree(tx: &Transaction<'_>, id: TicketId) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET worktree = NULL WHERE id = ?1", [id.to_string()])?;
+    Ok(())
+}
+
+/// The ticket a run works for: its task's, its conversation's task's, or the one whose
+/// discussion woke it.
+pub fn of_run(conn: &Connection, run: aurelius_domain::RunId) -> Result<Option<TicketId>, StorageError> {
+    let id: Option<String> = conn
+        .query_row(
+            "SELECT COALESCE(
+                (SELECT t.ticket_id FROM tasks t WHERE t.id = r.task_id),
+                (SELECT t.ticket_id FROM tasks t WHERE t.conversation_id = r.conversation_id AND t.ticket_id IS NOT NULL ORDER BY t.created_at_ms DESC LIMIT 1),
+                (SELECT i.ticket_id FROM employee_inbox i WHERE i.run_id = r.id AND i.ticket_id IS NOT NULL LIMIT 1))
+             FROM runs r WHERE r.id = ?1",
+            [run.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(id.and_then(|i| TicketId::parse(&i).ok()))
+}
+
+/// The ticket a conversation works for: the one of its task, or of the discussion its
+/// mailbox items came from (an employee has a conversation of its own per ticket).
+pub fn of_conversation(conn: &Connection, conversation: aurelius_domain::ConversationId) -> Result<Option<TicketId>, StorageError> {
+    let id: Option<String> = conn
+        .query_row(
+            "SELECT COALESCE(
+                (SELECT t.ticket_id FROM tasks t WHERE t.conversation_id = ?1 AND t.ticket_id IS NOT NULL ORDER BY t.created_at_ms DESC LIMIT 1),
+                (SELECT i.ticket_id FROM employee_inbox i WHERE i.conversation_id = ?1 AND i.ticket_id IS NOT NULL ORDER BY i.rowid DESC LIMIT 1))",
+            [conversation.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(id.and_then(|i| TicketId::parse(&i).ok()))
+}
+
+/// What the server needs to know to give a ticket its worktree.
+pub fn worktree_need(conn: &Connection, id: TicketId) -> Result<Option<WorktreeNeed>, StorageError> {
+    let row: Option<(i64, String, String, Option<String>, bool, String, bool)> = conn
+        .query_row(
+            "SELECT k.number, k.title, k.project_id, p.folder, p.ticket_worktrees, c.kind, k.archived_at_ms IS NOT NULL
+             FROM tickets k JOIN projects p ON p.id = k.project_id JOIN board_columns c ON c.id = k.column_id WHERE k.id = ?1",
+            [id.to_string()],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .optional()?;
+    let Some((number, title, project, folder, wanted, column, archived)) = row else { return Ok(None) };
+    let Ok(project) = ProjectId::parse(&project) else { return Ok(None) };
+    let open = !archived && !matches!(ColumnKind::parse(&column), Some(ColumnKind::Backlog | ColumnKind::Done) | None);
+    Ok(Some(WorktreeNeed { ticket: id, number: number as u32, title, project, folder, wanted, open, has: worktree(conn, id)? }))
+}
+
+/// Tickets that are closed (Done, back in Backlog or archived) and still have a worktree:
+/// (ticket, the worktree's folder, the project's folder).
+pub fn closed_with_worktree(conn: &Connection) -> Result<Vec<(TicketId, String, Option<String>)>, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT k.id, k.worktree, p.folder FROM tickets k JOIN projects p ON p.id = k.project_id JOIN board_columns c ON c.id = k.column_id
+         WHERE k.worktree IS NOT NULL AND (k.archived_at_ms IS NOT NULL OR c.kind IN ('backlog','done'))",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)))?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (id, path, folder) = row?;
+        if let Ok(id) = TicketId::parse(&id) {
+            out.push((id, path, folder));
+        }
+    }
+    Ok(out)
 }
 
 /// What is known of a ticket for `ticket::ticket_work`: the one definition of what a

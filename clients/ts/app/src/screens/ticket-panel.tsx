@@ -36,6 +36,7 @@ import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useWorkspace } from "../workspace";
 import {
   activityDetail,
   activityText,
@@ -57,6 +58,7 @@ import {
   takeOverOffered,
   testingNote,
 } from "./board-logic";
+import { GIT_FEATURE, ticketChanges } from "./changes-logic";
 import { TicketChat } from "./chat";
 import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
@@ -134,6 +136,7 @@ const styles = stylex.create({
   small: { fontSize: 12, color: "var(--color-text-secondary)" },
   secondary: { color: "var(--color-text-secondary)" },
   third: { color: "var(--precision-text3)" },
+  mono: { fontFamily: "var(--font-family-code)", fontSize: 12, overflowWrap: "anywhere" },
   thirdSmall: { fontSize: 12, color: "var(--precision-text3)" },
   sectionLabel: { fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
   medium: { fontWeight: 500 },
@@ -935,6 +938,7 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
   useAction("Back", onClose);
   const resizable = useResizable({ defaultSize: 460, minSize: 360, maxSize: 720, autoSaveId: "ticket-panel" });
   const navigate = useNavigate();
+  const workspace = useWorkspace();
   const { features, status } = useLinkState();
   const detail = useTicket(id);
   const board = useBoard(null);
@@ -1309,6 +1313,22 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
                       {features.includes("ticket_responsible") ? (
                         <Row name="Responsible">
                           {t.responsible_username ?? <span {...stylex.props(styles.third)}>No one</span>}
+                        </Row>
+                      ) : null}
+                      {t.branch ? (
+                        <Row name="Branch">
+                          <span {...stylex.props(styles.mono)}>{t.branch}</span>
+                          {t.base_branch ? <span {...stylex.props(styles.third)}> from {t.base_branch}</span> : null}
+                          {features.includes(GIT_FEATURE) ? (
+                            <Button
+                              size="sm"
+                              label="See its changes"
+                              onClick={() => {
+                                workspace.choose(t.project_id);
+                                void navigate({ to: "/changes", search: { ...ticketChanges(t) } });
+                              }}
+                            />
+                          ) : null}
                         </Row>
                       ) : null}
                       <Row name="Runs on">

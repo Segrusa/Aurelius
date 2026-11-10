@@ -780,7 +780,7 @@ impl Client {
 
     /// Commits of a project's repository, newest first.
     pub async fn git_log(&self, project_id: aurelius_domain::ProjectId, rev: Option<&str>, path: Option<&str>, skip: u32, limit: u32) -> Result<aurelius_protocol::GitLog, ClientError> {
-        self.read(Method::GitLog { project_id, rev: rev.map(str::to_owned), path: path.map(str::to_owned), skip: Some(skip), limit: Some(limit) }, body!(GitLog)).await
+        self.read(Method::GitLog { project_id, rev: rev.map(str::to_owned), base: None, path: path.map(str::to_owned), skip: Some(skip), limit: Some(limit) }, body!(GitLog)).await
     }
 
     /// One commit with the files it changed.
@@ -790,7 +790,17 @@ impl Client {
 
     /// The diff of a commit, or without `id` of the work folder against its last commit.
     pub async fn git_diff(&self, project_id: aurelius_domain::ProjectId, id: Option<&str>, path: Option<&str>) -> Result<aurelius_protocol::GitDiff, ClientError> {
-        self.read(Method::GitDiff { project_id, id: id.map(str::to_owned), path: path.map(str::to_owned) }, body!(GitDiff)).await
+        self.read(Method::GitDiff { project_id, id: id.map(str::to_owned), rev: None, base: None, path: path.map(str::to_owned) }, body!(GitDiff)).await
+    }
+
+    /// What `rev` has that `base` has not (a ticket's branch against the one it was made from): its commits, newest first.
+    pub async fn git_branch_log(&self, project_id: aurelius_domain::ProjectId, rev: &str, base: &str) -> Result<aurelius_protocol::GitLog, ClientError> {
+        self.read(Method::GitLog { project_id, rev: Some(rev.to_owned()), base: Some(base.to_owned()), path: None, skip: None, limit: None }, body!(GitLog)).await
+    }
+
+    /// Everything `rev` changed since it left `base`, as one diff.
+    pub async fn git_branch_diff(&self, project_id: aurelius_domain::ProjectId, rev: &str, base: &str) -> Result<aurelius_protocol::GitDiff, ClientError> {
+        self.read(Method::GitDiff { project_id, id: None, rev: Some(rev.to_owned()), base: Some(base.to_owned()), path: None }, body!(GitDiff)).await
     }
 
     pub async fn markdown_file(&self, scope: aurelius_protocol::FileScope, path: &str) -> Result<aurelius_protocol::MarkdownFileContent, ClientError> {

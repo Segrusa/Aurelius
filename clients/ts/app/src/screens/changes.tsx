@@ -171,20 +171,23 @@ function useGit(project: string | null) {
   );
 }
 
-function useDiff(project: string, commit: string | null, path: string | null, wanted: boolean) {
+/** Everything a branch changed since it left its base, in place of one commit. */
+type Range = { rev: string; base: string };
+
+function useDiff(project: string, commit: string | null, path: string | null, range: Range | null) {
   const connection = useConnection();
   return useKeyed(
-    ["git", "diff", project, commit, path],
+    ["git", "diff", project, commit, path, range?.rev ?? null, range?.base ?? null],
     async () =>
       expectBody(
         await connection.call("git.diff", {
           project_id: project,
           ...(commit ? { id: commit } : {}),
+          ...(range ? { rev: range.rev, base: range.base } : {}),
           ...(path ? { path } : {}),
         }),
         "git_diff",
       ).value,
-    wanted,
   );
 }
 
@@ -254,8 +257,18 @@ function FileDiff({ file }: { file: DiffFile }) {
 }
 
 /** The text of a change: of a commit, or without one of the work folder; of one file when chosen. */
-function Diff({ project, commit, path }: { project: string; commit: string | null; path: string | null }) {
-  const diff = useDiff(project, commit, path, true);
+function Diff({
+  project,
+  commit,
+  path,
+  range = null,
+}: {
+  project: string;
+  commit: string | null;
+  path: string | null;
+  range?: Range | null;
+}) {
+  const diff = useDiff(project, commit, path, range);
   const files = useMemo(() => parseDiff(diff.data?.text ?? ""), [diff.data?.text]);
   if (diff.isPending) return <Loading rows={4} />;
   if (diff.error) return <Problem>{`The change did not load: ${failureOf(diff.error)}`}</Problem>;
@@ -416,21 +429,28 @@ function Commits({
   const connection = useConnection();
   const { status, user } = useLinkState();
   const rev = search.rev ?? null;
+  // A ticket's branch against the one it was made from: only what the ticket did.
+  const base = rev ? (search.base ?? null) : null;
   const log = useInfiniteQuery({
-    queryKey: ["git", "log", project, rev],
+    queryKey: ["git", "log", project, rev, base],
     enabled: status === "online" && user !== null,
     staleTime: 30_000,
     initialPageParam: 0,
     queryFn: async ({ pageParam }) =>
       expectBody(
-        await connection.call("git.log", { project_id: project, ...(rev ? { rev } : {}), skip: pageParam }),
+        await connection.call("git.log", {
+          project_id: project,
+          ...(rev ? { rev } : {}),
+          ...(base ? { base } : {}),
+          skip: pageParam,
+        }),
         "git_log",
       ).value,
     getNextPageParam: (last, pages) => (last.has_more ? pages.reduce((n, p) => n + p.commits.length, 0) : undefined),
   });
   const commits = log.data?.pages.flatMap((p) => p.commits) ?? [];
   const chosen = search.commit ?? null;
-  const keep = rev ? { rev } : {};
+  const keep = rev ? { rev, ...(base ? { base } : {}) } : {};
   return (
     <div {...stylex.props(styles.body)}>
       <div {...stylex.props(styles.list)}>
@@ -445,6 +465,15 @@ function Commits({
               ...branches.filter((b) => !b.current).map((b) => ({ value: b.name, label: b.name })),
             ]}
           />
+          {rev && base ? (
+            <>
+              <span {...stylex.props(styles.quiet)}>Only what this branch has that {base} has not.</span>
+              <Button size="sm" label="Show its whole history" onClick={() => go({ view: "commits", rev })} />
+              {chosen ? (
+                <Button size="sm" label="Show everything it changed" onClick={() => go({ view: "commits", ...keep })} />
+              ) : null}
+            </>
+          ) : null}
         </div>
         <div {...stylex.props(styles.listScroll)}>
           {log.isPending ? <Loading rows={4} /> : null}
@@ -482,6 +511,18 @@ function Commits({
               path={search.path ?? null}
               go={(path) => go({ view: "commits", ...keep, commit: chosen, ...(path ? { path } : {}) })}
             />
+          </div>
+        ) : rev && base ? (
+          <div {...stylex.props(styles.detailPad)}>
+            <div {...stylex.props(styles.title)}>
+              Everything {rev} changed since {base}
+            </div>
+            <span {...stylex.props(styles.meta)}>
+              {commits.length === 0 && log.data
+                ? "Nothing is committed on this branch yet."
+                : "All its commits as one change. Choose a commit on the left to see that one alone."}
+            </span>
+            <Diff project={project} commit={null} path={null} range={{ rev, base }} />
           </div>
         ) : (
           <div {...stylex.props(styles.center)}>

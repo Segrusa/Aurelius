@@ -382,7 +382,7 @@ async fn a_styleguide_link_starts_a_new_session_that_has_the_artifact_tool() {
     assert!(!runtime.seen().last().unwrap().system.contains("project/README.md"));
 
     let link = "https://claude.ai/artifact/abc";
-    client.ticket_command(Command::UpdateProject(UpdateProject { styleguide_url: Some(link.into()), project_id, dispatcher: None }), None).await.unwrap();
+    client.ticket_command(Command::UpdateProject(UpdateProject { ticket_worktrees: None, styleguide_url: Some(link.into()), project_id, dispatcher: None }), None).await.unwrap();
     say("Third question").await;
     let last = runtime.seen().last().unwrap().clone();
     assert_eq!(last.session, SessionUse::Keep, "a new session for the link: {last:?}");

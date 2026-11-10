@@ -182,6 +182,15 @@ pub struct TicketView {
     /// its runs read the artifact themselves. Left out when none and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design_url: Option<String>,
+    /// The ticket's own git branch (feature `ticket_worktrees`): its runs work on it, in
+    /// a worktree of their own, so `git.log { rev: branch, base: base_branch }` and
+    /// `git.diff` with the same two are what this ticket changed. Left out while it has
+    /// none (not started, no repository, switched off for the project) and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// The branch `branch` was made from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_branch: Option<String>,
     /// What the ticket waits for from a board member, and from whom (feature
     /// `ticket_state`): the server's one answer, so every client shows the same
     /// "Needs you". None: nothing. Left out then and by older servers.

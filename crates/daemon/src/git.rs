@@ -305,13 +305,18 @@ pub async fn overview(shared: &Arc<Shared>, project: ProjectId) -> Result<GitOve
     Ok(GitOverview { folder: shown, repository: true, branch, head, changes, changes_truncated, branches })
 }
 
-pub async fn log(shared: &Arc<Shared>, project: ProjectId, rev: Option<String>, path: Option<String>, skip: Option<u32>, limit: Option<u32>) -> Result<GitLog, ProtocolError> {
+pub async fn log(shared: &Arc<Shared>, project: ProjectId, rev: Option<String>, base: Option<String>, path: Option<String>, skip: Option<u32>, limit: Option<u32>) -> Result<GitLog, ProtocolError> {
     let top = repository_of(shared, project).await?;
     let limit = limit.unwrap_or(LOG_DEFAULT).clamp(1, GIT_LOG_MAX);
     let (count, skip, format) = (format!("--max-count={}", limit + 1), format!("--skip={}", skip.unwrap_or(0)), format!("--format={COMMIT_FORMAT}"));
     let mut args = vec!["log", count.as_str(), skip.as_str(), format.as_str(), "--end-of-options"];
     let rev = rev.as_deref().map(checked_rev).transpose()?;
     args.push(rev.unwrap_or("HEAD"));
+    // Without what `base` has: `^base` is one more revision, checked like the first.
+    let not_base = base.as_deref().map(checked_rev).transpose()?.map(|b| format!("^{b}"));
+    if let Some(not_base) = &not_base {
+        args.push(not_base);
+    }
     let path = path.as_deref().map(checked_path).transpose()?.map(literal);
     args.push("--");
     if let Some(path) = &path {
@@ -356,11 +361,22 @@ pub async fn commit(shared: &Arc<Shared>, project: ProjectId, id: String) -> Res
     Ok(GitCommitDetail { commit, body, files, files_truncated })
 }
 
-pub async fn diff(shared: &Arc<Shared>, project: ProjectId, id: Option<String>, path: Option<String>) -> Result<GitDiff, ProtocolError> {
+pub async fn diff(shared: &Arc<Shared>, project: ProjectId, id: Option<String>, rev: Option<String>, base: Option<String>, path: Option<String>) -> Result<GitDiff, ProtocolError> {
     let top = repository_of(shared, project).await?;
     let path = path.as_deref().map(checked_path).transpose()?;
     let spec = path.map(literal);
     let common = ["diff", "-M", "--no-ext-diff", "--no-textconv"];
+    // Everything a branch changed since it left its base: from where the two parted to its tip.
+    if let (Some(rev), Some(base)) = (rev.as_deref(), base.as_deref()) {
+        let (rev, base) = (checked_rev(rev)?, checked_rev(base)?);
+        let parted = text(&git(&top, &["merge-base", "--end-of-options", base, rev], &[]).await?).trim().to_owned();
+        let mut args: Vec<&str> = common.to_vec();
+        args.extend(["--end-of-options", &parted, rev, "--"]);
+        if let Some(spec) = &spec {
+            args.push(spec);
+        }
+        return Ok(capped(git(&top, &args, &[]).await?));
+    }
     if let Some(id) = id {
         let (commit, _) = commit_of(&top, &id).await?;
         let base = base_of(&top, &commit).await?;

@@ -15,6 +15,8 @@ const STOP_GRACE: Duration = Duration::from_secs(10);
 pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     let epoch = job.lease_epoch;
     let mut driver = super::Driver::new(&shared, &job.id, epoch);
+    // A ticket's run works in the ticket's own worktree: made here when it has none yet.
+    crate::worktrees::ensure_for_run(&shared, &job.id).await;
     let s = shared.clone();
     let payload = job.payload.clone();
     let mut plan: ChatRunPlan = match blocking(move || s.service.prepare_chat_run(&payload)).await {

@@ -799,7 +799,8 @@ impl CommandService {
         let cmd = cmd.clone();
         let dispatcher = cmd.dispatcher.map(|d| d.employee_id);
         let styleguide = cmd.styleguide_url.as_deref().map(|u| ticket::valid_artifact_url("styleguide_url", u)).transpose().map_err(domain_error)?;
-        if dispatcher.is_none() && styleguide.is_none() {
+        let worktrees = cmd.ticket_worktrees;
+        if dispatcher.is_none() && styleguide.is_none() && worktrees.is_none() {
             return Err(domain_error(DomainError::Required { field: "a field to change".into() }));
         }
         let expected = envelope.expected_version;
@@ -817,7 +818,7 @@ impl CommandService {
             if let Some(employee) = dispatcher.flatten() {
                 check!(check_employee(tx, employee)?);
             }
-            let version = company_store::update_project(tx, cmd.project_id, dispatcher, styleguide.as_ref().map(|s| s.as_deref()))?;
+            let version = company_store::update_project(tx, cmd.project_id, dispatcher, styleguide.as_ref().map(|s| s.as_deref()), worktrees)?;
             let mut e = Events::new(&base, "project", cmd.project_id.to_string(), Some(cmd.project_id), version - 1);
             let mut payload = json!({ "by": by });
             if let Some(dispatcher) = dispatcher {
@@ -825,6 +826,9 @@ impl CommandService {
             }
             if styleguide.is_some() {
                 payload["changed"] = json!(["styleguide"]);
+            }
+            if let Some(on) = worktrees {
+                payload["ticket_worktrees"] = json!(on);
             }
             e.push(tx, EventKind::ProjectUpdated, payload)?;
             Ok(Ok((CommandResult::ProjectUpdated { project_id: cmd.project_id, version }, e.notices)))
