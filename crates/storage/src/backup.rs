@@ -42,7 +42,7 @@ impl Store {
             let result = conn.execute("VACUUM INTO ?1", [&target]).map(|_| ()).map_err(StorageError::from);
             let _ = reply_tx.send(result);
         });
-        self.writer.send(job).map_err(|_| StorageError::WriterStopped)?;
+        self.writer.as_ref().ok_or(StorageError::WriterStopped)?.send(job).map_err(|_| StorageError::WriterStopped)?;
         reply_rx.recv().map_err(|_| StorageError::WriterStopped)?
     }
 }

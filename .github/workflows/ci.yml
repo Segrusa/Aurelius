@@ -23,7 +23,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+      # Every test binary runs, also after one failed: a first failure used to hide
+      # the tests after it (delegation and testing never ran while backups failed).
+      - run: cargo test --workspace --no-fail-fast
+
+  # The same tests on Linux, where the server also runs (scripts/install-linux.sh).
+  server-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --no-fail-fast
 
   mobile:
     runs-on: ubuntu-latest

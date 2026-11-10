@@ -80,7 +80,9 @@ async fn wait_task(client: &Client, id: TaskId, done: impl Fn(&TaskView) -> bool
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    panic!("task did not reach the expected state: {:?}", client.tasks(None).await.unwrap().tasks.into_iter().find(|t| t.id == id));
+    let all = client.tasks(None).await.unwrap().tasks;
+    let others: Vec<_> = all.iter().map(|t| (t.title.as_str(), t.employee_name.as_deref(), t.status, t.waiting_reason.as_deref())).collect();
+    panic!("task did not reach the expected state: {:?}\nall tasks: {others:?}", all.iter().find(|t| t.id == id));
 }
 
 /// The running run of a task's conversation.

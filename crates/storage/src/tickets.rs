@@ -484,6 +484,7 @@ pub fn facts(conn: &Connection, id: TicketId) -> Result<Option<TicketFacts>, Sto
                     (SELECT COUNT(*) FROM tasks w WHERE w.ticket_id = k.id AND w.id IS NOT k.root_task_id AND w.id IS NOT k.test_task_id
                       AND w.status IN ('queued','running','waiting')),
                     EXISTS (SELECT 1 FROM employee_inbox i WHERE i.ticket_id = k.id
+                      AND (i.task_id IS NULL OR i.task_id IS NOT k.test_task_id)
                       AND (i.state IN ('queued','held')
                            OR (i.state = 'claimed' AND EXISTS (SELECT 1 FROM runs r WHERE r.id = i.run_id AND r.status IN {live})))),
                     x.status, x.waiting_reason

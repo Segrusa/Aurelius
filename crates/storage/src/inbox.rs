@@ -145,10 +145,13 @@ pub fn held_of_run(conn: &Connection, run: RunId) -> Result<u32, StorageError> {
 /// Whether work on `ticket` is still open besides `except`: a handoff or message
 /// waiting in a mailbox (queued, or held until its sender has read), or a run that
 /// has taken one and has not ended. The ticket is not ready for its board member
-/// while this is so.
+/// while this is so. The tester's test task is not such work: the main task has
+/// reported already and keeps status Review while the tests run (`testing`), so an
+/// answer of the owner meanwhile must not find the ticket "busy" and take it back to Doing.
 pub fn open_on_ticket(conn: &Connection, ticket: TicketId, except: Option<RunId>) -> Result<bool, StorageError> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM employee_inbox i WHERE i.ticket_id = ?1 AND i.run_id <> COALESCE(?2, '')
+           AND (i.task_id IS NULL OR i.task_id IS NOT (SELECT k.test_task_id FROM tickets k WHERE k.id = ?1))
            AND (i.state IN ('queued', 'held')
                 OR (i.state = 'claimed' AND EXISTS(SELECT 1 FROM runs r WHERE r.id = i.run_id AND r.status IN ('created','starting','running','waiting','cancelling')))))",
         rusqlite::params![ticket.to_string(), except.map(|r| r.to_string())],

@@ -108,7 +108,10 @@ type WriteJob = Box<dyn FnOnce(&mut Connection) + Send>;
 const READERS: usize = 4;
 
 pub struct Store {
-    writer: mpsc::Sender<WriteJob>,
+    /// None only while the store is dropped.
+    writer: Option<mpsc::Sender<WriteJob>>,
+    /// The writer thread, joined when the store is dropped.
+    writer_thread: Option<thread::JoinHandle<()>>,
     readers: Vec<Mutex<Connection>>,
     /// Which reader a read waits for when all are busy.
     next_reader: AtomicUsize,
@@ -150,14 +153,14 @@ impl Store {
             .collect::<Result<Vec<_>, StorageError>>()?;
 
         let (tx, rx) = mpsc::channel::<WriteJob>();
-        thread::Builder::new().name("aurelius-db-writer".into()).spawn(move || {
+        let writer_thread = thread::Builder::new().name("aurelius-db-writer".into()).spawn(move || {
             let mut conn = write_conn;
             for job in rx {
                 job(&mut conn);
             }
         })?;
 
-        Ok(Self { writer: tx, readers, next_reader: AtomicUsize::new(0), blobs, db_path })
+        Ok(Self { writer: Some(tx), writer_thread: Some(writer_thread), readers, next_reader: AtomicUsize::new(0), blobs, db_path })
     }
 
     pub fn blobs(&self) -> &BlobStore {
@@ -190,7 +193,7 @@ impl Store {
             })();
             let _ = reply_tx.send(result);
         });
-        self.writer.send(job).map_err(|_| StorageError::WriterStopped)?;
+        self.writer.as_ref().ok_or(StorageError::WriterStopped)?.send(job).map_err(|_| StorageError::WriterStopped)?;
         reply_rx.recv().map_err(|_| StorageError::WriterStopped)?
     }
 
@@ -207,6 +210,23 @@ impl Store {
         let turn = self.next_reader.fetch_add(1, Ordering::Relaxed) % self.readers.len();
         let conn = self.readers[turn].lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         f(&conn)
+    }
+}
+
+/// Dropping the store closes the database before it returns: first the readers,
+/// then the writer, which as the last connection checkpoints the WAL. Without this
+/// the writer thread closed its connection some time after the drop, so whatever
+/// came next (a backup, the fresh start, a test) could still find the database open.
+impl Drop for Store {
+    fn drop(&mut self) {
+        self.readers.clear();
+        self.writer = None;
+        if let Some(thread) = self.writer_thread.take() {
+            // A job that held the last reference drops the store on the writer thread itself.
+            if thread.thread().id() != thread::current().id() {
+                let _ = thread.join();
+            }
+        }
     }
 }
 

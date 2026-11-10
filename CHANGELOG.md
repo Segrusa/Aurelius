@@ -6,6 +6,8 @@ released separately, each with its own version and changelog:
 
 ## Unreleased (feat/astryx)
 
+- **Two tickets that got stuck.** A ticket in Testing no longer falls back to Doing when its owner answers a message while the tests run, and a task that waits for a colleague's part goes on when that part ends instead of waiting for good. Both came with "a ticket stays in Doing while a handoff is open" (ticket #42), which counted the tester's run and the part's own ending run as open work.
+- **The database is closed when the server lets go of it.** A backup, a restore or the fresh start right after a stop no longer finds the database still open for a moment.
 - **One answer to "who must act?".** The server now says for every ticket what it waits for and from whom, and what still works on it; the desktop app shows that instead of working it out itself, so the mark on a card, the filter and the badges agree everywhere. A ticket in Doing or Testing that nothing works on any more and that waits for nothing now asks for a board member ("nobody works on it") instead of sitting there. Accept also waits for a colleague who still has a handoff of the ticket to answer, and for tests that still run.
 - **Private chats stay private.** Your chat with an employee no longer reaches another board member through the live updates, through a read of one of its runs or messages, in the list of approvals, or as something they can steer (its mode, its runs, its messages).
 - **An administrator.** Only an administrator sets a temporary password for someone else, signs out their devices, sees their devices or disables them. The first board member of a server is the administrator and names others under Settings; the last one stays one. Everything else is still one role.

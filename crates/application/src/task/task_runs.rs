@@ -619,7 +619,14 @@ pub(crate) fn run_settled(tx: &Tx<'_>, st: &Store, run: RunId, broken: bool) -> 
 /// The owner of a waiting task goes on, told `text`, when nothing of it is still open.
 fn continue_with(tx: &Tx<'_>, st: &Store, task: TaskId, text: &str, reason: &str) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
-    if row.status != TaskStatus::Waiting || open_parts(tx, task)? || live_run(tx, task, None)? || ticket_busy(tx, task, None)? {
+    if row.status != TaskStatus::Waiting || open_parts(tx, task)? || live_run(tx, task, None)? {
+        return Ok(vec![]);
+    }
+    // Only a ticket's main task waits for the handoffs and runs of its ticket. A part
+    // below it waits for its own parts alone: asked here, the ticket always looks busy,
+    // because the run of the part that just ended is itself still open on it, and the
+    // task would wait for good.
+    if crate::task::ticket_line::is_root(tx, task)? && ticket_busy(tx, task, None)? {
         return Ok(vec![]);
     }
     let Some((conversation, _)) = store::task_conversation(tx, task)? else { return Ok(vec![]) };
