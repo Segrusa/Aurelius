@@ -70,6 +70,7 @@ fn every_new_method_travels_under_its_name() {
         (WriteMethod::Host(HostWrite::SessionRevoke { session_id: SessionId::new() }), "session.revoke"),
         (WriteMethod::Host(HostWrite::UserSetPassword(password)), "user.set_password"),
         (WriteMethod::Host(HostWrite::UserDisable { user_id: user }), "user.disable"),
+        (WriteMethod::Host(HostWrite::UserSetAdmin { user_id: user, admin: true }), "user.set_admin"),
         (WriteMethod::Host(HostWrite::ClaudeLoginLink), "claude_login.link"),
         (WriteMethod::Host(HostWrite::ClaudeLoginCancel { link_id: "l1".into() }), "claude_login.cancel"),
         (WriteMethod::Host(HostWrite::ClaudeLoginUnlink), "claude_login.unlink"),

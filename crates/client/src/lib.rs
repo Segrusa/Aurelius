@@ -550,7 +550,7 @@ impl Client {
     }
 
     pub async fn messages(&self, conversation_id: aurelius_domain::ConversationId) -> Result<MessagesSnapshot, ClientError> {
-        self.read(Method::ConversationGet { conversation_id }, body!(Messages)).await
+        self.read(Method::ConversationGet { conversation_id, peek: false }, body!(Messages)).await
     }
 
     pub async fn connections(&self) -> Result<aurelius_protocol::ProvidersSnapshot, ClientError> {
@@ -609,12 +609,12 @@ impl Client {
 
     /// The company's group chat (Team chat): the user and every employee.
     pub async fn group_chat(&self) -> Result<MessagesSnapshot, ClientError> {
-        self.read(Method::GroupChatGet { channel: None }, body!(Messages)).await
+        self.read(Method::GroupChatGet { channel: None, peek: false }, body!(Messages)).await
     }
 
     /// One channel of the Team chat (feature `team_channels`); reading it marks it read.
     pub async fn channel_messages(&self, channel: aurelius_domain::ConversationId) -> Result<MessagesSnapshot, ClientError> {
-        self.read(Method::GroupChatGet { channel: Some(channel) }, body!(Messages)).await
+        self.read(Method::GroupChatGet { channel: Some(channel), peek: false }, body!(Messages)).await
     }
 
     /// One thread of a channel: `message_id` starts it; its replies oldest
@@ -893,6 +893,11 @@ impl Client {
     /// Disable a board member (never the last active one: `last_board_member`).
     pub async fn disable_user(&self, user_id: aurelius_domain::UserId) -> Result<aurelius_domain::user::UserView, ClientError> {
         self.host(HostWrite::UserDisable { user_id }, done!(User)).await
+    }
+
+    /// Make a board member an administrator or an ordinary one again (as an administrator).
+    pub async fn set_admin(&self, user_id: aurelius_domain::UserId, admin: bool) -> Result<aurelius_domain::user::UserView, ClientError> {
+        self.host(HostWrite::UserSetAdmin { user_id, admin }, done!(User)).await
     }
 
     // ---- the own Claude login (protocol 5) ----

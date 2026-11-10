@@ -327,10 +327,12 @@ abstract final class Methods {
   /// every request must equal the server's, else the answer is a hard error.
   static const String sessionHello = 'session.hello';
   /// The signed-in devices of a board member (none: the session's own),
-  /// newest activity first (`SessionView::current` marks this one). Any board
-  /// member may list another's (one role). Never a token or its hash.
+  /// newest activity first (`SessionView::current` marks this one). Another
+  /// board member's only as an administrator (`forbidden` otherwise; feature
+  /// `admin_role`). Never a token or its hash.
   static const String sessionList = 'session.list';
-  /// End one session (any board member's: one role). Its device's open
+  /// End one session: an own one, or as an administrator another board member's
+  /// (`forbidden` otherwise; feature `admin_role`). Its device's open
   /// connection closes at once (`ServerMessage::SignedOut`); the timeline says
   /// who revoked it. Answers `Done`. Not for apps.
   static const String sessionRevoke = 'session.revoke';
@@ -455,7 +457,8 @@ abstract final class Methods {
   /// before anything is recorded: the receipt, its request hash and the event
   /// `user.created` hold the name only. Not for apps.
   static const String userCreate = 'user.create';
-  /// Disable a board member: their sessions end at once and they cannot sign
+  /// Disable a board member, as an administrator (`forbidden` otherwise; the
+  /// last active administrator cannot be): their sessions end at once and they cannot sign
   /// in; their Claude login is disconnected; tickets keep their creator. The
   /// last active board member cannot be disabled (`last_board_member`).
   /// Answers `User`. Not for apps.
@@ -476,9 +479,13 @@ abstract final class Methods {
   /// End this connection's session (the device must sign in again); answers
   /// `WhoAmI` without a board member. A session method.
   static const String userLogout = 'user.logout';
+  /// Make a board member an administrator or an ordinary one again (feature
+  /// `admin_role`), as an administrator (`forbidden` otherwise). The last
+  /// active administrator stays one (`validation`). Answers `User`. Not for apps.
+  static const String userSetAdmin = 'user.set_admin';
   /// Change a password. Own (no `user_id`, or the session's): with the old
   /// password; the other sessions end, this one stays. Another board member's
-  /// (B10): a temporary password, changed at their next sign-in
+  /// (B10), only as an administrator (`forbidden` otherwise): a temporary password, changed at their next sign-in
   /// (`must_change_password`); all their sessions end. Like `user.create`, the
   /// passwords are in no receipt, request hash, event or log. Answers `Done`.
   static const String userSetPassword = 'user.set_password';
@@ -636,10 +643,11 @@ Map<String, dynamic> connectionList() => <String, dynamic>{
 };
 
 /// A conversation's messages and settings.
-Map<String, dynamic> conversationGet({required String conversationId}) => <String, dynamic>{
+Map<String, dynamic> conversationGet({required String conversationId, bool? peek}) => <String, dynamic>{
   'method': Methods.conversationGet,
   'params': <String, dynamic>{
     'conversation_id': conversationId,
+    if (peek != null) 'peek': peek,
   },
 };
 
@@ -737,10 +745,11 @@ Map<String, dynamic> fsListDir({String? path}) => <String, dynamic>{
 /// messages carry its name as `author`. Write with `group_chat.send`.
 /// `channel` (feature `team_channels`): a project's channel from
 /// `channel.list`; none: the general channel, the one older servers have.
-Map<String, dynamic> groupChatGet({String? channel}) => <String, dynamic>{
+Map<String, dynamic> groupChatGet({String? channel, bool? peek}) => <String, dynamic>{
   'method': Methods.groupChatGet,
   'params': <String, dynamic>{
     if (channel != null) 'channel': channel,
+    if (peek != null) 'peek': peek,
   },
 };
 
@@ -1016,8 +1025,9 @@ Map<String, dynamic> sessionHello(HelloParams params) => <String, dynamic>{
 };
 
 /// The signed-in devices of a board member (none: the session's own),
-/// newest activity first (`SessionView::current` marks this one). Any board
-/// member may list another's (one role). Never a token or its hash.
+/// newest activity first (`SessionView::current` marks this one). Another
+/// board member's only as an administrator (`forbidden` otherwise; feature
+/// `admin_role`). Never a token or its hash.
 Map<String, dynamic> sessionList({String? userId}) => <String, dynamic>{
   'method': Methods.sessionList,
   'params': <String, dynamic>{
@@ -1487,7 +1497,8 @@ Map<String, dynamic> serverRestart() => <String, dynamic>{
   'method': Methods.serverRestart,
 };
 
-/// End one session (any board member's: one role). Its device's open
+/// End one session: an own one, or as an administrator another board member's
+/// (`forbidden` otherwise; feature `admin_role`). Its device's open
 /// connection closes at once (`ServerMessage::SignedOut`); the timeline says
 /// who revoked it. Answers `Done`. Not for apps.
 Map<String, dynamic> sessionRevoke({required String sessionId}) => <String, dynamic>{
@@ -1537,7 +1548,8 @@ Map<String, dynamic> userCreate(UserCreateParams params) => <String, dynamic>{
   'params': params.toJson(),
 };
 
-/// Disable a board member: their sessions end at once and they cannot sign
+/// Disable a board member, as an administrator (`forbidden` otherwise; the
+/// last active administrator cannot be): their sessions end at once and they cannot sign
 /// in; their Claude login is disconnected; tickets keep their creator. The
 /// last active board member cannot be disabled (`last_board_member`).
 /// Answers `User`. Not for apps.
@@ -1548,9 +1560,20 @@ Map<String, dynamic> userDisable({required String userId}) => <String, dynamic>{
   },
 };
 
+/// Make a board member an administrator or an ordinary one again (feature
+/// `admin_role`), as an administrator (`forbidden` otherwise). The last
+/// active administrator stays one (`validation`). Answers `User`. Not for apps.
+Map<String, dynamic> userSetAdmin({required bool admin, required String userId}) => <String, dynamic>{
+  'method': Methods.userSetAdmin,
+  'params': <String, dynamic>{
+    'admin': admin,
+    'user_id': userId,
+  },
+};
+
 /// Change a password. Own (no `user_id`, or the session's): with the old
 /// password; the other sessions end, this one stays. Another board member's
-/// (B10): a temporary password, changed at their next sign-in
+/// (B10), only as an administrator (`forbidden` otherwise): a temporary password, changed at their next sign-in
 /// (`must_change_password`); all their sessions end. Like `user.create`, the
 /// passwords are in no receipt, request hash, event or log. Answers `Done`.
 Map<String, dynamic> userSetPassword(SetPasswordParams params) => <String, dynamic>{

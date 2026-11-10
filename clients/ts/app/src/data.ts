@@ -279,13 +279,46 @@ export function useMyTickets(projectId: string | null, includeDone: boolean, wan
   );
 }
 
+/** Whether someone looks at this window now: it is shown and has the focus. */
+function attended(): boolean {
+  return typeof document === "undefined" || (document.visibilityState === "visible" && document.hasFocus());
+}
+
+/**
+ * `peek` for `conversation.get` and `group_chat.get` (feature `read_peek`): a window
+ * nobody looks at still shows new messages, but does not read them for its board
+ * member, so their other devices keep the unread mark. Coming back to the window
+ * reads the open discussion again, and that marks it read.
+ */
+function usePeek(): () => { peek?: true } {
+  const client = useQueryClient();
+  const { features } = useLinkState();
+  const supported = features.includes("read_peek");
+  useEffect(() => {
+    if (!supported || typeof window === "undefined") return;
+    const back = () => {
+      if (attended()) void client.invalidateQueries({ queryKey: ["messages"] });
+    };
+    window.addEventListener("focus", back);
+    document.addEventListener("visibilitychange", back);
+    return () => {
+      window.removeEventListener("focus", back);
+      document.removeEventListener("visibilitychange", back);
+    };
+  }, [client, supported]);
+  return () => (supported && !attended() ? { peek: true } : {});
+}
+
 export function useMessages(conversationId: string | null | undefined) {
   const connection = useConnection();
+  const peek = usePeek();
   return useKeyed(
     ["messages", conversationId],
     async () =>
-      expectBody(await connection.call("conversation.get", { conversation_id: conversationId as string }), "messages")
-        .value,
+      expectBody(
+        await connection.call("conversation.get", { conversation_id: conversationId as string, ...peek() }),
+        "messages",
+      ).value,
     Boolean(conversationId),
   );
 }
@@ -339,9 +372,10 @@ export function useEmployeeChats() {
 
 export function useChannelFeed(channel: string | null) {
   const connection = useConnection();
+  const peek = usePeek();
   return useKeyed(
     ["messages", "feed", channel],
-    async () => expectBody(await connection.call("group_chat.get", { channel }), "messages").value,
+    async () => expectBody(await connection.call("group_chat.get", { channel, ...peek() }), "messages").value,
   );
 }
 

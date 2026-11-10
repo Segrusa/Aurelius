@@ -16,6 +16,21 @@ use std::sync::Arc;
 /// `reader`: the board member of the connection : reading a
 /// discussion (a channel, a ticket's) marks it read for them.
 pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
+    // A read keyed by a run, a message or a conversation of someone else's private
+    // chat answers as if there were none, like `conversation.get` does.
+    let private = match &method {
+        Method::RunGetActivity { run_id } | Method::RunGetTrace { run_id } | Method::RunGetContext { run_id } | Method::RunGuidelines { run_id } => Some(run_id.to_string()),
+        Method::ActivityGet { message_id, .. } => Some(message_id.to_string()),
+        Method::SubagentList { conversation_id } => Some(conversation_id.to_string()),
+        Method::UsageGetTotals { conversation_id: Some(conversation_id), task_id: None, ticket_id: None } => Some(conversation_id.to_string()),
+        _ => None,
+    };
+    if let Some(id) = private {
+        let store = shared.store().clone();
+        if storage_task(move || store.read(|c| aurelius_storage::employee_chats::hides(c, &id, reader))).await? {
+            return Err(ProtocolError::new(ErrorCode::NotFound, "This does not exist."));
+        }
+    }
     match method {
         Method::SessionHello(_)
         | Method::EventSubscribe { .. }
@@ -43,13 +58,15 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::ServerGetName => Ok(ResponseBody::ServerName(super::server_name(shared).await)),
         Method::ProjectList => projects(shared).await,
         Method::JobList => jobs(shared).await,
-        Method::ConversationGet { conversation_id } => {
+        Method::ConversationGet { conversation_id, peek } => {
             let store = shared.store().clone();
             if storage_task(move || store.read(|c| aurelius_storage::employee_chats::hidden_from(c, conversation_id, reader))).await? {
                 return Err(ProtocolError::new(ErrorCode::NotFound, format!("conversation {conversation_id} does not exist")));
             }
             let body = messages(shared, conversation_id, reader).await?;
-            mark_read(shared, reader, conversation_id).await;
+            if !peek {
+                mark_read(shared, reader, conversation_id).await;
+            }
             Ok(body)
         }
         Method::EmployeeList => employees(shared).await,
@@ -76,7 +93,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let profiles = storage_task(move || store.read(aurelius_storage::employee_profiles::list)).await?;
             Ok(ResponseBody::EmployeeStartProfiles(aurelius_domain::employee_tools::StartProfiles { profiles }))
         }
-        Method::GroupChatGet { channel } => {
+        Method::GroupChatGet { channel, peek } => {
             let store = shared.store().clone();
             let found = storage_task(move || {
                 store.read(|c| match channel {
@@ -92,7 +109,9 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             match (found, channel) {
                 (Some(conversation_id), _) => {
                     let body = messages(shared, conversation_id, reader).await?;
-                    mark_read(shared, reader, conversation_id).await;
+                    if !peek {
+                        mark_read(shared, reader, conversation_id).await;
+                    }
                     Ok(body)
                 }
                 (None, Some(_)) => Err(ProtocolError::new(ErrorCode::NotFound, "this channel does not exist")),
@@ -120,7 +139,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::TicketMyTickets { project_id, include_done } => my_tickets(shared, reader, project_id, include_done).await,
         Method::MessageHistory { message_id } => message_history(shared, reader, message_id).await,
         Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
-        Method::ApprovalList { project_id } => approvals(shared, project_id).await,
+        Method::ApprovalList { project_id } => approvals(shared, reader, project_id).await,
         Method::ProviderList => connections(shared).await,
         Method::TaskList { project_id, employee_id, state } => tasks(shared, project_id, employee_id, state).await,
         Method::TimelineList(query) => timeline(shared, query).await,
@@ -661,12 +680,12 @@ async fn project_conversations(shared: &Arc<Shared>, project_id: ProjectId) -> R
     .map(ResponseBody::ProjectConversations)
 }
 
-async fn approvals(shared: &Arc<Shared>, project: Option<ProjectId>) -> Result<ResponseBody, ProtocolError> {
+async fn approvals(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, project: Option<ProjectId>) -> Result<ResponseBody, ProtocolError> {
     let store = shared.store().clone();
     storage_task(move || {
         store.read(|c| {
             let read_blob = |key: &str| store.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
-            Ok(ApprovalsSnapshot { as_of_seq: queries::last_seq(c)?, approvals: aurelius_storage::approvals::list_approvals(c, project, &read_blob)? })
+            Ok(ApprovalsSnapshot { as_of_seq: queries::last_seq(c)?, approvals: aurelius_storage::approvals::list_approvals(c, project, reader, &read_blob)? })
         })
     })
     .await

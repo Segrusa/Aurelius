@@ -27,6 +27,9 @@ pub struct UserRow {
     pub password_changed_at_ms: Option<i64>,
     /// The password is a temporary one: it must be changed at the next login.
     pub must_change_password: bool,
+    /// An administrator (migration 41): resets another's password, ends their
+    /// sessions, disables them and names other administrators.
+    pub admin: bool,
 }
 
 impl UserRow {
@@ -43,7 +46,7 @@ pub struct NewUser<'a> {
 }
 
 const COLUMNS: &str =
-    "id, company_id, username, created_by_user, version, created_at_ms, updated_at_ms, disabled_at_ms, password_changed_at_ms, must_change_password";
+    "id, company_id, username, created_by_user, version, created_at_ms, updated_at_ms, disabled_at_ms, password_changed_at_ms, must_change_password, admin";
 
 fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<UserRow> {
     Ok(UserRow {
@@ -57,6 +60,7 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<UserRow> {
         disabled_at_ms: r.get(7)?,
         password_changed_at_ms: r.get(8)?,
         must_change_password: r.get(9)?,
+        admin: r.get(10)?,
     })
 }
 
@@ -68,8 +72,9 @@ pub fn insert(tx: &Transaction<'_>, user: &NewUser<'_>, password_hash: &str) -> 
         .optional()?
         .ok_or_else(|| StorageError::Rejected("there is no company".into()))?;
     let inserted = tx.execute(
-        "INSERT INTO users(id, company_id, username, password_hash, created_by_user, version, created_at_ms, updated_at_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6)",
+        // The first board member of a server is its administrator.
+        "INSERT INTO users(id, company_id, username, password_hash, created_by_user, version, created_at_ms, updated_at_ms, admin)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?6, NOT EXISTS(SELECT 1 FROM users))",
         params![user.id, company, user.username, password_hash, user.created_by_user, user.now_ms],
     );
     match inserted {
@@ -108,6 +113,16 @@ pub fn count(conn: &Connection) -> Result<u64, StorageError> {
 /// The board members that are not disabled (e.g. so the last one cannot be).
 pub fn count_active(conn: &Connection) -> Result<u64, StorageError> {
     Ok(conn.query_row("SELECT COUNT(*) FROM users WHERE disabled_at_ms IS NULL", [], |r| r.get::<_, i64>(0))? as u64)
+}
+
+/// The administrators that are not disabled (so the last one stays one).
+pub fn count_admins(conn: &Connection) -> Result<u64, StorageError> {
+    Ok(conn.query_row("SELECT COUNT(*) FROM users WHERE admin = 1 AND disabled_at_ms IS NULL", [], |r| r.get::<_, i64>(0))? as u64)
+}
+
+/// Make a board member an administrator, or an ordinary one again. False when unknown.
+pub fn set_admin(tx: &Transaction<'_>, id: &str, admin: bool, now_ms: i64) -> Result<bool, StorageError> {
+    Ok(tx.execute("UPDATE users SET admin = ?2, version = version + 1, updated_at_ms = ?3 WHERE id = ?1", params![id, admin, now_ms])? == 1)
 }
 
 /// Disable a board member: every session of theirs is revoked, and their
@@ -173,6 +188,7 @@ impl UserRow {
             created_at_ms: self.created_at_ms,
             created_by_user: self.created_by_user.as_deref().and_then(|u| aurelius_domain::UserId::parse(u).ok()),
             disabled_at_ms: self.disabled_at_ms,
+            admin: self.admin,
         })
     }
 }

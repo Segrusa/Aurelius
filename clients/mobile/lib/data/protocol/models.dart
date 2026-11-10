@@ -20,7 +20,7 @@ enum AccessLevel {
 
   static AccessLevel fromJson(String value) => values.firstWhere(
         (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown AccessLevel value: $value'),
+        orElse: () => AccessLevel.unknown,
       );
 
   String toJson() => wire;
@@ -132,7 +132,7 @@ enum ActivityState {
 
   static ActivityState fromJson(String value) => values.firstWhere(
         (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown ActivityState value: $value'),
+        orElse: () => ActivityState.unknown,
       );
 
   String toJson() => wire;
@@ -7501,6 +7501,14 @@ sealed class HostWrite {
           userId: (src['user_id'] as String),
         );
         }
+      case 'user.set_admin':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteUserSetAdmin(
+          admin: (src['admin'] as bool),
+          userId: (src['user_id'] as String),
+        );
+        }
       case 'user.set_password':
         return HostWriteUserSetPassword(params: SetPasswordParams.fromJson(json['params'] as Map<String, dynamic>));
       case 'vault.archive':
@@ -8039,7 +8047,8 @@ final class HostWriteServerRestart extends HostWrite {
     };
 }
 
-/// End one session (any board member's: one role). Its device's open
+/// End one session: an own one, or as an administrator another board member's
+/// (`forbidden` otherwise; feature `admin_role`). Its device's open
 /// connection closes at once (`ServerMessage::SignedOut`); the timeline says
 /// who revoked it. Answers `Done`. Not for apps.
 final class HostWriteSessionRevoke extends HostWrite {
@@ -8136,7 +8145,8 @@ final class HostWriteUserCreate extends HostWrite {
     };
 }
 
-/// Disable a board member: their sessions end at once and they cannot sign
+/// Disable a board member, as an administrator (`forbidden` otherwise; the
+/// last active administrator cannot be): their sessions end at once and they cannot sign
 /// in; their Claude login is disconnected; tickets keep their creator. The
 /// last active board member cannot be disabled (`last_board_member`).
 /// Answers `User`. Not for apps.
@@ -8156,9 +8166,31 @@ final class HostWriteUserDisable extends HostWrite {
     };
 }
 
+/// Make a board member an administrator or an ordinary one again (feature
+/// `admin_role`), as an administrator (`forbidden` otherwise). The last
+/// active administrator stays one (`validation`). Answers `User`. Not for apps.
+final class HostWriteUserSetAdmin extends HostWrite {
+  const HostWriteUserSetAdmin({
+    required this.admin,
+    required this.userId,
+  });
+
+  final bool admin;
+  final String userId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.set_admin',
+      'params': <String, dynamic>{
+      'admin': admin,
+      'user_id': userId,
+    },
+    };
+}
+
 /// Change a password. Own (no `user_id`, or the session's): with the old
 /// password; the other sessions end, this one stays. Another board member's
-/// (B10): a temporary password, changed at their next sign-in
+/// (B10), only as an administrator (`forbidden` otherwise): a temporary password, changed at their next sign-in
 /// (`must_change_password`); all their sessions end. Like `user.create`, the
 /// passwords are in no receipt, request hash, event or log. Answers `Done`.
 final class HostWriteUserSetPassword extends HostWrite {
@@ -9014,7 +9046,7 @@ enum McpAuthStatus {
 
   static McpAuthStatus fromJson(String value) => values.firstWhere(
         (e) => e.wire == value,
-        orElse: () => throw FormatException('Unknown McpAuthStatus value: $value'),
+        orElse: () => McpAuthStatus.unknown,
       );
 
   String toJson() => wire;
@@ -9978,6 +10010,7 @@ sealed class Method {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodConversationGet(
           conversationId: (src['conversation_id'] as String),
+          peek: (src['peek'] == null ? null : (src['peek'] as bool)),
         );
         }
       case 'discussion.audience':
@@ -10049,6 +10082,7 @@ sealed class Method {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodGroupChatGet(
           channel: (src['channel'] == null ? null : (src['channel'] as String)),
+          peek: (src['peek'] == null ? null : (src['peek'] as bool)),
         );
         }
       case 'guideline.affected':
@@ -10626,15 +10660,21 @@ final class MethodConnectionList extends Method {
 final class MethodConversationGet extends Method {
   const MethodConversationGet({
     required this.conversationId,
+    this.peek,
   });
 
   final String conversationId;
+  /// Read without marking the discussion read (feature `read_peek`): what a
+  /// client sends while nobody looks at its window, so a device left open
+  /// does not read for its board member. Left out: reading marks it read.
+  final bool? peek;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'conversation.get',
       'params': <String, dynamic>{
       'conversation_id': conversationId,
+      if (peek != null) 'peek': peek,
     },
     };
 }
@@ -10828,15 +10868,19 @@ final class MethodFsListDir extends Method {
 final class MethodGroupChatGet extends Method {
   const MethodGroupChatGet({
     this.channel,
+    this.peek,
   });
 
   final String? channel;
+  /// As `conversation.get`'s `peek` (feature `read_peek`).
+  final bool? peek;
 
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'group_chat.get',
       'params': <String, dynamic>{
       if (channel != null) 'channel': channel,
+      if (peek != null) 'peek': peek,
     },
     };
 }
@@ -11404,8 +11448,9 @@ final class MethodSessionHello extends Method {
 }
 
 /// The signed-in devices of a board member (none: the session's own),
-/// newest activity first (`SessionView::current` marks this one). Any board
-/// member may list another's (one role). Never a token or its hash.
+/// newest activity first (`SessionView::current` marks this one). Another
+/// board member's only as an administrator (`forbidden` otherwise; feature
+/// `admin_role`). Never a token or its hash.
 final class MethodSessionList extends Method {
   const MethodSessionList({
     this.userId,
@@ -18412,6 +18457,7 @@ final class UserRef {
 /// A board member as every client sees it; never the password's hash.
 final class UserView {
   const UserView({
+    this.admin,
     required this.createdAtMs,
     this.createdByUser,
     this.disabledAtMs,
@@ -18419,6 +18465,10 @@ final class UserView {
     required this.username,
   });
 
+  /// An administrator (feature `admin_role`): the only one who resets another
+  /// board member's password, ends their sessions or disables them, and who
+  /// names other administrators. Everything else is one role.
+  final bool? admin;
   final int createdAtMs;
   /// None: made in the onboarding, without an active board member.
   final String? createdByUser;
@@ -18428,6 +18478,7 @@ final class UserView {
   final String username;
 
   factory UserView.fromJson(Map<String, dynamic> json) => UserView(
+    admin: (json['admin'] == null ? null : (json['admin'] as bool)),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
     createdByUser: (json['created_by_user'] == null ? null : (json['created_by_user'] as String)),
     disabledAtMs: (json['disabled_at_ms'] == null ? null : (json['disabled_at_ms'] as num).toInt()),
@@ -18436,6 +18487,7 @@ final class UserView {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (admin != null) 'admin': admin,
     'created_at_ms': createdAtMs,
     if (createdByUser != null) 'created_by_user': createdByUser,
     if (disabledAtMs != null) 'disabled_at_ms': disabledAtMs,

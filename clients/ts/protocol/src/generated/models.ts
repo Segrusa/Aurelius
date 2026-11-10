@@ -2350,7 +2350,8 @@ export type HostWrite =
   | ({ method: "secret.set"; params: { connection_id: string; secret: string } })
   | ({ method: "server.restart" })
   /**
-   * End one session (any board member's: one role). Its device's open
+   * End one session: an own one, or as an administrator another board member's
+   * (`forbidden` otherwise; feature `admin_role`). Its device's open
    * connection closes at once (`ServerMessage::SignedOut`); the timeline says
    * who revoked it. Answers `Done`. Not for apps.
    */
@@ -2378,16 +2379,23 @@ export type HostWrite =
    */
   | ({ method: "user.create"; params: UserCreateParams })
   /**
-   * Disable a board member: their sessions end at once and they cannot sign
+   * Disable a board member, as an administrator (`forbidden` otherwise; the
+   * last active administrator cannot be): their sessions end at once and they cannot sign
    * in; their Claude login is disconnected; tickets keep their creator. The
    * last active board member cannot be disabled (`last_board_member`).
    * Answers `User`. Not for apps.
    */
   | ({ method: "user.disable"; params: { user_id: string } })
   /**
+   * Make a board member an administrator or an ordinary one again (feature
+   * `admin_role`), as an administrator (`forbidden` otherwise). The last
+   * active administrator stays one (`validation`). Answers `User`. Not for apps.
+   */
+  | ({ method: "user.set_admin"; params: { admin: boolean; user_id: string } })
+  /**
    * Change a password. Own (no `user_id`, or the session's): with the old
    * password; the other sessions end, this one stays. Another board member's
-   * (B10): a temporary password, changed at their next sign-in
+   * (B10), only as an administrator (`forbidden` otherwise): a temporary password, changed at their next sign-in
    * (`must_change_password`); all their sessions end. Like `user.create`, the
    * passwords are in no receipt, request hash, event or log. Answers `Done`.
    */
@@ -3315,7 +3323,7 @@ export type Method =
   /**
    * A conversation's messages and settings.
    */
-  | ({ method: "conversation.get"; params: { conversation_id: string } })
+  | ({ method: "conversation.get"; params: { conversation_id: string; peek?: boolean } })
   /**
    * Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
    * answered with `DiscussionAudience`, for the reader's own message (the
@@ -3376,7 +3384,7 @@ export type Method =
    * `channel` (feature `team_channels`): a project's channel from
    * `channel.list`; none: the general channel, the one older servers have.
    */
-  | ({ method: "group_chat.get"; params: { channel?: string | null } })
+  | ({ method: "group_chat.get"; params: { channel?: string | null; peek?: boolean } })
   /**
    * Who a change of this guideline reaches from their next run (B6): employees,
    * projects and conversations that start a new session.
@@ -3521,8 +3529,9 @@ export type Method =
   | ({ method: "session.hello"; params: HelloParams })
   /**
    * The signed-in devices of a board member (none: the session's own),
-   * newest activity first (`SessionView::current` marks this one). Any board
-   * member may list another's (one role). Never a token or its hash.
+   * newest activity first (`SessionView::current` marks this one). Another
+   * board member's only as an administrator (`forbidden` otherwise; feature
+   * `admin_role`). Never a token or its hash.
    */
   | ({ method: "session.list"; params: { user_id?: string | null } })
   /**
@@ -6156,6 +6165,12 @@ export interface UserRef {
  * A board member as every client sees it; never the password's hash.
  */
 export interface UserView {
+  /**
+   * An administrator (feature `admin_role`): the only one who resets another
+   * board member's password, ends their sessions or disables them, and who
+   * names other administrators. Everything else is one role.
+   */
+  admin?: boolean;
   created_at_ms: number;
   /**
    * None: made in the onboarding, without an active board member.

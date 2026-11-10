@@ -66,7 +66,7 @@ const styles = stylex.create({
 
 function BoardMembers() {
   const connection = useConnection();
-  const { user } = useLinkState();
+  const { user, features } = useLinkState();
   const { busy, error, run } = useChange();
   const users = useSetting("users", async () => expectBody(await connection.call("user.list"), "users").value.users);
   const [username, setUsername] = useState("");
@@ -74,6 +74,10 @@ function BoardMembers() {
   const [repeat, setRepeat] = useState("");
   const [access, setAccess] = useState<{ id: string; username: string } | null>(null);
   const problem = passwordProblem(password, repeat);
+  // Another board member's sessions, password and account are an administrator's
+  // (feature `admin_role`); a server without it has one role, as before.
+  const roles = features.includes("admin_role");
+  const admin = !roles || (users.data ?? []).some((u) => u.id === user?.id && u.admin === true);
   const add = async (event: FormEvent) => {
     event.preventDefault();
     if (problem) return;
@@ -90,12 +94,31 @@ function BoardMembers() {
         <Row
           key={u.id}
           title={u.username}
-          hint={u.disabled_at_ms ? "Disabled" : u.id === user?.id ? "You" : "Signs in with their own Claude login."}
+          hint={
+            u.disabled_at_ms
+              ? "Disabled"
+              : [u.id === user?.id ? "You" : null, u.admin ? "Administrator" : null].filter(Boolean).join(" · ") ||
+                "Signs in with their own Claude login."
+          }
         >
-          {u.id === user?.id || u.disabled_at_ms ? null : (
+          {!roles || !admin || u.disabled_at_ms ? null : (
+            <ConfirmButton
+              label={u.admin ? "Remove administrator" : "Make administrator"}
+              question={
+                u.admin
+                  ? `Make ${u.username} an ordinary board member again?`
+                  : `Make ${u.username} an administrator? They can then reset passwords, sign out devices and disable board members.`
+              }
+              disabled={busy}
+              onConfirm={() =>
+                void run(() => connection.write("user.set_admin", { user_id: u.id, admin: !u.admin }, { retry: false }))
+              }
+            />
+          )}
+          {!admin || u.id === user?.id || u.disabled_at_ms ? null : (
             <SmallButton onClick={() => setAccess(u)}>Sessions</SmallButton>
           )}
-          {u.id === user?.id || u.disabled_at_ms ? null : (
+          {!admin || u.id === user?.id || u.disabled_at_ms ? null : (
             <ConfirmButton
               label="Disable"
               question={`Disable ${u.username}? They are signed out everywhere and can no longer sign in.`}

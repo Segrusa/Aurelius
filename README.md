@@ -1,8 +1,10 @@
 # Aurelius
 
-A calm, local workspace where you run your own AI team (a CEO, a CTO, employees and departments) on top of [Claude Code](https://claude.com/claude-code). Everything runs and is stored on your own computer.
+A calm workspace where you and your colleagues run your own AI team (a CEO, a tech lead, and the employees who report to them) on top of [Claude Code](https://claude.com/claude-code). Everything runs and is stored on a server of your own: your computer, or one machine the board members reach over Tailscale.
 
-Aurelius has a desktop app (Windows and macOS), a mobile app (iPhone and Android) and a server that keeps all state locally in SQLite.
+Aurelius has a server that keeps all state in SQLite, a desktop app (Windows and macOS), the same app in a browser, and a mobile app (iPhone and Android). Each board member signs in with their own name and connects their own Claude login.
+
+What has been decided about how it works is in [docs/decisions.md](docs/decisions.md).
 
 ## Requirements
 
@@ -20,7 +22,7 @@ The app starts the server for you.
 
 ## Mobile app
 
-The Flutter app in `clients/mobile` connects to Aurelius on your own PC over Tailscale. See [docs/mobile.md](docs/mobile.md).
+The Flutter app in `clients/mobile` connects to your Aurelius server over Tailscale. See [docs/mobile.md](docs/mobile.md).
 
 ## Contributing and security
 

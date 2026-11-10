@@ -359,7 +359,7 @@ async fn a_message_deleted_that_was_not_queued_reaches_an_older_client_and_break
     let kinds = replayed_kinds(&mut older).await;
     assert_eq!(kinds.iter().filter(|k| **k == EventKind::MessageDeleted).count(), 1, "it is a kind an older client knows: {kinds:?}");
     // What its handler does next: read the conversation again. The message is still there.
-    match read_outcome(&mut older, Method::GroupChatGet { channel: Some(channel) }).await {
+    match read_outcome(&mut older, Method::GroupChatGet { channel: Some(channel), peek: false }).await {
         Outcome::Ok(ResponseBody::Messages(snapshot)) => assert!(snapshot.messages.iter().any(|m| m.id == message)),
         other => panic!("{other:?}"),
     }

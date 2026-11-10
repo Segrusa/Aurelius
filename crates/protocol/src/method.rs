@@ -26,7 +26,14 @@ pub enum Method {
     JobList,
     /// A conversation's messages and settings.
     #[serde(rename = "conversation.get")]
-    ConversationGet { conversation_id: ConversationId },
+    ConversationGet {
+        conversation_id: ConversationId,
+        /// Read without marking the discussion read (feature `read_peek`): what a
+        /// client sends while nobody looks at its window, so a device left open
+        /// does not read for its board member. Left out: reading marks it read.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        peek: bool,
+    },
     /// The company's employees (not archived), oldest first.
     #[serde(rename = "employee.list")]
     EmployeeList,
@@ -100,6 +107,9 @@ pub enum Method {
     GroupChatGet {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         channel: Option<ConversationId>,
+        /// As `conversation.get`'s `peek` (feature `read_peek`).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        peek: bool,
     },
     /// The channels of the Team chat (feature `team_channels`): the general
     /// one first, then one per project (archived projects too: read-only).
@@ -203,8 +213,9 @@ pub enum Method {
     #[serde(rename = "user.logout")]
     UserLogout,
     /// The signed-in devices of a board member (none: the session's own),
-    /// newest activity first (`SessionView::current` marks this one). Any board
-    /// member may list another's (one role). Never a token or its hash.
+    /// newest activity first (`SessionView::current` marks this one). Another
+    /// board member's only as an administrator (`forbidden` otherwise; feature
+    /// `admin_role`). Never a token or its hash.
     #[serde(rename = "session.list")]
     SessionList {
         #[serde(default, skip_serializing_if = "Option::is_none")]

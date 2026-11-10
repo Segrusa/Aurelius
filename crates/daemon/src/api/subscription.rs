@@ -3,7 +3,7 @@
 
 use super::storage_task;
 use crate::Shared;
-use aurelius_domain::{EventKind, MessageId};
+use aurelius_domain::{EventKind, MessageId, UserId};
 use aurelius_protocol::{ActivityView, ErrorCode, Event, LoadSnapshot, PowerState, ProtocolError, ResponseBody, ServerMessage, StreamDelta};
 use aurelius_storage::{Store, queries};
 use std::collections::HashMap;
@@ -53,10 +53,14 @@ impl Accepts {
 /// cannot read an event kind it does not know. Without `chat_threads` the streamed
 /// text of an answer in a thread is: an older client would show it in the
 /// channel's own list.
+/// Whatever the client accepts, the events and streamed text of another board
+/// member's private chat with an employee are left out: only `reader` and that
+/// employee read it (`aurelius_storage::employee_chats::hides`).
 pub(super) async fn subscribe(
     shared: &Arc<Shared>,
     after_seq: u64,
     accepts: Accepts,
+    reader: Option<UserId>,
     out: mpsc::Sender<ServerMessage>,
 ) -> Result<(ResponseBody, tokio::task::JoinHandle<()>), ProtocolError> {
     let activity_changes = accepts.activity_changes;
@@ -65,7 +69,7 @@ pub(super) async fn subscribe(
     let mut streams = shared.streams.subscribe();
     let mut loads = Some(shared.admission.changes());
     let mut powers = Some(shared.power.changes());
-    let mut hidden = Hidden::new(accepts.team_channels, accepts.server_name).with_chat(accepts.chat_threads, accepts.chat_reactions).with_follow_and_edits(accepts.ticket_follow, accepts.message_edits);
+    let mut hidden = Hidden::new(accepts.team_channels, accepts.server_name).with_chat(accepts.chat_threads, accepts.chat_reactions).with_follow_and_edits(accepts.ticket_follow, accepts.message_edits).for_reader(reader);
     let mut cursor = replay(shared, after_seq, &out, &mut hidden).await?;
     let replayed_through_seq = cursor;
     let shared = shared.clone();
@@ -169,12 +173,14 @@ struct Hidden {
     chat_reactions: bool,
     ticket_follow: bool,
     message_edits: bool,
+    /// The board member of the connection; none reads no private chat at all.
+    reader: Option<UserId>,
     known: HashMap<String, bool>,
 }
 
 impl Hidden {
     fn new(team_channels: bool, server_name: bool) -> Self {
-        Hidden { team_channels, server_name, chat_threads: false, chat_reactions: false, ticket_follow: false, message_edits: false, known: HashMap::new() }
+        Hidden { team_channels, server_name, chat_threads: false, chat_reactions: false, ticket_follow: false, message_edits: false, reader: None, known: HashMap::new() }
     }
 
     /// The same, for a client that shows threads and/or reactions.
@@ -185,6 +191,11 @@ impl Hidden {
     /// The same, for a client that shows followers and/or edited messages.
     fn with_follow_and_edits(self, ticket_follow: bool, message_edits: bool) -> Self {
         Hidden { ticket_follow, message_edits, ..self }
+    }
+
+    /// The same, for the board member who reads.
+    fn for_reader(self, reader: Option<UserId>) -> Self {
+        Hidden { reader, ..self }
     }
 
     /// Event kinds this connection's client does not know.
@@ -205,15 +216,18 @@ impl Hidden {
     }
 
     async fn hides(&mut self, store: &Arc<Store>, aggregate_id: &str) -> bool {
-        if self.team_channels {
-            return false;
-        }
         if let Some(hidden) = self.known.get(aggregate_id) {
             return *hidden;
         }
-        let (id, store) = (aggregate_id.to_owned(), store.clone());
+        let (id, store, reader, channels) = (aggregate_id.to_owned(), store.clone(), self.reader, self.team_channels);
         let hidden = storage_task(move || {
             store.read(|c| {
+                if aurelius_storage::employee_chats::hides(c, &id, reader)? {
+                    return Ok(true);
+                }
+                if channels {
+                    return Ok(false);
+                }
                 Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND kind = 'group' AND project_id IS NOT NULL)", [&id], |r| r.get::<_, bool>(0))?)
             })
         })

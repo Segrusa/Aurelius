@@ -175,9 +175,10 @@ fn host_needs(host: &HostWrite) -> Needs {
         HostWrite::VaultCreate(_) | HostWrite::VaultUpdate(_) | HostWrite::VaultArchive { .. } => Needs::Cap(TaskControl),
         // Every own client must be able to make the first board member (MU1-20).
         HostWrite::UserCreate(_) => Needs::Cap(Read),
-        // One role: every board member manages sessions, passwords and board members,
-        // from any device they signed in on (the session decides, MU3-04/05).
-        HostWrite::SessionRevoke { .. } | HostWrite::UserSetPassword(_) | HostWrite::UserDisable { .. } => Needs::Cap(Read),
+        // Sessions, passwords and board members are managed from any device a board
+        // member signed in on; the session decides whose, and whether as an
+        // administrator (MU3-04/05, `UserView::admin`).
+        HostWrite::SessionRevoke { .. } | HostWrite::UserSetPassword(_) | HostWrite::UserDisable { .. } | HostWrite::UserSetAdmin { .. } => Needs::Cap(Read),
         HostWrite::ClaudeLoginLink | HostWrite::ClaudeLoginCancel { .. } | HostWrite::ClaudeLoginUnlink => Needs::Cap(Read),
         // The inbox is the user's own: reading, dismissing.
         HostWrite::NotificationMarkAllRead | HostWrite::NotificationMarkRead { .. } | HostWrite::NotificationDismiss { .. } | HostWrite::NotificationDismissAll => Needs::Cap(Read),
@@ -656,7 +657,7 @@ mod tests {
         assert_eq!(required(&decide), cap(Capability::Approve));
         assert_eq!(required(&read(Method::ProposalList)), cap(Capability::Read));
         // The company is an org chart read too.
-        for method in [Method::CompanyGet, Method::EmployeeChat { employee_id: EmployeeId::new() }, Method::GroupChatGet { channel: None }, Method::ChannelList] {
+        for method in [Method::CompanyGet, Method::EmployeeChat { employee_id: EmployeeId::new() }, Method::GroupChatGet { channel: None, peek: false }, Method::ChannelList] {
             assert_eq!(required(&read(method)), cap(Capability::Read));
         }
         // Writing in the group chat is chatting.

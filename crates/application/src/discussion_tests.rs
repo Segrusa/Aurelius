@@ -1385,7 +1385,7 @@ fn an_open_question_of_a_woken_run_is_on_its_ticket_and_marks_its_post() {
 
     assert!(messages(&s, d).iter().find(|m| m.text == "Looking into it.").unwrap().awaiting_user, "the post stands for the waiting run");
     let st = s.service.store().clone();
-    let listed = s.service.store().read(move |c| aurelius_storage::approvals::list_approvals(c, None, &|k| st.blobs().read(k).ok().and_then(|b| String::from_utf8(b).ok()))).unwrap();
+    let listed = s.service.store().read(move |c| aurelius_storage::approvals::list_approvals(c, None, None, &|k| st.blobs().read(k).ok().and_then(|b| String::from_utf8(b).ok()))).unwrap();
     let a = listed.iter().find(|a| a.id == approval_id).expect("listed");
     assert_eq!((a.ticket_id, a.discussion_id), (Some(t), Some(d)));
 }

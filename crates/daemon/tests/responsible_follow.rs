@@ -1213,6 +1213,7 @@ async fn an_older_client_reads_the_line_of_a_handover_with_its_own_enum() {
             40,
             Method::GroupChatGet {
                 channel: Some(discussion),
+                peek: false,
             },
         ),
     )

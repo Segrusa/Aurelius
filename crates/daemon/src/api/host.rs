@@ -18,6 +18,7 @@ pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite, user: Option
         HostWrite::SessionRevoke { .. }
         | HostWrite::UserSetPassword(_)
         | HostWrite::UserDisable { .. }
+        | HostWrite::UserSetAdmin { .. }
         | HostWrite::ClaudeLoginLink
         | HostWrite::ClaudeLoginCancel { .. }
         | HostWrite::ClaudeLoginUnlink => return Err(super::internal("a session write reached the host pipeline")),

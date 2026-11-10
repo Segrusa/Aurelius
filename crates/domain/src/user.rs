@@ -66,6 +66,11 @@ pub struct UserView {
     /// Disabled (`user.disable`): cannot sign in; tickets keep their creator.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disabled_at_ms: Option<i64>,
+    /// An administrator (feature `admin_role`): the only one who resets another
+    /// board member's password, ends their sessions or disables them, and who
+    /// names other administrators. Everything else is one role.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub admin: bool,
 }
 
 /// `user.list`, oldest first.
@@ -192,7 +197,7 @@ mod tests {
 
     #[test]
     fn a_login_result_never_prints_its_token() {
-        let user = UserView { id: UserId::new(), username: "alex".into(), created_at_ms: 1, created_by_user: None, disabled_at_ms: None };
+        let user = UserView { id: UserId::new(), username: "alex".into(), created_at_ms: 1, created_by_user: None, disabled_at_ms: None, admin: false };
         let login = LoginResult { user, session_token: "TOKEN-SECRET".into(), expires_at_ms: 9, must_change_password: false };
         assert!(!format!("{login:?}").contains("TOKEN-SECRET"));
         assert!(serde_json::to_string(&login).unwrap().contains("TOKEN-SECRET"), "the answer itself carries it once");

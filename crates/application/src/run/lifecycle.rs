@@ -495,8 +495,9 @@ impl CommandService {
     /// Startup reconciliation: runs that were active when the daemon died end
     /// as failed with their last checkpoint kept; their jobs are not re-run blindly.
     pub fn reconcile_chat_runs(&self) -> Result<usize, AppError> {
+        let store = self.store.clone();
         self.store
-            .write(|tx| {
+            .write(move |tx| {
                 let runs = conv::unfinished_runs(tx)?;
                 for (run_id, conversation_id) in &runs {
                     let _ = CommandService::invalidate_run_approvals(tx, *run_id)?;
@@ -527,6 +528,12 @@ impl CommandService {
                     })?;
                     conv::set_run_status(tx, *run_id, "failed", Some("daemon_restart"))?;
                     tx.execute("UPDATE jobs SET state = 'dead', last_error_code = 'daemon_restart' WHERE id = ?1 AND state = 'leased'", [run_id.to_string()])?;
+                    // What waited on this run hears of it, as at any other end (`commit_end`):
+                    // its task fails where a board member sees it, instead of staying
+                    // Running with no run behind it, the owner of a ticket that waited for
+                    // this colleague gets the ticket back.
+                    crate::task::task_runs::on_run_finished(tx, &store, *run_id, false, Some("daemon_restart"), "")?;
+                    crate::task::task_runs::run_settled(tx, &store, *run_id, true)?;
                 }
                 // Claimed but never started: safe to run again.
                 tx.execute(

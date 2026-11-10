@@ -229,6 +229,7 @@ export const METHODS = {
   "user.list": "read",
   "user.login": "read",
   "user.logout": "read",
+  "user.set_admin": "host",
   "user.set_password": "host",
   "user.whoami": "read",
   "vault.archive": "host",
@@ -369,7 +370,7 @@ export interface MethodParams {
   /**
    * A conversation's messages and settings.
    */
-  "conversation.get": { conversation_id: string };
+  "conversation.get": { conversation_id: string; peek?: boolean };
   "conversation.send_queued_now": M.SendQueuedNow;
   "conversation.set_agent_mode": M.SetAgentMode;
   "conversation.set_browser_allowed": M.SetBrowserAllowed;
@@ -447,7 +448,7 @@ export interface MethodParams {
    * `channel` (feature `team_channels`): a project's channel from
    * `channel.list`; none: the general channel, the one older servers have.
    */
-  "group_chat.get": { channel?: string | null };
+  "group_chat.get": { channel?: string | null; peek?: boolean };
   "group_chat.send": M.SendGroupMessage;
   /**
    * `guideline.add_starter_set`: the chosen templates as guidelines without links (B7).
@@ -727,12 +728,14 @@ export interface MethodParams {
   "session.hello": M.HelloParams;
   /**
    * The signed-in devices of a board member (none: the session's own),
-   * newest activity first (`SessionView::current` marks this one). Any board
-   * member may list another's (one role). Never a token or its hash.
+   * newest activity first (`SessionView::current` marks this one). Another
+   * board member's only as an administrator (`forbidden` otherwise; feature
+   * `admin_role`). Never a token or its hash.
    */
   "session.list": { user_id?: string | null };
   /**
-   * End one session (any board member's: one role). Its device's open
+   * End one session: an own one, or as an administrator another board member's
+   * (`forbidden` otherwise; feature `admin_role`). Its device's open
    * connection closes at once (`ServerMessage::SignedOut`); the timeline says
    * who revoked it. Answers `Done`. Not for apps.
    */
@@ -921,7 +924,8 @@ export interface MethodParams {
    */
   "user.create": M.UserCreateParams;
   /**
-   * Disable a board member: their sessions end at once and they cannot sign
+   * Disable a board member, as an administrator (`forbidden` otherwise; the
+   * last active administrator cannot be): their sessions end at once and they cannot sign
    * in; their Claude login is disconnected; tickets keep their creator. The
    * last active board member cannot be disabled (`last_board_member`).
    * Answers `User`. Not for apps.
@@ -950,9 +954,15 @@ export interface MethodParams {
    */
   "user.logout": undefined;
   /**
+   * Make a board member an administrator or an ordinary one again (feature
+   * `admin_role`), as an administrator (`forbidden` otherwise). The last
+   * active administrator stays one (`validation`). Answers `User`. Not for apps.
+   */
+  "user.set_admin": { admin: boolean; user_id: string };
+  /**
    * Change a password. Own (no `user_id`, or the session's): with the old
    * password; the other sessions end, this one stays. Another board member's
-   * (B10): a temporary password, changed at their next sign-in
+   * (B10), only as an administrator (`forbidden` otherwise): a temporary password, changed at their next sign-in
    * (`must_change_password`); all their sessions end. Like `user.create`, the
    * passwords are in no receipt, request hash, event or log. Answers `Done`.
    */

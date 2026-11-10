@@ -406,7 +406,7 @@ fn board_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "post_to_ticket",
-            "description": "Post a short message in the discussion of a ticket under your name; @Name wakes that colleague (a few times in a row at most). A ticket in Done can only be read.",
+            "description": "Post a short message in the discussion of a ticket under your name. An @Name of a colleague only refers to them and wakes nobody (hand_off does that); an @username of a board member tells them. A ticket in Done can only be read.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "ticket": ticket, "message": { "type": "string" } },

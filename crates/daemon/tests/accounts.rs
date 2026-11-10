@@ -274,6 +274,44 @@ async fn a_new_password_ends_the_other_sessions_and_a_temporary_one_must_be_chan
     common::stop(dir.path(), daemon).await;
 }
 
+/// Only an administrator resets another board member's password, ends their
+/// sessions, sees their devices or disables them; the first board member is one,
+/// names others, and the last one stays one.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_an_administrator_manages_another_board_members_account() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = common::start(dir.path()).await;
+    let alex = common::connect(dir.path()).await;
+    let robin = common::connect_as(dir.path(), "robin").await;
+    let alex_id = alex.user_whoami().await.unwrap().user.unwrap().id;
+    let robin_id = robin.user_whoami().await.unwrap().user.unwrap().id;
+    let admins = |users: Vec<aurelius_domain::user::UserView>| users.into_iter().filter(|u| u.admin).map(|u| u.id).collect::<Vec<_>>();
+    assert_eq!(admins(alex.user_list().await.unwrap().users), vec![alex_id], "the first board member");
+
+    // Robin is an ordinary board member: Alex's account is not theirs to touch.
+    assert_eq!(code(robin.set_password(Some(alex_id), None, TEMPORARY).await), ErrorCode::Forbidden);
+    assert_eq!(code(robin.sessions(Some(alex_id)).await), ErrorCode::Forbidden);
+    let alex_session = alex.sessions(None).await.unwrap().sessions[0].id;
+    assert_eq!(code(robin.revoke_session(alex_session).await), ErrorCode::Forbidden);
+    assert_eq!(code(robin.disable_user(alex_id).await), ErrorCode::Forbidden);
+    assert_eq!(code(robin.set_admin(robin_id, true).await), ErrorCode::Forbidden);
+    assert!(alex.user_whoami().await.unwrap().user.is_some(), "Alex is still signed in");
+    // Their own they still manage.
+    assert!(robin.sessions(None).await.is_ok());
+
+    // The last administrator stays one, and cannot be disabled by a second one made meanwhile.
+    assert_eq!(code(alex.set_admin(alex_id, false).await), ErrorCode::Validation);
+    assert!(alex.set_admin(robin_id, true).await.unwrap().admin);
+    assert!(robin.sessions(Some(alex_id)).await.is_ok(), "an administrator now");
+    assert!(!robin.set_admin(alex_id, false).await.unwrap().admin);
+    assert_eq!(admins(robin.user_list().await.unwrap().users), vec![robin_id]);
+    assert_eq!(code(alex.disable_user(robin_id).await), ErrorCode::Forbidden);
+    assert_eq!(code(robin.set_admin(robin_id, false).await), ErrorCode::Validation);
+    assert!(timeline_titles(dir.path()).contains(&"alex made robin an administrator".to_string()));
+    drop((alex, robin));
+    common::stop(dir.path(), daemon).await;
+}
+
 /// MU3-05 AC3/AC4: a disabled board member is signed out at once and cannot
 /// sign in; their tickets keep their creator; the last active one stays.
 #[tokio::test(flavor = "multi_thread")]

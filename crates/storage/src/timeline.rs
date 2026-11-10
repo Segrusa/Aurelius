@@ -50,7 +50,7 @@ fn is_meaningful(event_type: &str) -> bool {
 }
 
 /// Account writes recorded as `host.write` that belong in the timeline (MU3-04 AC4).
-const ACCOUNT_WRITES: &[&str] = &["session.revoke", "user.set_password"];
+const ACCOUNT_WRITES: &[&str] = &["session.revoke", "user.set_password", "user.set_admin"];
 
 fn meaningful(row: &Row) -> bool {
     is_meaningful(&row.event_type)
@@ -216,6 +216,11 @@ fn card(conn: &Connection, row: &Row) -> TimelineCard {
             let by = board_member(conn, &m["by"]);
             let title = if m["temporary"].as_bool() == Some(true) { format!("{by} set a temporary password for {}", s(&m["subject"])) } else { format!("{by} changed their password") };
             ("decision", "ACCOUNT", title, "Other sessions were signed out".into(), by)
+        }
+        "host.write" if m["method"].as_str() == Some("user.set_admin") => {
+            let by = board_member(conn, &m["by"]);
+            let title = if m["admin"].as_bool() == Some(true) { format!("{by} made {} an administrator", s(&m["subject"])) } else { format!("{by} made {} an ordinary board member again", s(&m["subject"])) };
+            ("decision", "ACCOUNT", title, String::new(), by)
         }
         "user.disabled" => {
             let by = board_member(conn, &m["by"]);

@@ -58,7 +58,7 @@ async fn write(stream: &mut BoxStream, command: Command) -> Result<CommandResult
 }
 
 async fn channel_messages(stream: &mut BoxStream, channel: ConversationId) -> Vec<MessageView> {
-    match call(stream, Request::read(70, Method::GroupChatGet { channel: Some(channel) })).await {
+    match call(stream, Request::read(70, Method::GroupChatGet { channel: Some(channel), peek: false })).await {
         Outcome::Ok(ResponseBody::Messages(snapshot)) => snapshot.messages,
         other => panic!("{other:?}"),
     }

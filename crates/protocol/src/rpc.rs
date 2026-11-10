@@ -278,6 +278,16 @@ pub mod feature {
     /// (`DiscussionAudience`). The text is plain text on the wire: a client
     /// marks `@Everyone` itself. An employee's `@Everyone` is only text.
     pub const EVERYONE_MENTION: &str = "everyone_mention";
+    /// An administrator among the board members (additive): `UserView::admin`,
+    /// the write `user.set_admin`, and `forbidden` for a board member who is not
+    /// one on another's `user.set_password`, `session.revoke` or `user.disable`.
+    /// The first board member of a server is an administrator. A client shows
+    /// those actions on someone else only to an administrator.
+    pub const ADMIN_ROLE: &str = "admin_role";
+    /// `conversation.get` and `group_chat.get` take `peek: true`: the messages
+    /// without marking the discussion read (additive). A client sends it while
+    /// its window is not looked at, and reads again when it is.
+    pub const READ_PEEK: &str = "read_peek";
     /// A channel per ticket (protocol 5, additive; AUR-CHAT-001): the ticket's
     /// discussion is its channel, `#<number>-<slug>` (`ticket_channel_name`).
     /// `channel.list` names ticket channels only to connections whose
@@ -427,6 +437,8 @@ pub const FEATURES: &[&str] = &[
     feature::WORKSPACE_FILTERS,
     feature::DESIGN_LINKS,
     feature::EVERYONE_MENTION,
+    feature::ADMIN_ROLE,
+    feature::READ_PEEK,
 ];
 
 /// Daemon → client.

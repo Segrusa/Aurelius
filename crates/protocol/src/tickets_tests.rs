@@ -146,11 +146,11 @@ fn an_older_client_still_reads_the_group_chat_and_its_views() {
             request["params"] = p;
         }
         let parsed: Request = serde_json::from_value(request).unwrap();
-        assert!(matches!(parsed.call, Call::Read(Method::GroupChatGet { channel: None })));
+        assert!(matches!(parsed.call, Call::Read(Method::GroupChatGet { channel: None, peek: false })));
     }
     let channel = aurelius_domain::ConversationId::new();
     let parsed: Request = serde_json::from_value(serde_json::json!({ "protocol": 4, "request_id": 8, "method": "group_chat.get", "params": { "channel": channel } })).unwrap();
-    assert!(matches!(parsed.call, Call::Read(Method::GroupChatGet { channel: Some(c) }) if c == channel));
+    assert!(matches!(parsed.call, Call::Read(Method::GroupChatGet { channel: Some(c), peek: false }) if c == channel));
     let parsed: Request = serde_json::from_value(serde_json::json!({ "protocol": 4, "request_id": 9, "method": "channel.list" })).unwrap();
     assert!(matches!(parsed.call, Call::Read(Method::ChannelList)));
     // `group_chat.send` without a channel: the general one; and it is left out on the wire.

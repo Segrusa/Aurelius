@@ -65,6 +65,24 @@ pub fn hidden_from(conn: &Connection, conversation: ConversationId, user: Option
     Ok(owner.flatten().is_some_and(|owner| user.is_none_or(|u| u.to_string() != owner)))
 }
 
+/// The same for anything that belongs to such a chat and is named by its own id: the
+/// conversation, a run in it, a message in it or an approval one of its runs asked.
+/// The live events, the streamed text and the reads keyed by a run or a message all
+/// ask this, so another board member's private chat stays out of each of them.
+pub fn hides(conn: &Connection, id: &str, user: Option<UserId>) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM conversations c
+          WHERE c.board_member_id IS NOT NULL AND (?2 IS NULL OR c.board_member_id <> ?2)
+            AND c.id IN (
+              SELECT ?1
+              UNION ALL SELECT conversation_id FROM runs WHERE id = ?1
+              UNION ALL SELECT conversation_id FROM messages WHERE id = ?1
+              UNION ALL SELECT r.conversation_id FROM approvals a JOIN runs r ON r.id = a.run_id WHERE a.id = ?1))",
+        params![id, user.map(|u| u.to_string())],
+        |r| r.get(0),
+    )?)
+}
+
 /// How much of the latest message a list of chats shows.
 const PREVIEW_CHARS: usize = 120;
 

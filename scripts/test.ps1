@@ -32,7 +32,7 @@ Write-Host "Testing $Part ($($packages.Count) packages)..."
 # Tests run in their own (dev) environment and build folder, so a running
 # production or dev app never locks the files.
 cargo test --target-dir target/work @cargoArgs
-exit $LASTEXITCODE
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # The app and its shared TypeScript.
 if ($Part -in @("desktop", "all")) {

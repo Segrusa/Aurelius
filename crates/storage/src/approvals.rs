@@ -123,7 +123,8 @@ pub fn pending_runs(conn: &Connection) -> Result<std::collections::HashSet<RunId
 /// Pending approvals first, then the 20 most recent decisions.
 /// `project`: only those of a run in that project, through its task or its conversation
 /// (a task's, a project's or a ticket's discussion). An employee's own chat has none.
-pub fn list_approvals(conn: &Connection, project: Option<aurelius_domain::ProjectId>, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<ApprovalView>, StorageError> {
+/// What a run in another board member's private chat asked stays out for `reader`.
+pub fn list_approvals(conn: &Connection, project: Option<aurelius_domain::ProjectId>, reader: Option<aurelius_domain::UserId>, read_blob: &dyn Fn(&str) -> Option<String>) -> Result<Vec<ApprovalView>, StorageError> {
     let mut stmt = conn.prepare(
         "SELECT a.id, a.status, a.action_digest, e.recorded_at_ms, a.expires_at_ms, a.run_id, r.conversation_id,
                 COALESCE(m.name, rm.name, 'Chat'), b.storage_key, r.task_id,
@@ -143,9 +144,10 @@ pub fn list_approvals(conn: &Connection, project: Option<aurelius_domain::Projec
                  c.project_id,
                  (SELECT g.project_id FROM conversations g WHERE g.id = json_extract(j.payload_json, '$.group.conversation_id'))
                ) = ?1)
+           AND (c.board_member_id IS NULL OR c.board_member_id = ?2)
          ORDER BY a.status = 'pending' DESC, e.recorded_at_ms DESC",
     )?;
-    let rows = stmt.query_map([project.map(|p| p.to_string())], |r| {
+    let rows = stmt.query_map([project.map(|p| p.to_string()), reader.map(|u| u.to_string())], |r| {
         Ok((
             parse(ApprovalId::parse(&r.get::<_, String>(0)?))?,
             r.get::<_, String>(1)?,

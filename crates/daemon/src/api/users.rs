@@ -542,6 +542,13 @@ pub(super) async fn session_read(shared: &Arc<Shared>, peer: &Peer, method: Meth
             let user_id = user_id.unwrap_or(me);
             let current = peer.session.as_ref().and_then(|s| s.id.clone());
             let store = shared.store().clone();
+            if user_id != me {
+                let (store, id) = (store.clone(), me.to_string());
+                let admin = storage_task(move || store.read(move |c| aurelius_storage::users::get(c, &id))).await?.is_some_and(|r| r.admin && !r.disabled());
+                if !admin {
+                    return Err(ProtocolError::new(ErrorCode::Forbidden, "Only an administrator sees another board member's devices."));
+                }
+            }
             let rows = storage_task(move || store.read(|c| aurelius_storage::user_sessions::list_for_user(c, &user_id.to_string(), aurelius_storage::now_ms()))).await?;
             let sessions = rows
                 .into_iter()
@@ -581,7 +588,7 @@ fn done() -> serde_json::Value {
     serde_json::to_value(aurelius_protocol::HostResult::Done).unwrap_or_default()
 }
 
-/// `session.revoke`, `user.set_password`, `user.disable` and the Claude login's
+/// `session.revoke`, `user.set_password`, `user.disable`, `user.set_admin` and the Claude login's
 /// writes. Not through the host pipeline: their receipt and event are made by
 /// `account_write` from parameters without a password. The open connections of
 /// every session that ends close at once.
@@ -592,6 +599,10 @@ pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: Co
         let store = s.store().clone();
         async move { storage_task(move || store.read(move |c| aurelius_storage::users::get(c, &id.to_string()))).await }
     };
+    // What a board member does to another one's account, only an administrator does
+    // (`UserView::admin`): a temporary password for someone else is signing in as them.
+    let admin = named(shared, me).await?.is_some_and(|r| r.admin && !r.disabled());
+    let admin_only = || ProtocolError::new(ErrorCode::Forbidden, "Only an administrator can do this for another board member.");
     match write {
         HostWrite::SessionRevoke { session_id } => {
             let sid = session_id.to_string();
@@ -603,6 +614,9 @@ pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: Co
             let row = storage_task(move || store.read(move |c| aurelius_storage::user_sessions::get(c, &id))).await?;
             let Some(row) = row else { return Err(ProtocolError::new(ErrorCode::NotFound, "This session does not exist.")) };
             let owner = UserId::parse(&row.user_id).map_err(internal)?;
+            if owner != me && !admin {
+                return Err(admin_only());
+            }
             let owner_name = named(shared, owner).await?.map(|u| u.username).unwrap_or_default();
             let account = user::AccountWrite {
                 method: "session.revoke",
@@ -627,6 +641,9 @@ pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: Co
             let aurelius_protocol::SetPasswordParams { user_id, old_password, new_password } = params;
             let target = user_id.unwrap_or(me);
             let own = target == me;
+            if !own && !admin {
+                return Err(admin_only());
+            }
             aurelius_domain::user::check_password(&new_password).map_err(|e| ProtocolError::new(ErrorCode::WeakPassword, e.to_string()))?;
             let Some(row) = named(shared, target).await?.filter(|r| !r.disabled()) else {
                 return Err(ProtocolError::new(ErrorCode::NotFound, "This board member does not exist or is disabled."));
@@ -680,6 +697,9 @@ pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: Co
             account_receipt(key, &committed)
         }
         HostWrite::UserDisable { user_id } => {
+            if !admin {
+                return Err(ProtocolError::new(ErrorCode::Forbidden, "Only an administrator can disable a board member."));
+            }
             let Some(row) = named(shared, user_id).await? else { return Err(ProtocolError::new(ErrorCode::NotFound, "This board member does not exist.")) };
             let account = user::AccountWrite {
                 method: "user.disable",
@@ -697,6 +717,9 @@ pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: Co
                     }
                     if aurelius_storage::users::count_active(tx)? <= 1 {
                         return Ok(Err(ProtocolError::new(ErrorCode::LastBoardMember, "The last active board member cannot be disabled.")));
+                    }
+                    if target.as_ref().is_some_and(|t| t.admin) && aurelius_storage::users::count_admins(tx)? <= 1 {
+                        return Ok(Err(ProtocolError::new(ErrorCode::Validation, "The last administrator cannot be disabled: make someone else an administrator first.")));
                     }
                     aurelius_storage::users::disable(tx, &id, aurelius_storage::now_ms())?;
                     // Their Claude login goes too (its folder with the Claude login runtime, F2).
@@ -717,6 +740,38 @@ pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: Co
                     peer.session = None;
                 }
             }
+            shared.publish(committed.notice.iter().cloned().collect::<Vec<_>>());
+            account_receipt(key, &committed)
+        }
+        HostWrite::UserSetAdmin { user_id, admin: make } => {
+            if !admin {
+                return Err(ProtocolError::new(ErrorCode::Forbidden, "Only an administrator can name administrators."));
+            }
+            let Some(row) = named(shared, user_id).await?.filter(|r| !r.disabled()) else {
+                return Err(ProtocolError::new(ErrorCode::NotFound, "This board member does not exist or is disabled."));
+            };
+            let account = user::AccountWrite {
+                method: "user.set_admin",
+                request_hash: aurelius_application::request_hash_of(&("user.set_admin", user_id, make)),
+                kind: aurelius_domain::EventKind::HostWrite,
+                user_id,
+                extra: serde_json::json!({ "subject_user_id": user_id, "subject": row.username, "admin": make }),
+            };
+            let (s, id) = (shared.clone(), row.id.clone());
+            let committed = app_task(move || {
+                s.service.account_write(&ctx, key, account, Box::new(move |tx| {
+                    let Some(target) = aurelius_storage::users::get(tx, &id)?.filter(|t| !t.disabled()) else {
+                        return Ok(Err(ProtocolError::new(ErrorCode::NotFound, "This board member does not exist or is disabled.")));
+                    };
+                    if !make && target.admin && aurelius_storage::users::count_admins(tx)? <= 1 {
+                        return Ok(Err(ProtocolError::new(ErrorCode::Validation, "The last administrator stays one: make someone else an administrator first.")));
+                    }
+                    aurelius_storage::users::set_admin(tx, &id, make, aurelius_storage::now_ms())?;
+                    let view = aurelius_storage::users::get(tx, &id)?.and_then(|u| u.view());
+                    Ok(Ok(serde_json::to_value(view.map(aurelius_protocol::HostResult::User)).unwrap_or_default()))
+                }))
+            })
+            .await?;
             shared.publish(committed.notice.iter().cloned().collect::<Vec<_>>());
             account_receipt(key, &committed)
         }

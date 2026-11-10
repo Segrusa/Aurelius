@@ -39,7 +39,7 @@ async fn a_board_member_talks_with_an_employee_and_hears_of_a_ticket_in_review_o
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let alex = connect(dir.path()).await;
-    let robin = connect_as(dir.path(), "robin").await;
+    let (robin, mut robin_events) = connect_events_as(dir.path(), "robin").await;
     let CommandResult::ProjectCreated { project_id, .. } = alex.execute(envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None }), None)).await.unwrap().result else { panic!() };
     let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Ada".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, conversation_id: main } = alex.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
@@ -55,6 +55,26 @@ async fn a_board_member_talks_with_an_employee_and_hears_of_a_ticket_in_review_o
     assert_eq!(all.iter().find(|m| m.role == MessageRole::User).and_then(|m| m.author_user.as_ref()).map(|u| u.username.as_str()), Some(BOARD_MEMBER));
 
     assert!(robin.messages(chat).await.is_err(), "only its board member reads it");
+    // Nor does anything of it reach the other board member another way: not as a live
+    // event, not through a read keyed by one of its runs, and not as something to steer.
+    let read = db(dir.path());
+    let mut private: Vec<String> = vec![chat.to_string()];
+    for table in ["runs", "messages"] {
+        let mut stmt = read.prepare(&format!("SELECT id FROM {table} WHERE conversation_id = ?1")).unwrap();
+        private.extend(stmt.query_map([chat.to_string()], |r| r.get::<_, String>(0)).unwrap().map(Result::unwrap));
+    }
+    drop(read);
+    assert!(private.len() >= 3, "the chat has a run and messages by now");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    while let Ok(event) = robin_events.try_recv() {
+        assert!(!private.contains(&event.aggregate_id), "robin got {:?} of alex's private chat", event.kind);
+    }
+    assert!(robin.subagents(chat).await.is_err());
+    let run = aurelius_domain::RunId::parse(&db(dir.path()).query_row::<String, _, _>("SELECT id FROM runs WHERE conversation_id = ?1", [chat.to_string()], |r| r.get(0)).unwrap()).unwrap();
+    assert!(robin.run_trace(run).await.is_err());
+    let auto = aurelius_domain::autonomy::SetAgentMode { conversation_id: chat, mode: aurelius_domain::autonomy::AgentMode::Auto };
+    assert!(robin.execute(envelope(Command::SetAgentMode(auto.clone()), None)).await.is_err(), "nor sets its mode");
+    assert!(alex.execute(envelope(Command::SetAgentMode(auto), None)).await.is_ok(), "its own board member does");
     assert!(robin.employee_chats().await.unwrap().chats.is_empty());
     let mine = alex.employee_chats().await.unwrap().chats;
     assert_eq!((mine.len(), mine[0].conversation_id, mine[0].employee_id, mine[0].employee_name.as_str(), mine[0].unread), (1, chat, employee_id, "Ada", 0));

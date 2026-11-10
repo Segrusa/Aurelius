@@ -1,5 +1,7 @@
 # Productdefinitie: Aurelius voor meerdere gebruikers — Company, Board, Tickets (goedgekeurd 2026-10-30)
 
+> **Status: gebouwd, deels vervangen.** Dit is de definitie van 2026-10-30. Wat sindsdien anders beslist is (privéchats, de administrator, wie een ticket betaalt, wie tickets start en verplaatst, de kolom Testing, heropenen) staat in [../decisions.md](../decisions.md) en gaat voor.
+
 ## Context
 Aurelius gaat nu uit van één eigenaar per server: er is geen gebruikerstabel en geen login, er is één Claude Code-login op de server, er is geen board en de status `review` wordt meteen doorlopen. Sébastien wil dat meerdere board members ermee werken via een ticketgedreven kanban-workflow, met een discussie per ticket, kanalen in de Team chat, een vault en memory op meerdere niveaus. Deze versie verwerkt zijn antwoorden op de open vragen uit v1.
 

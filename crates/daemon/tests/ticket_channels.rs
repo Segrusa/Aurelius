@@ -165,7 +165,7 @@ async fn an_older_client_sees_the_list_of_before_and_still_works_in_a_ticket_dis
     }
     // It still posts and reads in the ticket's discussion (through TicketView::conversation_id).
     assert!(matches!(write(&mut old, post(id, "Which browser?")).await, Ok(CommandResult::TicketMessagePosted { .. })));
-    let read = call(&mut old, Request::read(70, Method::ConversationGet { conversation_id: channel })).await;
+    let read = call(&mut old, Request::read(70, Method::ConversationGet { conversation_id: channel, peek: false })).await;
     let Outcome::Ok(ResponseBody::Messages(snapshot)) = read else { panic!("{read:?}") };
     assert!(snapshot.messages.iter().any(|m| m.text == "Which browser?"));
 
@@ -185,7 +185,7 @@ async fn an_older_client_sees_the_list_of_before_and_still_works_in_a_ticket_dis
     assert!(list(&mut old, Method::ChannelSearch { query: "login".into() }).await.is_empty());
     // And it reads and writes it as a channel too.
     assert!(matches!(write(&mut new, send(channel, "Chrome")).await, Ok(CommandResult::GroupMessageSent { .. })));
-    let read = call(&mut new, Request::read(71, Method::GroupChatGet { channel: Some(channel) })).await;
+    let read = call(&mut new, Request::read(71, Method::GroupChatGet { channel: Some(channel), peek: false })).await;
     let Outcome::Ok(ResponseBody::Messages(snapshot)) = read else { panic!("{read:?}") };
     assert!(snapshot.messages.iter().any(|m| m.text == "Chrome"));
     // read_through: what the reader had read before; the read above moved it.

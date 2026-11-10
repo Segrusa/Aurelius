@@ -299,6 +299,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
                 write @ (HostWrite::SessionRevoke { .. }
                 | HostWrite::UserSetPassword(_)
                 | HostWrite::UserDisable { .. }
+                | HostWrite::UserSetAdmin { .. }
                 | HostWrite::ClaudeLoginCancel { .. }
                 | HostWrite::ClaudeLoginUnlink),
             )) => match request.idempotency_key {
@@ -343,7 +344,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             // The password is checked again and counted like a sign-in (E9).
             Call::Read(Method::VaultKeyExport(params)) => vault::key_export(&shared, &peer, &mut attempts, params).await,
             Call::Read(method @ (Method::VaultList { .. } | Method::VaultReveal { .. } | Method::VaultAudit { .. })) => vault::read(&shared, &peer, method).await,
-            Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, accepts, out_tx.clone()).await {
+            Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, accepts, peer.user, out_tx.clone()).await {
                 Ok((body, task)) => {
                     if let Some(old) = forwarder.replace(task) {
                         old.abort();

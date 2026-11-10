@@ -187,24 +187,31 @@ pub enum HostWrite {
     /// `user.created` hold the name only. Not for apps.
     #[serde(rename = "user.create")]
     UserCreate(UserCreateParams),
-    /// End one session (any board member's: one role). Its device's open
+    /// End one session: an own one, or as an administrator another board member's
+    /// (`forbidden` otherwise; feature `admin_role`). Its device's open
     /// connection closes at once (`ServerMessage::SignedOut`); the timeline says
     /// who revoked it. Answers `Done`. Not for apps.
     #[serde(rename = "session.revoke")]
     SessionRevoke { session_id: aurelius_domain::SessionId },
     /// Change a password. Own (no `user_id`, or the session's): with the old
     /// password; the other sessions end, this one stays. Another board member's
-    /// (B10): a temporary password, changed at their next sign-in
+    /// (B10), only as an administrator (`forbidden` otherwise): a temporary password, changed at their next sign-in
     /// (`must_change_password`); all their sessions end. Like `user.create`, the
     /// passwords are in no receipt, request hash, event or log. Answers `Done`.
     #[serde(rename = "user.set_password")]
     UserSetPassword(SetPasswordParams),
-    /// Disable a board member: their sessions end at once and they cannot sign
+    /// Disable a board member, as an administrator (`forbidden` otherwise; the
+    /// last active administrator cannot be): their sessions end at once and they cannot sign
     /// in; their Claude login is disconnected; tickets keep their creator. The
     /// last active board member cannot be disabled (`last_board_member`).
     /// Answers `User`. Not for apps.
     #[serde(rename = "user.disable")]
     UserDisable { user_id: aurelius_domain::UserId },
+    /// Make a board member an administrator or an ordinary one again (feature
+    /// `admin_role`), as an administrator (`forbidden` otherwise). The last
+    /// active administrator stays one (`validation`). Answers `User`. Not for apps.
+    #[serde(rename = "user.set_admin")]
+    UserSetAdmin { user_id: aurelius_domain::UserId, admin: bool },
     /// Connect the session's own Claude login: the server starts `claude auth
     /// login` for `<data>/logins/<user_id>/` and answers `ClaudeLoginLink`. What
     /// Claude asks (the sign-in link, the code) comes to this connection only as
@@ -374,6 +381,7 @@ impl HostWrite {
         "session.revoke",
         "user.set_password",
         "user.disable",
+        "user.set_admin",
         "claude_login.link",
         "claude_login.cancel",
         "claude_login.unlink",

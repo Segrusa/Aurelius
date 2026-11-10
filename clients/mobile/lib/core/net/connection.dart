@@ -519,8 +519,10 @@ class AureliusConnection {
     try {
       message = ServerMessage.fromJson(decoded);
     } on FormatException {
-      return; // a message kind this app does not know
+      _unreadable(decoded); // a message kind or value this app does not know
+      return;
     } on TypeError {
+      _unreadable(decoded);
       return;
     }
     switch (message) {
@@ -567,6 +569,15 @@ class AureliusConnection {
       case ServerMessageStream():
         break; // local IPC only
     }
+  }
+
+  /// An answer this app could not read (a newer server sent something it does
+  /// not know): the call that waits for it fails now and says why, instead of
+  /// waiting for an answer that already came.
+  void _unreadable(Map<String, dynamic> frame) {
+    final id = frame['request_id'];
+    if (id is! num) return;
+    _waiting.remove(id.toInt())?.completeError(const ProtocolException(ErrorCode.internal, 'The server answered with something this version of the app does not know. Update the app.'));
   }
 
   /// [append] with its message's whole tool list: changes (`activity_changes`)

@@ -174,6 +174,31 @@ pub fn request_hash_of<T: serde::Serialize>(value: &T) -> String {
 /// so committing the (empty) transaction is harmless.
 pub(crate) type TxResult<T> = Result<Result<T, AppError>, StorageError>;
 
+/// The conversation, run, approval or message a command acts on, when it names one:
+/// what `employee_chats::hides` is asked about before the command runs.
+fn private_target(command: &Command) -> Option<String> {
+    Some(match command {
+        Command::SendChatMessage(c) => c.conversation_id.to_string(),
+        Command::RetryReply(c) => c.conversation_id.to_string(),
+        Command::StopRun(c) => c.run_id.to_string(),
+        Command::DecideApproval(c) => c.approval_id.to_string(),
+        Command::AnswerQuestion(c) => c.approval_id.to_string(),
+        Command::DecidePlan(c) => c.approval_id.to_string(),
+        Command::AttachFile(c) => c.conversation_id.to_string(),
+        Command::SetAgentMode(c) => c.conversation_id.to_string(),
+        Command::SetConversationRun(c) => c.conversation_id.to_string(),
+        Command::SetBrowserAllowed(c) => c.conversation_id.to_string(),
+        Command::SetScreenAllowed(c) => c.conversation_id.to_string(),
+        Command::DeleteConversation(c) => c.conversation_id.to_string(),
+        Command::DeleteQueuedMessage(c) => c.conversation_id.to_string(),
+        Command::SendQueuedNow(c) => c.conversation_id.to_string(),
+        Command::ReactToMessage(c) => c.message_id.to_string(),
+        Command::EditMessage(c) => c.message_id.to_string(),
+        Command::DeleteMessage(c) => c.message_id.to_string(),
+        _ => return None,
+    })
+}
+
 impl CommandService {
     pub fn new(store: Arc<Store>) -> Self {
         Self { store, projects_root: std::sync::Mutex::new(None) }
@@ -199,6 +224,19 @@ impl CommandService {
         // Fast path for retries: answer from the receipt without writing blobs.
         if let Some(receipt) = self.replay(&command_id, &hash)? {
             return Ok(Committed { receipt, notices: vec![], followups: vec![] });
+        }
+
+        // Another board member's private chat with an employee does not exist for this
+        // one: not to read, and not to steer either (its mode, its runs, its approvals,
+        // its messages). One check for every command that names such a thing by id.
+        if ctx.origin != Origin::Daemon
+            && let Some(id) = private_target(&envelope.command)
+        {
+            let user = ctx.user_id;
+            if self.store.read(|c| aurelius_storage::employee_chats::hides(c, &id, user)).map_err(storage_error)? {
+                COMMAND_METHOD.set("");
+                return Err(AppError::new(ErrorCode::NotFound, "This does not exist."));
+            }
         }
 
         let result = match &envelope.command {
