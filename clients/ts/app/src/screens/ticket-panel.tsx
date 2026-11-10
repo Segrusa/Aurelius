@@ -49,6 +49,7 @@ import {
   loginWait,
   ownerChoosable,
   PRIORITIES,
+  payerOffered,
   peopleCount,
   priorityLabel,
   runLocked,
@@ -65,6 +66,7 @@ import { TicketOdometer } from "./run-card";
 import { lastFailure, lastSummaryFailed } from "./run-logic";
 import { FileChips, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
+import { ConfirmButton } from "./settings-kit";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
 import {
   ColumnGlyph,
@@ -1311,6 +1313,19 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
                       ) : null}
                       <Row name="Runs on">
                         {t.login_user === need.me ? "Your Claude login" : `${t.login_username}'s Claude login`}
+                        {payerOffered(t, need.me) ? (
+                          <ConfirmButton
+                            label="Run on my login"
+                            question={`You are responsible for ${ticketNumber(t)}. Run it on your own Claude login from now on, instead of ${t.login_username}'s? Everything employees do on this ticket then counts for your plan.`}
+                            onConfirm={() =>
+                              void write(
+                                "ticket.use_my_login",
+                                { ticket_id: t.id },
+                                { done: `${ticketNumber(t)} runs on your Claude login now.` },
+                              )
+                            }
+                          />
+                        ) : null}
                       </Row>
                       <Row name="Created by">{`${t.created_by_username} · ${time(t.created_at_ms)}`}</Row>
                       {features.includes("ticket_follow") ? <Followers id={t.id} /> : null}

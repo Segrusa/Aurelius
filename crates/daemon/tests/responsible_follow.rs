@@ -1269,3 +1269,50 @@ async fn an_older_client_reads_the_line_of_a_handover_with_its_own_enum() {
     drop((alex, _bea, older));
     stop(dir.path(), daemon).await;
 }
+
+/// A ticket has one payer: a run another board member wakes in its discussion goes
+/// on the ticket's Claude login, not on theirs; in a channel it is theirs, as before.
+/// Taking the ticket over ("Run on my login") moves the payer, and the next run with it.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_run_of_a_ticket_goes_on_the_tickets_login_whoever_woke_it() {
+    use aurelius_domain::employee::CreateEmployee;
+    use aurelius_domain::ticket::UseMyLogin;
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let (alex, alex_id, bea, bea_id) = two_members(dir.path()).await;
+    let (project_id, _) = project(&alex).await;
+    let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Ada".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None };
+    run(&alex, Command::CreateEmployee(create)).await.unwrap();
+    let (ticket_id, _) = ticket(&alex, project_id).await;
+    assert_eq!(alex.ticket(ticket_id).await.unwrap().ticket.login_user, alex_id);
+
+    // The login of the newest run the discussion woke, once there is one more than `seen`.
+    let woken = |seen: i64| {
+        let root = dir.path().to_path_buf();
+        async move {
+            for _ in 0..400 {
+                let db = db(&root);
+                let runs: i64 = db.query_row("SELECT COUNT(*) FROM runs", [], |r| r.get(0)).unwrap();
+                if runs > seen {
+                    let login: Option<String> = db.query_row("SELECT login_user FROM runs ORDER BY rowid DESC LIMIT 1", [], |r| r.get(0)).unwrap();
+                    return (runs, login);
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            panic!("no run was woken");
+        }
+    };
+
+    post(&bea, ticket_id, "@Ada have a look").await;
+    let (runs, login) = woken(0).await;
+    assert_eq!(login, Some(alex_id.to_string()), "Bea woke it, the ticket pays");
+
+    // Bea takes the ticket over: from now on it is hers.
+    run(&bea, Command::UseMyLogin(UseMyLogin { ticket_id })).await.unwrap();
+    assert_eq!(bea.ticket(ticket_id).await.unwrap().ticket.login_user, bea_id);
+    post(&alex, ticket_id, "@Ada and once more").await;
+    let (_, login) = woken(runs).await;
+    assert_eq!(login, Some(bea_id.to_string()), "Alex woke it, the ticket's new payer pays");
+    drop((alex, bea));
+    stop(dir.path(), daemon).await;
+}

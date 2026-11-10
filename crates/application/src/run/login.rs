@@ -8,7 +8,9 @@
 //!   board member took it over, `ticket.use_my_login`). A task without a ticket:
 //!   the login it was made with (`tasks.login_user`: the board member who made
 //!   it, the run that delegated it or a schedule's), else its parent's.
-//! - A run the Team chat or a discussion woke: the login of the board member of
+//! - A run a ticket's discussion woke (a mention, a handoff, a planned message):
+//!   the ticket's `login_user` too, whoever wrote. A ticket has one payer.
+//! - A run a channel of the Team chat woke: the login of the board member of
 //!   hop 0, carried in the marking (`GroupRun::login_user`), also at hop 2–3.
 //! - A run in a board member's lasting chat with an employee: that board member,
 //!   also for an update nobody wrote (a ticket that reached Review).

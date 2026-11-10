@@ -25,6 +25,7 @@ import {
   needsMeFromServer,
   needsYou,
   ownerChoosable,
+  payerOffered,
   peopleCount,
   scrollToShow,
   shownCards,
@@ -384,5 +385,15 @@ describe("what the server says a ticket needs", () => {
   it("reads a kind it does not know as a ticket that needs someone", () => {
     const newer = ticket({ column: "doing", attention: { kind: "unknown" } });
     expect(needsFromServer(newer, "u1")).toBe("stalled");
+  });
+});
+
+describe("the payer of a ticket", () => {
+  it("is offered to the Responsible when the ticket runs on someone else's login", () => {
+    const mine = ticket({ column: "doing", responsible_user_id: "u1", login_user: "u2" });
+    expect(payerOffered(mine, "u1")).toBe(true);
+    expect(payerOffered(mine, "u3")).toBe(false);
+    expect(payerOffered(ticket({ column: "doing", responsible_user_id: "u1", login_user: "u1" }), "u1")).toBe(false);
+    expect(payerOffered(ticket({ column: "done", responsible_user_id: "u1", login_user: "u2" }), "u1")).toBe(false);
   });
 });

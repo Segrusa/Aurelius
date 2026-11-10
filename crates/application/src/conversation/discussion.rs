@@ -729,6 +729,17 @@ struct Shared<'a> {
     files: Vec<String>,
 }
 
+/// Whose Claude login a run woken in `d` uses. A ticket has one payer: every run of
+/// it, also one that another board member woke with a mention, a handoff or a planned
+/// message, runs on the ticket's login (`tickets.login_user`, shown as "Runs on").
+/// A channel has no payer of its own: there it is `hop0`, the board member who wrote.
+fn payer(tx: &Tx<'_>, d: &Discussion, hop0: Option<UserId>) -> Result<Option<UserId>, StorageError> {
+    match &d.place {
+        Place::Ticket(t) => Ok(aurelius_storage::tickets::login_user(tx, t.id)?.or(hop0)),
+        Place::General | Place::Project { .. } => Ok(hop0),
+    }
+}
+
 /// One message that wakes employees: where and who wrote it, its text, what it
 /// brings along and the messages before it (`view`).
 struct Wake<'a> {
@@ -777,7 +788,7 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     conv::set_agent_mode(tx, chat, AgentMode::Auto)?;
     // Only a board member waits for the answer; a colleague's mention would just add lines.
     let busy = if w.board.is_some() { busy_notices(tx, store, meta, correlation, (employee, name), w)? } else { Vec::new() };
-    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: w.login, thread_parent: w.thread };
+    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop, mode: None, login_user: payer(tx, w.discussion, w.login)?, thread_parent: w.thread };
     let (run, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
     Ok(Some((run, std::iter::once(posted).chain(busy).chain(queued).collect())))
 }
@@ -997,7 +1008,7 @@ fn quick_answer(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlatio
     if !w.shared.images.is_empty() {
         conv::set_message_files(tx, update, w.shared.images)?;
     }
-    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop: w.hop, mode: None, login_user: w.login, thread_parent: w.thread };
+    let marking = GroupRun { conversation_id: d.id, message_id: MessageId::new(), hop: w.hop, mode: None, login_user: payer(tx, w.discussion, w.login)?, thread_parent: w.thread };
     let (_, queued) = queue_run_marked(tx, meta, correlation, chat, update, Some(marking))?;
     Ok(Some(std::iter::once(posted).chain(queued).collect()))
 }

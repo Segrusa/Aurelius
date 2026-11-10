@@ -183,6 +183,22 @@ export function takeOverOffered(t: TicketView, me: string | null): boolean {
   return t.needs === "login" && me !== null && me !== t.login_user && t.column !== "done" && t.column !== "backlog";
 }
 
+/**
+ * A ticket has one payer, the board member on whose Claude login all its runs go ("Runs on").
+ * It follows a change of Responsible only when the new one says so: they are offered it here,
+ * and nobody's login is ever used because someone else chose it.
+ */
+export function payerOffered(t: TicketView, me: string | null): boolean {
+  return (
+    me !== null &&
+    t.responsible_user_id === me &&
+    t.login_user !== me &&
+    t.column !== "done" &&
+    t.column !== "backlog" &&
+    !takeOverOffered(t, me)
+  );
+}
+
 export const PRIORITIES: TicketPriority[] = ["urgent", "high", "normal", "low"];
 
 /** As text and shape, never only colour. */
