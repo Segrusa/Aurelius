@@ -10,7 +10,7 @@ use crate::{StorageError, now_ms};
 use aurelius_domain::{
     BoardColumnId, EmployeeId, ProjectId, TaskId, TicketId, UserId,
     task::{RunSettings, TaskStatus},
-    ticket::{BoardColumnCards, ColumnKind, MY_TICKETS_MAX, MyTicketsView, TicketPriority, TicketView},
+    ticket::{BoardColumnCards, ColumnKind, MY_TICKETS_MAX, MyTicketsView, TicketAttention, TicketAttentionKind, TicketFacts, TicketPriority, TicketView, TicketWork},
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
@@ -456,9 +456,86 @@ fn ticket_row(r: &Row<'_>) -> rusqlite::Result<(TicketView, Option<String>)> {
             responsible_username: r.get(32)?,
             responsible_disabled: r.get(33)?,
             design_url: r.get(34)?,
+            attention: None,
+            busy: Vec::new(),
         },
         description,
     ))
+}
+
+/// What is known of a ticket for `ticket::ticket_work`: the one definition of what a
+/// ticket needs and what still works on it, read here for every view and every write.
+pub fn facts(conn: &Connection, id: TicketId) -> Result<Option<TicketFacts>, StorageError> {
+    let live = "('created','starting','running','waiting','cancelling')";
+    Ok(conn
+        .query_row(
+            &format!(
+                "SELECT c.kind, t.status, t.waiting_reason, k.owner_employee_id IS NOT NULL,
+                    t.id IS NOT NULL AND (
+                        EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.conversation_id IS NOT NULL AND r.status IN {live})
+                     OR EXISTS (SELECT 1 FROM employee_inbox i WHERE i.task_id = t.id AND i.state = 'queued')
+                     OR EXISTS (SELECT 1 FROM jobs j WHERE j.id = t.id AND j.state IN ('ready','leased'))),
+                    EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state IN ('ready','leased') AND json_extract(j.payload_json, '$.ticket_id') = k.id),
+                    (EXISTS (SELECT 1 FROM tasks w WHERE w.ticket_id = k.id AND w.status = 'waiting' AND w.waiting_reason = 'login')
+                     OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state = 'ready' AND j.last_error_code = 'login'
+                                AND json_extract(j.payload_json, '$.ticket_id') = k.id)),
+                    (SELECT COUNT(*) FROM approvals a JOIN runs r ON r.id = a.run_id
+                      WHERE a.status = 'pending' AND r.task_id IN (k.root_task_id, k.test_task_id)),
+                    (SELECT COUNT(*) FROM tasks w WHERE w.ticket_id = k.id AND w.id IS NOT k.root_task_id AND w.id IS NOT k.test_task_id
+                      AND w.status IN ('queued','running','waiting')),
+                    EXISTS (SELECT 1 FROM employee_inbox i WHERE i.ticket_id = k.id
+                      AND (i.state IN ('queued','held')
+                           OR (i.state = 'claimed' AND EXISTS (SELECT 1 FROM runs r WHERE r.id = i.run_id AND r.status IN {live})))),
+                    x.status, x.waiting_reason
+                 FROM tickets k JOIN board_columns c ON c.id = k.column_id
+                 LEFT JOIN tasks t ON t.id = k.root_task_id
+                 LEFT JOIN tasks x ON x.id = k.test_task_id AND x.status NOT IN ('succeeded','failed','cancelled')
+                 WHERE k.id = ?1"
+            ),
+            [id.to_string()],
+            |r| {
+                Ok(TicketFacts {
+                    column: ColumnKind::parse(&r.get::<_, String>(0)?),
+                    root: r.get::<_, Option<String>>(1)?.and_then(|s| TaskStatus::parse(&s)),
+                    root_waiting: r.get(2)?,
+                    has_owner: r.get(3)?,
+                    root_live: r.get(4)?,
+                    choosing: r.get(5)?,
+                    login_missing: r.get(6)?,
+                    approvals: r.get::<_, i64>(7)? as u32,
+                    linked_working: r.get::<_, i64>(8)? as u32,
+                    colleagues: r.get(9)?,
+                    tests: r.get::<_, Option<String>>(10)?.and_then(|s| TaskStatus::parse(&s)),
+                    tests_waiting: r.get(11)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+/// `ticket::ticket_work` of a ticket as it is now; none when it is unknown.
+pub fn work(conn: &Connection, id: TicketId) -> Result<Option<TicketWork>, StorageError> {
+    Ok(facts(conn, id)?.map(|f| aurelius_domain::ticket::ticket_work(&f)))
+}
+
+/// Fill in what the ticket needs, from whom, and what still works on it. An archived
+/// or closed ticket needs nothing and is not read.
+fn with_work(conn: &Connection, ticket: &mut TicketView) -> Result<(), StorageError> {
+    if ticket.archived_at_ms.is_some() || matches!(ticket.column, ColumnKind::Backlog | ColumnKind::Done) {
+        return Ok(());
+    }
+    let Some(work) = work(conn, ticket.id)? else { return Ok(()) };
+    ticket.attention = work.attention.map(|kind| TicketAttention {
+        kind,
+        // A missing login is its own board member's; anything else is the active
+        // Responsible's, and everyone's when there is none (B6).
+        user_id: match kind {
+            TicketAttentionKind::Login => Some(ticket.login_user),
+            _ => ticket.responsible_user_id.filter(|_| !ticket.responsible_disabled),
+        },
+    });
+    ticket.busy = work.busy;
+    Ok(())
 }
 
 /// Tickets in board order (column, then position).
@@ -482,6 +559,7 @@ pub fn list(conn: &Connection, filter: &TicketFilter, read_blob: &dyn Fn(&str) -
                 continue;
             }
         }
+        with_work(conn, &mut ticket)?;
         out.push(ticket);
     }
     Ok(out)
@@ -512,6 +590,7 @@ pub fn my_tickets(conn: &Connection, viewer: UserId, project: Option<ProjectId>,
     for row in rows {
         let (mut ticket, key) = row?;
         ticket.description = key.as_deref().and_then(read_blob).filter(|d| !d.is_empty());
+        with_work(conn, &mut ticket)?;
         tickets.push(ticket);
     }
     let followed = crate::followers::following(conn, viewer)?;

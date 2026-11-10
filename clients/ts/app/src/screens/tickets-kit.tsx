@@ -17,8 +17,10 @@ import {
   GAVE_UP_LIMIT,
   isChoosing,
   type Needs,
+  needsFromServer,
   needsLine,
   needsMe,
+  needsMeFromServer,
   priorityColor,
   priorityLabel,
   ticketNeeds,
@@ -27,13 +29,18 @@ import {
 /** Who needs what on these tickets: one definition for the cards, the filter and the badges. */
 export function useTicketNeeds(tickets: TicketView[]) {
   const connection = useConnection();
-  const { user, status } = useLinkState();
+  const { user, status, features } = useLinkState();
   const me = user?.id ?? null;
+  // The server computes it (feature `ticket_state`): nothing is read or derived here then.
+  const served = features.includes("ticket_state");
   const company = useCompany();
   const projects = useProjects();
   const employees = useEmployees();
   const tasks = useAllTasks();
-  const unowned = useMemo(() => tickets.filter((t) => t.column === "todo" && !t.owner_employee_id), [tickets]);
+  const unowned = useMemo(
+    () => (served ? [] : tickets.filter((t) => t.column === "todo" && !t.owner_employee_id)),
+    [tickets, served],
+  );
   // Only what the timeline says of a Todo ticket without an owner tells whether its dispatcher gave up.
   const timelines = useQueries({
     queries: unowned.map((t) => ({
@@ -63,6 +70,19 @@ export function useTicketNeeds(tickets: TicketView[]) {
         company.data?.company.dispatcher_employee_id,
         employees.data ?? [],
       );
+    if (served) {
+      const needs = (t: TicketView): Needs | null => needsFromServer(t, me);
+      // In Todo without an owner, and the server does not ask for one: its dispatcher is choosing.
+      const choosing = (t: TicketView) =>
+        t.column === "todo" && !t.owner_employee_id && t.attention?.kind !== "choose_owner";
+      return {
+        me,
+        dispatcher,
+        choosing,
+        needs,
+        mine: (t: TicketView) => needs(t) !== null && needsMeFromServer(t, me),
+      };
+    }
     const choosing = (t: TicketView) => {
       const d = dispatcher(t.project_id);
       return isChoosing(t, d.kind === "project" || d.kind === "company", stopped.get(t.id) ?? false);
@@ -76,7 +96,7 @@ export function useTicketNeeds(tickets: TicketView[]) {
         t.root_task_id ? (waiting.get(t.root_task_id) ?? null) : null,
       );
     return { me, dispatcher, choosing, needs, mine: (t: TicketView) => needsMe(needs(t), t, me) };
-  }, [unowned, timelines, tasks.data, projects.data, company.data, employees.data, me]);
+  }, [unowned, timelines, tasks.data, projects.data, company.data, employees.data, me, served]);
 }
 
 /** One write on a ticket: refreshes what shows it, and says what went wrong in a toast. */

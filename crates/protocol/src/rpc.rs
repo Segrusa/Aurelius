@@ -288,6 +288,12 @@ pub mod feature {
     /// without marking the discussion read (additive). A client sends it while
     /// its window is not looked at, and reads again when it is.
     pub const READ_PEEK: &str = "read_peek";
+    /// `TicketView::attention` and `TicketView::busy` (additive): what a ticket
+    /// waits for from a board member and from whom, and what still works on it,
+    /// as the server computes them (`aurelius_domain::ticket::ticket_work`). A
+    /// client shows "Needs you" from these and computes nothing itself, so every
+    /// client and every device agrees. `ticket.accept` refuses while `busy` is not empty.
+    pub const TICKET_STATE: &str = "ticket_state";
     /// A channel per ticket (protocol 5, additive; AUR-CHAT-001): the ticket's
     /// discussion is its channel, `#<number>-<slug>` (`ticket_channel_name`).
     /// `channel.list` names ticket channels only to connections whose
@@ -439,6 +445,7 @@ pub const FEATURES: &[&str] = &[
     feature::EVERYONE_MENTION,
     feature::ADMIN_ROLE,
     feature::READ_PEEK,
+    feature::TICKET_STATE,
 ];
 
 /// Daemon → client.

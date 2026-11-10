@@ -50,7 +50,15 @@ export function dropEffect(from: ColumnKind, to: ColumnKind, choosing: boolean):
   return refused("The engine moves tickets here.");
 }
 
-export type Needs = "review" | "plan_review" | "choose_owner" | "failed" | "input" | "approval" | "connect_login";
+export type Needs =
+  | "review"
+  | "plan_review"
+  | "choose_owner"
+  | "failed"
+  | "input"
+  | "approval"
+  | "connect_login"
+  | "stalled";
 
 const NEEDS_MINE: Record<Needs, string> = {
   review: "Needs you · review",
@@ -60,6 +68,7 @@ const NEEDS_MINE: Record<Needs, string> = {
   input: "Needs you · stopped",
   approval: "Waiting for your approval",
   connect_login: "Needs you · Claude login",
+  stalled: "Needs you · nobody works on it",
 };
 
 const NEEDS_OTHERS: Record<Needs, string> = {
@@ -70,6 +79,7 @@ const NEEDS_OTHERS: Record<Needs, string> = {
   input: "Stopped, waits for an answer",
   approval: "Waiting for approval",
   connect_login: "Waiting for a Claude login",
+  stalled: "Nobody works on it",
 };
 
 export function needsLine(needs: Needs, mine: boolean): string {
@@ -104,6 +114,37 @@ export function ticketNeeds(
   if (t.needs === "login" && (t.column === "todo" || t.column === "doing"))
     return me === t.login_user ? "connect_login" : null;
   return needsYou(t, choosing, rootApprovals, rootWaiting);
+}
+
+/**
+ * What the server says a ticket waits for (feature `ticket_state`), in this app's words.
+ * A missing Claude login shows only to its own board member, as before; a kind a newer
+ * server added reads as "nobody works on it": the ticket needs someone.
+ */
+export function needsFromServer(t: TicketView, me: string | null): Needs | null {
+  const attention = t.attention;
+  if (!attention) return null;
+  switch (attention.kind) {
+    case "login":
+      return attention.user_id === me ? "connect_login" : null;
+    case "review":
+    case "plan_review":
+    case "failed":
+    case "approval":
+    case "input":
+    case "choose_owner":
+    case "stalled":
+      return attention.kind;
+    default:
+      return "stalled";
+  }
+}
+
+/** Whom the server says it waits for: its board member, or everyone when it names nobody. */
+export function needsMeFromServer(t: TicketView, me: string | null): boolean {
+  const attention = t.attention;
+  if (!attention) return false;
+  return !attention.user_id || attention.user_id === me;
 }
 
 /** B6: the ◆, the filter and the badge follow this; anyone can still decide. */

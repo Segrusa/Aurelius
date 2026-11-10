@@ -6,6 +6,7 @@ released separately, each with its own version and changelog:
 
 ## Unreleased (feat/astryx)
 
+- **One answer to "who must act?".** The server now says for every ticket what it waits for and from whom, and what still works on it; the desktop app shows that instead of working it out itself, so the mark on a card, the filter and the badges agree everywhere. A ticket in Doing or Testing that nothing works on any more and that waits for nothing now asks for a board member ("nobody works on it") instead of sitting there. Accept also waits for a colleague who still has a handoff of the ticket to answer, and for tests that still run.
 - **Private chats stay private.** Your chat with an employee no longer reaches another board member through the live updates, through a read of one of its runs or messages, in the list of approvals, or as something they can steer (its mode, its runs, its messages).
 - **An administrator.** Only an administrator sets a temporary password for someone else, signs out their devices, sees their devices or disables them. The first board member of a server is the administrator and names others under Settings; the last one stays one. Everything else is still one role.
 - **A window nobody looks at does not read for you.** The desktop app keeps showing new messages in an open channel or chat while it is in the background, but they stay unread on your other devices until you come back to the window.

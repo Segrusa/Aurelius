@@ -20,7 +20,9 @@ import {
   latestPlan,
   loginWait,
   movedCard,
+  needsFromServer,
   needsMe,
+  needsMeFromServer,
   needsYou,
   ownerChoosable,
   peopleCount,
@@ -357,5 +359,30 @@ describe("scrollToShow", () => {
 
   it("shows the start of a card when the row is too narrow for it", () => {
     expect(scrollToShow(inColumn(1), stops, 0, 200)).toBe(274);
+  });
+});
+
+describe("what the server says a ticket needs", () => {
+  it("is shown as it is, to the board member it names or to everyone", () => {
+    const review = ticket({ column: "review", attention: { kind: "review", user_id: "u2" } });
+    expect(needsFromServer(review, "u1")).toBe("review");
+    expect(needsMeFromServer(review, "u1")).toBe(false);
+    expect(needsMeFromServer(review, "u2")).toBe(true);
+    const open = ticket({ column: "doing", attention: { kind: "stalled" } });
+    expect(needsFromServer(open, "u1")).toBe("stalled");
+    expect(needsMeFromServer(open, "u1")).toBe(true);
+    expect(needsFromServer(ticket({ column: "doing" }), "u1")).toBeNull();
+    expect(needsMeFromServer(ticket({ column: "doing" }), "u1")).toBe(false);
+  });
+
+  it("keeps a missing Claude login for its own board member", () => {
+    const login = ticket({ column: "todo", attention: { kind: "login", user_id: "u2" } });
+    expect(needsFromServer(login, "u1")).toBeNull();
+    expect(needsFromServer(login, "u2")).toBe("connect_login");
+  });
+
+  it("reads a kind it does not know as a ticket that needs someone", () => {
+    const newer = ticket({ column: "doing", attention: { kind: "unknown" } });
+    expect(needsFromServer(newer, "u1")).toBe("stalled");
   });
 });

@@ -182,6 +182,139 @@ pub struct TicketView {
     /// its runs read the artifact themselves. Left out when none and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design_url: Option<String>,
+    /// What the ticket waits for from a board member, and from whom (feature
+    /// `ticket_state`): the server's one answer, so every client shows the same
+    /// "Needs you". None: nothing. Left out then and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<TicketAttention>,
+    /// What still works on the ticket (feature `ticket_state`): `ticket.accept`
+    /// refuses while this is not empty. Left out when empty and by older servers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub busy: Vec<TicketBusy>,
+}
+
+/// What a ticket waits for from a board member (`TicketView::attention`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TicketAttention {
+    pub kind: TicketAttentionKind,
+    /// Whom it waits for: the board member whose Claude login is missing, else the
+    /// ticket's active Responsible. None: every board member. Anyone may still decide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<UserId>,
+}
+
+/// The kinds of `TicketAttention`. A newer server's kind reads as `unknown`: the
+/// ticket needs someone, and the app cannot say what for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TicketAttentionKind {
+    /// The ticket's login user must connect their Claude login (`TicketNeed::Login`).
+    Login,
+    /// The report waits for accept or send back.
+    Review,
+    /// The plan waits for approve or revise.
+    PlanReview,
+    /// The main task failed: Start begins a new attempt.
+    Failed,
+    /// A run of the ticket asks permission for an action.
+    Approval,
+    /// The main task (or the test task) stopped on a question.
+    Input,
+    /// In Todo without an owner, and no dispatcher is choosing one.
+    ChooseOwner,
+    /// In Doing or Testing while nothing works on it and it waits for nothing a
+    /// board member could give: it would stay there for good. Start again, or cancel.
+    Stalled,
+    #[serde(other)]
+    Unknown,
+}
+
+/// What still works on a ticket (`TicketView::busy`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TicketBusy {
+    /// A run of the main task goes, or waits its turn.
+    MainTask,
+    /// Tasks given to colleagues below the ticket have not ended.
+    LinkedTasks,
+    /// A handoff or a message of the ticket waits in a colleague's mailbox, or a run that took one goes.
+    Colleagues,
+    /// The tester's test task has not ended.
+    Tests,
+    #[serde(other)]
+    Unknown,
+}
+
+/// What is known of a ticket, to say what it needs and what still works on it
+/// (`ticket_work`). Every reader and every write that asks "is it ready?" or
+/// "who must act?" fills this in and asks there, so there is one answer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TicketFacts {
+    pub column: Option<ColumnKind>,
+    /// The main task's status and why it waits.
+    pub root: Option<crate::task::TaskStatus>,
+    pub root_waiting: Option<String>,
+    /// A run of the main task goes or is queued, or its job is ready.
+    pub root_live: bool,
+    pub has_owner: bool,
+    /// The dispatcher's job for this ticket is still open.
+    pub choosing: bool,
+    /// A task of it, or its dispatcher, waits for the login user's Claude login.
+    pub login_missing: bool,
+    /// Approvals a run of the main task or the test task waits for.
+    pub approvals: u32,
+    /// Linked tasks other than the main task and the test task that have not ended.
+    pub linked_working: u32,
+    /// `inbox::open_on_ticket`: handoffs and messages of the ticket still open.
+    pub colleagues: bool,
+    /// The test task's status while it has not ended, and why it waits.
+    pub tests: Option<crate::task::TaskStatus>,
+    pub tests_waiting: Option<String>,
+}
+
+/// What a ticket needs from a board member and what still works on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TicketWork {
+    pub attention: Option<TicketAttentionKind>,
+    pub busy: Vec<TicketBusy>,
+}
+
+/// The one place that says so. Order matters: a missing login hides everything
+/// else (nothing can run), a decision that waits comes before a question.
+pub fn ticket_work(f: &TicketFacts) -> TicketWork {
+    use crate::task::TaskStatus as S;
+    let column = f.column.unwrap_or(ColumnKind::Backlog);
+    let mut busy = Vec::new();
+    if f.root_live {
+        busy.push(TicketBusy::MainTask);
+    }
+    if f.linked_working > 0 {
+        busy.push(TicketBusy::LinkedTasks);
+    }
+    if f.colleagues {
+        busy.push(TicketBusy::Colleagues);
+    }
+    if f.tests.is_some() {
+        busy.push(TicketBusy::Tests);
+    }
+    let input = |reason: &Option<String>| reason.as_deref() == Some("input");
+    let attention = match column {
+        ColumnKind::Backlog | ColumnKind::Done => None,
+        ColumnKind::Todo | ColumnKind::Doing if f.login_missing => Some(TicketAttentionKind::Login),
+        ColumnKind::Review => Some(TicketAttentionKind::Review),
+        ColumnKind::PlanReview => Some(TicketAttentionKind::PlanReview),
+        ColumnKind::Todo | ColumnKind::Doing if f.root == Some(S::Failed) => Some(TicketAttentionKind::Failed),
+        _ if f.approvals > 0 => Some(TicketAttentionKind::Approval),
+        ColumnKind::Doing if f.root == Some(S::Waiting) && input(&f.root_waiting) => Some(TicketAttentionKind::Input),
+        ColumnKind::Testing if f.tests == Some(S::Waiting) && input(&f.tests_waiting) => Some(TicketAttentionKind::Input),
+        ColumnKind::Todo if !f.has_owner && !f.choosing => Some(TicketAttentionKind::ChooseOwner),
+        // Nothing works on it and it waits for nothing a board member, the quota or a
+        // login could end: without this it stays in its column for good.
+        ColumnKind::Doing if busy.is_empty() && matches!((f.root, f.root_waiting.as_deref()), (None | Some(S::Running | S::Succeeded | S::Cancelled), _) | (Some(S::Waiting), Some("dependency"))) => Some(TicketAttentionKind::Stalled),
+        ColumnKind::Testing if busy.is_empty() => Some(TicketAttentionKind::Stalled),
+        _ => None,
+    };
+    TicketWork { attention, busy }
 }
 
 /// Why a ticket cannot run yet (`TicketView::needs`).
@@ -931,5 +1064,71 @@ mod tests {
         assert!(UpdateBoardColumns { columns: edits }.decide(&current).is_err(), "an unknown one");
         let blank = current.iter().map(|c| BoardColumnEdit { column_id: c.id, name: " ".into() }).collect();
         assert!(UpdateBoardColumns { columns: blank }.decide(&current).is_err());
+    }
+}
+
+#[cfg(test)]
+mod work_tests {
+    use super::*;
+    use crate::task::TaskStatus as S;
+
+    fn facts(column: ColumnKind, root: Option<S>) -> TicketFacts {
+        TicketFacts { column: Some(column), root, has_owner: true, ..Default::default() }
+    }
+
+    #[test]
+    fn a_decision_that_waits_is_what_the_ticket_needs() {
+        assert_eq!(ticket_work(&facts(ColumnKind::Review, Some(S::Review))).attention, Some(TicketAttentionKind::Review));
+        assert_eq!(ticket_work(&facts(ColumnKind::PlanReview, Some(S::Waiting))).attention, Some(TicketAttentionKind::PlanReview));
+        assert_eq!(ticket_work(&facts(ColumnKind::Doing, Some(S::Failed))).attention, Some(TicketAttentionKind::Failed));
+        let asked = TicketFacts { root_waiting: Some("input".into()), ..facts(ColumnKind::Doing, Some(S::Waiting)) };
+        assert_eq!(ticket_work(&asked).attention, Some(TicketAttentionKind::Input));
+        let approval = TicketFacts { approvals: 1, root_live: true, ..facts(ColumnKind::Doing, Some(S::Running)) };
+        assert_eq!(ticket_work(&approval).attention, Some(TicketAttentionKind::Approval));
+        // Closed or not started: nothing.
+        assert_eq!(ticket_work(&facts(ColumnKind::Backlog, None)).attention, None);
+        assert_eq!(ticket_work(&facts(ColumnKind::Done, Some(S::Succeeded))).attention, None);
+    }
+
+    #[test]
+    fn a_missing_login_comes_first_and_an_owner_is_asked_only_when_nobody_chooses() {
+        let login = TicketFacts { login_missing: true, ..facts(ColumnKind::Doing, Some(S::Failed)) };
+        assert_eq!(ticket_work(&login).attention, Some(TicketAttentionKind::Login));
+        let unowned = TicketFacts { has_owner: false, ..facts(ColumnKind::Todo, Some(S::Draft)) };
+        assert_eq!(ticket_work(&unowned).attention, Some(TicketAttentionKind::ChooseOwner));
+        assert_eq!(ticket_work(&TicketFacts { choosing: true, ..unowned }).attention, None);
+    }
+
+    #[test]
+    fn work_that_goes_is_busy_and_work_that_stopped_for_no_reason_is_stalled() {
+        let running = TicketFacts { root_live: true, ..facts(ColumnKind::Doing, Some(S::Running)) };
+        assert_eq!(ticket_work(&running), TicketWork { attention: None, busy: vec![TicketBusy::MainTask] });
+        // Running with no run behind it, or waiting for colleagues who are all done.
+        assert_eq!(ticket_work(&facts(ColumnKind::Doing, Some(S::Running))).attention, Some(TicketAttentionKind::Stalled));
+        let waits = TicketFacts { root_waiting: Some("dependency".into()), ..facts(ColumnKind::Doing, Some(S::Waiting)) };
+        assert_eq!(ticket_work(&waits).attention, Some(TicketAttentionKind::Stalled));
+        assert_eq!(ticket_work(&TicketFacts { colleagues: true, ..waits.clone() }), TicketWork { attention: None, busy: vec![TicketBusy::Colleagues] });
+        assert_eq!(ticket_work(&TicketFacts { linked_working: 2, ..waits }).busy, vec![TicketBusy::LinkedTasks]);
+        // The quota, a pause or its turn end by themselves.
+        for reason in ["quota", "paused"] {
+            let waiting = TicketFacts { root_waiting: Some(reason.into()), ..facts(ColumnKind::Doing, Some(S::Waiting)) };
+            assert_eq!(ticket_work(&waiting).attention, None, "{reason}");
+        }
+        assert_eq!(ticket_work(&facts(ColumnKind::Doing, Some(S::Queued))).attention, None);
+    }
+
+    #[test]
+    fn testing_is_busy_while_the_tests_run_and_asks_when_they_stop() {
+        let testing = TicketFacts { tests: Some(S::Running), ..facts(ColumnKind::Testing, Some(S::Review)) };
+        assert_eq!(ticket_work(&testing), TicketWork { attention: None, busy: vec![TicketBusy::Tests] });
+        let asked = TicketFacts { tests: Some(S::Waiting), tests_waiting: Some("input".into()), ..facts(ColumnKind::Testing, Some(S::Review)) };
+        assert_eq!(ticket_work(&asked).attention, Some(TicketAttentionKind::Input));
+        assert_eq!(ticket_work(&facts(ColumnKind::Testing, Some(S::Review))).attention, Some(TicketAttentionKind::Stalled));
+    }
+
+    #[test]
+    fn a_newer_kind_reads_as_unknown() {
+        assert_eq!(serde_json::from_str::<TicketAttentionKind>("\"budget\"").unwrap(), TicketAttentionKind::Unknown);
+        assert_eq!(serde_json::from_str::<TicketBusy>("\"review_bot\"").unwrap(), TicketBusy::Unknown);
     }
 }

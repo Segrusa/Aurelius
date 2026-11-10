@@ -17157,6 +17157,87 @@ final class ThreadWaitingSnapshot {
   };
 }
 
+/// What a ticket waits for from a board member (`TicketView::attention`).
+final class TicketAttention {
+  const TicketAttention({
+    required this.kind,
+    this.userId,
+  });
+
+  final TicketAttentionKind kind;
+  /// Whom it waits for: the board member whose Claude login is missing, else the
+  /// ticket's active Responsible. None: every board member. Anyone may still decide.
+  final String? userId;
+
+  factory TicketAttention.fromJson(Map<String, dynamic> json) => TicketAttention(
+    kind: TicketAttentionKind.fromJson(json['kind'] as String),
+    userId: (json['user_id'] == null ? null : (json['user_id'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'kind': kind.toJson(),
+    if (userId != null) 'user_id': userId,
+  };
+}
+
+/// The kinds of `TicketAttention`. A newer server's kind reads as `unknown`: the
+/// ticket needs someone, and the app cannot say what for.
+enum TicketAttentionKind {
+  /// A run of the ticket asks permission for an action.
+  approval('approval'),
+  /// In Todo without an owner, and no dispatcher is choosing one.
+  chooseOwner('choose_owner'),
+  /// The main task failed: Start begins a new attempt.
+  failed('failed'),
+  /// The main task (or the test task) stopped on a question.
+  input('input'),
+  /// The ticket's login user must connect their Claude login (`TicketNeed::Login`).
+  login('login'),
+  /// The plan waits for approve or revise.
+  planReview('plan_review'),
+  /// The report waits for accept or send back.
+  review('review'),
+  /// In Doing or Testing while nothing works on it and it waits for nothing a
+  /// board member could give: it would stay there for good. Start again, or cancel.
+  stalled('stalled'),
+  unknown('unknown');
+
+  const TicketAttentionKind(this.wire);
+
+  final String wire;
+
+  static TicketAttentionKind fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => TicketAttentionKind.unknown,
+      );
+
+  String toJson() => wire;
+}
+
+/// What still works on a ticket (`TicketView::busy`).
+enum TicketBusy {
+  /// A handoff or a message of the ticket waits in a colleague's mailbox, or a run that took one goes.
+  colleagues('colleagues'),
+  /// Tasks given to colleagues below the ticket have not ended.
+  linkedTasks('linked_tasks'),
+  /// A run of the main task goes, or waits its turn.
+  mainTask('main_task'),
+  /// The tester's test task has not ended.
+  tests('tests'),
+  unknown('unknown');
+
+  const TicketBusy(this.wire);
+
+  final String wire;
+
+  static TicketBusy fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => TicketBusy.unknown,
+      );
+
+  String toJson() => wire;
+}
+
 /// `ticket.get`: the ticket, its main task and every task linked to it.
 final class TicketDetail {
   const TicketDetail({
@@ -17247,6 +17328,8 @@ final class TicketView {
   const TicketView({
     this.archivedAtMs,
     required this.attachments,
+    this.attention,
+    this.busy = const [],
     required this.column,
     required this.columnId,
     this.conversationId,
@@ -17285,6 +17368,13 @@ final class TicketView {
   final int? archivedAtMs;
   /// Files attached to the ticket (fetched with `upload.get`).
   final List<MessageFileView> attachments;
+  /// What the ticket waits for from a board member, and from whom (feature
+  /// `ticket_state`): the server's one answer, so every client shows the same
+  /// "Needs you". None: nothing. Left out then and by older servers.
+  final TicketAttention? attention;
+  /// What still works on the ticket (feature `ticket_state`): `ticket.accept`
+  /// refuses while this is not empty. Left out when empty and by older servers.
+  final List<TicketBusy> busy;
   final ColumnKind column;
   final String columnId;
   /// The ticket's discussion (feature `ticket_discussion`): read it with
@@ -17344,6 +17434,8 @@ final class TicketView {
   factory TicketView.fromJson(Map<String, dynamic> json) => TicketView(
     archivedAtMs: (json['archived_at_ms'] == null ? null : (json['archived_at_ms'] as num).toInt()),
     attachments: (json['attachments'] as List<dynamic>).map((x0) => MessageFileView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    attention: (json['attention'] == null ? null : TicketAttention.fromJson(json['attention'] as Map<String, dynamic>)),
+    busy: (json['busy'] == null ? const [] : (json['busy'] as List<dynamic>).map((x0) => TicketBusy.fromJson(x0 as String)).toList()),
     column: ColumnKind.fromJson(json['column'] as String),
     columnId: (json['column_id'] as String),
     conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
@@ -17382,6 +17474,8 @@ final class TicketView {
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (archivedAtMs != null) 'archived_at_ms': archivedAtMs,
     'attachments': attachments.map((x0) => x0.toJson()).toList(),
+    if (attention != null) 'attention': attention?.toJson(),
+    'busy': busy.map((x0) => x0.toJson()).toList(),
     'column': column.toJson(),
     'column_id': columnId,
     if (conversationId != null) 'conversation_id': conversationId,

@@ -18,7 +18,7 @@ erbij), *open* (beslist, nog niet gebouwd).
 | D5 | Employees verplaatsen een ticket alleen van Backlog naar Todo, en alleen managers. Al het andere verplaatst het werk zelf of beslist een board member. | `multi-user.md` §2 "tot en met Review" | gebouwd (de code deed dit al; het document was fout) |
 | D6 | **Plan-modus is alleen-lezen voor het hele bedrijf**: geen bestanden, geen delegaties, geen handoffs, geen geplande berichten en geen geheugen. Een delegatie erft de modus van wie delegeert. | — | open |
 | D7 | "Niet pushen of mergen zonder akkoord" is een **slot**, geen afspraak: `git push`, een merge en een deploy vragen in elke modus eerst een board member. | RULE 07 als tekst in de prompt | open |
-| D8 | De kolom **Testing** bestaat, met een uitweg als de test wacht (vraag, quotum, login): het ticket vraagt dan om een mens. | `multi-user.md` §2 (zes kolommen) | deels: de kolom bestaat, de uitweg niet |
+| D8 | De kolom **Testing** bestaat, met een uitweg als de test wacht (vraag, quotum, login): het ticket vraagt dan om een mens. | `multi-user.md` §2 (zes kolommen) | deels: een ticket in Testing waar de tester een vraag stelt of waar niets meer loopt, vraagt nu om een board member. Open: een knop die het dan naar Review of terug naar Doing zet |
 | D9 | Een ticket in Done kan **heropend** worden; discussie, rapport en branch blijven. | `fase-1` "It cannot be reopened"; `fase-a` "bestaat niet" | open |
 | D10 | **Al het werk loopt via het bord.** Een terugkerende taak en werk uit een chat maken een ticket; taken zonder ticket verdwijnen voor mensen. | `fase-2` B5 | open |
 | D11 | Iedereen ziet ieders **verbruik** (tokens en kosten per login). Het percentage van het abonnement blijft alleen voor de eigenaar ervan. | `fase-3` B12 | gebouwd (de code deed dit al) |
@@ -29,7 +29,7 @@ Kleinere punten, in dezelfde ronde beslist:
 | # | Beslissing | Status |
 |---|---|---|
 | D13 | Een wijziging op een verouderde versie wordt geweigerd, op elke client: `expected_version` bij elke ticketschrijfactie. | open (mobiel doet het, desktop alleen bij bewerken) |
-| D14 | De server berekent wat een ticket nodig heeft en van wie (*Needs you*); clients rekenen het niet na. | open |
+| D14 | De server berekent wat een ticket nodig heeft en van wie (*Needs you*); clients rekenen het niet na. | deels: server en desktop gebouwd (`TicketView.attention` en `busy`, feature `ticket_state`). Open: de mobiele app en de Inbox-telling rekenen nog zelf |
 | D15 | De server ontleedt mentions; clients gebruiken dezelfde regels. | open |
 | D16 | Een venster waar niemand naar kijkt leest niet voor zijn board member (`peek`, feature `read_peek`). | deels: desktop gebouwd. Open: een eigen leesopdracht met een event, zodat alle apparaten van één persoon gelijk lopen |
 | D17 | De regels RULE 01–10 staan in de repo, met een versie. | open (ze staan nu alleen in de database van de server) |
@@ -39,7 +39,9 @@ Kleinere punten, in dezelfde ronde beslist:
 
 Nog niet gebouwd, in de volgorde waarin ze het meeste opleveren.
 
-1. **Eén tickettoestand op de server.** Eén functie bepaalt uit de gebeurtenissen de kolom, wat het ticket nodig heeft, van wie, en of er nog iets loopt. Ze vervangt de drie plekken die nu de kolom zetten en de vier definities van "nog bezig", en ze is de plek voor D8, D13 en D14.
+1. **Eén tickettoestand op de server.** Eén functie bepaalt uit de feiten van een ticket wat het nodig heeft, van wie, en of er nog iets loopt.
+   - *Gebouwd:* `ticket::ticket_work` in het domein, gevuld door `tickets::facts`. Elke ticketweergave (bord, lijst, My tickets, ticket) draagt het antwoord, Accepteren weigert met dezelfde feiten, en de desktop toont het zonder zelf te rekenen. Nieuw is *Stalled*: een ticket in Doing of Testing waar niets meer aan werkt en dat op niets wacht, vraagt om een board member in plaats van te blijven staan.
+   - *Open:* de kolom wordt nog op drie plekken gezet (`ticket_line::on_status`, de bordopdrachten in `ticket.rs`, `testing.rs`); die moeten de kolom uit dezelfde feiten afleiden. De motor gebruikt intern nog `open_parts` en `open_on_ticket` om te beslissen wanneer de eigenaar verdergaat.
 2. **Expliciet "klaar" en "vraag".** De tools `report_done` en `ask_board` in plaats van raden uit de laatste regel. Een run die zonder een van beide eindigt, vraagt aandacht en gaat niet naar Review.
 3. **Herstelbaar in plaats van definitief.** Een run die mislukt of onderbroken wordt, zet de taak op wachten met Hervatten op dezelfde sessie. Definitief mislukt is er alleen voor fouten die niet overgaan.
 4. **Een worktree en branch per ticket**, gemaakt door de server bij Start. Accepteren biedt mergen, een PR openen of bewaren (D7).

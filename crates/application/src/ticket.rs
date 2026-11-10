@@ -379,16 +379,22 @@ impl CommandService {
                     if state.root_status != Some(aurelius_domain::task::TaskStatus::Review) {
                         return rejected(DomainError::Ticket("The main task is working again; accept once it reported.".into()));
                     }
-                    // B6: Done only when nothing linked to the ticket still works.
-                    let working = store::working_tasks(tx, state.id, state.root_task_id)?;
-                    if working > 0 {
-                        return rejected(DomainError::Ticket(format!("{working} linked task(s) still work; wait for them or cancel them first.")));
+                    // B6: Done only when nothing still works on the ticket. What "works" means is
+                    // said in one place (`ticket::ticket_work`), the same the card shows as busy.
+                    let facts = store::facts(tx, state.id)?.unwrap_or_default();
+                    if facts.linked_working > 0 {
+                        return rejected(DomainError::Ticket(format!("{} linked task(s) still work; wait for them or cancel them first.", facts.linked_working)));
                     }
                     // Nor while a run in the main task's conversation goes (a question in Review, §3.3).
-                    if let Some(root) = state.root_task_id {
-                        if crate::task::task_runs::live_run(tx, root, None)? {
-                            return rejected(DomainError::Ticket("The main task's conversation is still running; accept once it answered.".into()));
-                        }
+                    if facts.root_live {
+                        return rejected(DomainError::Ticket("The main task's conversation is still running; accept once it answered.".into()));
+                    }
+                    // Nor while a colleague still has a handoff or a message of this ticket to answer.
+                    if facts.colleagues {
+                        return rejected(DomainError::Ticket("A colleague still works on this ticket; accept once they are done.".into()));
+                    }
+                    if facts.tests.is_some() {
+                        return rejected(DomainError::Ticket("The tests of this ticket still run; accept once they ended.".into()));
                     }
                     let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
                     to_column(tx, state.id, ColumnKind::Done)?;
