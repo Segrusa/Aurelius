@@ -191,7 +191,9 @@ async fn sessions_are_listed_and_revoking_one_closes_its_device_at_once() {
     assert_eq!(signed_out(&phone, &mut pushes).await, SignOutReason::Revoked);
     assert!(!alex.sessions(None).await.unwrap().sessions.iter().any(|s| s.id == phone_session.id));
 
-    // AC4: another board member revokes one of Alex's; the timeline names who.
+    // AC4: another board member, an administrator, revokes one of Alex's; the timeline names who.
+    let robin_id = robin.user_whoami().await.unwrap().user.unwrap().id;
+    alex.set_admin(robin_id, true).await.unwrap();
     let laptop_session = alex.sessions(None).await.unwrap().sessions.into_iter().find(|s| s.device_name == "Laptop").unwrap();
     let mut pushes = laptop.session_pushes();
     let robin_sees = robin.sessions(Some(laptop_session.user_id)).await.unwrap();
