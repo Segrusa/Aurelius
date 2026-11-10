@@ -35,6 +35,12 @@ Kleinere punten, in dezelfde ronde beslist:
 | D17 | De regels RULE 01–10 staan in de repo, met een versie. | open (ze staan nu alleen in de database van de server) |
 | D18 | Een antwoord dat een client niet kan lezen is een fout, geen time-out; een enum met de waarde `unknown` leest een onbekende waarde als `unknown`. | gebouwd |
 
+## 2026-11-10: wijzigingen nakijken per project
+
+| # | Beslissing | Status |
+|---|---|---|
+| D19 | Elk project toont de git-toestand van zijn map in het scherm **Changes**: wat nog niet gecommit is, de commits per branch en de branches, telkens met de diff. Alleen lezen: het scherm en de vier `git.*`-leesverzoeken (feature `project_git`) wijzigen niets aan de repository. Wat een client meegeeft (een branch, een commit, een pad) wordt gecontroleerd en kan nooit een optie van git worden of buiten de repository lezen. | gebouwd op de server en in de desktop- en webapp. Open: de mobiele app; een commit of branch koppelen aan zijn ticket; een worktree per ticket (ontwerpwijziging 4) |
+
 ## Ontwerpwijzigingen waartoe besloten is
 
 Nog niet gebouwd, in de volgorde waarin ze het meeste opleveren.

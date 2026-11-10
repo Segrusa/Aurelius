@@ -36,6 +36,7 @@ import { Logo, NAV_ICONS, type NavIcon, NewIcon, SearchIcon } from "../ui/icons"
 import { initial, Mark, markColor } from "../ui/marks";
 import { ToastBridge, toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
+import { GIT_FEATURE } from "./changes-logic";
 import { ChatDock } from "./chat-dock";
 import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
@@ -121,8 +122,10 @@ const NAV_MAIN: { to: string; label: string; icon: NavIcon }[] = [
   { to: "/inbox", label: "Inbox", icon: "inbox" },
   { to: "/my-tickets", label: "My tickets", icon: "mine" },
 ];
-const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Feature }[] = [
+/** `needs`: a feature of the server; without it the row is left out. */
+const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Feature; needs?: string }[] = [
   { to: "/board", label: "Board", icon: "board" },
+  { to: "/changes", label: "Changes", icon: "branch", needs: GIT_FEATURE },
   { to: "/tasks", label: "Tasks", icon: "tasks", feature: "TasksInSidebar" },
   { to: "/scheduled", label: "Scheduled", icon: "clock", feature: "ScheduledInSidebar" },
   { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
@@ -419,7 +422,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
   const chat = useMemo(() => chatBadge(narrow(channels.data ?? [], workspace)), [channels.data, workspace]);
   const { open } = overlays;
   const { groups } = useInbox();
-  const { hostName, status } = useLinkState();
+  const { hostName, status, features } = useLinkState();
   const employees = useEmployees();
   const [employeePins] = usePins(pinKey(hostName, "pinned_employees"));
   const pinnedEmployees = employeePins.flatMap(
@@ -478,15 +481,17 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
         />
       ))}
       <SideNavSection title="Workspace">
-        {shown(NAV_WORKSPACE).map((n) => (
-          <NavRow
-            key={n.to}
-            to={n.to}
-            label={n.label}
-            icon={NAV_ICONS[n.icon]}
-            end={n.to === "/chat" ? <Counted count={chat.mentions} dot={chat.unread} /> : undefined}
-          />
-        ))}
+        {shown(NAV_WORKSPACE)
+          .filter((n) => !n.needs || features.includes(n.needs))
+          .map((n) => (
+            <NavRow
+              key={n.to}
+              to={n.to}
+              label={n.label}
+              icon={NAV_ICONS[n.icon]}
+              end={n.to === "/chat" ? <Counted count={chat.mentions} dot={chat.unread} /> : undefined}
+            />
+          ))}
       </SideNavSection>
       {/* What only fits written out: the rail keeps the rows above. */}
       {collapsed ? null : (

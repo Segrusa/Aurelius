@@ -464,6 +464,40 @@ pub enum Method {
     /// One Markdown file as UTF-8 text. `path` is relative to the work folder.
     #[serde(rename = "markdown.get")]
     MarkdownGet { scope: FileScope, path: String },
+    /// What a project's work folder looks like in git now (feature `project_git`):
+    /// the branch it is on, its uncommitted changes and its branches. Read-only, like
+    /// every `git.*` read; a project without a folder or a repository answers empty.
+    #[serde(rename = "git.overview")]
+    GitOverview { project_id: ProjectId },
+    /// Commits of a project's repository, newest first: of `rev` (a branch, a tag or
+    /// a commit id; none: where the work folder is), only those that touched `path`
+    /// when given, after the first `skip`, at most `limit` (default 50, most `GIT_LOG_MAX`).
+    #[serde(rename = "git.log")]
+    GitLog {
+        project_id: ProjectId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rev: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skip: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
+    /// One commit: its whole message and the files it changed.
+    #[serde(rename = "git.commit")]
+    GitCommit { project_id: ProjectId, id: String },
+    /// A unified diff: of commit `id` against its first parent, or without `id` of
+    /// the work folder against its last commit (staged and not, untracked files as
+    /// new). `path`: only that file.
+    #[serde(rename = "git.diff")]
+    GitDiff {
+        project_id: ProjectId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+    },
     /// The subagents running in the answers of one conversation.
     #[serde(rename = "subagent.list")]
     SubagentList { conversation_id: ConversationId },

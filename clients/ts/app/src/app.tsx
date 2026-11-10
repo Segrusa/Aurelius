@@ -20,6 +20,8 @@ import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
 import { activityFilters } from "./screens/activity-logic";
 import { BoardScreen } from "./screens/board";
+import { ChangesScreen } from "./screens/changes";
+import { changesSearch } from "./screens/changes-logic";
 import { ChatScreen } from "./screens/chat";
 import { EmployeeChatScreen } from "./screens/employee-chat";
 import { type EmployeeTab, isEmployeeTab } from "./screens/employee-logic";
@@ -181,6 +183,14 @@ const project = createRoute({
 
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
 const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
+const changes = createRoute({
+  getParentRoute: () => root,
+  path: "/changes",
+  validateSearch: changesSearch,
+  component: function ChangesRoute() {
+    return <ChangesScreen search={changes.useSearch()} />;
+  },
+});
 // The log lives in Settings now; an old link keeps what it narrowed on.
 const activity = createRoute({
   getParentRoute: () => root,
@@ -230,6 +240,7 @@ const router = createRouter({
     settings,
     usage,
     scheduled,
+    changes,
     activity,
     orgChart,
     employee,

@@ -78,6 +78,10 @@ export const METHODS = {
   "file.get": "read",
   "fs.create_dir": "host",
   "fs.list_dir": "read",
+  "git.commit": "read",
+  "git.diff": "read",
+  "git.log": "read",
+  "git.overview": "read",
   "group_chat.get": "read",
   "group_chat.send": "command",
   "guideline.add_starter_set": "command",
@@ -441,6 +445,28 @@ export interface MethodParams {
    * Folders on the server: none lists the starting points.
    */
   "fs.list_dir": { path?: string | null };
+  /**
+   * One commit: its whole message and the files it changed.
+   */
+  "git.commit": { id: string; project_id: string };
+  /**
+   * A unified diff: of commit `id` against its first parent, or without `id` of
+   * the work folder against its last commit (staged and not, untracked files as
+   * new). `path`: only that file.
+   */
+  "git.diff": { id?: string | null; path?: string | null; project_id: string };
+  /**
+   * Commits of a project's repository, newest first: of `rev` (a branch, a tag or
+   * a commit id; none: where the work folder is), only those that touched `path`
+   * when given, after the first `skip`, at most `limit` (default 50, most `GIT_LOG_MAX`).
+   */
+  "git.log": { limit?: number | null; path?: string | null; project_id: string; rev?: string | null; skip?: number | null };
+  /**
+   * What a project's work folder looks like in git now (feature `project_git`):
+   * the branch it is on, its uncommitted changes and its branches. Read-only, like
+   * every `git.*` read; a project without a folder or a repository answers empty.
+   */
+  "git.overview": { project_id: string };
   /**
    * The company's group chat (Team chat): the user and every employee. Its
    * messages and settings, as `conversation.get` answers them; an employee's

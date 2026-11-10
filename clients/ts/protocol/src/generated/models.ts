@@ -1952,6 +1952,158 @@ export interface ForgetMemory {
 }
 
 /**
+ * One branch of the repository.
+ */
+export interface GitBranch {
+  ahead?: number | null;
+  at_ms: number;
+  author: string;
+  behind?: number | null;
+  /**
+   * The branch the work folder is on.
+   */
+  current?: boolean;
+  /**
+   * Its latest commit: id, first line, author and time.
+   */
+  head: string;
+  name: string;
+  /**
+   * A branch of a remote (`origin/main`), not a local one.
+   */
+  remote?: boolean;
+  subject: string;
+  /**
+   * What it follows (`origin/main`), and how far it is ahead of and behind it.
+   */
+  upstream?: string | null;
+  /**
+   * The work folder of a worktree that has this branch checked out, other than the project's own.
+   */
+  worktree?: string | null;
+}
+
+/**
+ * One changed file: in the work folder now, or in a commit.
+ */
+export interface GitChange {
+  /**
+   * Lines added and removed; none for a binary or an untracked file.
+   */
+  added?: number | null;
+  /**
+   * Where it was before a rename or copy.
+   */
+  from?: string | null;
+  /**
+   * Relative to the repository, with `/`.
+   */
+  path: string;
+  removed?: number | null;
+  /**
+   * Staged for the next commit (work folder only).
+   */
+  staged?: boolean;
+  /**
+   * `added`, `modified`, `deleted`, `renamed`, `copied`, `untracked` or `conflict`.
+   * Text, not an enum, so a new kind never breaks an older client.
+   */
+  status: string;
+}
+
+/**
+ * One commit in a list.
+ */
+export interface GitCommit {
+  at_ms: number;
+  author: string;
+  email: string;
+  id: string;
+  parents: string[];
+  /**
+   * Branches and tags that point at it (`main`, `origin/main`, `tag: v1`).
+   */
+  refs?: string[];
+  /**
+   * The first line of its message.
+   */
+  subject: string;
+}
+
+/**
+ * `git.commit`: one commit whole, without the text of its changes (`git.diff` has it).
+ */
+export interface GitCommitDetail {
+  /**
+   * The message after its first line.
+   */
+  body: string;
+  commit: GitCommit;
+  /**
+   * Against its first parent (for a merge: what the merge brought in).
+   */
+  files: GitChange[];
+  files_truncated?: boolean;
+}
+
+/**
+ * `git.diff`: a unified diff as git prints it.
+ */
+export interface GitDiff {
+  text: string;
+  /**
+   * Longer than `GIT_DIFF_MAX_BYTES`: cut at the end of a line.
+   */
+  truncated?: boolean;
+}
+
+/**
+ * `git.log`: commits, newest first.
+ */
+export interface GitLog {
+  commits: GitCommit[];
+  /**
+   * Older commits follow: ask again with `skip` raised by what came.
+   */
+  has_more: boolean;
+}
+
+/**
+ * `git.overview` (feature `project_git`): what a project's work folder looks like in
+ * git now. Read-only: nothing here or in the other `git.*` reads changes the repository.
+ */
+export interface GitOverview {
+  /**
+   * The branch the work folder is on; none on a detached HEAD or without a commit.
+   */
+  branch?: string | null;
+  /**
+   * Local branches (latest commit first), then the remote ones.
+   */
+  branches: GitBranch[];
+  /**
+   * Uncommitted changes of the work folder, staged ones first, then by path.
+   */
+  changes: GitChange[];
+  /**
+   * More changed files than `GIT_FILES_MAX`; the rest is left out.
+   */
+  changes_truncated?: boolean;
+  /**
+   * The project's work folder; none: the project has none on this server.
+   */
+  folder?: string | null;
+  /**
+   * The commit the work folder is on; none in a repository without commits.
+   */
+  head?: string | null;
+  /**
+   * The folder is (inside) a git repository. False: everything below is empty.
+   */
+  repository: boolean;
+}
+
+/**
  * `guideline.affected`: who a change reaches, for "applies from the next run
  * of N employees" (B6). A run gets it at its next start; a conversation whose
  * session had another version starts a new session then.
@@ -3378,6 +3530,28 @@ export type Method =
    */
   | ({ method: "fs.list_dir"; params: { path?: string | null } })
   /**
+   * One commit: its whole message and the files it changed.
+   */
+  | ({ method: "git.commit"; params: { id: string; project_id: string } })
+  /**
+   * A unified diff: of commit `id` against its first parent, or without `id` of
+   * the work folder against its last commit (staged and not, untracked files as
+   * new). `path`: only that file.
+   */
+  | ({ method: "git.diff"; params: { id?: string | null; path?: string | null; project_id: string } })
+  /**
+   * Commits of a project's repository, newest first: of `rev` (a branch, a tag or
+   * a commit id; none: where the work folder is), only those that touched `path`
+   * when given, after the first `skip`, at most `limit` (default 50, most `GIT_LOG_MAX`).
+   */
+  | ({ method: "git.log"; params: { limit?: number | null; path?: string | null; project_id: string; rev?: string | null; skip?: number | null } })
+  /**
+   * What a project's work folder looks like in git now (feature `project_git`):
+   * the branch it is on, its uncommitted changes and its branches. Read-only, like
+   * every `git.*` read; a project without a folder or a repository answers empty.
+   */
+  | ({ method: "git.overview"; params: { project_id: string } })
+  /**
    * The company's group chat (Team chat): the user and every employee. Its
    * messages and settings, as `conversation.get` answers them; an employee's
    * messages carry its name as `author`. Write with `group_chat.send`.
@@ -4229,6 +4403,10 @@ export type ResponseBody =
    * A file kept with a message.
    */
   | ({ type: "file"; value: { data_base64: string; id: string; media_type: string; name: string } })
+  | ({ type: "git_commit"; value: GitCommitDetail })
+  | ({ type: "git_diff"; value: GitDiff })
+  | ({ type: "git_log"; value: GitLog })
+  | ({ type: "git_overview"; value: GitOverview })
   /**
    * `guideline.get`.
    */

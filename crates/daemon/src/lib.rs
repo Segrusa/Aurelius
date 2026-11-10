@@ -5,6 +5,7 @@
 pub mod api;
 mod remote;
 mod browse;
+mod git;
 mod markdown;
 mod uploads;
 mod dispatcher;

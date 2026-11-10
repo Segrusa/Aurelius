@@ -139,6 +139,20 @@ abstract final class Methods {
   static const String fsCreateDir = 'fs.create_dir';
   /// Folders on the server: none lists the starting points.
   static const String fsListDir = 'fs.list_dir';
+  /// One commit: its whole message and the files it changed.
+  static const String gitCommit = 'git.commit';
+  /// A unified diff: of commit `id` against its first parent, or without `id` of
+  /// the work folder against its last commit (staged and not, untracked files as
+  /// new). `path`: only that file.
+  static const String gitDiff = 'git.diff';
+  /// Commits of a project's repository, newest first: of `rev` (a branch, a tag or
+  /// a commit id; none: where the work folder is), only those that touched `path`
+  /// when given, after the first `skip`, at most `limit` (default 50, most `GIT_LOG_MAX`).
+  static const String gitLog = 'git.log';
+  /// What a project's work folder looks like in git now (feature `project_git`):
+  /// the branch it is on, its uncommitted changes and its branches. Read-only, like
+  /// every `git.*` read; a project without a folder or a repository answers empty.
+  static const String gitOverview = 'git.overview';
   /// The company's group chat (Team chat): the user and every employee. Its
   /// messages and settings, as `conversation.get` answers them; an employee's
   /// messages carry its name as `author`. Write with `group_chat.send`.
@@ -737,6 +751,51 @@ Map<String, dynamic> fsListDir({String? path}) => <String, dynamic>{
   'method': Methods.fsListDir,
   'params': <String, dynamic>{
     if (path != null) 'path': path,
+  },
+};
+
+/// One commit: its whole message and the files it changed.
+Map<String, dynamic> gitCommit({required String id, required String projectId}) => <String, dynamic>{
+  'method': Methods.gitCommit,
+  'params': <String, dynamic>{
+    'id': id,
+    'project_id': projectId,
+  },
+};
+
+/// A unified diff: of commit `id` against its first parent, or without `id` of
+/// the work folder against its last commit (staged and not, untracked files as
+/// new). `path`: only that file.
+Map<String, dynamic> gitDiff({String? id, String? path, required String projectId}) => <String, dynamic>{
+  'method': Methods.gitDiff,
+  'params': <String, dynamic>{
+    if (id != null) 'id': id,
+    if (path != null) 'path': path,
+    'project_id': projectId,
+  },
+};
+
+/// Commits of a project's repository, newest first: of `rev` (a branch, a tag or
+/// a commit id; none: where the work folder is), only those that touched `path`
+/// when given, after the first `skip`, at most `limit` (default 50, most `GIT_LOG_MAX`).
+Map<String, dynamic> gitLog({int? limit, String? path, required String projectId, String? rev, int? skip}) => <String, dynamic>{
+  'method': Methods.gitLog,
+  'params': <String, dynamic>{
+    if (limit != null) 'limit': limit,
+    if (path != null) 'path': path,
+    'project_id': projectId,
+    if (rev != null) 'rev': rev,
+    if (skip != null) 'skip': skip,
+  },
+};
+
+/// What a project's work folder looks like in git now (feature `project_git`):
+/// the branch it is on, its uncommitted changes and its branches. Read-only, like
+/// every `git.*` read; a project without a folder or a repository answers empty.
+Map<String, dynamic> gitOverview({required String projectId}) => <String, dynamic>{
+  'method': Methods.gitOverview,
+  'params': <String, dynamic>{
+    'project_id': projectId,
   },
 };
 

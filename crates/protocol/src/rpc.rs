@@ -294,6 +294,11 @@ pub mod feature {
     /// client shows "Needs you" from these and computes nothing itself, so every
     /// client and every device agrees. `ticket.accept` refuses while `busy` is not empty.
     pub const TICKET_STATE: &str = "ticket_state";
+    /// The git state of a project's work folder (additive): `git.overview`, `git.log`,
+    /// `git.commit` and `git.diff`. Read-only: uncommitted changes, branches, the
+    /// history and the text of every change, so a board member can check what
+    /// employees did without a terminal on the server.
+    pub const PROJECT_GIT: &str = "project_git";
     /// A channel per ticket (protocol 5, additive; AUR-CHAT-001): the ticket's
     /// discussion is its channel, `#<number>-<slug>` (`ticket_channel_name`).
     /// `channel.list` names ticket channels only to connections whose
@@ -446,6 +451,7 @@ pub const FEATURES: &[&str] = &[
     feature::ADMIN_ROLE,
     feature::READ_PEEK,
     feature::TICKET_STATE,
+    feature::PROJECT_GIT,
 ];
 
 /// Daemon → client.
@@ -605,6 +611,10 @@ pub enum ResponseBody {
     MemoryContext(MemoryContextView),
     MarkdownFiles(MarkdownFileList),
     MarkdownFile(MarkdownFileContent),
+    GitOverview(GitOverview),
+    GitLog(GitLog),
+    GitCommit(GitCommitDetail),
+    GitDiff(GitDiff),
     Usage(UsageSnapshot),
     UsageHours(UsageHours),
     UsageTotals(UsageTotals),

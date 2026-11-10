@@ -773,6 +773,26 @@ impl Client {
     }
 
     /// One Markdown file, relative or absolute inside the work folder.
+    /// What a project's work folder looks like in git now (feature `project_git`).
+    pub async fn git_overview(&self, project_id: aurelius_domain::ProjectId) -> Result<aurelius_protocol::GitOverview, ClientError> {
+        self.read(Method::GitOverview { project_id }, body!(GitOverview)).await
+    }
+
+    /// Commits of a project's repository, newest first.
+    pub async fn git_log(&self, project_id: aurelius_domain::ProjectId, rev: Option<&str>, path: Option<&str>, skip: u32, limit: u32) -> Result<aurelius_protocol::GitLog, ClientError> {
+        self.read(Method::GitLog { project_id, rev: rev.map(str::to_owned), path: path.map(str::to_owned), skip: Some(skip), limit: Some(limit) }, body!(GitLog)).await
+    }
+
+    /// One commit with the files it changed.
+    pub async fn git_commit(&self, project_id: aurelius_domain::ProjectId, id: &str) -> Result<aurelius_protocol::GitCommitDetail, ClientError> {
+        self.read(Method::GitCommit { project_id, id: id.to_owned() }, body!(GitCommit)).await
+    }
+
+    /// The diff of a commit, or without `id` of the work folder against its last commit.
+    pub async fn git_diff(&self, project_id: aurelius_domain::ProjectId, id: Option<&str>, path: Option<&str>) -> Result<aurelius_protocol::GitDiff, ClientError> {
+        self.read(Method::GitDiff { project_id, id: id.map(str::to_owned), path: path.map(str::to_owned) }, body!(GitDiff)).await
+    }
+
     pub async fn markdown_file(&self, scope: aurelius_protocol::FileScope, path: &str) -> Result<aurelius_protocol::MarkdownFileContent, ClientError> {
         self.read(Method::MarkdownGet { scope, path: path.to_owned() }, body!(MarkdownFile)).await
     }

@@ -6337,6 +6337,278 @@ final class ForgetMemory {
   };
 }
 
+/// One branch of the repository.
+final class GitBranch {
+  const GitBranch({
+    this.ahead,
+    required this.atMs,
+    required this.author,
+    this.behind,
+    this.current,
+    required this.head,
+    required this.name,
+    this.remote,
+    required this.subject,
+    this.upstream,
+    this.worktree,
+  });
+
+  final int? ahead;
+  final int atMs;
+  final String author;
+  final int? behind;
+  /// The branch the work folder is on.
+  final bool? current;
+  /// Its latest commit: id, first line, author and time.
+  final String head;
+  final String name;
+  /// A branch of a remote (`origin/main`), not a local one.
+  final bool? remote;
+  final String subject;
+  /// What it follows (`origin/main`), and how far it is ahead of and behind it.
+  final String? upstream;
+  /// The work folder of a worktree that has this branch checked out, other than the project's own.
+  final String? worktree;
+
+  factory GitBranch.fromJson(Map<String, dynamic> json) => GitBranch(
+    ahead: (json['ahead'] == null ? null : (json['ahead'] as num).toInt()),
+    atMs: (json['at_ms'] as num).toInt(),
+    author: (json['author'] as String),
+    behind: (json['behind'] == null ? null : (json['behind'] as num).toInt()),
+    current: (json['current'] == null ? null : (json['current'] as bool)),
+    head: (json['head'] as String),
+    name: (json['name'] as String),
+    remote: (json['remote'] == null ? null : (json['remote'] as bool)),
+    subject: (json['subject'] as String),
+    upstream: (json['upstream'] == null ? null : (json['upstream'] as String)),
+    worktree: (json['worktree'] == null ? null : (json['worktree'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (ahead != null) 'ahead': ahead,
+    'at_ms': atMs,
+    'author': author,
+    if (behind != null) 'behind': behind,
+    if (current != null) 'current': current,
+    'head': head,
+    'name': name,
+    if (remote != null) 'remote': remote,
+    'subject': subject,
+    if (upstream != null) 'upstream': upstream,
+    if (worktree != null) 'worktree': worktree,
+  };
+}
+
+/// One changed file: in the work folder now, or in a commit.
+final class GitChange {
+  const GitChange({
+    this.added,
+    this.from,
+    required this.path,
+    this.removed,
+    this.staged,
+    required this.status,
+  });
+
+  /// Lines added and removed; none for a binary or an untracked file.
+  final int? added;
+  /// Where it was before a rename or copy.
+  final String? from;
+  /// Relative to the repository, with `/`.
+  final String path;
+  final int? removed;
+  /// Staged for the next commit (work folder only).
+  final bool? staged;
+  /// `added`, `modified`, `deleted`, `renamed`, `copied`, `untracked` or `conflict`.
+  /// Text, not an enum, so a new kind never breaks an older client.
+  final String status;
+
+  factory GitChange.fromJson(Map<String, dynamic> json) => GitChange(
+    added: (json['added'] == null ? null : (json['added'] as num).toInt()),
+    from: (json['from'] == null ? null : (json['from'] as String)),
+    path: (json['path'] as String),
+    removed: (json['removed'] == null ? null : (json['removed'] as num).toInt()),
+    staged: (json['staged'] == null ? null : (json['staged'] as bool)),
+    status: (json['status'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (added != null) 'added': added,
+    if (from != null) 'from': from,
+    'path': path,
+    if (removed != null) 'removed': removed,
+    if (staged != null) 'staged': staged,
+    'status': status,
+  };
+}
+
+/// One commit in a list.
+final class GitCommit {
+  const GitCommit({
+    required this.atMs,
+    required this.author,
+    required this.email,
+    required this.id,
+    required this.parents,
+    this.refs = const [],
+    required this.subject,
+  });
+
+  final int atMs;
+  final String author;
+  final String email;
+  final String id;
+  final List<String> parents;
+  /// Branches and tags that point at it (`main`, `origin/main`, `tag: v1`).
+  final List<String> refs;
+  /// The first line of its message.
+  final String subject;
+
+  factory GitCommit.fromJson(Map<String, dynamic> json) => GitCommit(
+    atMs: (json['at_ms'] as num).toInt(),
+    author: (json['author'] as String),
+    email: (json['email'] as String),
+    id: (json['id'] as String),
+    parents: (json['parents'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    refs: (json['refs'] == null ? const [] : (json['refs'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    subject: (json['subject'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'at_ms': atMs,
+    'author': author,
+    'email': email,
+    'id': id,
+    'parents': parents,
+    'refs': refs,
+    'subject': subject,
+  };
+}
+
+/// `git.commit`: one commit whole, without the text of its changes (`git.diff` has it).
+final class GitCommitDetail {
+  const GitCommitDetail({
+    required this.body,
+    required this.commit,
+    required this.files,
+    this.filesTruncated,
+  });
+
+  /// The message after its first line.
+  final String body;
+  final GitCommit commit;
+  /// Against its first parent (for a merge: what the merge brought in).
+  final List<GitChange> files;
+  final bool? filesTruncated;
+
+  factory GitCommitDetail.fromJson(Map<String, dynamic> json) => GitCommitDetail(
+    body: (json['body'] as String),
+    commit: GitCommit.fromJson(json['commit'] as Map<String, dynamic>),
+    files: (json['files'] as List<dynamic>).map((x0) => GitChange.fromJson(x0 as Map<String, dynamic>)).toList(),
+    filesTruncated: (json['files_truncated'] == null ? null : (json['files_truncated'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'body': body,
+    'commit': commit.toJson(),
+    'files': files.map((x0) => x0.toJson()).toList(),
+    if (filesTruncated != null) 'files_truncated': filesTruncated,
+  };
+}
+
+/// `git.diff`: a unified diff as git prints it.
+final class GitDiff {
+  const GitDiff({
+    required this.text,
+    this.truncated,
+  });
+
+  final String text;
+  /// Longer than `GIT_DIFF_MAX_BYTES`: cut at the end of a line.
+  final bool? truncated;
+
+  factory GitDiff.fromJson(Map<String, dynamic> json) => GitDiff(
+    text: (json['text'] as String),
+    truncated: (json['truncated'] == null ? null : (json['truncated'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'text': text,
+    if (truncated != null) 'truncated': truncated,
+  };
+}
+
+/// `git.log`: commits, newest first.
+final class GitLog {
+  const GitLog({
+    required this.commits,
+    required this.hasMore,
+  });
+
+  final List<GitCommit> commits;
+  /// Older commits follow: ask again with `skip` raised by what came.
+  final bool hasMore;
+
+  factory GitLog.fromJson(Map<String, dynamic> json) => GitLog(
+    commits: (json['commits'] as List<dynamic>).map((x0) => GitCommit.fromJson(x0 as Map<String, dynamic>)).toList(),
+    hasMore: (json['has_more'] as bool),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'commits': commits.map((x0) => x0.toJson()).toList(),
+    'has_more': hasMore,
+  };
+}
+
+/// `git.overview` (feature `project_git`): what a project's work folder looks like in
+/// git now. Read-only: nothing here or in the other `git.*` reads changes the repository.
+final class GitOverview {
+  const GitOverview({
+    this.branch,
+    required this.branches,
+    required this.changes,
+    this.changesTruncated,
+    this.folder,
+    this.head,
+    required this.repository,
+  });
+
+  /// The branch the work folder is on; none on a detached HEAD or without a commit.
+  final String? branch;
+  /// Local branches (latest commit first), then the remote ones.
+  final List<GitBranch> branches;
+  /// Uncommitted changes of the work folder, staged ones first, then by path.
+  final List<GitChange> changes;
+  /// More changed files than `GIT_FILES_MAX`; the rest is left out.
+  final bool? changesTruncated;
+  /// The project's work folder; none: the project has none on this server.
+  final String? folder;
+  /// The commit the work folder is on; none in a repository without commits.
+  final String? head;
+  /// The folder is (inside) a git repository. False: everything below is empty.
+  final bool repository;
+
+  factory GitOverview.fromJson(Map<String, dynamic> json) => GitOverview(
+    branch: (json['branch'] == null ? null : (json['branch'] as String)),
+    branches: (json['branches'] as List<dynamic>).map((x0) => GitBranch.fromJson(x0 as Map<String, dynamic>)).toList(),
+    changes: (json['changes'] as List<dynamic>).map((x0) => GitChange.fromJson(x0 as Map<String, dynamic>)).toList(),
+    changesTruncated: (json['changes_truncated'] == null ? null : (json['changes_truncated'] as bool)),
+    folder: (json['folder'] == null ? null : (json['folder'] as String)),
+    head: (json['head'] == null ? null : (json['head'] as String)),
+    repository: (json['repository'] as bool),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (branch != null) 'branch': branch,
+    'branches': branches.map((x0) => x0.toJson()).toList(),
+    'changes': changes.map((x0) => x0.toJson()).toList(),
+    if (changesTruncated != null) 'changes_truncated': changesTruncated,
+    if (folder != null) 'folder': folder,
+    if (head != null) 'head': head,
+    'repository': repository,
+  };
+}
+
 /// `guideline.affected`: who a change reaches, for "applies from the next run
 /// of N employees" (B6). A run gets it at its next start; a conversation whose
 /// session had another version starts a new session then.
@@ -10077,6 +10349,41 @@ sealed class Method {
           path: (src['path'] == null ? null : (src['path'] as String)),
         );
         }
+      case 'git.commit':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGitCommit(
+          id: (src['id'] as String),
+          projectId: (src['project_id'] as String),
+        );
+        }
+      case 'git.diff':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGitDiff(
+          id: (src['id'] == null ? null : (src['id'] as String)),
+          path: (src['path'] == null ? null : (src['path'] as String)),
+          projectId: (src['project_id'] as String),
+        );
+        }
+      case 'git.log':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGitLog(
+          limit: (src['limit'] == null ? null : (src['limit'] as num).toInt()),
+          path: (src['path'] == null ? null : (src['path'] as String)),
+          projectId: (src['project_id'] as String),
+          rev: (src['rev'] == null ? null : (src['rev'] as String)),
+          skip: (src['skip'] == null ? null : (src['skip'] as num).toInt()),
+        );
+        }
+      case 'git.overview':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodGitOverview(
+          projectId: (src['project_id'] as String),
+        );
+        }
       case 'group_chat.get':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -10856,6 +11163,101 @@ final class MethodFsListDir extends Method {
       'method': 'fs.list_dir',
       'params': <String, dynamic>{
       if (path != null) 'path': path,
+    },
+    };
+}
+
+/// One commit: its whole message and the files it changed.
+final class MethodGitCommit extends Method {
+  const MethodGitCommit({
+    required this.id,
+    required this.projectId,
+  });
+
+  final String id;
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'git.commit',
+      'params': <String, dynamic>{
+      'id': id,
+      'project_id': projectId,
+    },
+    };
+}
+
+/// A unified diff: of commit `id` against its first parent, or without `id` of
+/// the work folder against its last commit (staged and not, untracked files as
+/// new). `path`: only that file.
+final class MethodGitDiff extends Method {
+  const MethodGitDiff({
+    this.id,
+    this.path,
+    required this.projectId,
+  });
+
+  final String? id;
+  final String? path;
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'git.diff',
+      'params': <String, dynamic>{
+      if (id != null) 'id': id,
+      if (path != null) 'path': path,
+      'project_id': projectId,
+    },
+    };
+}
+
+/// Commits of a project's repository, newest first: of `rev` (a branch, a tag or
+/// a commit id; none: where the work folder is), only those that touched `path`
+/// when given, after the first `skip`, at most `limit` (default 50, most `GIT_LOG_MAX`).
+final class MethodGitLog extends Method {
+  const MethodGitLog({
+    this.limit,
+    this.path,
+    required this.projectId,
+    this.rev,
+    this.skip,
+  });
+
+  final int? limit;
+  final String? path;
+  final String projectId;
+  final String? rev;
+  final int? skip;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'git.log',
+      'params': <String, dynamic>{
+      if (limit != null) 'limit': limit,
+      if (path != null) 'path': path,
+      'project_id': projectId,
+      if (rev != null) 'rev': rev,
+      if (skip != null) 'skip': skip,
+    },
+    };
+}
+
+/// What a project's work folder looks like in git now (feature `project_git`):
+/// the branch it is on, its uncommitted changes and its branches. Read-only, like
+/// every `git.*` read; a project without a folder or a repository answers empty.
+final class MethodGitOverview extends Method {
+  const MethodGitOverview({
+    required this.projectId,
+  });
+
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'git.overview',
+      'params': <String, dynamic>{
+      'project_id': projectId,
     },
     };
 }
@@ -13195,6 +13597,14 @@ sealed class ResponseBody {
           name: (src['name'] as String),
         );
         }
+      case 'git_commit':
+        return ResponseBodyGitCommit(value: GitCommitDetail.fromJson(json['value'] as Map<String, dynamic>));
+      case 'git_diff':
+        return ResponseBodyGitDiff(value: GitDiff.fromJson(json['value'] as Map<String, dynamic>));
+      case 'git_log':
+        return ResponseBodyGitLog(value: GitLog.fromJson(json['value'] as Map<String, dynamic>));
+      case 'git_overview':
+        return ResponseBodyGitOverview(value: GitOverview.fromJson(json['value'] as Map<String, dynamic>));
       case 'guideline':
         return ResponseBodyGuideline(value: GuidelineDetail.fromJson(json['value'] as Map<String, dynamic>));
       case 'guideline_affected':
@@ -13695,6 +14105,62 @@ final class ResponseBodyFile extends ResponseBody {
       'media_type': mediaType,
       'name': name,
     },
+    };
+}
+
+final class ResponseBodyGitCommit extends ResponseBody {
+  const ResponseBodyGitCommit({
+    required this.value,
+  });
+
+  final GitCommitDetail value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'git_commit',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyGitDiff extends ResponseBody {
+  const ResponseBodyGitDiff({
+    required this.value,
+  });
+
+  final GitDiff value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'git_diff',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyGitLog extends ResponseBody {
+  const ResponseBodyGitLog({
+    required this.value,
+  });
+
+  final GitLog value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'git_log',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyGitOverview extends ResponseBody {
+  const ResponseBodyGitOverview({
+    required this.value,
+  });
+
+  final GitOverview value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'git_overview',
+      'value': value.toJson(),
     };
 }
 

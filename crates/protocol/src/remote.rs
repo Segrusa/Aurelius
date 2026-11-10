@@ -105,6 +105,10 @@ fn method_needs(method: &Method) -> Needs {
         | Method::EventSubscribe { .. }
         | Method::MarkdownList { .. }
         | Method::MarkdownGet { .. }
+        | Method::GitOverview { .. }
+        | Method::GitLog { .. }
+        | Method::GitCommit { .. }
+        | Method::GitDiff { .. }
         | Method::SubagentList { .. }
         | Method::ActivityGet { .. }
         | Method::UpdateGet { .. }

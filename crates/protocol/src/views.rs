@@ -82,6 +82,129 @@ pub struct MarkdownFileContent {
     pub modified_ms: i64,
 }
 
+/// Most commits `git.log` answers with at once.
+pub const GIT_LOG_MAX: u32 = 200;
+/// Most changed files a `git.overview` or a `git.commit` lists; the rest is counted.
+pub const GIT_FILES_MAX: usize = 2_000;
+/// Largest diff `git.diff` sends; a longer one is cut there (`GitDiff::truncated`).
+pub const GIT_DIFF_MAX_BYTES: usize = 600 * 1024;
+
+/// One changed file: in the work folder now, or in a commit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GitChange {
+    /// Relative to the repository, with `/`.
+    pub path: String,
+    /// Where it was before a rename or copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// `added`, `modified`, `deleted`, `renamed`, `copied`, `untracked` or `conflict`.
+    /// Text, not an enum, so a new kind never breaks an older client.
+    pub status: String,
+    /// Staged for the next commit (work folder only).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub staged: bool,
+    /// Lines added and removed; none for a binary or an untracked file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removed: Option<u32>,
+}
+
+/// One branch of the repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GitBranch {
+    pub name: String,
+    /// A branch of a remote (`origin/main`), not a local one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remote: bool,
+    /// The branch the work folder is on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub current: bool,
+    /// Its latest commit: id, first line, author and time.
+    pub head: String,
+    pub subject: String,
+    pub author: String,
+    pub at_ms: i64,
+    /// What it follows (`origin/main`), and how far it is ahead of and behind it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub behind: Option<u32>,
+    /// The work folder of a worktree that has this branch checked out, other than the project's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<String>,
+}
+
+/// `git.overview` (feature `project_git`): what a project's work folder looks like in
+/// git now. Read-only: nothing here or in the other `git.*` reads changes the repository.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GitOverview {
+    /// The project's work folder; none: the project has none on this server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+    /// The folder is (inside) a git repository. False: everything below is empty.
+    pub repository: bool,
+    /// The branch the work folder is on; none on a detached HEAD or without a commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// The commit the work folder is on; none in a repository without commits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    /// Uncommitted changes of the work folder, staged ones first, then by path.
+    pub changes: Vec<GitChange>,
+    /// More changed files than `GIT_FILES_MAX`; the rest is left out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub changes_truncated: bool,
+    /// Local branches (latest commit first), then the remote ones.
+    pub branches: Vec<GitBranch>,
+}
+
+/// One commit in a list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GitCommit {
+    pub id: String,
+    /// The first line of its message.
+    pub subject: String,
+    pub author: String,
+    pub email: String,
+    pub at_ms: i64,
+    pub parents: Vec<String>,
+    /// Branches and tags that point at it (`main`, `origin/main`, `tag: v1`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<String>,
+}
+
+/// `git.log`: commits, newest first.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GitLog {
+    pub commits: Vec<GitCommit>,
+    /// Older commits follow: ask again with `skip` raised by what came.
+    pub has_more: bool,
+}
+
+/// `git.commit`: one commit whole, without the text of its changes (`git.diff` has it).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GitCommitDetail {
+    pub commit: GitCommit,
+    /// The message after its first line.
+    pub body: String,
+    /// Against its first parent (for a merge: what the merge brought in).
+    pub files: Vec<GitChange>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub files_truncated: bool,
+}
+
+/// `git.diff`: a unified diff as git prints it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GitDiff {
+    pub text: String,
+    /// Longer than `GIT_DIFF_MAX_BYTES`: cut at the end of a line.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+}
+
 /// Largest part of an uploaded file `upload.get` sends at once (well under the frame limit).
 pub const UPLOAD_CHUNK_BYTES: u64 = 2 * 1024 * 1024;
 /// Largest side of a thumbnail `upload.get` makes.
