@@ -393,6 +393,12 @@ async fn run_inner(
     if interrupted > 0 {
         tracing::warn!(interrupted, "chat runs interrupted by a previous daemon stop");
     }
+    // After that, so a card follows what the interrupted runs left of its main task.
+    match tokio::task::block_in_place(|| service.reconcile_ticket_columns()) {
+        Ok(0) => {}
+        Ok(moved) => tracing::warn!(moved, "cards were in another column than their main task says and were put back"),
+        Err(err) => tracing::warn!(error = %err, "could not check the columns of the board"),
+    }
 
     // The load limits: what the user set in the app, else the environment.
     aurelius_host::chrome::load_stored(service.store());

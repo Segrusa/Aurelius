@@ -513,6 +513,22 @@ pub fn facts(conn: &Connection, id: TicketId) -> Result<Option<TicketFacts>, Sto
         .optional()?)
 }
 
+/// The cards that are in another column than their main task says
+/// (`TicketFacts::misplaced`), as (ticket, project, where it is, where it belongs).
+/// None in a sound database: every write leaves each card where it belongs.
+pub fn misplaced(conn: &Connection) -> Result<Vec<(TicketId, ProjectId, ColumnKind, ColumnKind)>, StorageError> {
+    let mut stmt = conn.prepare("SELECT id, project_id FROM tickets WHERE archived_at_ms IS NULL ORDER BY number")?;
+    let ids: Vec<(String, String)> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+    let mut out = Vec::new();
+    for (id, project) in ids {
+        let (Ok(id), Ok(project)) = (TicketId::parse(&id), ProjectId::parse(&project)) else { continue };
+        if let Some((at, to)) = facts(conn, id)?.and_then(|f| f.misplaced()) {
+            out.push((id, project, at, to));
+        }
+    }
+    Ok(out)
+}
+
 /// `ticket::ticket_work` of a ticket as it is now; none when it is unknown.
 pub fn work(conn: &Connection, id: TicketId) -> Result<Option<TicketWork>, StorageError> {
     Ok(facts(conn, id)?.map(|f| aurelius_domain::ticket::ticket_work(&f)))

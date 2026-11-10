@@ -1,8 +1,10 @@
 //! The engine's side of a ticket (impact analysis §3.3–3.4): its main task and
 //! the card that follows it. The task's status is the truth for the engine;
-//! the column is what the board sees. The card moves in one place, `on_status`,
+//! the column is what the board sees. Where a card belongs is said in one place,
+//! `aurelius_domain::ticket::column_of`; the engine moves it there in `on_status`,
 //! called from `task_line::set_status` for every status change, and only for
-//! the main task of a ticket (no parent, `tickets.root_task_id`).
+//! the main task of a ticket (no parent, `tickets.root_task_id`). A card that is
+//! elsewhere after a restart is put back by `put_back_misplaced`.
 //!
 //! | Column      | Main task                                  |
 //! |-------------|--------------------------------------------|
@@ -51,22 +53,6 @@ pub(crate) fn root_of(conn: &rusqlite::Connection, task: TaskId) -> Result<Optio
 
 pub(crate) fn is_root(conn: &rusqlite::Connection, task: TaskId) -> Result<bool, StorageError> {
     Ok(root_of(conn, task)?.is_some())
-}
-
-/// Where the card of a main task in `status` belongs; none: where it is.
-fn column_for(status: TaskStatus, waiting_reason: Option<&str>) -> Option<ColumnKind> {
-    match status {
-        // Waiting for the dispatcher, or for the owner's turn or job (Todo); a
-        // resumption passes through Queued too, so it moves nothing.
-        TaskStatus::Draft | TaskStatus::Queued => None,
-        TaskStatus::Waiting if waiting_reason == Some(WAITING_PLAN_REVIEW) => Some(ColumnKind::PlanReview),
-        // Waiting for the Claude login of its board member: it stays where it is (Todo or Doing, `needs: login`).
-        TaskStatus::Waiting if waiting_reason == Some(aurelius_domain::task::WAITING_LOGIN) => None,
-        TaskStatus::Running | TaskStatus::Waiting | TaskStatus::Failed => Some(ColumnKind::Doing),
-        TaskStatus::Review => Some(ColumnKind::Review),
-        TaskStatus::Succeeded => Some(ColumnKind::Done),
-        TaskStatus::Cancelled => Some(ColumnKind::Backlog),
-    }
 }
 
 /// An event of the ticket by the engine, with the next version of the ticket.
@@ -209,13 +195,32 @@ fn worked_by(tx: &Tx<'_>, task: TaskId) -> Result<Option<Actor>, StorageError> {
     Ok(task_store::status_and_employee(tx, task)?.and_then(|(_, e)| e).map(|employee_id| Actor::Employee { employee_id }))
 }
 
+/// Put every card that is elsewhere back where its main task says (`column_of`), with
+/// a line in its discussion. For the start of the server: a write always leaves a card
+/// where it belongs, so one that is not was cut off halfway. Done is closed and only
+/// `ticket.accept` fills it, so a card is neither put there nor taken from there.
+pub(crate) fn put_back_misplaced(tx: &Tx<'_>) -> Result<Vec<EventNotice>, StorageError> {
+    let mut notices = Vec::new();
+    for (ticket, project, from, to) in store::misplaced(tx)? {
+        if from == ColumnKind::Done || to == ColumnKind::Done {
+            continue;
+        }
+        let target = company_store::column_of_kind(tx, to)?;
+        store::move_to(tx, ticket, target.id, None)?;
+        notices.push(ticket_event(tx, ticket, project, EventKind::TicketMoved, None, json!({ "from": from, "to": to, "reason": "state" }))?);
+        notices.extend(column_line(tx, ticket, None, from, to, Some("put the card where its work is"))?);
+    }
+    Ok(notices)
+}
+
 /// The hook of `task_line::set_status`: the card of a main task follows its status.
 pub(crate) fn on_status(tx: &Tx<'_>, task: TaskId, status: TaskStatus, waiting_reason: Option<&str>) -> Result<Vec<EventNotice>, StorageError> {
     // Not a main task: a ticket's test task that ended may still have to move its card.
     let Some((ticket, project, column)) = root_of(tx, task)? else { return crate::task::testing::on_ended(tx, task, status) };
-    let Some(to) = column_for(status, waiting_reason) else { return Ok(vec![]) };
-    // A report goes to Testing first when the company has a tester.
-    let to = if to == ColumnKind::Review { crate::task::testing::column_after_report(tx)? } else { to };
+    // The one table of the domain. A report goes to Testing first when the company
+    // has a tester: its test task is made right after this (`reported`).
+    let tests_open = status == TaskStatus::Review && crate::task::testing::column_after_report(tx)? == ColumnKind::Testing;
+    let Some(to) = aurelius_domain::ticket::column_of(Some(status), waiting_reason, tests_open) else { return Ok(vec![]) };
     if status == TaskStatus::Failed && to == column {
         return failed_in_place(tx, task, ticket);
     }

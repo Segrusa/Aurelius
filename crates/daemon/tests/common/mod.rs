@@ -129,6 +129,10 @@ fn usernames(root: &Path) -> Vec<String> {
 pub async fn stop(root: &Path, handle: Daemon) {
     aurelius_client::bridge::shutdown_daemon(root).await.expect("shutdown");
     tokio::time::timeout(Duration::from_secs(10), handle).await.expect("daemon stops").expect("join").expect("clean stop");
+    // Whatever the test did, it left every card in the column its main task says
+    // (`aurelius_domain::ticket::column_of`): each test checks that table for free.
+    let misplaced = aurelius_storage::tickets::misplaced(&db(root)).expect("read the board");
+    assert!(misplaced.is_empty(), "cards in another column than their main task says (ticket, project, is in, belongs in): {misplaced:?}");
 }
 
 /// The daemon's database, read-only.

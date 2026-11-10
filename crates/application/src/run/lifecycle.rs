@@ -545,6 +545,18 @@ impl CommandService {
             })
             .map_err(storage_error)
     }
+
+    /// Startup, after `reconcile_chat_runs`: cards that are in another column than
+    /// their main task says go back where they belong. Returns how many.
+    pub fn reconcile_ticket_columns(&self) -> Result<usize, AppError> {
+        self.store
+            .write(|tx| {
+                let before = aurelius_storage::tickets::misplaced(tx)?.len();
+                crate::task::ticket_line::put_back_misplaced(tx)?;
+                Ok(before - aurelius_storage::tickets::misplaced(tx)?.len())
+            })
+            .map_err(storage_error)
+    }
 }
 
 /// The setting for how long a run may go without progress, in seconds.

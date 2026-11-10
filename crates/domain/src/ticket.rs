@@ -272,6 +272,51 @@ pub struct TicketFacts {
     pub tests_waiting: Option<String>,
 }
 
+/// The column a ticket's card belongs in, from its main task: the one table the
+/// engine moves the card by and every card is checked against.
+///
+/// | Main task                                   | Column      |
+/// |---------------------------------------------|-------------|
+/// | none, or cancelled                          | Backlog     |
+/// | Draft (no owner yet)                        | Todo        |
+/// | Running, Waiting (not for a plan), Failed   | Doing       |
+/// | Waiting for its plan's review               | Plan review |
+/// | Review, while its tests are open            | Testing     |
+/// | Review                                      | Review      |
+/// | Succeeded                                   | Done        |
+///
+/// None: the status does not say. A queued task waits for the dispatcher or its
+/// owner's turn in Todo, and passes through Queued again in Doing when it resumes;
+/// one that waits for a Claude login waits wherever it was. The card stays then.
+/// `tests_open`: the ticket's test task has not ended, or is about to be made.
+pub fn column_of(root: Option<crate::task::TaskStatus>, root_waiting: Option<&str>, tests_open: bool) -> Option<ColumnKind> {
+    use crate::task::{TaskStatus as S, WAITING_LOGIN, WAITING_PLAN_REVIEW};
+    Some(match root {
+        None | Some(S::Cancelled) => ColumnKind::Backlog,
+        Some(S::Draft) => ColumnKind::Todo,
+        Some(S::Queued) => return None,
+        Some(S::Waiting) if root_waiting == Some(WAITING_LOGIN) => return None,
+        Some(S::Waiting) if root_waiting == Some(WAITING_PLAN_REVIEW) => ColumnKind::PlanReview,
+        Some(S::Running | S::Waiting | S::Failed) => ColumnKind::Doing,
+        Some(S::Review) if tests_open => ColumnKind::Testing,
+        Some(S::Review) => ColumnKind::Review,
+        Some(S::Succeeded) => ColumnKind::Done,
+    })
+}
+
+impl TicketFacts {
+    /// Where the card belongs by `column_of`; none: where it is.
+    pub fn belongs_in(&self) -> Option<ColumnKind> {
+        column_of(self.root, self.root_waiting.as_deref(), self.tests.is_some())
+    }
+
+    /// The card is in another column than its main task says: (where it is, where it belongs).
+    pub fn misplaced(&self) -> Option<(ColumnKind, ColumnKind)> {
+        let (at, to) = (self.column?, self.belongs_in()?);
+        (at != to).then_some((at, to))
+    }
+}
+
 /// What a ticket needs from a board member and what still works on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TicketWork {
@@ -1124,6 +1169,27 @@ mod work_tests {
         let asked = TicketFacts { tests: Some(S::Waiting), tests_waiting: Some("input".into()), ..facts(ColumnKind::Testing, Some(S::Review)) };
         assert_eq!(ticket_work(&asked).attention, Some(TicketAttentionKind::Input));
         assert_eq!(ticket_work(&facts(ColumnKind::Testing, Some(S::Review))).attention, Some(TicketAttentionKind::Stalled));
+    }
+
+    #[test]
+    fn the_card_belongs_where_its_main_task_says() {
+        assert_eq!(column_of(None, None, false), Some(ColumnKind::Backlog));
+        assert_eq!(column_of(Some(S::Cancelled), None, false), Some(ColumnKind::Backlog));
+        assert_eq!(column_of(Some(S::Draft), None, false), Some(ColumnKind::Todo));
+        assert_eq!(column_of(Some(S::Running), None, false), Some(ColumnKind::Doing));
+        assert_eq!(column_of(Some(S::Failed), None, false), Some(ColumnKind::Doing));
+        assert_eq!(column_of(Some(S::Waiting), Some("input"), false), Some(ColumnKind::Doing));
+        assert_eq!(column_of(Some(S::Waiting), Some("plan_review"), false), Some(ColumnKind::PlanReview));
+        assert_eq!(column_of(Some(S::Review), None, true), Some(ColumnKind::Testing));
+        assert_eq!(column_of(Some(S::Review), None, false), Some(ColumnKind::Review));
+        assert_eq!(column_of(Some(S::Succeeded), None, false), Some(ColumnKind::Done));
+        // Queued and waiting for a login do not say: the card stays.
+        assert_eq!(column_of(Some(S::Queued), None, false), None);
+        assert_eq!(column_of(Some(S::Waiting), Some("login"), false), None);
+        let stuck = TicketFacts { tests: None, ..facts(ColumnKind::Testing, Some(S::Review)) };
+        assert_eq!(stuck.misplaced(), Some((ColumnKind::Testing, ColumnKind::Review)));
+        assert_eq!(facts(ColumnKind::Doing, Some(S::Queued)).misplaced(), None);
+        assert_eq!(facts(ColumnKind::Review, Some(S::Review)).misplaced(), None);
     }
 
     #[test]
