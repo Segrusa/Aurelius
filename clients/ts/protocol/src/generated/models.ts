@@ -2392,6 +2392,10 @@ export type HostResult =
   | ({ type: "power" } & PowerState)
   | ({ type: "remote" } & RemoteStatus)
   | ({ type: "shutting_down" })
+  /**
+   * `ticket.land`: what was done with the ticket's branch.
+   */
+  | ({ type: "ticket_landed" } & TicketLanded)
   | ({ type: "trace_setting" } & TraceSetting)
   | ({ type: "update" } & UpdateStatus)
   /**
@@ -2508,6 +2512,18 @@ export type HostWrite =
    * who revoked it. Answers `Done`. Not for apps.
    */
   | ({ method: "session.revoke"; params: { session_id: string } })
+  /**
+   * A board member's decision on a ticket's branch (feature `ticket_landing`). `how`:
+   * `merge` merges it into the branch it was made from, in the project's folder, as
+   * one merge commit by this board member; `push` pushes it to the repository's
+   * remote and answers where a pull request is opened. Refused (`validation`, with
+   * the reason) when the ticket has no branch, has work in its worktree that is not
+   * committed, has nothing its base lacks, when the project's folder is on another
+   * branch or has changes of its own, or when the merge conflicts (nothing is left
+   * half merged). Neither closes the ticket: `ticket.accept` does. Answers
+   * `TicketLanded`. Not for apps.
+   */
+  | ({ method: "ticket.land"; params: { how: string; ticket_id: string } })
   /**
    * Trace mode on or off for every run that starts afterwards (feature `run_trace`).
    * Off also forgets the traces kept so far.
@@ -5785,6 +5801,29 @@ export interface TicketFollowersView {
 }
 
 /**
+ * `ticket.land`: the branch was merged or pushed.
+ */
+export interface TicketLanded {
+  /**
+   * The branch it was merged into, or would be by a pull request.
+   */
+  base: string;
+  branch: string;
+  /**
+   * The merge commit, or the commit that was pushed.
+   */
+  commit: string;
+  /**
+   * `merged` or `pushed`.
+   */
+  how: string;
+  /**
+   * Where the pull request is opened (GitHub, GitLab); none for a remote we do not know.
+   */
+  url?: string | null;
+}
+
+/**
  * Why a ticket cannot run yet (`TicketView::needs`).
  */
 export type TicketNeed =
@@ -5863,6 +5902,16 @@ export interface TicketView {
   done_at_ms?: number | null;
   id: string;
   labels: string[];
+  /**
+   * What a board member did with the branch (`ticket.land`, feature `ticket_landing`):
+   * `merged` into `base_branch`, or `pushed` for a pull request. Text, so a new way
+   * never breaks an older client. Left out while the branch is only kept.
+   */
+  landed?: string | null;
+  /**
+   * Where the pull request of a pushed branch is opened, when the remote is a known host.
+   */
+  landed_url?: string | null;
   /**
    * Whose Claude login its runs use (protocol 5): the creator, unless a
    * board member took it over on their own login (`ticket.use_my_login`).

@@ -40,4 +40,4 @@ pub use events::Event;
 pub use method::{ClaudeLoginInputParams, HelloParams, KeyExportParams, LoginParams, Method, client_feature};
 pub use rpc::{Call, ClaudeLoginPrompt, FEATURES, HelloResult, Outcome, PROTOCOL_MAJOR, Request, ResponseBody, ServerMessage, feature, incompatible_message, reject_unparsed};
 pub use views::*;
-pub use write::{HostResult, HostWrite, Receipt, SetPasswordParams, UserCreateParams, VaultCreateParams, VaultUpdateParams, WriteMethod, WriteResult};
+pub use write::{HostResult, HostWrite, Receipt, SetPasswordParams, TicketLanded, UserCreateParams, VaultCreateParams, VaultUpdateParams, WriteMethod, WriteResult};

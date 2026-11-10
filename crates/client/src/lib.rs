@@ -925,6 +925,11 @@ impl Client {
         self.host(HostWrite::UserDisable { user_id }, done!(User)).await
     }
 
+    /// A board member's decision on a ticket's branch: `merge` it into its base, or `push` it for a pull request.
+    pub async fn land_ticket(&self, ticket_id: aurelius_domain::TicketId, how: &str) -> Result<aurelius_protocol::TicketLanded, ClientError> {
+        self.host(HostWrite::TicketLand { ticket_id, how: how.to_owned() }, done!(TicketLanded)).await
+    }
+
     /// Make a board member an administrator or an ordinary one again (as an administrator).
     pub async fn set_admin(&self, user_id: aurelius_domain::UserId, admin: bool) -> Result<aurelius_domain::user::UserView, ClientError> {
         self.host(HostWrite::UserSetAdmin { user_id, admin }, done!(User)).await

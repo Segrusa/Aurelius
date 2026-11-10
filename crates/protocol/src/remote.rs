@@ -186,6 +186,8 @@ fn host_needs(host: &HostWrite) -> Needs {
         HostWrite::ClaudeLoginLink | HostWrite::ClaudeLoginCancel { .. } | HostWrite::ClaudeLoginUnlink => Needs::Cap(Read),
         // The inbox is the user's own: reading, dismissing.
         HostWrite::NotificationMarkAllRead | HostWrite::NotificationMarkRead { .. } | HostWrite::NotificationDismiss { .. } | HostWrite::NotificationDismissAll => Needs::Cap(Read),
+        // What becomes of a ticket's branch is decided like the ticket itself.
+        HostWrite::TicketLand { .. } => Needs::Cap(TaskControl),
         HostWrite::SecretSet { .. }
         | HostWrite::McpAdd(_)
         | HostWrite::McpRemove { .. }

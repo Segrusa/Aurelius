@@ -28,6 +28,7 @@ pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite, user: Option
             crate::runtimes::store_secret(shared, connection_id, secret).await?;
             HostResult::Done
         }
+        HostWrite::TicketLand { ticket_id, how } => HostResult::TicketLanded(crate::worktrees::land(shared, ticket_id, user_id, &how).await?),
         HostWrite::McpSet { enabled } => HostResult::McpServers(crate::mcp_servers::set(shared, enabled, user_id).await?),
         HostWrite::McpAdd(params) => HostResult::McpServers(crate::mcp_servers::add(shared, params, user_id).await?),
         HostWrite::McpRemove { name } => HostResult::McpServers(crate::mcp_servers::remove(shared, name, user_id).await?),

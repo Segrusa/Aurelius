@@ -212,6 +212,17 @@ pub enum HostWrite {
     /// active administrator stays one (`validation`). Answers `User`. Not for apps.
     #[serde(rename = "user.set_admin")]
     UserSetAdmin { user_id: aurelius_domain::UserId, admin: bool },
+    /// A board member's decision on a ticket's branch (feature `ticket_landing`). `how`:
+    /// `merge` merges it into the branch it was made from, in the project's folder, as
+    /// one merge commit by this board member; `push` pushes it to the repository's
+    /// remote and answers where a pull request is opened. Refused (`validation`, with
+    /// the reason) when the ticket has no branch, has work in its worktree that is not
+    /// committed, has nothing its base lacks, when the project's folder is on another
+    /// branch or has changes of its own, or when the merge conflicts (nothing is left
+    /// half merged). Neither closes the ticket: `ticket.accept` does. Answers
+    /// `TicketLanded`. Not for apps.
+    #[serde(rename = "ticket.land")]
+    TicketLand { ticket_id: aurelius_domain::TicketId, how: String },
     /// Connect the session's own Claude login: the server starts `claude auth
     /// login` for `<data>/logins/<user_id>/` and answers `ClaudeLoginLink`. What
     /// Claude asks (the sign-in link, the code) comes to this connection only as
@@ -382,6 +393,7 @@ impl HostWrite {
         "user.set_password",
         "user.disable",
         "user.set_admin",
+        "ticket.land",
         "claude_login.link",
         "claude_login.cancel",
         "claude_login.unlink",
@@ -431,6 +443,8 @@ pub enum HostResult {
     DirListing(DirListing),
     /// `user.disable`: the board member as it is now.
     User(aurelius_domain::user::UserView),
+    /// `ticket.land`: what was done with the ticket's branch.
+    TicketLanded(TicketLanded),
     /// `claude_login.link`: the link that runs; its prompts follow as
     /// `ServerMessage::ClaudeLoginPrompt` with this id.
     ClaudeLoginLink { link_id: String },
@@ -439,6 +453,21 @@ pub enum HostResult {
     /// `vault.create` / `vault.update` / `vault.archive`: the item as it is now.
     /// A replayed receipt has no value: read it with `vault.list` or `vault.reveal`.
     VaultItem(aurelius_domain::vault::VaultItemView),
+}
+
+/// `ticket.land`: the branch was merged or pushed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TicketLanded {
+    /// `merged` or `pushed`.
+    pub how: String,
+    pub branch: String,
+    /// The branch it was merged into, or would be by a pull request.
+    pub base: String,
+    /// The merge commit, or the commit that was pushed.
+    pub commit: String,
+    /// Where the pull request is opened (GitHub, GitLab); none for a remote we do not know.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 impl HostResult {

@@ -7230,6 +7230,8 @@ sealed class HostResult {
         return HostResultRemote(value: RemoteStatus.fromJson(json as Map<String, dynamic>));
       case 'shutting_down':
         return const HostResultShuttingDown();
+      case 'ticket_landed':
+        return HostResultTicketLanded(value: TicketLanded.fromJson(json as Map<String, dynamic>));
       case 'trace_setting':
         return HostResultTraceSetting(value: TraceSetting.fromJson(json as Map<String, dynamic>));
       case 'update':
@@ -7496,6 +7498,21 @@ final class HostResultShuttingDown extends HostResult {
     };
 }
 
+/// `ticket.land`: what was done with the ticket's branch.
+final class HostResultTicketLanded extends HostResult {
+  const HostResultTicketLanded({
+    required this.value,
+  });
+
+  final TicketLanded value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'ticket_landed',
+      ...value.toJson(),
+    };
+}
+
 final class HostResultTraceSetting extends HostResult {
   const HostResultTraceSetting({
     required this.value,
@@ -7747,6 +7764,14 @@ sealed class HostWrite {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return HostWriteSessionRevoke(
           sessionId: (src['session_id'] as String),
+        );
+        }
+      case 'ticket.land':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteTicketLand(
+          how: (src['how'] as String),
+          ticketId: (src['ticket_id'] as String),
         );
         }
       case 'trace.set_enabled':
@@ -8335,6 +8360,34 @@ final class HostWriteSessionRevoke extends HostWrite {
       'method': 'session.revoke',
       'params': <String, dynamic>{
       'session_id': sessionId,
+    },
+    };
+}
+
+/// A board member's decision on a ticket's branch (feature `ticket_landing`). `how`:
+/// `merge` merges it into the branch it was made from, in the project's folder, as
+/// one merge commit by this board member; `push` pushes it to the repository's
+/// remote and answers where a pull request is opened. Refused (`validation`, with
+/// the reason) when the ticket has no branch, has work in its worktree that is not
+/// committed, has nothing its base lacks, when the project's folder is on another
+/// branch or has changes of its own, or when the merge conflicts (nothing is left
+/// half merged). Neither closes the ticket: `ticket.accept` does. Answers
+/// `TicketLanded`. Not for apps.
+final class HostWriteTicketLand extends HostWrite {
+  const HostWriteTicketLand({
+    required this.how,
+    required this.ticketId,
+  });
+
+  final String how;
+  final String ticketId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'ticket.land',
+      'params': <String, dynamic>{
+      'how': how,
+      'ticket_id': ticketId,
     },
     };
 }
@@ -17717,6 +17770,43 @@ final class TicketFollowersView {
   };
 }
 
+/// `ticket.land`: the branch was merged or pushed.
+final class TicketLanded {
+  const TicketLanded({
+    required this.base,
+    required this.branch,
+    required this.commit,
+    required this.how,
+    this.url,
+  });
+
+  /// The branch it was merged into, or would be by a pull request.
+  final String base;
+  final String branch;
+  /// The merge commit, or the commit that was pushed.
+  final String commit;
+  /// `merged` or `pushed`.
+  final String how;
+  /// Where the pull request is opened (GitHub, GitLab); none for a remote we do not know.
+  final String? url;
+
+  factory TicketLanded.fromJson(Map<String, dynamic> json) => TicketLanded(
+    base: (json['base'] as String),
+    branch: (json['branch'] as String),
+    commit: (json['commit'] as String),
+    how: (json['how'] as String),
+    url: (json['url'] == null ? null : (json['url'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'base': base,
+    'branch': branch,
+    'commit': commit,
+    'how': how,
+    if (url != null) 'url': url,
+  };
+}
+
 /// Why a ticket cannot run yet (`TicketView::needs`).
 enum TicketNeed {
   /// `login_user` has no working Claude login (none, expired, or disabled):
@@ -17776,6 +17866,8 @@ final class TicketView {
     this.doneAtMs,
     required this.id,
     required this.labels,
+    this.landed,
+    this.landedUrl,
     required this.loginUser,
     required this.loginUsername,
     this.needs,
@@ -17834,6 +17926,12 @@ final class TicketView {
   final int? doneAtMs;
   final String id;
   final List<String> labels;
+  /// What a board member did with the branch (`ticket.land`, feature `ticket_landing`):
+  /// `merged` into `base_branch`, or `pushed` for a pull request. Text, so a new way
+  /// never breaks an older client. Left out while the branch is only kept.
+  final String? landed;
+  /// Where the pull request of a pushed branch is opened, when the remote is a known host.
+  final String? landedUrl;
   /// Whose Claude login its runs use (protocol 5): the creator, unless a
   /// board member took it over on their own login (`ticket.use_my_login`).
   final String loginUser;
@@ -17891,6 +17989,8 @@ final class TicketView {
     doneAtMs: (json['done_at_ms'] == null ? null : (json['done_at_ms'] as num).toInt()),
     id: (json['id'] as String),
     labels: (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    landed: (json['landed'] == null ? null : (json['landed'] as String)),
+    landedUrl: (json['landed_url'] == null ? null : (json['landed_url'] as String)),
     loginUser: (json['login_user'] as String),
     loginUsername: (json['login_username'] as String),
     needs: (json['needs'] == null ? null : TicketNeed.fromJson(json['needs'] as String)),
@@ -17933,6 +18033,8 @@ final class TicketView {
     if (doneAtMs != null) 'done_at_ms': doneAtMs,
     'id': id,
     'labels': labels,
+    if (landed != null) 'landed': landed,
+    if (landedUrl != null) 'landed_url': landedUrl,
     'login_user': loginUser,
     'login_username': loginUsername,
     if (needs != null) 'needs': needs?.toJson(),

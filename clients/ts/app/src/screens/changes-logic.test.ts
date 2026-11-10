@@ -2,6 +2,7 @@ import type { GitBranch } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
   ago,
+  branchLine,
   changesLine,
   changesSearch,
   counts,
@@ -146,5 +147,14 @@ describe("words for changes and branches", () => {
     expect(ago(now - 5 * 60_000, now)).toBe("5 min ago");
     expect(ago(now - 3 * 3_600_000, now)).toBe("3 h ago");
     expect(ago(now - 2 * 86_400_000, now)).toBe("2 d ago");
+  });
+});
+
+describe("what the review bar says of a ticket's branch", () => {
+  it("follows what a board member did with it", () => {
+    const t = { branch: "ticket/1-x", base_branch: "main" };
+    expect(branchLine(t)).toBe("The work is on ticket/1-x, not in main yet:");
+    expect(branchLine({ ...t, landed: "pushed" })).toBe("ticket/1-x is pushed for a pull request into main.");
+    expect(branchLine({ ...t, landed: "merged" })).toBe("ticket/1-x is merged into main.");
   });
 });

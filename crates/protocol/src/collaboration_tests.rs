@@ -192,6 +192,8 @@ fn ticket() -> TicketView {
         design_url: None,
         branch: None,
         base_branch: None,
+        landed: None,
+        landed_url: None,
         attention: None,
         busy: Vec::new(),
         id: TicketId::new(),

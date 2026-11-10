@@ -12,6 +12,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { expectBody } from "@aurelius/client";
 import type { AgentMode, TicketPriority, TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
@@ -58,17 +59,17 @@ import {
   takeOverOffered,
   testingNote,
 } from "./board-logic";
-import { GIT_FEATURE, ticketChanges } from "./changes-logic";
+import { branchLine, GIT_FEATURE, LANDING_FEATURE, ticketChanges } from "./changes-logic";
 import { TicketChat } from "./chat";
 import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
-import { FormDialog, Loading, Problem } from "./org-kit";
+import { FormDialog, failureOf, Loading, Problem } from "./org-kit";
 import { TicketOdometer } from "./run-card";
 import { lastFailure, lastSummaryFailed } from "./run-logic";
 import { FileChips, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
-import { ConfirmButton } from "./settings-kit";
+import { ConfirmButton, openWeb } from "./settings-kit";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
 import {
   ColumnGlyph,
@@ -514,6 +515,7 @@ function ReviewGate({
           <Button label={r.label} key={r.label} isDisabled={busy} onClick={() => reply(r.text)} />
         ))}
       </div>
+      <BranchDecision t={t} />
       <div {...stylex.props(styles.buttons)}>
         <Button variant="primary" label="Mark done" isDisabled={!ready} onClick={done}>
           {keyed ? (
@@ -931,6 +933,60 @@ function Activity({ id }: { id: string }) {
 
 type Section = "ticket" | "discussion" | "activity";
 
+/**
+ * What becomes of a ticket's branch is a board member's decision, taken next to accepting it
+ * (feature `ticket_landing`): merge it into the branch it was made from, or push it for a pull
+ * request. Neither closes the ticket; Mark done does, and a branch that is only kept stays.
+ */
+function BranchDecision({ t }: { t: TicketView }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const { features } = useLinkState();
+  const [busy, setBusy] = useState(false);
+  if (!t.branch || !t.base_branch || !features.includes(LANDING_FEATURE)) return null;
+  const land = async (how: "merge" | "push") => {
+    setBusy(true);
+    try {
+      const receipt = await connection.write("ticket.land", { ticket_id: t.id, how }, { retry: false });
+      const landed =
+        receipt.result.kind === "host" && receipt.result.value.type === "ticket_landed" ? receipt.result.value : null;
+      await client.invalidateQueries({ queryKey: ["tickets"] });
+      await client.invalidateQueries({ queryKey: ["git"] });
+      toast(how === "merge" ? `${t.branch} is merged into ${t.base_branch}.` : `${t.branch} is pushed.`);
+      if (landed?.url) openWeb(landed.url);
+    } catch (e) {
+      toast(failureOf(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const merged = t.landed === "merged";
+  return (
+    <div {...stylex.props(styles.buttonsCentered)}>
+      <span {...stylex.props(styles.thirdSmall)}>{branchLine(t)}</span>
+      {merged ? null : (
+        <ConfirmButton
+          label={`Merge into ${t.base_branch}`}
+          question={`Merge ${t.branch} into ${t.base_branch} in the project's folder? It becomes one merge commit under your name. Nothing is pushed.`}
+          disabled={busy}
+          onConfirm={() => void land("merge")}
+        />
+      )}
+      {merged ? null : (
+        <ConfirmButton
+          label={t.landed === "pushed" ? "Push again" : "Push for a pull request"}
+          question={`Push ${t.branch} to the repository's remote? It leaves this server; you open the pull request there.`}
+          disabled={busy}
+          onConfirm={() => void land("push")}
+        />
+      )}
+      {t.landed_url && !merged ? (
+        <Button label="Open pull request" onClick={() => openWeb(t.landed_url as string)} />
+      ) : null}
+    </div>
+  );
+}
+
 export function TicketPanel({ id, onClose, message }: { id: string; onClose: () => void; message?: string }) {
   const platform = usePlatform();
   const { hostId } = useLinkState();
@@ -1319,6 +1375,7 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
                         <Row name="Branch">
                           <span {...stylex.props(styles.mono)}>{t.branch}</span>
                           {t.base_branch ? <span {...stylex.props(styles.third)}> from {t.base_branch}</span> : null}
+                          {t.landed ? <span {...stylex.props(styles.third)}> · {t.landed}</span> : null}
                           {features.includes(GIT_FEATURE) ? (
                             <Button
                               size="sm"

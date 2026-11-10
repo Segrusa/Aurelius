@@ -186,3 +186,88 @@ async fn a_ticket_works_on_its_own_branch_in_its_own_worktree_and_leaves_no_work
     assert_eq!(folders.first().map(|f| std::fs::canonicalize(f).unwrap()), Some(std::fs::canonicalize(&plain).unwrap()));
     common::stop(dir.path(), daemon).await;
 }
+
+fn code<T: std::fmt::Debug>(result: Result<T, aurelius_client::ClientError>) -> (aurelius_domain::ErrorCode, String) {
+    match result {
+        Err(aurelius_client::ClientError::Protocol(err)) => (err.code, err.message),
+        other => panic!("expected a protocol error, got {other:?}"),
+    }
+}
+
+/// `ticket.land`: a board member merges a ticket's branch into its base or pushes it for a
+/// pull request; whatever could lose or mix up work is refused, and a conflict is undone.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_board_member_merges_or_pushes_a_tickets_branch_and_nothing_is_left_half_done() {
+    use aurelius_domain::ErrorCode;
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = common::start_with(dir.path(), Arc::new(Recording::default())).await;
+    let client = common::connect(dir.path()).await;
+    assert!(client.supports(aurelius_protocol::feature::TICKET_LANDING));
+    // The project's repository follows a remote (a bare one next to it).
+    let remote = dir.path().join("remote.git");
+    std::fs::create_dir_all(&remote).unwrap();
+    git(&remote, &["init", "-q", "--bare", "-b", "main"]);
+    let repo = dir.path().join("repo");
+    repository(&repo);
+    git(&repo, &["remote", "add", "origin", &remote.display().to_string()]);
+    git(&repo, &["push", "-q", "-u", "origin", "main"]);
+    let atlas = project(&client, "Atlas", &repo).await;
+    let forge = employee(&client, "Forge").await;
+    let login = done_ticket(&client, atlas, "Fix the login", forge).await;
+    let id = login.ticket.id;
+    let work = worktree_of(dir.path(), id).unwrap();
+
+    // Nothing to merge yet, and never while something in the worktree is not committed.
+    let (why, said) = code(client.land_ticket(id, "merge").await);
+    assert!(why == ErrorCode::Validation && said.contains("nothing to merge"), "{said}");
+    std::fs::write(work.join("src/login.rs"), "pub fn login() {}\n").unwrap();
+    let (_, said) = code(client.land_ticket(id, "merge").await);
+    assert!(said.contains("not committed yet"), "{said}");
+    git(&work, &["add", "."]);
+    git(&work, &["commit", "-q", "-m", "Add the login"]);
+    assert_eq!(code(client.land_ticket(id, "rebase").await).0, ErrorCode::InvalidRequest);
+
+    // Not while the project's folder is elsewhere or has changes of its own.
+    git(&repo, &["checkout", "-q", "-b", "other"]);
+    let (_, said) = code(client.land_ticket(id, "merge").await);
+    assert!(said.contains("is on other, not on main"), "{said}");
+    git(&repo, &["checkout", "-q", "main"]);
+    std::fs::write(repo.join("src/main.rs"), "fn main() { /* edited */ }\n").unwrap();
+    let (_, said) = code(client.land_ticket(id, "merge").await);
+    assert!(said.contains("changes that are not committed"), "{said}");
+    git(&repo, &["checkout", "-q", "--", "src/main.rs"]);
+
+    // Pushed for a pull request: the remote has the branch, the ticket says so; it can still be merged.
+    let pushed = client.land_ticket(id, "push").await.unwrap();
+    assert_eq!((pushed.how.as_str(), pushed.branch.as_str(), pushed.base.as_str(), pushed.url), ("pushed", "ticket/1-fix-the-login", "main", None));
+    assert_eq!(git(&remote, &["rev-parse", "refs/heads/ticket/1-fix-the-login"]), pushed.commit);
+    assert_eq!(client.ticket(id).await.unwrap().ticket.landed.as_deref(), Some("pushed"));
+
+    // Merged: one merge commit by the board member in the project's folder, said in the discussion.
+    let merged = client.land_ticket(id, "merge").await.unwrap();
+    assert_eq!(merged.how, "merged");
+    assert_eq!(git(&repo, &["rev-parse", "HEAD"]), merged.commit);
+    assert_eq!(git(&repo, &["log", "-1", "--format=%s|%an|%P"]).split('|').take(2).collect::<Vec<_>>(), ["Merge ticket #1: Fix the login", common::BOARD_MEMBER]);
+    assert!(repo.join("src/login.rs").is_file(), "the ticket's work is in main now");
+    let after = client.ticket(id).await.unwrap();
+    assert_eq!(after.ticket.landed.as_deref(), Some("merged"));
+    let lines: Vec<String> = client.messages(after.ticket.conversation_id.unwrap()).await.unwrap().messages.into_iter().filter(|m| m.system.is_some()).map(|m| m.text).collect();
+    assert!(lines.iter().any(|l| l.contains("merged ticket/1-fix-the-login into main")) && lines.iter().any(|l| l.contains("pushed ticket/1-fix-the-login to origin")), "{lines:?}");
+    let (_, said) = code(client.land_ticket(id, "merge").await);
+    assert!(said.contains("merged into main already"), "{said}");
+
+    // A branch that conflicts with its base: refused with the file, and the folder is as it was.
+    let clash = done_ticket(&client, atlas, "Rewrite main", forge).await;
+    let clash_work = worktree_of(dir.path(), clash.ticket.id).unwrap();
+    std::fs::write(clash_work.join("src/main.rs"), "fn main() { ticket(); }\n").unwrap();
+    git(&clash_work, &["commit", "-q", "-am", "The ticket's main"]);
+    std::fs::write(repo.join("src/main.rs"), "fn main() { someone_else(); }\n").unwrap();
+    git(&repo, &["commit", "-q", "-am", "Someone else's main"]);
+    let before = git(&repo, &["rev-parse", "HEAD"]);
+    let (why, said) = code(client.land_ticket(clash.ticket.id, "merge").await);
+    assert!(why == ErrorCode::Validation && said.contains("conflicts with main in src/main.rs") && said.contains("Nothing was merged"), "{said}");
+    assert_eq!(git(&repo, &["rev-parse", "HEAD"]), before);
+    assert!(git(&repo, &["status", "--porcelain", "--untracked-files=no"]).is_empty(), "no merge left half done");
+    assert_eq!(client.ticket(clash.ticket.id).await.unwrap().ticket.landed, None);
+    common::stop(dir.path(), daemon).await;
+}

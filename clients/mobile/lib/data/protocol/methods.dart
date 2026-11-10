@@ -391,6 +391,16 @@ abstract final class Methods {
   static const String ticketFollowers = 'ticket.followers';
   /// One ticket with its main task and every task linked to it.
   static const String ticketGet = 'ticket.get';
+  /// A board member's decision on a ticket's branch (feature `ticket_landing`). `how`:
+  /// `merge` merges it into the branch it was made from, in the project's folder, as
+  /// one merge commit by this board member; `push` pushes it to the repository's
+  /// remote and answers where a pull request is opened. Refused (`validation`, with
+  /// the reason) when the ticket has no branch, has work in its worktree that is not
+  /// committed, has nothing its base lacks, when the project's folder is on another
+  /// branch or has changes of its own, or when the merge conflicts (nothing is left
+  /// half merged). Neither closes the ticket: `ticket.accept` does. Answers
+  /// `TicketLanded`. Not for apps.
+  static const String ticketLand = 'ticket.land';
   /// Tickets in board order (not archived); every given filter applies. `query`
   /// searches title, description and `#number`.
   static const String ticketList = 'ticket.list';
@@ -1569,6 +1579,23 @@ Map<String, dynamic> sessionRevoke({required String sessionId}) => <String, dyna
   'method': Methods.sessionRevoke,
   'params': <String, dynamic>{
     'session_id': sessionId,
+  },
+};
+
+/// A board member's decision on a ticket's branch (feature `ticket_landing`). `how`:
+/// `merge` merges it into the branch it was made from, in the project's folder, as
+/// one merge commit by this board member; `push` pushes it to the repository's
+/// remote and answers where a pull request is opened. Refused (`validation`, with
+/// the reason) when the ticket has no branch, has work in its worktree that is not
+/// committed, has nothing its base lacks, when the project's folder is on another
+/// branch or has changes of its own, or when the merge conflicts (nothing is left
+/// half merged). Neither closes the ticket: `ticket.accept` does. Answers
+/// `TicketLanded`. Not for apps.
+Map<String, dynamic> ticketLand({required String how, required String ticketId}) => <String, dynamic>{
+  'method': Methods.ticketLand,
+  'params': <String, dynamic>{
+    'how': how,
+    'ticket_id': ticketId,
   },
 };
 

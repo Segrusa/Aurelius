@@ -392,7 +392,7 @@ const SELECT: &str = "SELECT k.id, k.number, k.project_id, p.name, k.title, db.s
         (EXISTS (SELECT 1 FROM tasks w WHERE w.ticket_id = k.id AND w.status = 'waiting' AND w.waiting_reason = 'login')
          OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state = 'ready' AND j.last_error_code = 'login'
                     AND json_extract(j.payload_json, '$.ticket_id') = k.id)),
-        k.responsible_user_id, ru.username, COALESCE(ru.disabled_at_ms IS NOT NULL, 0), k.design_url, k.branch, k.base_branch
+        k.responsible_user_id, ru.username, COALESCE(ru.disabled_at_ms IS NOT NULL, 0), k.design_url, k.branch, k.base_branch, k.landed, k.landed_url
      FROM tickets k
      JOIN projects p ON p.id = k.project_id
      JOIN board_columns c ON c.id = k.column_id
@@ -458,6 +458,8 @@ fn ticket_row(r: &Row<'_>) -> rusqlite::Result<(TicketView, Option<String>)> {
             design_url: r.get(34)?,
             branch: r.get(35)?,
             base_branch: r.get(36)?,
+            landed: r.get(37)?,
+            landed_url: r.get(38)?,
             attention: None,
             busy: Vec::new(),
         },
@@ -512,6 +514,18 @@ pub fn set_worktree(tx: &Transaction<'_>, id: TicketId, branch: &str, base: Opti
 pub fn clear_worktree(tx: &Transaction<'_>, id: TicketId) -> Result<(), StorageError> {
     tx.execute("UPDATE tickets SET worktree = NULL WHERE id = ?1", [id.to_string()])?;
     Ok(())
+}
+
+/// The ticket's branch was merged or pushed (`how`: 'merged' or 'pushed').
+pub fn set_landed(tx: &Transaction<'_>, id: TicketId, how: &str, commit: &str, url: Option<&str>) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET landed = ?2, landed_commit = ?3, landed_url = ?4 WHERE id = ?1", params![id.to_string(), how, commit, url])?;
+    Ok(())
+}
+
+/// What became of the ticket's branch: (how, the pull request's page).
+pub fn landed(conn: &Connection, id: TicketId) -> Result<Option<(String, Option<String>)>, StorageError> {
+    let row: Option<(Option<String>, Option<String>)> = conn.query_row("SELECT landed, landed_url FROM tickets WHERE id = ?1", [id.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+    Ok(row.and_then(|(how, url)| Some((how?, url))))
 }
 
 /// The ticket a run works for: its task's, its conversation's task's, or the one whose

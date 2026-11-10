@@ -546,6 +546,26 @@ impl CommandService {
             .map_err(storage_error)
     }
 
+    /// A board member merged or pushed a ticket's branch (`ticket.land`, done by the
+    /// daemon in the repository): kept on the ticket, with its event and a line in the
+    /// discussion that says who did what. `how`: 'merged' or 'pushed'.
+    pub fn ticket_landed(&self, ticket: aurelius_domain::TicketId, user: aurelius_domain::UserId, how: &'static str, commit: String, url: Option<String>, text: String) -> Result<Vec<aurelius_domain::EventNotice>, AppError> {
+        use aurelius_domain::ticket::Actor;
+        use aurelius_domain::views::{SystemLine, SystemLineKind};
+        self.store
+            .write(move |tx| {
+                let Some(state) = aurelius_storage::tickets::state(tx, ticket)? else { return Ok(vec![]) };
+                aurelius_storage::tickets::set_landed(tx, ticket, how, &commit, url.as_deref())?;
+                let by = Actor::BoardMember { user_id: user };
+                let mut notices = vec![crate::task::ticket_line::ticket_event(tx, ticket, state.project_id, aurelius_domain::EventKind::TicketUpdated, Some(by), serde_json::json!({ "changed": ["branch"], "landed": how, "commit": commit }))?];
+                let mut line = SystemLine::new(SystemLineKind::Moved);
+                line.by = Some(crate::conversation::discussion::actor_name(tx, Some(by))?);
+                notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, &text)?);
+                Ok(notices)
+            })
+            .map_err(storage_error)
+    }
+
     /// Startup, after `reconcile_chat_runs`: cards that are in another column than
     /// their main task says go back where they belong. Returns how many.
     pub fn reconcile_ticket_columns(&self) -> Result<usize, AppError> {

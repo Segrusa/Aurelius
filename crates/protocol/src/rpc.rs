@@ -306,6 +306,10 @@ pub mod feature {
     /// ticket's first run starts and removes it when the ticket is closed with nothing
     /// uncommitted in it; the branch stays. It never merges, pushes or deletes a branch.
     pub const TICKET_WORKTREES: &str = "ticket_worktrees";
+    /// A board member decides what becomes of a ticket's branch (additive): the write
+    /// `ticket.land { how: merge | push }` and `TicketView::landed` / `landed_url`. A
+    /// client offers it next to accepting a ticket that has a branch.
+    pub const TICKET_LANDING: &str = "ticket_landing";
     /// A channel per ticket (protocol 5, additive; AUR-CHAT-001): the ticket's
     /// discussion is its channel, `#<number>-<slug>` (`ticket_channel_name`).
     /// `channel.list` names ticket channels only to connections whose
@@ -460,6 +464,7 @@ pub const FEATURES: &[&str] = &[
     feature::TICKET_STATE,
     feature::PROJECT_GIT,
     feature::TICKET_WORKTREES,
+    feature::TICKET_LANDING,
 ];
 
 /// Daemon → client.

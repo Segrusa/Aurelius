@@ -191,6 +191,14 @@ pub struct TicketView {
     /// The branch `branch` was made from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_branch: Option<String>,
+    /// What a board member did with the branch (`ticket.land`, feature `ticket_landing`):
+    /// `merged` into `base_branch`, or `pushed` for a pull request. Text, so a new way
+    /// never breaks an older client. Left out while the branch is only kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landed: Option<String>,
+    /// Where the pull request of a pushed branch is opened, when the remote is a known host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landed_url: Option<String>,
     /// What the ticket waits for from a board member, and from whom (feature
     /// `ticket_state`): the server's one answer, so every client shows the same
     /// "Needs you". None: nothing. Left out then and by older servers.

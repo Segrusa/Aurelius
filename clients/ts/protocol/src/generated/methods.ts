@@ -205,6 +205,7 @@ export const METHODS = {
   "ticket.follow": "command",
   "ticket.followers": "read",
   "ticket.get": "read",
+  "ticket.land": "host",
   "ticket.list": "read",
   "ticket.move": "command",
   "ticket.my_tickets": "read",
@@ -831,6 +832,18 @@ export interface MethodParams {
    * One ticket with its main task and every task linked to it.
    */
   "ticket.get": { ticket_id: string };
+  /**
+   * A board member's decision on a ticket's branch (feature `ticket_landing`). `how`:
+   * `merge` merges it into the branch it was made from, in the project's folder, as
+   * one merge commit by this board member; `push` pushes it to the repository's
+   * remote and answers where a pull request is opened. Refused (`validation`, with
+   * the reason) when the ticket has no branch, has work in its worktree that is not
+   * committed, has nothing its base lacks, when the project's folder is on another
+   * branch or has changes of its own, or when the merge conflicts (nothing is left
+   * half merged). Neither closes the ticket: `ticket.accept` does. Answers
+   * `TicketLanded`. Not for apps.
+   */
+  "ticket.land": { how: string; ticket_id: string };
   /**
    * Tickets in board order (not archived); every given filter applies. `query`
    * searches title, description and `#number`.

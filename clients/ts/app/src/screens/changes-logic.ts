@@ -9,6 +9,16 @@ export const GIT_FEATURE = "project_git";
 /** A branch and a worktree per ticket (feature `ticket_worktrees`). */
 export const WORKTREES_FEATURE = "ticket_worktrees";
 
+/** A board member merges or pushes a ticket's branch (feature `ticket_landing`). */
+export const LANDING_FEATURE = "ticket_landing";
+
+/** What the review bar says of a ticket's branch before the decision on it. */
+export function branchLine(t: { branch?: string | null; base_branch?: string | null; landed?: string | null }): string {
+  if (t.landed === "merged") return `${t.branch} is merged into ${t.base_branch}.`;
+  if (t.landed === "pushed") return `${t.branch} is pushed for a pull request into ${t.base_branch}.`;
+  return `The work is on ${t.branch}, not in ${t.base_branch} yet:`;
+}
+
 export const CHANGES_VIEWS = ["changes", "commits", "branches"] as const;
 export type ChangesView = (typeof CHANGES_VIEWS)[number];
 
