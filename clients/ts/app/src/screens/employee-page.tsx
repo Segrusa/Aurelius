@@ -12,7 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useAllTasks, useEffectiveSets, useEmployees } from "../data";
+import { useAllTasks, useEmployees } from "../data";
 import { hidden } from "../hidden";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
@@ -21,6 +21,7 @@ import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useOpenChat } from "./employee-chat";
 import { EmployeeDialog } from "./employee-dialog";
+import { EmployeeGuidelinesTab } from "./employee-guidelines";
 import { EmployeeInboxTab, EmployeeMemoryTab } from "./employee-inbox";
 import {
   type AgentMode,
@@ -99,7 +100,6 @@ const styles = stylex.create({
   },
   // "Show all": the whole text, persona and rules, selectable.
   unfolded: { display: "block", overflow: "visible", userSelect: "text", WebkitLineClamp: "unset" },
-  guidelinesTitle: { margin: 0, fontWeight: 500, color: "var(--color-text-secondary)" },
   tabPanel: {
     display: "flex",
     minWidth: 0,
@@ -114,25 +114,6 @@ const styles = stylex.create({
   panel: { display: "flex", minWidth: 0, flexDirection: "column", gap: 12 },
   panelTitle: { display: "flex", margin: 0, fontWeight: 500 },
   counts: { marginInlineStart: "auto", fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
-  guidelines: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    marginBlockStart: 8,
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: "var(--precision-line2)",
-    paddingBlockStart: 12,
-  },
-  guidelineLink: {
-    overflow: "hidden",
-    fontSize: 12,
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
-    textDecoration: "none",
-  },
-  manage: { fontSize: 12, color: "var(--color-text-accent)", textDecoration: "none" },
   sunk: { backgroundColor: "var(--precision-sunk)" },
 });
 
@@ -198,9 +179,6 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
   const [showEarlier, setShowEarlier] = useState(false);
   const [allInstructions, setAllInstructions] = useState(false);
   const [pins, setPins] = usePins(pinKey(hostName, "pinned_employees"));
-  const pairs = useMemo((): [string, null][] => [[id, null]], [id]);
-  const sets = useEffectiveSets(pairs);
-  const set = sets.data?.get(`${id}|`);
   const mine = useMemo(
     () =>
       (tasks.data ?? [])
@@ -210,7 +188,7 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
   );
   const now = Date.now();
   const byGroup = (g: string) => mine.filter((t) => threadGroup(isOngoing(t), false, t.updated_at_ms, now) === g);
-  const tabs = employeeTabs(features.includes("employee_queue"));
+  const tabs = employeeTabs(features.includes("employee_queue"), features.includes("guidelines"));
   const tab = tabs.find((t) => t.key === wanted)?.key ?? tabs[0]?.key ?? "settings";
   const pickTab = (key: string) =>
     void navigate({ to: "/employees/$id", params: { id }, search: { tab: key as EmployeeTab }, replace: true });
@@ -379,6 +357,7 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
                   <EmployeeInboxTab employeeId={e.id} name={e.name} logs={features.includes("activity_log")} />
                 ) : null}
                 {tab === "memory" ? <EmployeeMemoryTab employeeId={e.id} name={e.name} /> : null}
+                {tab === "guidelines" ? <EmployeeGuidelinesTab employeeId={e.id} name={e.name} /> : null}
                 {tab === "settings" ? (
                   <>
                     <MetadataList orientation="horizontal" label={{ position: "start" }}>
@@ -505,24 +484,6 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
                 </div>
               ) : null}
               {showEarlier ? earlier.map((t) => <TaskCard key={t.id} task={t} />) : null}
-              <div {...stylex.props(styles.guidelines)}>
-                <p title="What its runs get on top of its instructions" {...stylex.props(styles.guidelinesTitle)}>
-                  Guidelines{set ? ` · ${set.guidelines.length} · ${set.total_chars} / ${set.limit_chars}` : ""}
-                </p>
-                {set?.guidelines.map((g) => (
-                  <Link
-                    key={g.id}
-                    to="/knowledge/guidelines/$id"
-                    params={{ id: g.id }}
-                    {...stylex.props(styles.guidelineLink)}
-                  >
-                    {g.title}
-                  </Link>
-                ))}
-                <Link to="/knowledge/$tab" params={{ tab: "guidelines" }} {...stylex.props(styles.manage)}>
-                  Manage links →
-                </Link>
-              </div>
             </div>
           </LayoutPanel>
         }
