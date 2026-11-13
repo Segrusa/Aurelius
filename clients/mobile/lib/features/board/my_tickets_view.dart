@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -7,8 +8,10 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/refresh.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/quick_task.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
+import '../connection/connection_bloc.dart';
 import 'my_tickets_bloc.dart';
 
 /// What My tickets says when a tab has nothing (ui §5.3).
@@ -83,6 +86,7 @@ class _MyTicketsPaneState extends State<MyTicketsPane> {
         value: _bloc,
         child: BlocBuilder<MyTicketsBloc, MyTicketsState>(builder: (context, state) {
           final company = context.watch<CompanyBloc>().state;
+          final quickOn = context.select<ConnectionBloc, bool>((b) => quickTasksOn(b.state));
           List<TicketView> of(MyTab tab) => state.inTab(tab, me: widget.me, needsMe: widget.needsMe);
           final tab = _tab ?? (state.mine == null ? MyTab.responsible : of(MyTab.waiting).isNotEmpty ? MyTab.waiting : MyTab.responsible);
           final shown = of(tab);
@@ -96,6 +100,11 @@ class _MyTicketsPaneState extends State<MyTicketsPane> {
             );
           } else if (state.mine == null) {
             body = const _Skeleton();
+          } else if (shown.isEmpty && quickOn && state.quickOnly) {
+            body = EmptyState(
+              'No quick tasks here.',
+              action: TextButton(key: const ValueKey('my-tickets-clear-quick'), onPressed: () => _bloc.add(const MyTicketsQuickOnly(false)), child: const Text('Clear filter')),
+            );
           } else if (shown.isEmpty) {
             body = state.projectId != null
                 ? EmptyState(
@@ -172,6 +181,22 @@ class _MyTicketsPaneState extends State<MyTicketsPane> {
                 Switch.adaptive(key: const ValueKey('my-show-done'), value: state.includeDone, onChanged: (on) => _bloc.add(MyTicketsDoneShown(on))),
               ]),
             ),
+            // On a line of its own: beside the project and Show Done it does not fit a phone.
+            if (quickOn)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilterChip(
+                    key: const ValueKey('my-filter-quick'),
+                    avatar: const Icon(CupertinoIcons.bolt, size: 16),
+                    label: const Text(quickFilterName),
+                    selected: state.quickOnly,
+                    showCheckmark: false,
+                    onSelected: (on) => _bloc.add(MyTicketsQuickOnly(on)),
+                  ),
+                ),
+              ),
             if (!widget.online) Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 4), child: Text('Offline · reconnecting', style: TextStyle(color: Tokens.label2))),
             Expanded(child: Opacity(opacity: widget.online ? 1 : 0.6, child: body)),
           ]);

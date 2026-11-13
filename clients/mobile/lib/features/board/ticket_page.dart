@@ -14,6 +14,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/discussion.dart';
 import '../../data/links.dart';
+import '../../data/quick_task.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../chat/chat_bloc.dart';
@@ -28,7 +29,7 @@ import 'ticket_actions.dart';
 import 'ticket_bloc.dart';
 import 'ticket_text_dialog.dart';
 import 'detail_row.dart';
-import 'ticket_card.dart' show WhoBlock, priorityColor, startWith;
+import 'ticket_card.dart' show QuickTag, WhoBlock, priorityColor, startWith;
 
 /// `/ticket/:tid` (§8): a full page with the ticket's fields, its tasks, its
 /// activity and, at the bottom, the actions of its column. With a server of
@@ -232,6 +233,7 @@ class _TicketViewState extends State<_TicketView> {
                   decoration: BoxDecoration(color: Tokens.cell2, borderRadius: BorderRadius.circular(999)),
                   child: Text(_columnName(page, ticket), style: const TextStyle(fontWeight: FontWeight.w600)),
                 ),
+                if (isQuickTask(ticket, on: quickTasksOn(link))) const QuickTag(keyId: 'page'),
                 if (line != null && state != TicketState.done) Text(mine ? '◆ $line' : line, style: TextStyle(color: mine ? Tokens.accentText : Tokens.label2, fontWeight: mine ? FontWeight.w600 : null)),
               ]),
             ),

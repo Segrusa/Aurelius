@@ -1,12 +1,17 @@
+import 'package:bloc_test/bloc_test.dart';
 import 'package:aurelius_mobile/core/net/connection.dart' show LinkState, LinkStatus;
 import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/data/discussion.dart';
 import 'package:aurelius_mobile/data/quick_task.dart';
 import 'package:aurelius_mobile/data/views.dart';
+import 'package:aurelius_mobile/features/board/board_bloc.dart';
+import 'package:aurelius_mobile/features/board/board_page.dart';
+import 'package:aurelius_mobile/features/board/my_tickets_bloc.dart';
 import 'package:aurelius_mobile/features/board/new_ticket_page.dart';
 import 'package:aurelius_mobile/features/dashboard/dashboard_page.dart' show GiveWorkBox;
 import 'package:aurelius_mobile/features/dashboard/give_work.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,6 +25,13 @@ import 'support/tickets.dart';
 
 /// [onlineLink] on a server with quick tasks.
 const quickLink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], features: [quickTaskFeature], boardMembersExist: true, user: testUser, claudeLogin: testLogin);
+
+/// A server with My tickets, without and with quick tasks.
+const myLink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], features: ['my_tickets'], boardMembersExist: true, user: testUser, claudeLogin: testLogin);
+const myQuickLink = LinkState(status: LinkStatus.online, capabilities: ['read', 'chat', 'task_control', 'approve'], features: ['my_tickets', quickTaskFeature], boardMembersExist: true, user: testUser, claudeLogin: testLogin);
+
+final quickOne = ticketOf(id: 'q1', number: 7, column: ColumnKind.doing, ownerEmployeeId: 'forge', ownerName: 'Forge', title: 'Fix the footer', kind: quickKind);
+final normalOne = ticketOf(id: 'n1', number: 8, column: ColumnKind.doing, ownerEmployeeId: 'forge', ownerName: 'Forge', title: 'Plan the release');
 
 void main() {
   setUpAll(() => registerFallbackValue(<String, dynamic>{}));
@@ -175,6 +187,95 @@ void main() {
       await open(tester);
       await tapKey(tester, 'give-work-quick');
       expect(find.descendant(of: find.byKey(const ValueKey('give-work-lead')), matching: find.text('Forge')), findsOneWidget);
+    });
+  });
+
+  group('the label and the filter (ST-07)', () {
+    Widget board(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage());
+
+    MockRepository repoWith(List<TicketView> tickets, {LinkState link = quickLink}) {
+      final repo = boardRepository(board: boardOf(tickets), link: link);
+      when(() => repo.myTickets(projectId: any(named: 'projectId'), includeDone: any(named: 'includeDone'))).thenAnswer((_) async => MyTicketsView(tickets: tickets, following: const []));
+      return repo;
+    }
+
+    blocTest<BoardBloc, BoardState>(
+      'Quick tasks keeps only quick tasks in the columns',
+      build: () => BoardBloc(repoWith([quickOne, normalOne])),
+      act: (bloc) async {
+        await stateWhere(bloc, (s) => s.board != null);
+        bloc.add(const BoardQuickOnly(true));
+      },
+      wait: const Duration(milliseconds: 50),
+      verify: (bloc) {
+        expect(bloc.state.quickOnly, isTrue);
+        expect([for (final t in bloc.state.tickets) t.id], ['q1']);
+      },
+    );
+
+    test('My tickets keeps only quick tasks in every list with the filter', () {
+      final state = MyTicketsState(loading: false, mine: MyTicketsView(tickets: [quickOne, normalOne], following: const []), quickOnly: true);
+      expect([for (final t in state.inTab(MyTab.created, me: testUser.id, needsMe: (_) => false)) t.id], ['q1']);
+      final all = MyTicketsState(loading: false, mine: MyTicketsView(tickets: [quickOne, normalOne], following: const []));
+      expect(all.inTab(MyTab.created, me: testUser.id, needsMe: (_) => false), hasLength(2));
+    });
+
+    testWidgets('a quick task has the Quick tag on its card; a ticket does not', (tester) async {
+      final repo = repoWith([quickOne, normalOne]);
+      await pumpBoardPage(tester, repo, board(repo), link: quickLink);
+      expect(find.byKey(const ValueKey('quick-tag-q1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('quick-tag-n1')), findsNothing);
+      expect(find.descendant(of: find.byKey(const ValueKey('quick-tag-q1')), matching: find.text(quickLabel)), findsOneWidget);
+    });
+
+    testWidgets('without the feature there is no tag and no filter', (tester) async {
+      final repo = repoWith([quickOne, normalOne], link: onlineLink);
+      await pumpBoardPage(tester, repo, board(repo), link: onlineLink);
+      expect(find.byKey(const ValueKey('quick-tag-q1')), findsNothing);
+      expect(find.byKey(const ValueKey('board-filter-quick')), findsNothing);
+      expect(find.text('Fix the footer'), findsOneWidget, reason: 'an older client shows it as a normal ticket');
+    });
+
+    testWidgets('the Board filter Quick tasks hides other tickets', (tester) async {
+      final repo = repoWith([quickOne, normalOne]);
+      await pumpBoardPage(tester, repo, board(repo), link: quickLink);
+      expect(find.text('Plan the release'), findsOneWidget);
+      await tapKey(tester, 'board-filter-quick');
+      expect(find.text(quickFilterName), findsOneWidget);
+      expect(find.text('Fix the footer'), findsOneWidget);
+      expect(find.text('Plan the release'), findsNothing);
+    });
+
+    testWidgets('the Board filter with no quick task says so and clears', (tester) async {
+      final repo = repoWith([normalOne]);
+      await pumpBoardPage(tester, repo, board(repo), link: quickLink);
+      await tapKey(tester, 'board-filter-quick');
+      expect(find.text('No quick tasks.'), findsOneWidget);
+      await tester.tap(find.text('Clear filter'));
+      await settleBoard(tester);
+      expect(find.text('Plan the release'), findsOneWidget);
+    });
+
+    testWidgets('My tickets has the filter Quick tasks with the feature only', (tester) async {
+      final repo = repoWith([quickOne, normalOne], link: myQuickLink);
+      await pumpBoardPage(tester, repo, board(repo), link: myQuickLink);
+      await tester.tap(find.text('My tickets'));
+      await settleBoard(tester);
+      await tester.tap(find.byKey(const ValueKey('my-tab-created')));
+      await settleBoard(tester);
+      expect(find.text('Plan the release'), findsOneWidget);
+      await tapKey(tester, 'my-filter-quick');
+      expect(find.text('Fix the footer'), findsOneWidget);
+      expect(find.text('Plan the release'), findsNothing);
+      expect(find.byKey(const ValueKey('quick-tag-q1')), findsOneWidget);
+    });
+
+    testWidgets('My tickets without the feature has no filter Quick tasks', (tester) async {
+      final repo = repoWith([quickOne, normalOne], link: myLink);
+      await pumpBoardPage(tester, repo, board(repo), link: myLink);
+      await tester.tap(find.text('My tickets'));
+      await settleBoard(tester);
+      expect(find.byKey(const ValueKey('my-filter-quick')), findsNothing);
     });
   });
 }
