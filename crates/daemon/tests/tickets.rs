@@ -50,6 +50,7 @@ async fn create(client: &Client, project_id: ProjectId, title: &str, priority: T
             start: false,
             from_message: None,
             from_idea: None,
+            kind: None,
         })
         .await
         .unwrap();
@@ -221,6 +222,7 @@ async fn a_board_member_adds_files_to_an_existing_ticket() {
             start: false,
             from_message: None,
             from_idea: None,
+            kind: None,
         })
         .await
         .unwrap();

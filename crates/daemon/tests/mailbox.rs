@@ -210,6 +210,7 @@ async fn a_thread_parked_on_a_question_keeps_new_items_until_the_answer_comes() 
             start: true,
             from_message: None,
             from_idea: None,
+            kind: None,
         })
         .await
         .unwrap();

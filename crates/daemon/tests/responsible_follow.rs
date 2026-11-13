@@ -74,6 +74,7 @@ fn new_ticket(
         from_message: None,
         from_idea: None,
         responsible_user_id,
+        kind: None,
     }
 }
 

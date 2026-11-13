@@ -51,6 +51,7 @@ fn add(f: &Fixture, project: ProjectId, title: &str) -> (TicketId, u32) {
                     run: &RunSettings::default(),
                     labels: &["ui".to_owned()],
                     deadline_ms: None,
+                    kind: Default::default(),
                 },
             )
         })
@@ -130,6 +131,7 @@ fn created_by_user_must_be_a_board_member() {
                 run: &RunSettings::default(),
                 labels: &[],
                 deadline_ms: None,
+                kind: Default::default(),
             },
         )
     });
@@ -505,7 +507,7 @@ fn my_tickets_are_what_i_am_responsible_for_made_follow_or_on_my_login_and_what_
         .write(move |tx| {
             let backlog = company::column_of_kind(tx, ColumnKind::Backlog)?;
             let run = RunSettings::default();
-            tickets::insert(tx, &NewTicket { id: creator, project_id: project, title: "Made by me", description_blob: None, column_id: backlog.id, priority: TicketPriority::default(), created_by_user: me, owner: None, run: &run, labels: &[], deadline_ms: None })
+            tickets::insert(tx, &NewTicket { id: creator, project_id: project, title: "Made by me", description_blob: None, column_id: backlog.id, priority: TicketPriority::default(), created_by_user: me, owner: None, run: &run, labels: &[], deadline_ms: None, kind: Default::default() })
         })
         .unwrap();
     make_responsible(&f, creator, Some(other));
@@ -581,7 +583,7 @@ fn my_tickets_stop_at_the_maximum_and_keep_the_most_important() {
             let run = RunSettings::default();
             for n in 0..=MY_TICKETS_MAX {
                 let priority = if n == MY_TICKETS_MAX { TicketPriority::Urgent } else { TicketPriority::Low };
-                tickets::insert(tx, &NewTicket { id: TicketId::new(), project_id: project, title: "x", description_blob: None, column_id: backlog.id, priority, created_by_user: user, owner: None, run: &run, labels: &[], deadline_ms: None })?;
+                tickets::insert(tx, &NewTicket { id: TicketId::new(), project_id: project, title: "x", description_blob: None, column_id: backlog.id, priority, created_by_user: user, owner: None, run: &run, labels: &[], deadline_ms: None, kind: Default::default() })?;
             }
             Ok(())
         })

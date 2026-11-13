@@ -1050,6 +1050,10 @@ impl CommandService {
                 match action {
                     // A part stays in the task's project.
                     EmployeeAction::Delegate { employee, title, goal, criteria, ticket } => {
+                        // A quick task's employee does the work alone (ST-02 AC2); hand_over_task still works.
+                        if crate::ticket::quick::is_quick_root(tx, task)? {
+                            return Ok((false, crate::ticket::quick::DELEGATE_REFUSED.to_string(), vec![]));
+                        }
                         let Some(to) = find(&employee) else {
                             return Ok((false, format!("No active colleague called {employee} in the company."), vec![]));
                         };

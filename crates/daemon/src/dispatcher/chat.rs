@@ -17,6 +17,8 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     let mut driver = super::Driver::new(&shared, &job.id, epoch);
     let s = shared.clone();
     let payload = job.payload.clone();
+    // A quick task's run works in its own worktree: made here before its first run (ticket #53).
+    crate::quick::prepare_run(&shared, payload["conversation_id"].as_str().and_then(|c| aurelius_domain::ConversationId::parse(c).ok())).await;
     let mut plan: ChatRunPlan = match blocking(move || s.service.prepare_chat_run(&payload)).await {
         Some(Ok(Some(plan))) => plan,
         Some(Ok(None)) => {

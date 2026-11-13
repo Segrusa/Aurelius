@@ -191,6 +191,7 @@ fn ticket_from(project_id: aurelius_domain::ProjectId, idea: aurelius_domain::Id
         start,
         from_message: None,
         from_idea: Some(idea),
+        kind: None,
     })
 }
 

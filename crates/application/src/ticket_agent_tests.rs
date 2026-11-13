@@ -114,6 +114,7 @@ fn new_ticket(s: &Setup, title: &str, owner: Option<EmployeeId>) -> TicketId {
         start: false,
         from_message: None,
         from_idea: None,
+        kind: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(s, Command::CreateTicket(create)) else { panic!() };
     ticket_id

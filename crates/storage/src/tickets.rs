@@ -10,7 +10,7 @@ use crate::{StorageError, now_ms};
 use aurelius_domain::{
     BoardColumnId, EmployeeId, ProjectId, TaskId, TicketId, UserId,
     task::{RunSettings, TaskStatus},
-    ticket::{BoardColumnCards, ColumnKind, MY_TICKETS_MAX, MyTicketsView, TicketPriority, TicketView},
+    ticket::{BoardColumnCards, ColumnKind, MY_TICKETS_MAX, MyTicketsView, TicketKind, TicketPriority, TicketView},
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
@@ -33,6 +33,7 @@ pub struct NewTicket<'a> {
     pub run: &'a RunSettings,
     pub labels: &'a [String],
     pub deadline_ms: Option<i64>,
+    pub kind: TicketKind,
 }
 
 fn json_or_null<T: serde::Serialize>(value: &T, empty: bool) -> Result<Option<String>, StorageError> {
@@ -49,8 +50,8 @@ pub fn insert(tx: &Transaction<'_>, ticket: &NewTicket<'_>) -> Result<u32, Stora
     let discussion = crate::discussions::insert_ticket_discussion(tx, ticket.project_id, &crate::discussions::ticket_discussion_title(number as u32, ticket.title))?;
     tx.execute(
         "INSERT INTO tickets(id, company_id, project_id, number, title, description_blob_id, column_id, position, priority, created_by_user,
-                             owner_employee_id, run_json, labels_json, deadline_ms, version, created_at_ms, updated_at_ms, conversation_id, login_user)
-         VALUES (?1, (SELECT id FROM company), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?14, ?15, ?9)",
+                             owner_employee_id, run_json, labels_json, deadline_ms, version, created_at_ms, updated_at_ms, conversation_id, login_user, kind)
+         VALUES (?1, (SELECT id FROM company), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1, ?14, ?14, ?15, ?9, ?16)",
         params![
             ticket.id.to_string(),
             ticket.project_id.to_string(),
@@ -67,6 +68,7 @@ pub fn insert(tx: &Transaction<'_>, ticket: &NewTicket<'_>) -> Result<u32, Stora
             ticket.deadline_ms,
             now,
             discussion.to_string(),
+            ticket.kind.as_str(),
         ],
     )?;
     Ok(number as u32)
@@ -143,6 +145,35 @@ fn next_position(conn: &Connection, column: BoardColumnId) -> Result<f64, Storag
     )?)
 }
 
+/// The commit a quick task was merged into its project's main with (feature `quick_task`).
+pub fn set_merge_commit(tx: &Transaction<'_>, id: TicketId, commit: &str) -> Result<(), StorageError> {
+    tx.execute("UPDATE tickets SET merge_commit = ?2 WHERE id = ?1", params![id.to_string(), commit])?;
+    Ok(())
+}
+
+/// The project folder of a ticket's project, if it has one.
+pub fn project_folder(conn: &Connection, id: TicketId) -> Result<Option<String>, StorageError> {
+    Ok(conn
+        .query_row("SELECT p.folder FROM tickets k JOIN projects p ON p.id = k.project_id WHERE k.id = ?1", [id.to_string()], |r| r.get(0))
+        .optional()?
+        .flatten())
+}
+
+/// The quick task a conversation works for: the conversation of its main task (or of
+/// a task below it) or its discussion, with the ticket's number. None for every other conversation.
+pub fn quick_of_conversation(conn: &Connection, conversation: aurelius_domain::ConversationId) -> Result<Option<(TicketId, u32)>, StorageError> {
+    let row: Option<(String, i64)> = conn
+        .query_row(
+            "SELECT k.id, k.number FROM tickets k
+             WHERE k.kind = 'quick' AND (k.conversation_id = ?1
+                OR k.id IN (SELECT t.ticket_id FROM tasks t WHERE t.conversation_id = ?1))",
+            [conversation.to_string()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    Ok(row.and_then(|(id, n)| Some((TicketId::parse(&id).ok()?, n as u32))))
+}
+
 /// What a write needs to decide about a ticket.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TicketState {
@@ -155,12 +186,15 @@ pub struct TicketState {
     pub root_task_id: Option<TaskId>,
     pub root_status: Option<TaskStatus>,
     pub archived: bool,
+    pub kind: TicketKind,
+    pub number: u32,
 }
 
 pub fn state(conn: &Connection, id: TicketId) -> Result<Option<TicketState>, StorageError> {
     Ok(conn
         .query_row(
-            "SELECT k.project_id, k.column_id, c.kind, k.version, k.owner_employee_id, k.root_task_id, t.status, k.archived_at_ms IS NOT NULL
+            "SELECT k.project_id, k.column_id, c.kind, k.version, k.owner_employee_id, k.root_task_id, t.status, k.archived_at_ms IS NOT NULL,
+                    k.kind, k.number
              FROM tickets k JOIN board_columns c ON c.id = k.column_id LEFT JOIN tasks t ON t.id = k.root_task_id
              WHERE k.id = ?1",
             [id.to_string()],
@@ -175,6 +209,8 @@ pub fn state(conn: &Connection, id: TicketId) -> Result<Option<TicketState>, Sto
                     root_task_id: r.get::<_, Option<String>>(5)?.and_then(|t| TaskId::parse(&t).ok()),
                     root_status: r.get::<_, Option<String>>(6)?.and_then(|s| TaskStatus::parse(&s)),
                     archived: r.get(7)?,
+                    kind: TicketKind::parse(&r.get::<_, String>(8)?).unwrap_or_default(),
+                    number: r.get::<_, i64>(9)? as u32,
                 })
             },
         )
@@ -392,7 +428,8 @@ const SELECT: &str = "SELECT k.id, k.number, k.project_id, p.name, k.title, db.s
         (EXISTS (SELECT 1 FROM tasks w WHERE w.ticket_id = k.id AND w.status = 'waiting' AND w.waiting_reason = 'login')
          OR EXISTS (SELECT 1 FROM jobs j WHERE j.kind = 'ticket.triage' AND j.state = 'ready' AND j.last_error_code = 'login'
                     AND json_extract(j.payload_json, '$.ticket_id') = k.id)),
-        k.responsible_user_id, ru.username, COALESCE(ru.disabled_at_ms IS NOT NULL, 0), k.design_url
+        k.responsible_user_id, ru.username, COALESCE(ru.disabled_at_ms IS NOT NULL, 0), k.design_url,
+        k.kind, k.merge_commit
      FROM tickets k
      JOIN projects p ON p.id = k.project_id
      JOIN board_columns c ON c.id = k.column_id
@@ -456,6 +493,9 @@ fn ticket_row(r: &Row<'_>) -> rusqlite::Result<(TicketView, Option<String>)> {
             responsible_username: r.get(32)?,
             responsible_disabled: r.get(33)?,
             design_url: r.get(34)?,
+            // Left out for a normal ticket, so its view stays as it was (feature `quick_task`).
+            kind: Some(r.get::<_, String>(35)?).filter(|k| k.as_str() != TicketKind::Normal.as_str()),
+            merge_commit: r.get(36)?,
         },
         description,
     ))

@@ -13,7 +13,7 @@ use aurelius_domain::{
     company::{UpdateCompany, UpdateProject},
     employee::LifecycleStatus,
     project::ProjectStatus,
-    ticket::{self, Actor, ColumnKind, MoveEffect},
+    ticket::{self, Actor, ColumnKind, MoveEffect, TicketKind},
 };
 use aurelius_storage::{
     Tx as Transaction, StorageError, blobs, company as company_store,
@@ -27,6 +27,7 @@ use aurelius_domain::views::system_action;
 use serde_json::{Value, json};
 
 pub(crate) mod agent;
+pub mod quick;
 
 /// Why a paused or archived employee cannot be the tester: nobody would run the tests.
 pub(crate) const TESTER_NOT_ACTIVE: &str = "The tester must be an active employee.";
@@ -105,6 +106,11 @@ impl Events {
     }
 
     fn push(&mut self, tx: &Transaction<'_>, kind: EventKind, extra: Value) -> Result<(), StorageError> {
+        self.push_id(tx, kind, extra).map(drop)
+    }
+
+    /// `push`, with the id of the event (the source of a job the write queues).
+    fn push_id(&mut self, tx: &Transaction<'_>, kind: EventKind, extra: Value) -> Result<aurelius_domain::EventId, StorageError> {
         self.version += 1;
         let mut metadata = self.meta.clone();
         if let (Some(meta), Value::Object(extra)) = (metadata.as_object_mut(), extra) {
@@ -128,7 +134,7 @@ impl Events {
             },
         )?;
         self.notices.push(notice(appended.seq, kind.as_str(), self.aggregate_id.clone(), self.project));
-        Ok(())
+        Ok(appended.id)
     }
 
     /// The system lines of this write in the ticket's discussion (MU2-03), with its events.
@@ -252,7 +258,10 @@ impl CommandService {
                             store::mark_started(tx, state.id)?;
                             e.push(tx, EventKind::TicketStarted, json!({ "by": by }))?;
                         }
-                        MoveEffect::Cancel => e.push(tx, EventKind::TicketCancelled, json!({ "by": by }))?,
+                        MoveEffect::Cancel => {
+                            let source = e.push_id(tx, EventKind::TicketCancelled, json!({ "by": by }))?;
+                            quick::request_cleanup(tx, &state, source, &command_id.to_string())?;
+                        }
                     }
                     if target.kind != state.column {
                         let what = match effect {
@@ -391,6 +400,13 @@ impl CommandService {
                         }
                     }
                     let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
+                    // A quick task (ST-05): the daemon merges its branch first; only a merge that
+                    // worked puts the card on Done (`quick::quick_merge_finished`).
+                    if state.kind == TicketKind::Quick {
+                        let source = e.push_id(tx, EventKind::TicketUpdated, json!({ "changed": ["merge"], "by": by, "merge": "requested", "note": note }))?;
+                        e.line(check!(quick::request_merge(tx, &state, by, user, source, &command_id.to_string())?));
+                        return finish(tx, state.id, state.column, e);
+                    }
                     to_column(tx, state.id, ColumnKind::Done)?;
                     store::mark_done(tx, state.id)?;
                     e.moved(tx, state.column, ColumnKind::Done, by)?;
@@ -427,7 +443,9 @@ impl CommandService {
                 let mut e = Events::new(&base, "ticket", state.id.to_string(), Some(state.project_id), state.version);
                 to_column(tx, state.id, ColumnKind::Backlog)?;
                 e.moved(tx, state.column, ColumnKind::Backlog, by)?;
-                e.push(tx, EventKind::TicketCancelled, json!({ "by": by }))?;
+                let source = e.push_id(tx, EventKind::TicketCancelled, json!({ "by": by }))?;
+                // BR4: a quick task's worktree and branch go too (the client confirmed it).
+                quick::request_cleanup(tx, &state, source, &command_id.to_string())?;
                 e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Backlog, Some("cancelled the ticket"))?);
                 finish_then(tx, state.id, e, |tx| ticket_line::cancel(tx, &st, state.id, &command_id.to_string()))
             }),
@@ -502,7 +520,11 @@ impl CommandService {
         }
     }
 
-    fn create_ticket(&self, base: Base, envelope: &CommandEnvelope, hash: String, cmd: ticket::CreateTicket, user: UserId) -> Result<Committed, AppError> {
+    fn create_ticket(&self, base: Base, envelope: &CommandEnvelope, hash: String, mut cmd: ticket::CreateTicket, user: UserId) -> Result<Committed, AppError> {
+        let kind = cmd.kind.unwrap_or_default();
+        if kind == TicketKind::Quick {
+            crate::ticket::quick::prepare(self.store(), &mut cmd, user)?;
+        }
         let title = ticket::valid_title(&cmd.title).map_err(domain_error)?;
         let description = ticket::valid_description(cmd.description.as_deref()).map_err(domain_error)?;
         let labels = ticket::valid_labels(&cmd.labels).map_err(domain_error)?;
@@ -572,13 +594,24 @@ impl CommandService {
                     labels: &labels,
                     deadline_ms: cmd.deadline_ms,
                     attachments: stored.as_ref(),
+                    kind,
                 },
             )?;
             // The discussion starts with a link to the message, and its chat gets "→ #N" (MU2-10 AC3).
             if let Some((message, (conversation, label))) = &source {
                 e.line(crate::conversation::discussion::created_from(tx, id, number, user, *conversation, *message, label)?);
             }
-            if cmd.start {
+            if kind == TicketKind::Quick {
+                // ST-01 AC3: at once in Doing with its chosen employee; no Todo, no dispatcher.
+                let doing = company_store::column_of_kind(tx, ColumnKind::Doing)?;
+                store::move_to(tx, id, doing.id, None)?;
+                store::mark_started(tx, id)?;
+                e.moved(tx, ColumnKind::Backlog, ColumnKind::Doing, by)?;
+                e.push(tx, EventKind::TicketStarted, json!({ "by": by, "kind": kind }))?;
+                let owner = cmd.owner_employee_id.map(|o| crate::conversation::discussion::employee_name(tx, o)).transpose()?.unwrap_or_default();
+                let what = format!("started the quick task with {owner} as owner, on the branch {}", ticket::quick_branch(number));
+                e.line(ticket_line::column_line(tx, id, Some(by), ColumnKind::Backlog, ColumnKind::Doing, Some(&what))?);
+            } else if cmd.start {
                 let todo = company_store::column_of_kind(tx, ColumnKind::Todo)?;
                 store::move_to(tx, id, todo.id, None)?;
                 store::mark_started(tx, id)?;
@@ -599,7 +632,7 @@ impl CommandService {
             if let Some(idea) = cmd.from_idea {
                 notices.push(crate::task::ideas::became_ticket(tx, idea, cmd.project_id, id, &title, command_id.to_string())?);
             }
-            if cmd.start {
+            if cmd.start || kind == TicketKind::Quick {
                 notices.extend(ticket_line::started(tx, &st, id, user)?);
             }
             // Its channel opens; made from a message in General, that line there is the one.
@@ -639,6 +672,10 @@ impl CommandService {
             }
             if cmd.run.is_some() && state.root_status == Some(aurelius_domain::task::TaskStatus::Running) {
                 return rejected(DomainError::Ticket("Mode and model change only while the main task does not run.".into()));
+            }
+            // A quick task stays in Auto (ST-01 AC4).
+            if state.kind == TicketKind::Quick && cmd.run.as_ref().is_some_and(|r| r.mode != Some(aurelius_domain::autonomy::AgentMode::Auto)) {
+                return rejected(DomainError::Ticket(quick::PLAN_REFUSED.into()));
             }
             let mut files_added: Vec<String> = Vec::new();
             let mut told: Vec<EventNotice> = Vec::new();
@@ -841,6 +878,7 @@ struct NewCard<'a> {
     labels: &'a [String],
     deadline_ms: Option<i64>,
     attachments: Option<&'a task_store::TaskAttachments>,
+    kind: TicketKind,
 }
 
 /// Insert a ticket at the bottom of Backlog and write its `ticket.created` event, the creator's
@@ -863,6 +901,7 @@ fn insert_ticket(tx: &Transaction<'_>, e: &mut Events, card: &NewCard<'_>) -> Re
             run: card.run,
             labels: card.labels,
             deadline_ms: card.deadline_ms,
+            kind: card.kind,
         },
     )?;
     store::set_attachments(tx, id, card.attachments)?;
@@ -876,6 +915,9 @@ fn insert_ticket(tx: &Transaction<'_>, e: &mut Events, card: &NewCard<'_>) -> Re
     let mut created = json!({ "number": number, "created_by_user": card.user, "by": by, "responsible_user_id": card.responsible });
     if !named.is_empty() {
         created["mentioned_users"] = json!(named);
+    }
+    if card.kind == TicketKind::Quick {
+        created["kind"] = json!(card.kind);
     }
     e.push(tx, EventKind::TicketCreated, created)?;
     e.follow(tx, id, card.project, card.user, FollowReason::Created)?;

@@ -281,6 +281,7 @@ fn ticket(f: &Fixture, project: ProjectId, creator: &str) -> TicketId {
                     run: &RunSettings::default(),
                     labels: &[],
                     deadline_ms: None,
+                    kind: Default::default(),
                 },
             )
             .map(|_| ())

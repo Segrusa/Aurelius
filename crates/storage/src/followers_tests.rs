@@ -31,7 +31,7 @@ fn fixture() -> Fixture {
             let backlog = company::column_of_kind(tx, ColumnKind::Backlog)?;
             tickets::insert(
                 tx,
-                &NewTicket { id: ticket, project_id: project, title: "Fix", description_blob: None, column_id: backlog.id, priority: TicketPriority::default(), created_by_user: alex, owner: None, run: &RunSettings::default(), labels: &[], deadline_ms: None },
+                &NewTicket { id: ticket, project_id: project, title: "Fix", description_blob: None, column_id: backlog.id, priority: TicketPriority::default(), created_by_user: alex, owner: None, run: &RunSettings::default(), labels: &[], deadline_ms: None, kind: Default::default() },
             )?;
             Ok(())
         })

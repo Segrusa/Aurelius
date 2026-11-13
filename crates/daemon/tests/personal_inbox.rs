@@ -79,6 +79,7 @@ fn new_ticket(project_id: ProjectId, owner: Option<EmployeeId>, description: Opt
         start,
         from_message: None,
         from_idea: None,
+        kind: None,
     }
 }
 

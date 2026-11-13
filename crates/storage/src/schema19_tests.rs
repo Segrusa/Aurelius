@@ -234,6 +234,7 @@ fn add_ticket(f: &Fixture, title: &str) -> TicketId {
                     run: &RunSettings::default(),
                     labels: &[],
                     deadline_ms: None,
+                    kind: Default::default(),
                 },
             )
         })

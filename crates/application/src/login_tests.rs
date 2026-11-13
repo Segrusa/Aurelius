@@ -69,6 +69,7 @@ fn setup() -> Setup {
         start: false,
         from_message: None,
         from_idea: None,
+        kind: None,
     };
     run(Command::CreateTicket(shared));
     Setup { _dir: dir, service, project: project_id, alex, robin, ada, iris, otto }
@@ -134,6 +135,7 @@ fn ticket_of(s: &Setup, by: UserId, owner: EmployeeId) -> (TicketId, TaskId) {
         start: false,
         from_message: None,
         from_idea: None,
+        kind: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(s, by, Command::CreateTicket(create)) else { panic!() };
     exec(s, by, Command::StartTicket(StartTicket { ticket_id, employee_id: None }));
@@ -191,7 +193,7 @@ fn a_task_without_a_ticket_runs_on_who_made_it_and_its_parts_too() {
     // Ticket #1 is Alex's: its work runs on Alex's login, so Robin's run cannot add to it.
     let (ok, text, _) = s.service.employee_action(run, part(Some("#1"))).unwrap();
     assert!(!ok && text == crate::ticket::agent::DELEGATE_OTHER_LOGIN, "{text}");
-    let robins = ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: s.project, title: "Robin's".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None, from_idea: None };
+    let robins = ticket::CreateTicket { responsible_user_id: None, confirm_secret: false, project_id: s.project, title: "Robin's".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None, owner_employee_id: None, run: Default::default(), files: vec![], start: false, from_message: None, from_idea: None, kind: None };
     let CommandResult::TicketCreated { number, .. } = exec(&s, s.robin, Command::CreateTicket(robins)) else { panic!() };
     let (_, part) = delegate_on(&s, run, "Iris", s.iris.0, &format!("#{number}"));
     assert_eq!(login_of(&s, part), Some(s.robin));
@@ -340,6 +342,7 @@ fn the_dispatchers_triage_and_the_summary_after_done_use_the_tickets_login() {
         start: true,
         from_message: None,
         from_idea: None,
+        kind: None,
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(&s, s.robin, Command::CreateTicket(create)) else { panic!() };
     let root = s.service.store().read(|c| aurelius_storage::tickets::state(c, ticket_id)).unwrap().unwrap().root_task_id.unwrap();
@@ -519,7 +522,7 @@ fn the_dispatcher_waits_for_its_logins_limit_without_using_a_try() {
         responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project, title: "Search".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None,
-        owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None, from_idea: None,
+        owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None, from_idea: None, kind: None
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(&s, s.robin, Command::CreateTicket(create)) else { panic!() };
     let root = s.service.store().read(|c| aurelius_storage::tickets::state(c, ticket_id)).unwrap().unwrap().root_task_id.unwrap();
@@ -610,7 +613,7 @@ fn the_dispatcher_waits_for_the_tickets_login_without_using_a_try() {
         responsible_user_id: None,
         confirm_secret: false,
         project_id: s.project, title: "Search".into(), description: None, priority: Default::default(), labels: vec![], deadline_ms: None,
-        owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None, from_idea: None,
+        owner_employee_id: None, run: Default::default(), files: vec![], start: true, from_message: None, from_idea: None, kind: None
     };
     let CommandResult::TicketCreated { ticket_id, .. } = exec(&s, s.robin, Command::CreateTicket(create)) else { panic!() };
     let root = s.service.store().read(|c| aurelius_storage::tickets::state(c, ticket_id)).unwrap().unwrap().root_task_id.unwrap();

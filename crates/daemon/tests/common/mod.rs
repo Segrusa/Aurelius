@@ -195,6 +195,7 @@ pub async fn backlog_ticket(client: &Client, project_id: aurelius_domain::Projec
             start: false,
             from_message: None,
             from_idea: None,
+            kind: None,
         })
         .await
         .unwrap();

@@ -121,6 +121,7 @@ async fn started(client: &Client, project_id: ProjectId, title: &str) -> TicketI
             start: true,
             from_message: None,
             from_idea: None,
+            kind: None,
         })
         .await
         .unwrap();

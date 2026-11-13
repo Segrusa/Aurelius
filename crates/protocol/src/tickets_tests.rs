@@ -26,6 +26,7 @@ fn create(mode: Option<AgentMode>) -> CreateTicket {
         start: false,
         from_message: None,
         from_idea: None,
+        kind: None,
     }
 }
 

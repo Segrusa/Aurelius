@@ -214,8 +214,8 @@ pub(crate) fn on_status(tx: &Tx<'_>, task: TaskId, status: TaskStatus, waiting_r
     // Not a main task: a ticket's test task that ended may still have to move its card.
     let Some((ticket, project, column)) = root_of(tx, task)? else { return crate::task::testing::on_ended(tx, task, status) };
     let Some(to) = column_for(status, waiting_reason) else { return Ok(vec![]) };
-    // A report goes to Testing first when the company has a tester.
-    let to = if to == ColumnKind::Review { crate::task::testing::column_after_report(tx)? } else { to };
+    // A report goes to Testing first when the company has a tester; a quick task's never (ST-03 AC1).
+    let to = if to == ColumnKind::Review { crate::task::testing::column_after_report(tx, ticket)? } else { to };
     if status == TaskStatus::Failed && to == column {
         return failed_in_place(tx, task, ticket);
     }
@@ -319,7 +319,9 @@ pub(crate) fn review_lines(tx: &Tx<'_>, ticket: TicketId, project: ProjectId, ro
 pub(crate) fn started(tx: &Tx<'_>, st: &Store, ticket: TicketId, user: UserId) -> Result<Vec<EventNotice>, StorageError> {
     let read = |key: &str| st.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
     let Some(view) = store::view(tx, ticket, &read)? else { return Ok(vec![]) };
-    if view.column != ColumnKind::Todo {
+    // A quick task starts in Doing (ST-01 AC3).
+    let quick = view.is_quick();
+    if view.column != ColumnKind::Todo && !(quick && view.column == ColumnKind::Doing) {
         return Ok(vec![]);
     }
     // A main task that still works stays the main task (a second Start is refused before this).
@@ -368,7 +370,9 @@ pub(crate) fn started(tx: &Tx<'_>, st: &Store, ticket: TicketId, user: UserId) -
 pub(crate) fn dispatched(tx: &Tx<'_>, ticket: TicketId, employee: EmployeeId) -> Result<Vec<EventNotice>, StorageError> {
     let Some(state) = store::state(tx, ticket)? else { return Ok(vec![]) };
     let Some(root) = state.root_task_id else { return Ok(vec![]) };
-    if state.column != ColumnKind::Todo || state.root_status != Some(TaskStatus::Draft) {
+    // A quick task goes to its employee in Doing (ST-01 AC3).
+    let quick_start = state.kind == aurelius_domain::ticket::TicketKind::Quick && state.column == ColumnKind::Doing;
+    if (state.column != ColumnKind::Todo && !quick_start) || state.root_status != Some(TaskStatus::Draft) {
         return Ok(vec![]);
     }
     let mut notices = crate::task::task_line::set_employee(tx, root, Some(employee))?.into_vec();
