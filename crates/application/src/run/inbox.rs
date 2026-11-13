@@ -198,8 +198,8 @@ pub(crate) fn cancel_queued(tx: &Tx<'_>, run: RunId) -> Result<bool, StorageErro
     Ok(true)
 }
 
-/// A run ended on a question (`ends_on_question`; `MessageView::awaiting_user` says
-/// the same to clients): its thread waits for the answer.
+/// A run of a ticket's main task ended without `report_ready` (`wait_for_answer`): its
+/// thread waits for the board member's answer.
 pub(crate) fn park_on_question(tx: &Tx<'_>, run: RunId, task: TaskId) -> Result<(), StorageError> {
     let Some((employee, thread)) = store::job_thread(tx, run)? else { return Ok(()) };
     store::park(tx, &employee, &thread, task, run)

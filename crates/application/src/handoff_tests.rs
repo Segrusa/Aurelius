@@ -281,6 +281,7 @@ fn a_ticket_stays_in_doing_while_a_handoff_is_open_and_reports_once_when_it_is_d
 
     // The owner's last run reports: now, and only now, the ticket goes to Review, with one line.
     let next = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap()[0].0;
+    assert!(act(&s, next, EmployeeAction::ReportReady { report: "The review passed; the fix is ready.".into() }).0);
     end_run(&s, next, "The review passed; the fix is ready.");
     assert_eq!(task_status(&s, root), TaskStatus::Review);
     assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);

@@ -18,6 +18,7 @@ use aurelius_domain::{
     task::{self, TaskStatus},
 };
 use aurelius_storage::{StorageError, Store, Tx, blobs, employees, tasks as store};
+use rusqlite::OptionalExtension;
 
 /// How an employee works on a task in its conversation (system text).
 pub const TASK_GUIDANCE: &str = "This conversation is a task you took on. Start with one or two sentences on how you will approach it. Do the work yourself with your own tools; use subagents (the Task tool) only for a broad search across many files, not by default. You can give a part to a colleague with delegate_task (you get their result here) or hand the whole task over with hand_over_task. Message a part you gave away with message_task (it interrupts them by default). Everything you do is visible in this conversation, so keep your closing answer short: say whether it worked, in one or two sentences, and what the user must still do or decide, if anything. No report, no headings, and do not repeat what is already above it (steps, tool calls, files, screenshots, ids). That closing answer is the task's result.";
@@ -222,16 +223,23 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
             notices.extend(answered);
             return Ok(notices);
         }
-        // A run that ends on a question has not finished: the ticket stays in Doing until the board member answers.
-        if row.status != TaskStatus::Review && ends_on_question(tx, st, task, run, closing)? {
-            notices.extend(wait_for_answer(tx, st, task, &row, run, closing)?);
-            return Ok(notices);
-        }
+        // Only the owner's `report_ready` brings the ticket to Review; what the run says decides nothing.
+        let report = reported_in_run(tx, st, run)?;
+        let closing = report.as_deref().unwrap_or(closing);
         // The work may lie with a colleague (a handoff, a run in the discussion): the ticket is not
         // ready for the board member then. It stays in Doing until the last of them has ended.
         if ticket_busy(tx, task, Some(run))? {
             notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("dependency"))?);
             notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "handed_off" }))?);
+            return Ok(notices);
+        }
+        // A run that ends without it has not finished, with a question mark or without: the ticket
+        // stays in Doing, the board member is told, and their answer wakes the owner.
+        // While the card is in Testing the report is in and `report_ready` is refused: the owner's run
+        // that answers a word there ends as it always did.
+        let testing = matches!(crate::task::ticket_line::root_of(tx, task)?, Some((_, _, aurelius_domain::ticket::ColumnKind::Testing)));
+        if row.status != TaskStatus::Review && !testing && report.is_none() {
+            notices.extend(wait_for_answer(tx, st, task, &row, run, closing)?);
             return Ok(notices);
         }
         notices.extend(complete(tx, st, task, closing)?);
@@ -241,25 +249,58 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
     Ok(notices)
 }
 
-/// The run of a ticket's main task ended on a question: its closing text, or the last
-/// message it posted in the ticket's discussion, ends with "?".
-fn ends_on_question(tx: &Tx<'_>, st: &Store, task: TaskId, run: RunId, closing: &str) -> Result<bool, StorageError> {
-    if aurelius_domain::group_chat::asks_question(closing) {
-        return Ok(true);
+/// Longest report `report_ready` takes, in characters.
+pub const REPORT_READY_MAX: usize = 20_000;
+/// The event that records a `report_ready` call: the run and the blob of its report.
+const REPORT_READY_EVENT: &str = "task.report_ready";
+/// What the discussion says when the owner's run ended without `report_ready` and without a word of its own.
+const NO_REPORT_NOTE: &str = "I stopped without reporting the work as ready, so the ticket stays in Doing. I am waiting for your input.";
+
+/// `report_ready` of a run: the owner says the work is ready for Review. Only a live run of a
+/// ticket's main task whose card has not been reported yet may (a tool call is never trusted).
+/// Nothing moves now: the report is kept with the run, and its end decides (so an open handoff,
+/// delegation or run still holds the ticket in Doing). Returns (ok, text for the model, notices).
+pub(crate) fn report_ready(tx: &Tx<'_>, st: &Store, run: RunId, report: &str) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
+    let refuse = |why: &str| Ok((false, why.to_owned(), vec![]));
+    let Some((task, row)) = live_task_of(tx, run)? else { return refuse("report_ready is only for the owner's run of a ticket's main task.") };
+    let Some((_, _, column)) = crate::task::ticket_line::root_of(tx, task)? else { return refuse("report_ready is only for the main task of a ticket.") };
+    if matches!(column, aurelius_domain::ticket::ColumnKind::Review | aurelius_domain::ticket::ColumnKind::Testing | aurelius_domain::ticket::ColumnKind::Done) {
+        return refuse("This ticket is already reported. Answer in the discussion instead.");
     }
-    let Some(ticket) = crate::task::ticket_line::ticket_of(tx, task)? else { return Ok(false) };
-    let Some(discussion) = aurelius_storage::discussions::ticket_conversation(tx, ticket)? else { return Ok(false) };
-    let key = aurelius_storage::discussions::run_last_post_key(tx, discussion, run)?;
-    let posted = key.and_then(|k| st.blobs().read(&k).ok()).and_then(|b| String::from_utf8(b).ok());
-    Ok(posted.is_some_and(|text| aurelius_domain::group_chat::asks_question(&text)))
+    let report = report.trim();
+    if report.is_empty() {
+        return refuse("Give the report: what you did, what you checked and what is still open.");
+    }
+    if report.chars().count() > REPORT_READY_MAX {
+        return refuse(&format!("The report is too long: at most {REPORT_READY_MAX} characters."));
+    }
+    let blob = st.blobs().put(report.as_bytes(), "text/markdown; charset=utf-8")?;
+    blobs::register(tx, &blob)?;
+    let notice = task_event(tx, task, row.project_id, REPORT_READY_EVENT, serde_json::json!({ "run_id": run, "blob_id": blob.id.to_string() }))?;
+    Ok((true, "Report recorded. Finish your answer now without asking anything; the ticket goes to Review when your run ends and nothing else is open on it.".to_owned(), vec![notice]))
 }
 
-/// The question goes to the discussion (unless the run posted it there itself) and the
-/// main task waits for the answer; the card stays in Doing. The answer resumes it.
+/// The report the run gave with `report_ready` (the last one), if it did.
+fn reported_in_run(tx: &Tx<'_>, st: &Store, run: RunId) -> Result<Option<String>, StorageError> {
+    let key: Option<String> = tx
+        .query_row(
+            "SELECT b.storage_key FROM events v JOIN blobs b ON b.id = json_extract(v.metadata_json, '$.blob_id')
+             WHERE v.aggregate_type = 'task' AND v.type = ?1 AND json_extract(v.metadata_json, '$.run_id') = ?2
+             ORDER BY v.seq DESC LIMIT 1",
+            rusqlite::params![REPORT_READY_EVENT, run.to_string()],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(key.and_then(|k| st.blobs().read(&k).ok()).and_then(|b| String::from_utf8(b).ok()))
+}
+
+/// The run ended without `report_ready`: what it said (a question, or that it needs input) goes to the
+/// discussion (unless the run posted there itself) and the main task waits for the answer; the card stays in Doing. The answer resumes it.
 fn wait_for_answer(tx: &Tx<'_>, st: &Store, task: TaskId, row: &store::TaskRow, run: RunId, closing: &str) -> Result<Vec<EventNotice>, StorageError> {
     let mut notices = Vec::new();
     if let Some(ticket) = crate::task::ticket_line::ticket_of(tx, task)? {
-        notices.extend(crate::conversation::discussion::owner_answer(tx, st, ticket, run, closing)?);
+        let said = if closing.trim().is_empty() { NO_REPORT_NOTE } else { closing };
+        notices.extend(crate::conversation::discussion::owner_answer(tx, st, ticket, run, said)?);
     }
     notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("input"))?);
     notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": WAITING_QUESTION }))?);
@@ -714,6 +755,9 @@ pub enum EmployeeAction {
     /// The tester's verdict on a ticket in Testing (`testing::verdict`; only in
     /// the run of its open test task).
     ReportTestResult { passed: bool, summary: String },
+    /// The owner of a ticket reports the work ready for Review (`report_ready`; only in a live
+    /// run of the ticket's main task). The ticket moves when the run ends.
+    ReportReady { report: String },
     /// The tickets of the board, filtered (`ticket::agent`); `project` none: the run's project, else all.
     ListTickets { project: Option<String>, column: Option<String>, query: Option<String>, limit: Option<u32> },
     /// One ticket in full with the latest messages of its discussion (`ticket` is `#12`, a number or an id).
@@ -953,6 +997,10 @@ impl CommandService {
             let (passed, summary) = (*passed, summary.clone());
             return self.store.write(move |tx| crate::task::testing::verdict(tx, &st, run, passed, &summary)).map_err(storage_error);
         }
+        if let EmployeeAction::ReportReady { report } = &action {
+            let report = report.clone();
+            return self.store.write(move |tx| report_ready(tx, &st, run, &report)).map_err(storage_error);
+        }
         if let EmployeeAction::MessageTask { task, message, interrupt } = action {
             return self.store.write(move |tx| message_task(tx, &st, run, &task, &message, interrupt)).map_err(storage_error);
         }
@@ -1058,6 +1106,7 @@ impl CommandService {
                     | EmployeeAction::Scratchpad { .. }
                     | EmployeeAction::AssignTicket { .. }
                     | EmployeeAction::ReportTestResult { .. }
+                    | EmployeeAction::ReportReady { .. }
                     | EmployeeAction::ListTickets { .. }
                     | EmployeeAction::ReadTicket { .. }
                     | EmployeeAction::CreateTicket { .. }

@@ -6128,6 +6128,7 @@ enum EventKind {
   taskModeChosen('task.mode_chosen'),
   taskPosted('task.posted'),
   taskQueued('task.queued'),
+  taskReportReady('task.report_ready'),
   taskResumed('task.resumed'),
   taskRunChanged('task.run_changed'),
   taskStarted('task.started'),

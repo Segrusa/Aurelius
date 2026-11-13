@@ -474,9 +474,16 @@ fn started_ticket(s: &Setup) -> (TicketId, TaskId, ConversationId, RunId) {
 /// `started_ticket`, whose owner reported (`report`): the ticket is in Review.
 fn reported_ticket(s: &Setup, report: &str) -> (TicketId, TaskId, ConversationId) {
     let (t, root, conversation, run) = started_ticket(s);
-    end_run(s, run, report);
+    report_and_end(s, run, report);
     assert_eq!(ticket_view(s, t).column, ColumnKind::Review);
     (t, root, conversation)
+}
+
+/// The owner reports the work ready with `report_ready`, then its run ends.
+fn report_and_end(s: &Setup, run: RunId, report: &str) {
+    let (ok, said) = act(s, run, EmployeeAction::ReportReady { report: report.into() });
+    assert!(ok, "{said}");
+    end_run(s, run, "Done.");
 }
 
 /// The run ends with `answer`, as a dispatcher's end does for the task.
@@ -533,8 +540,72 @@ fn a_run_that_ends_on_a_question_keeps_the_ticket_in_doing_until_it_is_answered(
     assert_eq!(task_status(&s, root), TaskStatus::Running);
     let next = s.service.store().read(move |c| aurelius_storage::conversations::unfinished_runs_in(c, conversation)).unwrap();
     assert_eq!(next.len(), 1, "one run answers it");
-    end_run(&s, next[0].0, "Done with the label.");
+    report_and_end(&s, next[0].0, "Done with the label.");
     assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
+}
+
+#[test]
+fn a_run_that_ends_without_report_ready_stays_in_doing_with_or_without_a_question_mark() {
+    use aurelius_domain::task::TaskStatus;
+    let s = setup();
+    let (t, root, _, run) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    // Ticket #44: four things asked of the board member, ending on a full stop.
+    end_run(&s, run, "I need from you:\n\n1. approval\n2. a decision on the licence\n3. acceptance of the risk\n4. a test project.");
+    assert_eq!(task_status(&s, root), TaskStatus::Waiting);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Doing);
+    assert_eq!(system_lines(&s, d).iter().filter(|(k, _)| *k == SystemLineKind::Review).count(), 0);
+    assert!(messages(&s, d).into_iter().last().unwrap().text.ends_with("4. a test project."), "the board member reads what is asked");
+}
+
+#[test]
+fn a_run_that_ends_without_report_ready_and_without_words_says_it_waits_for_input() {
+    let s = setup();
+    let (t, root, _, run) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.unwrap();
+    end_run(&s, run, "");
+    assert_eq!(task_status(&s, root), aurelius_domain::task::TaskStatus::Waiting);
+    assert!(messages(&s, d).into_iter().last().unwrap().text.contains("waiting for your input"));
+}
+
+#[test]
+fn report_ready_is_refused_outside_the_owners_live_run_of_the_main_task_or_when_empty() {
+    let s = setup();
+    let (t, _, _, run) = started_ticket(&s);
+    assert!(!act(&s, run, EmployeeAction::ReportReady { report: "  ".into() }).0, "an empty report");
+    assert!(!act(&s, run, EmployeeAction::ReportReady { report: "x".repeat(crate::task::task_runs::REPORT_READY_MAX + 1) }).0, "too long");
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Doing, "refused calls move nothing");
+    // A run that is not a task's: refused.
+    let (_, runs) = post(&s, new_ticket(&s, "Other", None), "@Bo look").unwrap();
+    assert!(!act(&s, runs[0], EmployeeAction::ReportReady { report: "done".into() }).0);
+    // In Review already: the owner answers in the discussion instead.
+    let later = setup();
+    let (_, _, _, answering) = answering_ticket(&later);
+    assert!(!act(&later, answering, EmployeeAction::ReportReady { report: "again".into() }).0);
+}
+
+#[test]
+fn report_ready_moves_nothing_before_the_run_ends_and_a_second_call_replaces_the_report() {
+    let s = setup();
+    let (t, root, _, run) = started_ticket(&s);
+    assert!(act(&s, run, EmployeeAction::ReportReady { report: "First.".into() }).0);
+    assert!(act(&s, run, EmployeeAction::ReportReady { report: "Second, final.".into() }).0);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Doing, "the run is still live");
+    end_run(&s, run, "Done.");
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
+    assert!(result_of(&s, root).unwrap().contains("Second, final."));
+}
+
+#[test]
+fn report_ready_does_not_beat_an_open_handoff() {
+    use aurelius_domain::task::TaskStatus;
+    let s = setup();
+    let (t, root, _, run) = started_ticket(&s);
+    assert!(hand_off(&s, run, "Bo", "Review branch x.").0);
+    assert!(act(&s, run, EmployeeAction::ReportReady { report: "Ready, apart from the review.".into() }).0);
+    end_run(&s, run, "Done.");
+    assert_eq!(task_status(&s, root), TaskStatus::Waiting);
+    assert_eq!(ticket_view(&s, t).column, ColumnKind::Doing);
 }
 
 #[test]
@@ -552,9 +623,9 @@ fn a_run_that_asked_in_the_discussion_and_signs_off_keeps_the_ticket_in_doing() 
 }
 
 #[test]
-fn a_run_that_ends_on_a_statement_still_reports() {
+fn a_report_that_reads_like_a_question_still_reports_because_the_tool_decides() {
     let s = setup();
-    let (t, _, _) = reported_ticket(&s, "All done. Anything else?\n\nThe label is changed.");
+    let (t, _, _) = reported_ticket(&s, "All done. Anything else?\n\nThe label is changed?");
     assert_eq!(ticket_view(&s, t).column, ColumnKind::Review);
 }
 
@@ -668,16 +739,17 @@ fn a_run_that_works_on_after_its_post_in_the_discussion_still_answers_there() {
 }
 
 #[test]
-fn a_report_is_the_closing_text_without_the_notes_before_the_last_tool_use() {
+fn what_a_waiting_run_tells_the_board_member_is_its_closing_text_without_the_notes_before_the_last_tool_use() {
     let s = setup();
-    let (_, root, _, run) = started_ticket(&s);
+    let (t, _, _, run) = started_ticket(&s);
+    let d = ticket_view(&s, t).conversation_id.unwrap();
     let notes = "I'll start by looking at the screenshot.\n\n";
     let closing = "The server name now shows in every client; I tested the desktop and the phone, and nothing else changed.";
     let offset = notes.len() as u32;
     s.service.store().write(move |tx| aurelius_storage::conversations::activity_started(tx, run, aurelius_domain::MessageId::new(), "call-1", "Read", &serde_json::json!({}), None, offset)).unwrap();
     end_run(&s, run, &format!("{notes}{closing}"));
-    let report = result_of(&s, root).unwrap();
-    assert!(report.contains(closing) && !report.contains("I'll start"), "{report}");
+    let said = messages(&s, d).into_iter().last().unwrap().text;
+    assert!(said.contains(closing) && !said.contains("I'll start"), "{said}");
 }
 
 #[test]

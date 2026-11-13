@@ -43,7 +43,7 @@ const COMPANY: &str = "Company";
 /// `ExitPlanMode`, and of the bridge the employee's own memory and scratchpad,
 /// reading its work (tasks, tickets, discussions, guidelines), `post_to_discussion`,
 /// `hand_off`, `tell_responsible`, `suggest_replies`, `set_mode` and
-/// `report_test_result`. They only touch the employee's own thread or read, and
+/// `report_test_result` and `report_ready`. They only touch the employee's own thread or read, and
 /// the platform rules count on them.
 pub const SWITCHABLE_TOOLS: &[SwitchableTool] = &[
     tool("Read", "Read files", FILES),

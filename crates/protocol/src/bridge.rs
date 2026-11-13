@@ -148,6 +148,11 @@ pub enum EmployeeTaskOp {
     /// Doing with `summary` for the owner. The daemon refuses it for any run other
     /// than the open test task of a ticket in Testing.
     ReportTestResult { passed: bool, #[serde(default)] summary: String },
+    /// The owner of a ticket reports that the work is done (the bridge's `report_ready`, `--report`
+    /// only, ticket #46): `report` is what the board member reads in Review. Only this brings the
+    /// ticket to Review, and only when the owner's run ends; the daemon refuses it for any run
+    /// other than a live run of a ticket's main task that is not yet in Review.
+    ReportReady { report: String },
     /// Propose a guideline (the bridge's `propose_guideline`, feature `guidelines`, B5):
     /// a change of one in the run's own block (`guideline`: its `g:` id, id or
     /// title), or none for a new one. `text` is the whole new markdown. Always
@@ -316,6 +321,7 @@ mod tests {
             VaultRead { .. } => "vault_read",
             AssignTicket { .. } => "assign_ticket",
             ReportTestResult { .. } => "report_test_result",
+            ReportReady { .. } => "report_ready",
             ProposeGuideline { .. } => "propose_guideline",
             ListGuidelines { .. } => "list_guidelines",
             ReadGuideline { .. } => "read_guideline",
