@@ -226,18 +226,18 @@ pub(crate) fn on_run_finished(tx: &Tx<'_>, st: &Store, run: RunId, completed: bo
         // Only the owner's `report_ready` brings the ticket to Review; what the run says decides nothing.
         let report = reported_in_run(tx, st, run)?;
         let closing = report.as_deref().unwrap_or(closing);
+        // While the card is in Testing the report is in and `report_ready` is refused: the owner's run
+        // that answers a word there ends as it always did, beside the tester's open run.
+        let testing = matches!(crate::task::ticket_line::root_of(tx, task)?, Some((_, _, aurelius_domain::ticket::ColumnKind::Testing)));
         // The work may lie with a colleague (a handoff, a run in the discussion): the ticket is not
         // ready for the board member then. It stays in Doing until the last of them has ended.
-        if ticket_busy(tx, task, Some(run))? {
+        if !testing && ticket_busy(tx, task, Some(run))? {
             notices.extend(crate::task::task_line::set_status(tx, task, TaskStatus::Waiting, Some("dependency"))?);
             notices.push(task_event(tx, task, row.project_id, "task.waiting", serde_json::json!({ "reason": "handed_off" }))?);
             return Ok(notices);
         }
         // A run that ends without it has not finished, with a question mark or without: the ticket
         // stays in Doing, the board member is told, and their answer wakes the owner.
-        // While the card is in Testing the report is in and `report_ready` is refused: the owner's run
-        // that answers a word there ends as it always did.
-        let testing = matches!(crate::task::ticket_line::root_of(tx, task)?, Some((_, _, aurelius_domain::ticket::ColumnKind::Testing)));
         if row.status != TaskStatus::Review && !testing && report.is_none() {
             notices.extend(wait_for_answer(tx, st, task, &row, run, closing)?);
             return Ok(notices);
@@ -620,7 +620,12 @@ fn open_parts(tx: &Tx<'_>, task: TaskId) -> Result<bool, StorageError> {
 }
 
 /// Work on the task's ticket (a handoff, a run in its discussion) is open besides `except`.
+/// Only a ticket's main task waits for that: a delegated part on the ticket waits for its
+/// own parts, and `ticket_settled` would never wake it once the ticket's work has ended.
 fn ticket_busy(tx: &Tx<'_>, task: TaskId, except: Option<RunId>) -> Result<bool, StorageError> {
+    if !crate::task::ticket_line::is_root(tx, task)? {
+        return Ok(false);
+    }
     match crate::task::ticket_line::ticket_of(tx, task)? {
         Some(ticket) => aurelius_storage::inbox::open_on_ticket(tx, ticket, except),
         None => Ok(false),
