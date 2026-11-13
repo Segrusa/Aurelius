@@ -7,6 +7,7 @@ import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/board/board_bloc.dart';
 import 'package:aurelius_mobile/features/board/board_page.dart';
 import 'package:aurelius_mobile/features/board/my_tickets_bloc.dart';
+import 'package:aurelius_mobile/features/board/ticket_page.dart';
 import 'package:aurelius_mobile/features/board/new_ticket_page.dart';
 import 'package:aurelius_mobile/features/dashboard/dashboard_page.dart' show GiveWorkBox;
 import 'package:aurelius_mobile/features/dashboard/give_work.dart';
@@ -276,6 +277,88 @@ void main() {
       await tester.tap(find.text('My tickets'));
       await settleBoard(tester);
       expect(find.byKey(const ValueKey('my-filter-quick')), findsNothing);
+    });
+  });
+
+  group('Review, Done and cancel (ST-05, BR4)', () {
+    Future<MockRepository> open(WidgetTester tester, TicketView ticket, {LinkState link = quickLink}) async {
+      final repo = boardRepository(detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []), link: link);
+      await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id), link: link);
+      return repo;
+    }
+
+    TicketView quickIn(ColumnKind column, {String? mergeCommit, int? doneAtMs}) =>
+        ticketOf(id: 'q1', number: 9, column: column, ownerEmployeeId: 'forge', ownerName: 'Forge', title: 'Fix the footer', kind: quickKind, mergeCommit: mergeCommit, doneAtMs: doneAtMs);
+
+    String barDone(WidgetTester tester) => tester.widget<Text>(find.descendant(of: find.byKey(const ValueKey('bar-done')), matching: find.byType(Text))).data!;
+
+    testWidgets('in Review a quick task has Approve and merge; it asks, then sends ticket.accept', (tester) async {
+      final repo = await open(tester, quickIn(ColumnKind.review));
+      expect(barDone(tester), approveAndMerge);
+      expect(find.byKey(const ValueKey('quick-tag-page')), findsOneWidget);
+      await tapKey(tester, 'bar-done');
+      expect(find.text('$approveAndMerge #9?'), findsOneWidget);
+      expect(find.textContaining('Nothing is pushed.'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('mark-done')));
+      await settleBoard(tester);
+      expect(writesOf(repo).single['method'], 'ticket.accept');
+      expect(find.text('#9 is approved. Merging into main…'), findsOneWidget);
+    });
+
+    testWidgets('a normal ticket in Review keeps Done', (tester) async {
+      await open(tester, ticketOf(column: ColumnKind.review, ownerEmployeeId: 'forge', ownerName: 'Forge'));
+      expect(barDone(tester), 'Done');
+    });
+
+    testWidgets('without the feature a quick task keeps Done and shows no tag', (tester) async {
+      await open(tester, quickIn(ColumnKind.review), link: onlineLink);
+      expect(barDone(tester), 'Done');
+      expect(find.byKey(const ValueKey('quick-tag-page')), findsNothing);
+    });
+
+    testWidgets('after Done the page shows the short merge commit', (tester) async {
+      await open(tester, quickIn(ColumnKind.done, mergeCommit: '1a2b3c4d5e6f7a8b9c0d', doneAtMs: 0));
+      expect(find.text("Merged into the project's main as 1a2b3c4. Nothing was pushed."), findsOneWidget);
+    });
+
+    testWidgets('after Done the card shows the short merge commit', (tester) async {
+      final repo = boardRepository(board: boardOf([quickIn(ColumnKind.done, mergeCommit: '1a2b3c4d5e6f7a8b9c0d', doneAtMs: 0)]), link: quickLink);
+      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage()), link: quickLink);
+      await tapKey(tester, 'board-chip-done');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('card-done-q1')), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('card-done-q1'))).data, endsWith(' · merged 1a2b3c4'));
+    });
+
+    testWidgets('Back to Backlog of a quick task asks first; Cancel keeps it, confirming sends ticket.cancel', (tester) async {
+      final repo = await open(tester, quickIn(ColumnKind.doing));
+      await tapKey(tester, 'bar-backlog');
+      expect(find.text(quickCancelTitle), findsOneWidget);
+      expect(find.text(quickCancelBody), findsOneWidget);
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await settleBoard(tester);
+      verifyNever(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')));
+      await tapKey(tester, 'bar-backlog');
+      await tester.tap(find.widgetWithText(TextButton, 'Back to Backlog'));
+      await settleBoard(tester);
+      expect(writesOf(repo).single['method'], 'ticket.cancel');
+      expect(find.text('#9 is back in Backlog. Its branch is removed.'), findsOneWidget);
+    });
+
+    testWidgets('a quick task in Review asks the same before it goes back to Backlog', (tester) async {
+      await open(tester, quickIn(ColumnKind.review));
+      await tester.tap(find.byTooltip('Ticket actions'));
+      await settleBoard(tester);
+      await tester.tap(find.text('Back to Backlog').last);
+      await settleBoard(tester);
+      expect(find.text(quickCancelTitle), findsOneWidget);
+    });
+
+    testWidgets('a normal ticket keeps its own question', (tester) async {
+      await open(tester, ticketOf(column: ColumnKind.doing, ownerEmployeeId: 'forge', ownerName: 'Forge'));
+      await tapKey(tester, 'bar-backlog');
+      expect(find.text(quickCancelTitle), findsNothing);
+      expect(find.text('Back to Backlog?'), findsOneWidget);
     });
   });
 }

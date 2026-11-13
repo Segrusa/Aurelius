@@ -351,13 +351,18 @@ class _TicketViewState extends State<_TicketView> {
       label: 'Runs on',
       value: ticket.loginUser == context.read<ConnectionBloc>().state.user?.id ? 'Your Claude login' : "${ticket.loginUsername}'s Claude login",
     );
+    final quick = isQuickTask(ticket, on: quickTasksOn(context.read<ConnectionBloc>().state));
     final ownDispatcher = project?.dispatcherEmployeeId != null && project!.dispatcherEmployeeId == effectiveDispatcher(project, company.company?.dispatcherEmployeeId, company.employees);
     return [
       if (state == TicketState.done)
         _Notice(
           key: const ValueKey('ticket-done'),
           title: '✓ Closed${ticket.doneAtMs == null ? '' : ' · ${DateFormat.yMMMd().add_Hm().format(DateTime.fromMillisecondsSinceEpoch(ticket.doneAtMs!))}'}',
-          body: 'Nothing was merged, pushed or deployed.',
+          body: !quick
+              ? 'Nothing was merged, pushed or deployed.'
+              : ticket.mergeCommit == null
+                  ? 'There were no commits to merge. Nothing was pushed.'
+                  : "Merged into the project's main as ${shortCommit(ticket.mergeCommit!)}. Nothing was pushed.",
         ),
       if (state == TicketState.choosing) _Notice(title: '◌ ${dispatcher ?? 'The dispatcher'} is choosing an employee…', body: 'You can choose one yourself.'),
       if (state == TicketState.needsOwner)
@@ -411,7 +416,7 @@ class _TicketViewState extends State<_TicketView> {
           body: 'The full test suite runs once. Green goes on to Review; red goes back to Doing with the failures for the owner.',
         ),
       if (state == TicketState.review) ...[
-        GroupHeader('Report', caps: true, info: 'Only a board member decides. Done merges, pushes and deploys nothing.'),
+        GroupHeader('Report', caps: true, info: quick ? "Only a board member decides. $approveAndMerge merges its branch into the project's main; nothing is pushed." : 'Only a board member decides. Done merges, pushes and deploys nothing.'),
         InsetGroup(padding: const EdgeInsets.all(16), children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('From ${owner ?? 'the owner'}${root == null ? '' : ' · ${Fmt.ago(root.updatedAtMs)}'}', style: TextStyle(color: Tokens.label2, fontSize: 13)),
@@ -734,7 +739,7 @@ class _ActionBar extends StatelessWidget {
           ],
         TicketState.review => [
             OutlinedButton(key: const ValueKey('bar-send-back'), onPressed: on(onSendBack ?? () => showSendBack(context, ticket)), child: const Text('Send back')),
-            FilledButton.icon(key: const ValueKey('bar-done'), onPressed: on(() => showMarkDone(context, ticket)), icon: const Icon(Icons.check), label: const Text('Done')),
+            FilledButton.icon(key: const ValueKey('bar-done'), onPressed: on(() => showMarkDone(context, ticket)), icon: const Icon(Icons.check), label: Text(acceptLabel(ticket, quickOn: quickTasksOn(context.read<ConnectionBloc>().state)))),
           ],
         TicketState.done => const <Widget>[],
       },
@@ -992,7 +997,7 @@ class _DecisionsState extends State<_Decisions> {
                   key: const ValueKey('discussion-done'),
                   onPressed: can ? () => showMarkDone(context, ticket) : null,
                   icon: const Icon(Icons.check, size: 18),
-                  label: const Text('Done'),
+                  label: Text(acceptLabel(ticket, quickOn: quickTasksOn(context.read<ConnectionBloc>().state))),
                 ),
               ];
         return Padding(
