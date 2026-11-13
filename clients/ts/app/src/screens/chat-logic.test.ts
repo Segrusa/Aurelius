@@ -405,7 +405,18 @@ describe("@Everyone", () => {
   it("shows as a mention when known", () => {
     expect(markMentions("@everyone go", ["Everyone"], null)).toBe("[@everyone](#@everyone) go");
   });
-  it("tells whom it wakes", () => {
+  it("names the coordinator and who reads along", () => {
+    expect(audienceLine({ employees: 5, paused: 1, board_members: 2, coordinator: "Orion" })).toBe(
+      "Orion picks who follows up; 5 employees can read along (1 paused), 2 board members are told",
+    );
+    expect(audienceLine({ employees: 1, paused: 0, board_members: 1, coordinator: "Ann" })).toBe(
+      "Ann picks who follows up; 1 employee can read along, 1 board member is told",
+    );
+    expect(audienceLine({ employees: 3, paused: 0, board_members: 0, coordinator: "Ann" })).toBe(
+      "Ann picks who follows up; 3 employees can read along",
+    );
+  });
+  it("keeps the old line on an older server", () => {
     expect(audienceLine({ employees: 5, paused: 1, board_members: 2 })).toBe(
       "Wakes 5 employees (1 paused) and tells 2 board members",
     );

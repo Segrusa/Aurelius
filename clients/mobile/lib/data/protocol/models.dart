@@ -5398,11 +5398,13 @@ final class DirListing {
 
 /// `discussion.audience` (feature `everyone_mention`): whom a board member's
 /// `@Everyone` in one discussion would reach, so a client can say so before it
-/// sends. Never the asking board member: they are not told of their own message.
+/// sends: it wakes the `coordinator`, the others only know of it. Never the asking
+/// board member: they are not told of their own message.
 final class DiscussionAudience {
   const DiscussionAudience({
     required this.boardMembers,
     required this.boardUsernames,
+    this.coordinator,
     required this.employeeNames,
     required this.employees,
     required this.paused,
@@ -5413,11 +5415,16 @@ final class DiscussionAudience {
   final int boardMembers;
   /// Their usernames.
   final List<String> boardUsernames;
+  /// The one employee `@Everyone` wakes, who answers or hands over: the ticket's
+  /// owner, else the dispatcher, else the CEO, the first that is active. None
+  /// when there is nobody, or from a server that still wakes all `employees`.
+  final String? coordinator;
   /// Their names, in the order of the company.
   final List<String> employeeNames;
-  /// Employees `@Everyone` wakes: active, in the discussion.
+  /// Active employees in the discussion, who know of an `@Everyone`: it is in what
+  /// they read when next woken there. It does not wake them (see `coordinator`).
   final int employees;
-  /// Employees in the discussion who are paused: they are not woken, the message says so.
+  /// Employees in the discussion who are paused.
   final int paused;
   /// Their names.
   final List<String> pausedNames;
@@ -5425,6 +5432,7 @@ final class DiscussionAudience {
   factory DiscussionAudience.fromJson(Map<String, dynamic> json) => DiscussionAudience(
     boardMembers: (json['board_members'] as num).toInt(),
     boardUsernames: (json['board_usernames'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+    coordinator: (json['coordinator'] == null ? null : (json['coordinator'] as String)),
     employeeNames: (json['employee_names'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
     employees: (json['employees'] as num).toInt(),
     paused: (json['paused'] as num).toInt(),
@@ -5434,6 +5442,7 @@ final class DiscussionAudience {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'board_members': boardMembers,
     'board_usernames': boardUsernames,
+    if (coordinator != null) 'coordinator': coordinator,
     'employee_names': employeeNames,
     'employees': employees,
     'paused': paused,

@@ -272,10 +272,12 @@ pub mod feature {
     /// `host_name`, the pairing text and the pairing poll give the chosen name.
     pub const SERVER_NAME: &str = "server_name";
     /// `@Everyone` (protocol 5, additive; ticket #40): a board member's message
-    /// with `@Everyone` in a channel or a ticket's discussion wakes every active
-    /// employee in it and tells the board members in it, once each; the read
-    /// `discussion.audience { channel }` counts them before sending
-    /// (`DiscussionAudience`). The text is plain text on the wire: a client
+    /// with `@Everyone` in a channel or a ticket's discussion wakes one employee,
+    /// the coordinator (ticket #45; before that, every active employee in it), and
+    /// tells the board members in it, once each; the other employees read it when
+    /// next woken there. The read `discussion.audience { channel }` names and counts
+    /// them before sending (`DiscussionAudience`; `coordinator` absent on an older
+    /// server). The text is plain text on the wire: a client
     /// marks `@Everyone` itself. An employee's `@Everyone` is only text.
     pub const EVERYONE_MENTION: &str = "everyone_mention";
     /// A channel per ticket (protocol 5, additive; AUR-CHAT-001): the ticket's
