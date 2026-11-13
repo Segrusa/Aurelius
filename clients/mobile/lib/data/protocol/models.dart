@@ -1467,6 +1467,7 @@ sealed class Command {
           files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           fromIdea: (json['from_idea'] == null ? null : (json['from_idea'] as String)),
           fromMessage: (json['from_message'] == null ? null : (json['from_message'] as String)),
+          kind: (json['kind'] == null ? null : TicketKind.fromJson(json['kind'] as String)),
           labels: (json['labels'] == null ? const [] : (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
           ownerEmployeeId: (json['owner_employee_id'] == null ? null : (json['owner_employee_id'] as String)),
           priority: (json['priority'] == null ? null : TicketPriority.fromJson(json['priority'] as String)),
@@ -2020,6 +2021,7 @@ final class CommandCreateTicket extends Command {
     this.files = const [],
     this.fromIdea,
     this.fromMessage,
+    this.kind,
     this.labels = const [],
     this.ownerEmployeeId,
     this.priority,
@@ -2044,6 +2046,10 @@ final class CommandCreateTicket extends Command {
   /// Made from this chat message ("Make ticket", feature `ticket_discussion`):
   /// the discussion starts with a link to it, and its chat gets a link to the ticket.
   final String? fromMessage;
+  /// A quick task (feature `quick_task`): it needs `owner_employee_id`, starts at once
+  /// in Doing and ignores `start`. Left out: a normal ticket. Optional, as above:
+  /// older servers refuse fields they do not know.
+  final TicketKind? kind;
   final List<String> labels;
   /// Chosen now: the dispatcher is skipped when it starts.
   final String? ownerEmployeeId;
@@ -2067,6 +2073,7 @@ final class CommandCreateTicket extends Command {
       'files': files,
       if (fromIdea != null) 'from_idea': fromIdea,
       if (fromMessage != null) 'from_message': fromMessage,
+      if (kind != null) 'kind': kind?.toJson(),
       'labels': labels,
       if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
       if (priority != null) 'priority': priority?.toJson(),
@@ -17545,6 +17552,27 @@ final class TicketFollowersView {
   };
 }
 
+/// What sort of ticket it is (protocol 5, feature `quick_task`, ticket #53).
+enum TicketKind {
+  /// Triage, Plan review, delegation and Testing as the board has them.
+  normal('normal'),
+  /// A small piece of work: it starts in Doing with its chosen employee in Auto mode,
+  /// never gets triage, Plan review or Testing, cannot be delegated, works on its own
+  /// branch `quick/ticket-<N>` and is merged into the project's local main on Done.
+  quick('quick');
+
+  const TicketKind(this.wire);
+
+  final String wire;
+
+  static TicketKind fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown TicketKind value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
 /// Why a ticket cannot run yet (`TicketView::needs`).
 enum TicketNeed {
   /// `login_user` has no working Claude login (none, expired, or disabled):
@@ -17599,9 +17627,11 @@ final class TicketView {
     this.designUrl,
     this.doneAtMs,
     required this.id,
+    this.kind,
     required this.labels,
     required this.loginUser,
     required this.loginUsername,
+    this.mergeCommit,
     this.needs,
     required this.number,
     this.ownerEmployeeId,
@@ -17643,11 +17673,17 @@ final class TicketView {
   final String? designUrl;
   final int? doneAtMs;
   final String id;
+  /// `"quick"` for a quick task (feature `quick_task`, `TicketKind::as_str`); left out for a
+  /// normal ticket, so its view is as before and an older client shows a quick task as a
+  /// normal one. Text, not an enum: a view never holds an enum value an older client does not know (R1).
+  final String? kind;
   final List<String> labels;
   /// Whose Claude login its runs use (protocol 5): the creator, unless a
   /// board member took it over on their own login (`ticket.use_my_login`).
   final String loginUser;
   final String loginUsername;
+  /// The merge commit of a quick task accepted into the project's main (feature `quick_task`).
+  final String? mergeCommit;
   /// What the ticket waits for before it can run; none: nothing.
   final TicketNeed? needs;
   /// Per company, from 1: what people call it (`#12`).
@@ -17696,9 +17732,11 @@ final class TicketView {
     designUrl: (json['design_url'] == null ? null : (json['design_url'] as String)),
     doneAtMs: (json['done_at_ms'] == null ? null : (json['done_at_ms'] as num).toInt()),
     id: (json['id'] as String),
+    kind: (json['kind'] == null ? null : (json['kind'] as String)),
     labels: (json['labels'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
     loginUser: (json['login_user'] as String),
     loginUsername: (json['login_username'] as String),
+    mergeCommit: (json['merge_commit'] == null ? null : (json['merge_commit'] as String)),
     needs: (json['needs'] == null ? null : TicketNeed.fromJson(json['needs'] as String)),
     number: (json['number'] as num).toInt(),
     ownerEmployeeId: (json['owner_employee_id'] == null ? null : (json['owner_employee_id'] as String)),
@@ -17734,9 +17772,11 @@ final class TicketView {
     if (designUrl != null) 'design_url': designUrl,
     if (doneAtMs != null) 'done_at_ms': doneAtMs,
     'id': id,
+    if (kind != null) 'kind': kind,
     'labels': labels,
     'login_user': loginUser,
     'login_username': loginUsername,
+    if (mergeCommit != null) 'merge_commit': mergeCommit,
     if (needs != null) 'needs': needs?.toJson(),
     'number': number,
     if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
