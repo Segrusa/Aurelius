@@ -41,6 +41,7 @@ import { KeyHint } from "../ui/key-hint";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
+import { TicketActivityLine } from "./activity-bar";
 import {
   beforeFor,
   columnShown,
@@ -58,7 +59,6 @@ import { Held, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
 import { FormDialog, Page, PageHead, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
-import { TicketActivityLine } from "./activity-bar";
 import { ConfirmDialog, TicketPanel } from "./ticket-panel";
 import { TicketRows } from "./ticket-rows";
 import {

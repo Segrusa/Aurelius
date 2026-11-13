@@ -1,5 +1,4 @@
 import { Button } from "@astryxdesign/core/Button";
-import { TicketActivityLine } from "./activity-bar";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -37,6 +36,7 @@ import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { TicketActivityLine } from "./activity-bar";
 import {
   activityDetail,
   activityText,
