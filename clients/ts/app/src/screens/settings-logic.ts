@@ -1,6 +1,7 @@
 // A recurrence as the schedule dialog types it, and as the wire holds it.
 
-import type { Recurrence } from "@aurelius/protocol";
+import type { EmployeeRunLine, EmployeeRunsView, Recurrence, RunValueSource, Setting2 } from "@aurelius/protocol";
+import { effortName } from "./employee-logic";
 
 export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export const EVERY_HOURS_MAX = 168;
@@ -67,4 +68,59 @@ export function screenUseRows<U extends { opens: number; last_ms: number }>(use:
     );
   }
   return [...rows.entries()].sort((a, b) => b[1].opens - a[1].opens);
+}
+
+// ── Model and effort per employee ───────────────────────────────────────
+
+type RunsView = Pick<EmployeeRunsView, "company" | "company_model_default_effort">;
+
+const levelOf = (s: Setting2 | undefined): string | null => (s?.mode === "value" ? s.value : null);
+
+/** What "Default" comes to for an employee: the company's level when its model has it, else the model's. */
+export function defaultEffortLabel(
+  view: Pick<RunsView, "company">,
+  supported: readonly string[],
+  modelDefault: string | null | undefined,
+): string {
+  const company = levelOf(view.company.effort);
+  if (company && supported.includes(company)) return `${effortName(company)} (company default)`;
+  return modelDefault ? `${effortName(modelDefault)} (model's default)` : "Model's default";
+}
+
+/**
+ * The choices for an effort: Default, then what the model has. A stored level
+ * the model lacks stays listed, marked, so the selector shows what is stored.
+ */
+export function effortOptions(
+  supported: readonly string[],
+  defaultLabel: string,
+  stored: string | null,
+): { value: string; label: string }[] {
+  const levels = supported.map((value) => ({ value, label: effortName(value) }));
+  const lost =
+    stored && !supported.includes(stored) ? [{ value: stored, label: `${effortName(stored)} (not supported)` }] : [];
+  return [{ value: "inherit", label: `Default · ${defaultLabel}` }, ...levels, ...lost];
+}
+
+const MODEL_SOURCE: Record<RunValueSource, string> = {
+  employee: "chosen for this employee",
+  company: "company default",
+  connection: "connection's default",
+  runtime: "Claude Code's default",
+};
+
+/** Under an employee's name: the model and where it comes from, then what a chat or the model changes. */
+export function employeeRunHint(run: EmployeeRunLine, name: (model: string) => string): string {
+  const model = run.model ? name(run.model) : "Model not known yet";
+  const parts = [`${model} · ${MODEL_SOURCE[run.model_source]}`];
+  if (run.supported_efforts.length === 0) parts.push("This model has no effort setting");
+  if (run.unsupported_effort)
+    parts.push(`${effortName(run.unsupported_effort)} is not supported by this model, so it is not used`);
+  if (run.chat_model || run.chat_effort) {
+    const chat = [run.chat_model && name(run.chat_model), run.chat_effort && effortName(run.chat_effort)].filter(
+      Boolean,
+    );
+    parts.push(`Its chat is set to ${chat.join(", ")}`);
+  }
+  return parts.join(". ");
 }

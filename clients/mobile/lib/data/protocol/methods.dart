@@ -120,6 +120,8 @@ abstract final class Methods {
   /// What is in an employee's mailbox now (feature `employee_queue`).
   static const String employeeQueue = 'employee.queue';
   static const String employeeRestoreInstructions = 'employee.restore_instructions';
+  /// The model and effort a new run of each employee uses (feature `employee_run_overview`).
+  static const String employeeRunOverview = 'employee.run_overview';
   /// An employee's scratchpad (feature `employee_scratchpad`).
   static const String employeeScratchpad = 'employee.scratchpad';
   static const String employeeSendMessage = 'employee.send_message';
@@ -688,6 +690,11 @@ Map<String, dynamic> employeeQueue({required String employeeId}) => <String, dyn
   'params': <String, dynamic>{
     'employee_id': employeeId,
   },
+};
+
+/// The model and effort a new run of each employee uses (feature `employee_run_overview`).
+Map<String, dynamic> employeeRunOverview() => <String, dynamic>{
+  'method': Methods.employeeRunOverview,
 };
 
 /// An employee's scratchpad (feature `employee_scratchpad`).

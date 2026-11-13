@@ -56,6 +56,9 @@ pub enum Method {
     /// The catalogue of start profiles (feature `employee_profiles`).
     #[serde(rename = "employee.start_profiles")]
     EmployeeStartProfiles,
+    /// The model and effort a new run of each employee uses (feature `employee_run_overview`).
+    #[serde(rename = "employee.run_overview")]
+    EmployeeRunOverview,
     /// An employee's scratchpad (feature `employee_scratchpad`).
     #[serde(rename = "employee.scratchpad")]
     EmployeeScratchpad { employee_id: EmployeeId },

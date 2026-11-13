@@ -12,6 +12,7 @@ import '../core/net/gateway_api.dart';
 import '../core/push/push_action.dart';
 import '../core/widgets/widgets.dart' show toast;
 import '../data/aurelius_repository.dart';
+import '../features/employee_runs/employee_runs_page.dart';
 import '../features/account/account.dart';
 import '../features/account/claude_login.dart' show ClaudeLoginPage;
 import '../features/board/board_page.dart';
@@ -154,6 +155,7 @@ class AppRouter {
         pageBuilder: (context, state) => routePage(state, const SettingsPage()),
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'board', pageBuilder: (context, state) => routePage(state, const BoardSettingsPage())),
+          GoRoute(parentNavigatorKey: _root, path: 'employee-runs', pageBuilder: (context, state) => routePage(state, const EmployeeRunsPage())),
           GoRoute(
             parentNavigatorKey: _root,
             path: 'board-members',

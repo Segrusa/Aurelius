@@ -593,6 +593,11 @@ impl Client {
         self.read(Method::EmployeeStartProfiles, body!(EmployeeStartProfiles)).await
     }
 
+    /// The model and effort a new run of each employee uses.
+    pub async fn employee_runs(&self) -> Result<aurelius_domain::views::EmployeeRunsView, ClientError> {
+        self.read(Method::EmployeeRunOverview, body!(EmployeeRuns)).await
+    }
+
     pub async fn employee_scratchpad(&self, employee_id: aurelius_domain::EmployeeId) -> Result<aurelius_domain::views::ScratchpadView, ClientError> {
         self.read(Method::EmployeeScratchpad { employee_id }, body!(EmployeeScratchpad)).await
     }

@@ -213,3 +213,69 @@ async fn a_delegated_task_runs_with_the_model_and_effort_of_the_employee_who_doe
     assert_eq!(config["model_origin"], "employee Simon");
     stop(dir.path(), daemon).await;
 }
+
+/// Ticket #49: what Settings shows is what the next run uses, it survives a
+/// restart, Default brings the company's back and a level the model lacks is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_chosen_effort_is_shown_kept_used_by_the_next_run_and_can_be_reset() {
+    use aurelius_domain::views::RunValueSource;
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let CommandResult::ProjectCreated { project_id, .. } = exec(&client, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })).await else { panic!() };
+    let alex = employee(&client, project_id, "Alex").await;
+    let line = |runs: &aurelius_domain::views::EmployeeRunsView| runs.employees.iter().find(|e| e.employee_id == alex).unwrap().clone();
+    let set = |scope, effort: Setting<String>| Command::SetRunDefaults(SetRunDefaults { scope, purpose: Purpose::Employee, settings: RunDefaults { effort, ..RunDefaults::default() } });
+
+    // Nothing chosen: no effort goes to the run and the overview says so.
+    let before = line(&client.employee_runs().await.unwrap());
+    assert_eq!((before.effort.as_deref(), before.effort_source), (None, RunValueSource::Runtime));
+    exec(&client, new_task(project_id, alex, "Nothing")).await;
+    assert_eq!(task_run_config(dir.path(), "Nothing").await["effort"], serde_json::Value::Null);
+
+    // The employee's own choice, kept over a restart and used by its next run.
+    exec(&client, set(ConfigScope::Employee(alex), Setting::Value("max".into()))).await;
+    stop(dir.path(), daemon).await;
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let own = line(&client.employee_runs().await.unwrap());
+    assert_eq!((own.effort.as_deref(), own.effort_source), (Some("max"), RunValueSource::Employee));
+    exec(&client, new_task(project_id, alex, "Own")).await;
+    assert_eq!(task_run_config(dir.path(), "Own").await["effort"], "max");
+
+    // Default: the company's level again.
+    exec(&client, set(ConfigScope::Global, Setting::Value("low".into()))).await;
+    exec(&client, set(ConfigScope::Employee(alex), Setting::Inherit)).await;
+    let reset = line(&client.employee_runs().await.unwrap());
+    assert_eq!((reset.effort.as_deref(), reset.effort_source), (Some("low"), RunValueSource::Company));
+    exec(&client, new_task(project_id, alex, "Reset")).await;
+    assert_eq!(task_run_config(dir.path(), "Reset").await["effort"], "low");
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_effort_the_model_lacks_is_refused_and_a_stored_one_is_left_out_of_the_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let CommandResult::ProjectCreated { project_id, .. } = exec(&client, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })).await else { panic!() };
+    let alex = employee(&client, project_id, "Alex").await;
+    let settings = |model: &str, effort: &str| RunDefaults { model: Setting::Value(model.into()), effort: Setting::Value(effort.into()), ..RunDefaults::default() };
+    let write = |settings| Command::SetRunDefaults(SetRunDefaults { scope: ConfigScope::Employee(alex), purpose: Purpose::Employee, settings });
+
+    let refused = client.execute(envelope(write(settings("claude-haiku-4-5", "high")), None)).await.unwrap_err();
+    assert!(refused.to_string().contains("claude-haiku-4-5 has no effort setting."), "{refused}");
+    let unknown = client.execute(envelope(write(settings("claude-opus-5-5", "ludicrous")), None)).await.unwrap_err();
+    assert!(unknown.to_string().contains("Effort must be one of"), "{unknown}");
+
+    // Moving to a model without it is allowed; the run and the overview drop the level.
+    exec(&client, write(settings("claude-opus-5-5", "high"))).await;
+    exec(&client, write(settings("claude-haiku-4-5", "high"))).await;
+    let runs = client.employee_runs().await.unwrap();
+    let line = runs.employees.iter().find(|e| e.employee_id == alex).unwrap();
+    assert_eq!((line.effort.as_deref(), line.unsupported_effort.as_deref()), (None, Some("high")));
+    assert!(line.supported_efforts.is_empty());
+    exec(&client, new_task(project_id, alex, "Dropped")).await;
+    assert_eq!(task_run_config(dir.path(), "Dropped").await["effort"], serde_json::Value::Null);
+    stop(dir.path(), daemon).await;
+}

@@ -66,6 +66,7 @@ export const METHODS = {
   "employee.open_chat": "command",
   "employee.queue": "read",
   "employee.restore_instructions": "command",
+  "employee.run_overview": "read",
   "employee.scratchpad": "read",
   "employee.send_message": "command",
   "employee.set_folder": "command",
@@ -407,6 +408,10 @@ export interface MethodParams {
    */
   "employee.queue": { employee_id: string };
   "employee.restore_instructions": M.RestoreEmployeeInstructions;
+  /**
+   * The model and effort a new run of each employee uses (feature `employee_run_overview`).
+   */
+  "employee.run_overview": undefined;
   /**
    * An employee's scratchpad (feature `employee_scratchpad`).
    */

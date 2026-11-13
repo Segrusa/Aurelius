@@ -121,6 +121,8 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
             GroupRow(key: const ValueKey('settings-board'), leading: const IconTile(CupertinoIcons.square_split_2x1), title: 'Board', subtitle: 'Columns and dispatcher', chevron: true, onTap: () => context.push('/settings/board')),
+            if (link.features.contains('employee_run_overview'))
+              GroupRow(key: const ValueKey('settings-employee-runs'), leading: const IconTile(CupertinoIcons.slider_horizontal_3), title: 'Model & effort', subtitle: 'Per employee', chevron: true, onTap: () => context.push('/settings/employee-runs')),
             GroupRow(
               key: const ValueKey('settings-board-members'),
               leading: const IconTile(CupertinoIcons.person_crop_circle_fill),

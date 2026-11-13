@@ -76,6 +76,10 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let profiles = storage_task(move || store.read(aurelius_storage::employee_profiles::list)).await?;
             Ok(ResponseBody::EmployeeStartProfiles(aurelius_domain::employee_tools::StartProfiles { profiles }))
         }
+        Method::EmployeeRunOverview => {
+            let store = shared.store().clone();
+            Ok(ResponseBody::EmployeeRuns(storage_task(move || store.read(aurelius_application::run::connections::employee_runs)).await?))
+        }
         Method::GroupChatGet { channel } => {
             let store = shared.store().clone();
             let found = storage_task(move || {

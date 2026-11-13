@@ -19,6 +19,7 @@ import {
   SchedulesSection,
   TraceSection,
 } from "./settings-advanced";
+import { EmployeeRunsSection } from "./settings-employee-runs";
 import { focusField, HINTS_KEY, pressKeyed, stepRow } from "./settings-kit";
 import { CompanySection, RemoteSection, ServerSection } from "./settings-workspace";
 import { AccountSection, AppSection } from "./settings-you";
@@ -168,6 +169,7 @@ const ALL_GROUPS: { label: string; sections: Section[] }[] = [
     label: "Workspace",
     sections: [
       { key: "company", label: "Company", body: () => <CompanySection /> },
+      { key: "employee-runs", label: "Model & effort", body: () => <EmployeeRunsSection /> },
       { key: "servers", label: "Servers & PC", body: () => <ServerSection /> },
       { key: "remote", label: "Remote access", body: () => <RemoteSection /> },
     ],

@@ -1,5 +1,15 @@
+import type { EmployeeRunLine } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import { parseClock, recurrenceForm, recurrenceOf, recurrenceText, screenUseRows } from "./settings-logic";
+import {
+  defaultEffortLabel,
+  effortOptions,
+  employeeRunHint,
+  parseClock,
+  recurrenceForm,
+  recurrenceOf,
+  recurrenceText,
+  screenUseRows,
+} from "./settings-logic";
 
 describe("recurrence", () => {
   it("reads a clock", () => {
@@ -37,5 +47,36 @@ describe("screenUseRows", () => {
       ["employees (their own pages)", { opens: 4, last_ms: 9 }],
       ["board", { opens: 3, last_ms: 5 }],
     ]);
+  });
+});
+
+describe("model and effort per employee", () => {
+  const high = { mode: "value", value: "high" } as const;
+
+  it("says what Default comes to", () => {
+    expect(defaultEffortLabel({ company: { effort: high } }, ["high"], "medium")).toBe("High (company default)");
+    expect(defaultEffortLabel({ company: { effort: high } }, ["low"], "medium")).toBe("Medium (model's default)");
+    expect(defaultEffortLabel({ company: {} }, [], null)).toBe("Model's default");
+  });
+
+  it("offers only what the model has, and keeps a stored level visible", () => {
+    const options = effortOptions(["low", "max"], "Model's default", "xhigh");
+    expect(options.map((o) => o.value)).toEqual(["inherit", "low", "max", "xhigh"]);
+    expect(options[3]?.label).toBe("Extra high (not supported)");
+    expect(effortOptions(["low"], "x", null).map((o) => o.value)).toEqual(["inherit", "low"]);
+  });
+
+  it("says where the model comes from and what a chat changes", () => {
+    const run = {
+      model: "claude-opus-5-5",
+      model_source: "company",
+      supported_efforts: ["low"],
+      unsupported_effort: "max",
+      chat_effort: "low",
+      chat_model: null,
+    } as EmployeeRunLine;
+    expect(employeeRunHint(run, (m) => m)).toBe(
+      "claude-opus-5-5 · company default. Max is not supported by this model, so it is not used. Its chat is set to Low",
+    );
   });
 });

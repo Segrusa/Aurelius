@@ -152,6 +152,9 @@ class AureliusRepository {
   /// One ticket with its main task and every task linked to it.
   Future<TicketDetail> ticket(String ticketId) async => (await _ask<ResponseBodyTicket>(ticketGet(ticketId: ticketId))).value;
 
+  /// The model and effort a new run of each employee uses (feature `employee_run_overview`).
+  Future<EmployeeRunsView> employeeRuns() async => (await _ask<ResponseBodyEmployeeRuns>(employeeRunOverview())).value;
+
   /// Who follows a ticket (feature `ticket_follow`).
   Future<TicketFollowersView> followers(String ticketId) async => (await _ask<ResponseBodyTicketFollowers>(ticketFollowers(ticketId: ticketId))).value;
 

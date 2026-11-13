@@ -1568,6 +1568,67 @@ export interface EmployeeQueueItem {
   waits_for?: string | null;
 }
 
+/**
+ * What a new run of one employee uses, as the run itself would resolve it.
+ */
+export interface EmployeeRunLine {
+  /**
+   * The effort chosen in the employee's chat; it goes before the rest in its chats.
+   */
+  chat_effort?: string | null;
+  /**
+   * The model chosen in the employee's chat; it goes before the rest in its chats.
+   */
+  chat_model?: string | null;
+  /**
+   * The display name of the connection, if there is one.
+   */
+  connection?: string | null;
+  /**
+   * The effort passed to the run; none: the run gets no effort and the model's own applies.
+   */
+  effort?: string | null;
+  effort_source: RunValueSource;
+  employee_id: string;
+  model?: string | null;
+  /**
+   * The model's own effort when none is passed, where that is known.
+   */
+  model_default_effort?: string | null;
+  model_source: RunValueSource;
+  name: string;
+  /**
+   * What is stored for the employee itself: a change sends it back with only the effort changed.
+   */
+  own: RunSettings;
+  status: LifecycleStatus;
+  /**
+   * The levels this employee's model can use; empty: it has no effort setting.
+   */
+  supported_efforts: string[];
+  /**
+   * A chosen effort the model cannot use, so runs leave it out.
+   */
+  unsupported_effort?: string | null;
+}
+
+/**
+ * `employee.run_overview` (feature `employee_run_overview`).
+ */
+export interface EmployeeRunsView {
+  /**
+   * The stored company-wide default for employee runs.
+   */
+  company: RunSettings;
+  company_model?: string | null;
+  company_model_default_effort?: string | null;
+  /**
+   * The levels the company's default model can use.
+   */
+  company_supported_efforts: string[];
+  employees: EmployeeRunLine[];
+}
+
 export interface EmployeeSummary {
   /**
    * What its runs may do with files and commands (C3); left out when `Inherit`.
@@ -3354,6 +3415,10 @@ export type Method =
    */
   | ({ method: "employee.queue"; params: { employee_id: string } })
   /**
+   * The model and effort a new run of each employee uses (feature `employee_run_overview`).
+   */
+  | ({ method: "employee.run_overview" })
+  /**
    * An employee's scratchpad (feature `employee_scratchpad`).
    */
   | ({ method: "employee.scratchpad"; params: { employee_id: string } })
@@ -4214,6 +4279,7 @@ export type ResponseBody =
    * `employee.queue`.
    */
   | ({ type: "employee_queue"; value: EmployeeQueue })
+  | ({ type: "employee_runs"; value: EmployeeRunsView })
   | ({ type: "employee_scratchpad"; value: ScratchpadView })
   /**
    * `employee.start_profiles`.
@@ -4538,6 +4604,28 @@ export interface RunTrace {
    */
   user_turn: string;
 }
+
+/**
+ * Where an employee's effective model or effort comes from (`employee.run_overview`).
+ */
+export type RunValueSource =
+  /**
+   * The company-wide default.
+   */
+  | "company"
+  /**
+   * The default model of the connection.
+   */
+  | "connection"
+  /**
+   * Chosen for this employee.
+   */
+  | "employee"
+  /**
+   * Nothing is chosen: the runtime decides (the model's own effort).
+   */
+  | "runtime"
+;
 
 /**
  * A message an employee scheduled (`schedule_message`, R7; feature `scheduled_messages`).
