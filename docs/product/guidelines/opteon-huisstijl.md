@@ -27,16 +27,16 @@ Alle projecten komen uit één sjabloon (de "FA/PA"-portfolio-app): dezelfde pre
 |---|---|---|
 | Flux (frontend) | Frontend · Security · Tests and evidence | 4 566 |
 | Forge (backend) | Backend · Database · Security · Tests and evidence | 6 664 |
-| Bridge (fullstack) | Frontend · Backend · Database · Security · Tests and evidence | 9 238 |
+| Bridge (fullstack) | Frontend · Backend · Security · Tests and evidence | 6 880 |
 | Nexus (API & integratie) | Backend · Security · Tests and evidence | 4 306 |
 | Schema (database) | Database · Backend · Security · Tests and evidence | 6 664 |
 | Orbit (DevOps) | Pipelines · Security | 2 296 |
 | Sentinel (security) | Security · Backend · Frontend · Code review | 7 008 |
-| Trace (code review) | Security · Frontend · Backend · Database · Code review | 9 366 |
-| Titan (tech lead) | Frontend · Backend · Database · Security · Pipelines · Code review | 10 519 |
+| Trace (code review) | Security · Frontend · Backend · Code review | 7 008 |
+| Titan (tech lead) | Frontend · Backend · Security · Pipelines · Code review | 8 161 |
 | Project Eurocontrol | Eurocontrol infra | +1 648 in dat project |
 
-"Tests and evidence" (849) en "Code review" (977) bestaan al. De aantallen zijn de lengtes van de teksten hieronder; de server telt bij het koppelen opnieuw en weigert een koppeling die over de limiet van 16 000 gaat.
+"Tests and evidence" (849) en "Code review" (977) bestaan al. In project Aurelius komen de Aurelius-guidelines (6 977 tekens) erbovenop; daarom krijgen Bridge, Trace en Titan geen Database-guideline (Forge en Schema hebben die), anders gaan ze daar over 16 000. De aantallen zijn de lengtes van de teksten hieronder; de server telt bij het koppelen opnieuw en weigert een koppeling die over de limiet van 16 000 gaat.
 
 ---
 
