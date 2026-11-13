@@ -333,6 +333,10 @@ class AureliusRepository {
   Future<GuidelineDetail> guideline(String guidelineId, {int? version}) async =>
       (await _ask<ResponseBodyGuideline>(guidelineGet(guidelineId: guidelineId, version: version))).value;
 
+  /// The guidelines linked to an employee, with their texts, as its runs get them.
+  Future<EffectiveGuidelines> effectiveGuidelines(String employeeId) async =>
+      (await _ask<ResponseBodyEffectiveGuidelines>(guidelineEffective(employeeId: employeeId))).value;
+
   /// Proposals of `propose_guideline` (B5): pending first.
   Future<List<GuidelineProposalView>> guidelineProposalList({ProposalStatus? status}) async =>
       (await _ask<ResponseBodyGuidelineProposals>(guidelineProposals(status: status))).value.proposals;

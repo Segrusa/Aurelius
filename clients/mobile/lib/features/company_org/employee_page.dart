@@ -92,10 +92,22 @@ class EmployeePage extends StatelessWidget {
                   key: const ValueKey('employee-page'),
                   padding: EdgeInsets.only(bottom: listBottom(context)),
                   children: [
+                    // Its persona and rules are in its instructions: the preview opens the whole text.
                     if ((m.instructions ?? '').isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(32, 12, 32, 0),
-                        child: Text(m.instructions!, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, color: Tokens.label2)),
+                      InkWell(
+                        key: const ValueKey('employee-instructions'),
+                        onTap: () => _showText(context, 'Instructions of ${m.name}', m.instructions!),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(32, 12, 32, 0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(m.instructions!, maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, color: Tokens.label2)),
+                              const SizedBox(height: 2),
+                              Text('Show all instructions', style: TextStyle(fontSize: 13, color: Tokens.accent)),
+                            ],
+                          ),
+                        ),
                       ),
                     const SizedBox(height: 12),
                     if (!archived)
@@ -162,6 +174,7 @@ class EmployeePage extends StatelessWidget {
                         ],
                       ),
                     ],
+                    if (context.read<AureliusRepository>().linkState.has(guidelinesFeature)) EmployeeGuidelines(key: ValueKey('employee-guidelines-${m.id}'), employee: m),
                     // Chats converted from before the company (one per old project thread): history.
                     if (m.conversations.where((c) => c.id != m.conversationId).toList() case final older when older.isNotEmpty) ...[
                       GroupHeader('Earlier Chats', count: older.length),
@@ -272,6 +285,112 @@ class EmployeePage extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The server feature that has guidelines (AUR-GL-01); without it the section stays hidden.
+const guidelinesFeature = 'guidelines';
+
+/// The guidelines linked to an employee, read-only: what its runs get on top
+/// of its instructions. Linking and editing are done in Aurelius on the PC.
+class EmployeeGuidelines extends StatefulWidget {
+  const EmployeeGuidelines({super.key, required this.employee});
+
+  final EmployeeSummary employee;
+
+  @override
+  State<EmployeeGuidelines> createState() => _EmployeeGuidelinesState();
+}
+
+class _EmployeeGuidelinesState extends State<EmployeeGuidelines> {
+  late Future<EffectiveGuidelines> _set;
+  StreamSubscription<Event>? _changes;
+
+  @override
+  void initState() {
+    super.initState();
+    final repository = context.read<AureliusRepository>();
+    _set = repository.effectiveGuidelines(widget.employee.id);
+    // A guideline edited or linked on the PC shows here at once.
+    _changes = repository.guidelineChanges.listen((_) => _reload());
+  }
+
+  @override
+  void dispose() {
+    _changes?.cancel();
+    super.dispose();
+  }
+
+  void _reload() {
+    if (!mounted) return;
+    final next = context.read<AureliusRepository>().effectiveGuidelines(widget.employee.id);
+    setState(() {
+      _set = next;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = widget.employee;
+    return FutureBuilder<EffectiveGuidelines>(
+      future: _set,
+      builder: (context, snap) {
+        final set = snap.data;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            GroupHeader('Guidelines', count: set?.guidelines.length),
+            InsetGroup(
+              children: [
+                if (snap.hasError)
+                  GroupRow(
+                    key: const ValueKey('employee-guidelines-retry'),
+                    title: "Couldn't load the guidelines",
+                    subtitle: 'Try again',
+                    onTap: _reload,
+                  )
+                else if (set == null)
+                  const GroupRow(title: 'Loading…', chevron: false)
+                else if (set.guidelines.isEmpty)
+                  GroupRow(title: '${m.name} has no guidelines', subtitle: 'Link them in Aurelius on the PC.', chevron: false)
+                else
+                  for (final g in set.guidelines)
+                    GroupRow(
+                      key: ValueKey('employee-guideline-${g.id}'),
+                      title: g.title,
+                      subtitle: 'Version ${g.version} · ${g.chars} characters',
+                      onTap: () => _showText(context, g.title, g.text),
+                    ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A long read-only text (instructions or a guideline) in a sheet, selectable
+/// and shown as written: no Markdown, so nothing in it loads or links.
+void _showText(BuildContext context, String title, String text) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (sheet) => SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.85),
+        child: ListView(
+          key: const ValueKey('employee-text-sheet'),
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          children: [
+            Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(title, style: Tokens.title(size: 20))),
+            SelectableText(text),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 /// Edit's Advanced section, folded as on the desktop: subagents, run one at a
