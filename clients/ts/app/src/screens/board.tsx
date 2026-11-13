@@ -58,6 +58,7 @@ import { Held, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
 import { FormDialog, Page, PageHead, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
+import { TicketActivityLine } from "./activity-bar";
 import { ConfirmDialog, TicketPanel } from "./ticket-panel";
 import { TicketRows } from "./ticket-rows";
 import {
@@ -345,6 +346,7 @@ const CardBody = memo(function CardBody({
         </span>
       </span>
       <span {...stylex.props(styles.cardTitle)}>{t.title}</span>
+      <TicketActivityLine ticketId={t.id} />
       <span {...stylex.props(styles.cardTags)}>
         {need ? <NeedsTag needs={need} mine={mine} /> : null}
         <TicketTags t={t} />

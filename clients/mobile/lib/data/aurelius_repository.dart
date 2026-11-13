@@ -147,6 +147,9 @@ class AureliusRepository {
   }
 
   /// The Board: its columns (six, seven with Testing) with their cards, for one project or all (B4).
+  /// Who is busy and what waits (feature `activity_overview`).
+  Future<ActivityOverview> overview() async => (await _ask<ResponseBodyActivityOverview>(activityOverview())).value;
+
   Future<BoardView> board({String? projectId}) async => (await _ask<ResponseBodyBoard>(boardGet(projectId: projectId))).value;
 
   /// One ticket with its main task and every task linked to it.

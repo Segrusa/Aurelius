@@ -280,7 +280,8 @@ fn claim_next(tx: &Tx<'_>, owner: &str, now: i64, lease_ms: i64, limit: u32) -> 
         if busy.contains(item.employee.as_str()) {
             continue;
         }
-        if !store::slot_free(tx, &item.employee)? {
+        // A paused employee starts nothing new; a run it already has goes on.
+        if store::is_paused(tx, &item.employee)? || !store::slot_free(tx, &item.employee)? {
             busy.insert(&item.employee);
             continue;
         }

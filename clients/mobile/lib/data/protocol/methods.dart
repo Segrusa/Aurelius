@@ -12,6 +12,9 @@ abstract final class Methods {
   /// One tool call of an answer whole: the input and output that
   /// `conversation.get` and live updates shorten (feature `activity_preview`).
   static const String activityGet = 'activity.get';
+  /// Who is busy and what waits, on what (feature `activity_overview`). Another
+  /// board member's private chat is only counted, with its employee.
+  static const String activityOverview = 'activity.overview';
   /// The activity log, newest first (R8, feature `activity_log`): every delivery, queue
   /// step and run step, narrowed by what is given. `limit`: at most 200, default 100.
   /// `project_id` (feature `workspace_filters`): only threads of that project's tickets,
@@ -539,6 +542,12 @@ Map<String, dynamic> activityGet({required String callId, required String messag
     'call_id': callId,
     'message_id': messageId,
   },
+};
+
+/// Who is busy and what waits, on what (feature `activity_overview`). Another
+/// board member's private chat is only counted, with its employee.
+Map<String, dynamic> activityOverview() => <String, dynamic>{
+  'method': Methods.activityOverview,
 };
 
 /// The activity log, newest first (R8, feature `activity_log`): every delivery, queue

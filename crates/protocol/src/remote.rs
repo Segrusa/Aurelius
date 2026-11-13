@@ -61,6 +61,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::EmployeeScratchpad { .. }
         | Method::EmployeeQueue { .. }
         | Method::ActivityLogList { .. }
+        | Method::ActivityOverview
         | Method::EmployeeToolOptions
         | Method::EmployeeStartProfiles
         | Method::EmployeeRunOverview

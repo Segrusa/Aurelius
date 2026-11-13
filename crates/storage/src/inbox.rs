@@ -195,6 +195,11 @@ fn collect_items(rows: impl Iterator<Item = rusqlite::Result<ItemRow>>) -> Resul
     Ok(out)
 }
 
+/// The employee is paused: what waits in its mailbox stays there until it is resumed.
+pub fn is_paused(conn: &Connection, employee: &str) -> Result<bool, StorageError> {
+    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM employees WHERE id = ?1 AND status = 'paused')", [employee], |r| r.get(0))?)
+}
+
 /// The one-run-per-employee rule (R2): a leased run of the employee keeps its slot,
 /// unless it waits for an approval (assumption 3: its thread stays held, the slot does not).
 pub fn slot_free(conn: &Connection, employee: &str) -> Result<bool, StorageError> {
@@ -458,6 +463,7 @@ pub fn waiters(conn: &Connection, thread: &str, now: i64) -> Result<Vec<ThreadWa
         let ahead: HashSet<&str> = queue.iter().filter(|i| i.employee == employee).take_while(|i| i.thread_key != thread).map(|i| i.thread_key.as_str()).collect();
         let busy = u32::from(!slot_free(conn, &employee)?);
         let reason = match () {
+            _ if is_paused(conn, &employee)? => Some("paused"),
             _ if is_parked(conn, &employee, thread)? => Some("question"),
             _ if not_before > now && quota == Some(1) => Some("limit"),
             _ => None,
@@ -467,8 +473,9 @@ pub fn waiters(conn: &Connection, thread: &str, now: i64) -> Result<Vec<ThreadWa
     Ok(out)
 }
 
-/// A due item whose employee has its slot free; what only the machine can hold back.
+/// A due item whose employee has its slot free and is not paused; what only the machine can hold back.
 const FREE_TO_START: &str = "i.state = 'queued' AND i.not_before_ms <= ?1
+    AND NOT EXISTS(SELECT 1 FROM employees p WHERE p.id = i.employee_id AND p.status = 'paused')
     AND NOT EXISTS(SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased' AND json_extract(o.payload_json, '$.employee_id') = i.employee_id
         AND NOT EXISTS (SELECT 1 FROM approvals a WHERE a.run_id = o.id AND a.status = 'pending'))";
 
@@ -559,6 +566,7 @@ pub fn queue_of(conn: &Connection, employee: EmployeeId, reader: Option<UserId>,
         let waits_for = match state.as_str() {
             HELD => Some("handoff"),
             CLAIMED => None,
+            _ if is_paused(conn, &employee.to_string())? => Some("paused"),
             _ if kind != "resume" && is_parked(conn, &employee.to_string(), &thread_key)? => Some("question"),
             _ if not_before_ms > now && error.as_deref() == Some("quota") => Some("limit"),
             _ if not_before_ms > now => Some("later"),

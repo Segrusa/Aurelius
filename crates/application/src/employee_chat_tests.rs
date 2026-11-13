@@ -7,7 +7,7 @@ use crate::conversation::employee_chat::{NO_RESPONSIBLE, NO_TICKET_TO_TELL};
 use crate::run::inbox::tests_support::use_real_mailbox;
 use crate::task::task_runs::EmployeeAction;
 use aurelius_domain::conversation::{SendChatMessage, TICKET_NOTE_KIND, TICKET_UPDATE_KIND};
-use aurelius_domain::employee::{CreateEmployee, OpenEmployeeChat, SetEmployeeStatus};
+use aurelius_domain::employee::{CreateEmployee, LifecycleStatus, OpenEmployeeChat, SetEmployeeStatus};
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::ticket::{ColumnKind, StartTicket};
 use aurelius_domain::views::MessageView;
@@ -433,4 +433,84 @@ fn tell_responsible_needs_a_ticket_with_a_responsible() {
     s.service.store().write(move |tx| { tx.execute("UPDATE tickets SET responsible_user_id = NULL WHERE id = ?1", [ticket.to_string()])?; Ok(()) }).unwrap();
     let (ok, text, _) = s.service.employee_action(run, EmployeeAction::TellResponsible { message: "Hello".into() }).unwrap();
     assert_eq!((ok, text.as_str()), (false, NO_RESPONSIBLE));
+}
+
+// ---- Ticket #50: paused employees and the overview ----
+
+fn set_status(s: &Setup, employee: EmployeeId, status: LifecycleStatus) {
+    exec(s, s.grace, Command::SetEmployeeStatus(SetEmployeeStatus { employee_id: employee, status })).unwrap();
+}
+
+fn overview(s: &Setup, reader: UserId) -> aurelius_domain::views::ActivityOverview {
+    s.service.store().read(move |c| aurelius_storage::activity::overview(c, Some(reader), aurelius_storage::now_ms())).unwrap()
+}
+
+fn ticket_state(s: &Setup, ticket: TicketId) -> (String, Option<String>) {
+    let found = overview(s, s.grace).tickets.into_iter().find(|t| t.ticket_id == ticket).expect("the ticket is in the overview");
+    (found.state, found.waits_for)
+}
+
+#[test]
+fn a_paused_employee_starts_nothing_new_and_starts_again_once_resumed() {
+    let s = setup();
+    use_real_mailbox(s.atlas);
+    let (ticket, _) = ticket_from(&s, s.main, "Rename the host");
+    started(&s, ticket);
+    set_status(&s, s.atlas, LifecycleStatus::Paused);
+
+    assert!(s.service.claim_next_work("t", 45_000, 4).unwrap().is_none(), "the item stays in the mailbox");
+    assert_eq!(ticket_state(&s, ticket), ("paused".to_owned(), Some("paused".to_owned())));
+    let waits: Vec<String> = overview(&s, s.grace).waiting.into_iter().map(|w| w.waits_for).collect();
+    assert_eq!(waits, ["paused"], "paused work is not waiting for a slot");
+
+    set_status(&s, s.atlas, LifecycleStatus::Active);
+    assert!(s.service.claim_next_work("t", 45_000, 4).unwrap().is_some(), "resumed: it starts");
+}
+
+#[test]
+fn a_running_run_goes_on_when_its_employee_is_paused() {
+    let s = setup();
+    use_real_mailbox(s.atlas);
+    let (ticket, _) = ticket_from(&s, s.main, "Rename the host");
+    started(&s, ticket);
+    let (job, _) = s.service.claim_next_work("t", 45_000, 4).unwrap().expect("the task's run");
+    let run = job.id.clone();
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE runs SET status = 'running', started_at_ms = 5 WHERE id = ?1", [run])?)).unwrap();
+    set_status(&s, s.atlas, LifecycleStatus::Paused);
+
+    let now = overview(&s, s.grace);
+    assert_eq!((now.busy.len(), now.busy[0].employee_paused, now.busy[0].since_ms), (1, true, 5));
+    assert_eq!(ticket_state(&s, ticket).0, "running");
+    let id = job.id.clone();
+    let state: String = s.service.store().read(move |c| Ok(c.query_row("SELECT state FROM jobs WHERE id = ?1", [id], |r| r.get(0))?)).unwrap();
+    assert_eq!(state, "leased", "pausing leaves the lease alone");
+}
+
+#[test]
+fn a_ticket_behind_a_busy_employee_waits_for_a_slot_and_the_running_one_does_not() {
+    let s = setup();
+    use_real_mailbox(s.atlas);
+    let (first, _) = ticket_from(&s, s.main, "One");
+    started(&s, first);
+    let (job, _) = s.service.claim_next_work("t", 45_000, 4).unwrap().expect("the first run");
+    let run = job.id.clone();
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [run])?)).unwrap();
+    let (second, _) = ticket_from(&s, s.main, "Two");
+    started(&s, second);
+
+    assert_eq!(ticket_state(&s, first).0, "running");
+    assert_eq!(ticket_state(&s, second), ("waiting_slot".to_owned(), Some("slot".to_owned())));
+}
+
+#[test]
+fn a_ticket_whose_owner_asked_a_question_waits_for_something_else() {
+    let s = setup();
+    use_real_mailbox(s.atlas);
+    let (ticket, _) = ticket_from(&s, s.main, "One");
+    let (root, _) = started(&s, ticket);
+    s.service.store().write(move |tx| {
+        tx.execute("DELETE FROM employee_inbox", [])?;
+        Ok(tx.execute("UPDATE tasks SET status = 'waiting', waiting_reason = 'input' WHERE id = ?1", [root.to_string()])?)
+    }).unwrap();
+    assert_eq!(ticket_state(&s, ticket), ("waiting_other".to_owned(), Some("board_member".to_owned())));
 }

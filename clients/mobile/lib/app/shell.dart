@@ -2,6 +2,8 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import '../data/activity.dart';
+import '../features/activity/activity_chip.dart';
 
 import '../core/theme/tokens.dart';
 import '../core/widgets/ios.dart';
@@ -59,6 +61,7 @@ class _HomeShellState extends State<HomeShell> {
     final badge = context.select<InboxBloc, int>((b) => b.state.badge);
     final team = _teamBadge(context);
     final bannerVisible = context.select<ConnectionBloc, bool>((b) => ConnectionBanner.visible(b.state));
+    final activityOn = context.select<ConnectionBloc, bool>((b) => b.state.has(activityOverviewFeature));
     final digits = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3, LogicalKeyboardKey.digit4];
     final shortcuts = <ShortcutActivator, VoidCallback>{
       for (final (i, key) in digits.indexed) ...{
@@ -74,8 +77,8 @@ class _HomeShellState extends State<HomeShell> {
         autofocus: true,
         child: TabScaffold(
           background: Tokens.bg,
-          banners: [const ConnectionBanner()],
-          bannerVisible: bannerVisible,
+          banners: [const ConnectionBanner(), if (activityOn) ActivityChip(underBanner: bannerVisible)],
+          bannerVisible: bannerVisible || activityOn,
           tabBar: GlassTabBar(
             current: shell.currentIndex,
             onTap: _go,

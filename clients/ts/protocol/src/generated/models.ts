@@ -25,6 +25,23 @@ export type AccessLevel =
 ;
 
 /**
+ * One run that really runs now (feature `activity_overview`).
+ */
+export interface ActivityBusy {
+  /**
+   * None: the project assistant, which is no employee.
+   */
+  employee_id?: string | null;
+  employee_name: string;
+  /**
+   * It was paused during this run: the run finishes, nothing new starts.
+   */
+  employee_paused?: boolean;
+  since_ms: number;
+  work: ActivityWork;
+}
+
+/**
  * One delivery, queue step or run step (R8; feature `activity_log`).
  */
 export interface ActivityLogEntry {
@@ -60,6 +77,18 @@ export interface ActivityLogPage {
    * There are older rows: ask again with `before_seq` as the last row's `seq`.
    */
   has_more?: boolean;
+}
+
+/**
+ * `activity.overview` (feature `activity_overview`): who is busy, what waits and
+ * on what, and the state of each ticket with work going or held up. A ticket
+ * that is not listed has nothing going on.
+ */
+export interface ActivityOverview {
+  as_of_seq: number;
+  busy: ActivityBusy[];
+  tickets: TicketActivity[];
+  waiting: ActivityWaiting[];
 }
 
 /**
@@ -121,6 +150,42 @@ export interface ActivityView {
    * (feature `activity_preview`). Older servers leave it out.
    */
   truncated?: boolean;
+}
+
+/**
+ * One piece of work in line (feature `activity_overview`): one per employee and
+ * thread, since what waits in one thread becomes one run.
+ */
+export interface ActivityWaiting {
+  employee_id?: string | null;
+  employee_name: string;
+  since_ms: number;
+  /**
+   * slot (its employee is busy), machine (a free slot on this machine), paused,
+   * question, approval, limit, login, later or handoff. Text, not an enum.
+   */
+  waits_for: string;
+  work: ActivityWork;
+}
+
+/**
+ * What an employee works on or waits with (feature `activity_overview`). With
+ * `private` set it is another board member's chat: every other field is empty,
+ * so neither its title nor where it is leaves the server.
+ */
+export interface ActivityWork {
+  channel_id?: string | null;
+  /**
+   * A chat of the reader's own with an employee.
+   */
+  chat_id?: string | null;
+  /**
+   * "#21 Fix login", a task's title, a channel's name; empty when `private`.
+   */
+  label?: string;
+  private?: boolean;
+  task_id?: string | null;
+  ticket_id?: string | null;
 }
 
 export interface AddConnection {
@@ -1563,7 +1628,7 @@ export interface EmployeeQueueItem {
   state: string;
   thread_key: string;
   /**
-   * What holds it back besides its turn: question, limit, later, machine or handoff.
+   * What holds it back besides its turn: paused, question, limit, later, machine or handoff.
    */
   waits_for?: string | null;
 }
@@ -3325,6 +3390,11 @@ export type Method =
    */
   | ({ method: "activity.get"; params: { call_id: string; message_id: string } })
   /**
+   * Who is busy and what waits, on what (feature `activity_overview`). Another
+   * board member's private chat is only counted, with its employee.
+   */
+  | ({ method: "activity.overview" })
+  /**
    * The activity log, newest first (R8, feature `activity_log`): every delivery, queue
    * step and run step, narrowed by what is given. `limit`: at most 200, default 100.
    * `project_id` (feature `workspace_filters`): only threads of that project's tickets,
@@ -4253,6 +4323,10 @@ export type ResponseBody =
    * `activity_log.list`.
    */
   | ({ type: "activity_log"; value: ActivityLogPage })
+  /**
+   * `activity.overview`.
+   */
+  | ({ type: "activity_overview"; value: ActivityOverview })
   | ({ type: "all_ideas"; value: AllIdeasSnapshot })
   | ({ type: "approvals"; value: ApprovalsSnapshot })
   | ({ type: "auto_allow_setting"; value: AutoAllowSetting })
@@ -5648,6 +5722,25 @@ export interface ThreadWaitingSnapshot {
   as_of_seq: number;
   scheduled: ScheduledMessageView[];
   waiters: ThreadWaiter[];
+}
+
+/**
+ * Where one ticket stands right now (feature `activity_overview`).
+ */
+export interface TicketActivity {
+  employee_id?: string | null;
+  employee_name?: string | null;
+  since_ms: number;
+  /**
+   * running, waiting_slot, paused or waiting_other. Text, not an enum.
+   */
+  state: string;
+  ticket_id: string;
+  /**
+   * With waiting_other: board_member, colleague, approval, question, limit,
+   * login, later or handoff. Also slot or machine with waiting_slot.
+   */
+  waits_for?: string | null;
 }
 
 /**

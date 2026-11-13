@@ -13,6 +13,7 @@ import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
 import '../links/link_actions.dart';
+import '../activity/activity_chip.dart';
 import 'ticket_actions.dart';
 
 /// What a card needs from the board around it.
@@ -160,6 +161,7 @@ class TicketCard extends StatelessWidget {
         ]),
         const SizedBox(height: 4),
         Text(ticket.title, maxLines: MediaQuery.textScalerOf(context).scale(1) >= 1.3 ? null : 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Tokens.label)),
+        TicketActivityLine(ticketId: ticket.id, padding: const EdgeInsets.only(top: 4)),
         if (ticket.labels.isNotEmpty) ...[
           const SizedBox(height: 6),
           Wrap(spacing: 6, runSpacing: 4, children: [

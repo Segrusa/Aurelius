@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import '../features/activity/activity_bloc.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -166,6 +167,7 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
           BlocProvider(create: (_) => CompanyBloc(_repository, order: ProjectOrderStore(widget.host.hostId))),
           BlocProvider(create: (_) => RuntimeBloc(_repository)),
           BlocProvider(create: (_) => ChannelsBloc(_repository)),
+          BlocProvider(create: (_) => ActivityBloc(_repository)),
         ],
         child: MaterialApp.router(
           debugShowCheckedModeBanner: false,

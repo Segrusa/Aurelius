@@ -603,6 +603,10 @@ impl Client {
     }
 
     /// What is in an employee's mailbox now.
+    pub async fn activity_overview(&self) -> Result<aurelius_domain::views::ActivityOverview, ClientError> {
+        self.read(Method::ActivityOverview, body!(ActivityOverview)).await
+    }
+
     pub async fn employee_queue(&self, employee_id: aurelius_domain::EmployeeId) -> Result<aurelius_domain::views::EmployeeQueue, ClientError> {
         self.read(Method::EmployeeQueue { employee_id }, body!(EmployeeQueue)).await
     }

@@ -12,6 +12,7 @@ export type MethodGroup = "read" | "host" | "command";
 /** The wire name of every method, with its group. */
 export const METHODS = {
   "activity.get": "read",
+  "activity.overview": "read",
   "activity_log.list": "read",
   "approval.answer": "command",
   "approval.decide": "command",
@@ -250,6 +251,11 @@ export interface MethodParams {
    * `conversation.get` and live updates shorten (feature `activity_preview`).
    */
   "activity.get": { call_id: string; message_id: string };
+  /**
+   * Who is busy and what waits, on what (feature `activity_overview`). Another
+   * board member's private chat is only counted, with its employee.
+   */
+  "activity.overview": undefined;
   /**
    * The activity log, newest first (R8, feature `activity_log`): every delivery, queue
    * step and run step, narrowed by what is given. `limit`: at most 200, default 100.
