@@ -224,12 +224,17 @@ describe("employeeState", () => {
 
 describe("the employee page's tabs", () => {
   it("has an Inbox when the server has a mailbox to show", () => {
-    expect(employeeTabs(true).map((t) => t.label)).toEqual(["Inbox", "Memory", "Settings"]);
-    expect(employeeTabs(false).map((t) => t.label)).toEqual(["Memory", "Settings"]);
+    expect(employeeTabs(true, false).map((t) => t.label)).toEqual(["Inbox", "Memory", "Settings"]);
+    expect(employeeTabs(false, false).map((t) => t.label)).toEqual(["Memory", "Settings"]);
+  });
+
+  it("has Guidelines when the server has guidelines", () => {
+    expect(employeeTabs(true, true).map((t) => t.label)).toEqual(["Inbox", "Memory", "Guidelines", "Settings"]);
   });
 
   it("reads only a tab it knows from the URL", () => {
     expect(isEmployeeTab("memory")).toBe(true);
+    expect(isEmployeeTab("guidelines")).toBe(true);
     expect(isEmployeeTab("tasks")).toBe(false);
   });
 });

@@ -88,19 +88,20 @@ export const choiceLine = (
   name: (value: string) => string = (v) => v,
 ): string => (choice === "inherit" ? inheritLabel(inherited) : name(choice));
 
-export type EmployeeTab = "inbox" | "memory" | "settings";
+export type EmployeeTab = "inbox" | "memory" | "guidelines" | "settings";
 
-/** The employee page's tabs. An older server has no mailbox to show. */
-export function employeeTabs(queue: boolean): { key: EmployeeTab; label: string }[] {
+/** The employee page's tabs. An older server has no mailbox or no guidelines to show. */
+export function employeeTabs(queue: boolean, guidelines: boolean): { key: EmployeeTab; label: string }[] {
   return [
     ...(queue ? [{ key: "inbox" as const, label: "Inbox" }] : []),
     { key: "memory", label: "Memory" },
+    ...(guidelines ? [{ key: "guidelines" as const, label: "Guidelines" }] : []),
     { key: "settings", label: "Settings" },
   ];
 }
 
 export const isEmployeeTab = (value: unknown): value is EmployeeTab =>
-  value === "inbox" || value === "memory" || value === "settings";
+  value === "inbox" || value === "memory" || value === "guidelines" || value === "settings";
 
 /** What the dot and word beside an employee say (U6). Colors are CSS values. */
 export interface EmployeeState {
