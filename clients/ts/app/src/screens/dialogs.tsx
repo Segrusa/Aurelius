@@ -2,6 +2,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog } from "@astryxdesign/core/Dialog";
 import { LayoutFooter } from "@astryxdesign/core/Layout";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
@@ -23,8 +24,17 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
-import { cycle, defaultAssignee, parseDeadline, parseLabels, rootsOf, titleOfGoal } from "./dialog-logic";
+import {
+  cycle,
+  defaultAssignee,
+  parseDeadline,
+  parseLabels,
+  rootsOf,
+  ticketCreateParams,
+  titleOfGoal,
+} from "./dialog-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
+import { LAST_QUICK, quickAssignee, quickCreateParams, quickEnabled, quickProblem } from "./quick-logic";
 import { modelName, useSetting } from "./settings-kit";
 import { NoConnectionNote, useNoConnection } from "./tickets-kit";
 
@@ -79,6 +89,9 @@ const styles = stylex.create({
     color: "var(--color-text-accent)",
   },
 });
+
+/** What a quick task does, said where it is made. */
+const QUICK_NOTE = "Starts at once in Doing, on its own branch. In Review, Approve and merge puts it in main.";
 
 /** The Menu next to the pressed buttons reads as one of them when it holds the choice. */
 const PICKED = {
@@ -214,6 +227,13 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const [labels, setLabels] = useState(seed?.labels ?? "");
   const [deadline, setDeadline] = useState("");
   const attach = useAttachments();
+  const { storage } = usePlatform();
+  const quickOn = quickEnabled(features);
+  const [kind, setKind] = useState<"ticket" | "quick">(seed?.quick && quickOn ? "quick" : "ticket");
+  const quick = quickOn && kind === "quick";
+  const [quickPick, setQuickPick] = useState<string | null>(null);
+  const activeEmployees = (employees.data ?? []).filter((e) => e.status === "active");
+  const quickWho = quickPick ?? quickAssignee(employees.data ?? [], storage.get(LAST_QUICK));
   const { busy, error, setError, held, send, sendAnyway } = useSend((text) => {
     toast(text);
     onClose();
@@ -221,7 +241,32 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const project = projects.data?.find((p) => p.id === projectId) ?? projects.data?.[0];
   const ownerName = owner === "dispatcher" ? "Dispatcher" : employees.data?.find((e) => e.id === owner)?.name;
 
+  const createQuick = () => {
+    if (!project || !quickWho || quickProblem({ description, employeeId: quickWho }) || busy) return;
+    send(async (confirmSecret) => {
+      await connection.write(
+        "ticket.create",
+        quickCreateParams(
+          {
+            projectId: project.id,
+            title,
+            description,
+            employeeId: quickWho,
+            files: attach.paths,
+            model: model === "default" ? null : model,
+          },
+          confirmSecret,
+        ),
+        { retry: false },
+      );
+      storage.set(LAST_QUICK, quickWho);
+      const name = employees.data?.find((e) => e.id === quickWho)?.name ?? "the employee";
+      return `Quick task started with ${name}.`;
+    });
+  };
+
   const create = (start: boolean) => {
+    if (quick) return createQuick();
     if (!project || title.trim() === "" || busy) return;
     let deadlineMs: number | null;
     try {
@@ -230,144 +275,226 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
       setError((e as Error).message);
       return;
     }
+    const responsibleUserId = !canHaveResponsible
+      ? null
+      : responsible === "me"
+        ? (user?.id ?? null)
+        : responsible === "none"
+          ? null
+          : responsible;
     send(async (confirmSecret) => {
       await connection.write(
         "ticket.create",
-        {
-          project_id: project.id,
-          title: title.trim(),
-          description: description.trim() || null,
-          priority,
-          labels: parseLabels(labels),
-          deadline_ms: deadlineMs,
-          ...(attach.paths.length > 0 ? { files: attach.paths } : {}),
-          start,
-          run: runOf(mode, model),
-          confirm_secret: confirmSecret,
-          // A server without the feature refuses a field it does not know.
-          ...(canHaveResponsible && responsible !== "me" && responsible !== "none"
-            ? { responsible_user_id: responsible }
-            : {}),
-          ...(canHaveResponsible && responsible === "me" && user ? { responsible_user_id: user.id } : {}),
-          ...(owner === "dispatcher" ? {} : { owner_employee_id: owner }),
-          ...(seed?.fromMessage ? { from_message: seed.fromMessage } : {}),
-          ...(seed?.fromIdea ? { from_idea: seed.fromIdea } : {}),
-        },
+        ticketCreateParams(
+          {
+            projectId: project.id,
+            title,
+            description,
+            priority,
+            labels: parseLabels(labels),
+            deadlineMs,
+            files: attach.paths,
+            start,
+            run: runOf(mode, model),
+            responsibleUserId,
+            ownerEmployeeId: owner === "dispatcher" ? null : owner,
+            fromMessage: seed?.fromMessage,
+            fromIdea: seed?.fromIdea,
+          },
+          confirmSecret,
+        ),
         { retry: false },
       );
       return start ? "Ticket created and started." : "Ticket created in Backlog.";
     });
   };
   useAction("ConfirmPrimary", () => create(true));
-  const ready = Boolean(project) && title.trim() !== "";
+  const ready = quick
+    ? Boolean(project) && quickProblem({ description, employeeId: quickWho }) === null
+    : Boolean(project) && title.trim() !== "";
+  const quickName = activeEmployees.find((e) => e.id === quickWho)?.name;
 
   return (
     <>
       <DialogHead
-        title="New ticket"
+        title={quick ? "New quick task" : "New ticket"}
         onOpenChange={(next) => {
           if (!next) onClose();
         }}
       />
       <div {...attach.target} {...stylex.props(styles.body)}>
-        <TextInput label="Title" hasAutoFocus placeholder="What should happen?" value={title} onChange={setTitle} />
-        <TextArea
-          label="Description"
-          placeholder="Details, in Markdown"
-          rows={5}
-          value={description}
-          onChange={setDescription}
-        />
-        <div {...stylex.props(styles.chips)}>
-          {project ? (
-            <Menu
-              label="Project"
-              value={project.id}
-              options={(projects.data ?? []).map((p) => ({ key: p.id, label: p.name }))}
-              onPick={setProjectId}
-              trigger={
-                <Chip name="Project">
-                  <Mark letter={initial(project.name)} color={markColor(project.id)} size={14} radius={3} />
-                  {project.name}
-                </Chip>
-              }
-            />
-          ) : (
-            <span {...stylex.props(styles.none)}>No project yet</span>
-          )}
-          <Menu
-            label="Priority"
-            value={priority}
-            options={PRIORITIES}
-            onPick={setPriority}
-            trigger={<Chip name="Priority">{PRIORITIES.find((p) => p.key === priority)?.label}</Chip>}
-          />
-          {canHaveResponsible ? (
-            <Menu
-              label="Responsible"
-              value={responsible}
-              options={[
-                { key: "me", label: "You" },
-                ...(members.data ?? [])
-                  .filter((u) => !u.disabled_at_ms && u.id !== user?.id)
-                  .map((u) => ({ key: u.id, label: u.username })),
-                { key: "none", label: "No one" },
-              ]}
-              onPick={setResponsible}
-              trigger={
-                <Chip name="Responsible">
-                  {responsible === "me"
-                    ? "You"
-                    : responsible === "none"
-                      ? "No one"
-                      : (members.data?.find((u) => u.id === responsible)?.username ?? "No one")}
-                </Chip>
-              }
-            />
-          ) : null}
-          <Menu
-            label="Owner"
-            value={owner}
-            options={[
-              { key: "dispatcher", label: "Dispatcher" },
-              ...(employees.data ?? []).map((e) => ({ key: e.id, label: e.name })),
-            ]}
-            onPick={setOwner}
-            trigger={<Chip name="Owner">{ownerName}</Chip>}
-          />
-          <Menu
-            label="Mode"
-            value={mode}
-            options={MODES.map((m) =>
-              m.key === "default"
-                ? { key: m.key as string, label: "Owner's default" }
-                : { key: m.key as string, label: m.label },
-            )}
-            onPick={setMode}
-            trigger={
-              <Chip name="Mode">
-                {mode === "default" ? "Owner's default" : MODES.find((m) => m.key === mode)?.label}
-              </Chip>
-            }
-          />
-          <Menu
-            label="Model"
-            value={model}
-            options={models}
-            onPick={setModel}
-            trigger={<Chip name="Model">{models.find((m) => m.key === model)?.label ?? "Default"}</Chip>}
-          />
-        </div>
-        <div {...stylex.props(styles.twoColumns)}>
-          <TextInput label="Labels" size="sm" placeholder="backend, ui" value={labels} onChange={setLabels} />
-          <TextInput
-            label="Deadline"
+        {quickOn ? (
+          <SegmentedControl
+            label="Kind"
             size="sm"
-            placeholder="2026-11-04 or 2026-11-04 17:00"
-            value={deadline}
-            onChange={setDeadline}
-          />
-        </div>
+            value={kind}
+            onChange={(next) => setKind(next === "quick" ? "quick" : "ticket")}
+          >
+            <SegmentedControlItem value="ticket" label="Ticket" />
+            <SegmentedControlItem value="quick" label="Quick task" />
+          </SegmentedControl>
+        ) : null}
+        {quick ? (
+          <>
+            <TextArea
+              label="Description"
+              hasAutoFocus
+              placeholder="What needs doing? Required, in Markdown"
+              rows={5}
+              value={description}
+              onChange={setDescription}
+            />
+            <TextInput
+              label="Title (optional)"
+              placeholder="Empty: the first line of the description"
+              value={title}
+              onChange={setTitle}
+            />
+          </>
+        ) : (
+          <>
+            <TextInput label="Title" hasAutoFocus placeholder="What should happen?" value={title} onChange={setTitle} />
+            <TextArea
+              label="Description"
+              placeholder="Details, in Markdown"
+              rows={5}
+              value={description}
+              onChange={setDescription}
+            />
+          </>
+        )}
+        {quick ? (
+          <div {...stylex.props(styles.chips)}>
+            {project ? (
+              <Menu
+                label="Project"
+                value={project.id}
+                options={(projects.data ?? []).map((p) => ({ key: p.id, label: p.name }))}
+                onPick={setProjectId}
+                trigger={
+                  <Chip name="Project">
+                    <Mark letter={initial(project.name)} color={markColor(project.id)} size={14} radius={3} />
+                    {project.name}
+                  </Chip>
+                }
+              />
+            ) : (
+              <span {...stylex.props(styles.none)}>No project yet</span>
+            )}
+            <Menu
+              label="Employee"
+              {...(quickWho ? { value: quickWho } : {})}
+              options={activeEmployees.map((e) => ({ key: e.id, label: e.name }))}
+              onPick={setQuickPick}
+              trigger={
+                <Chip name="Employee" style={quickName ? undefined : PICKED}>
+                  {quickName ?? "Choose who does it"}
+                </Chip>
+              }
+            />
+            <Menu
+              label="Model"
+              value={model}
+              options={models}
+              onPick={setModel}
+              trigger={<Chip name="Model">{models.find((m) => m.key === model)?.label ?? "Default"}</Chip>}
+            />
+          </div>
+        ) : null}
+        {quick ? null : (
+          <>
+            <div {...stylex.props(styles.chips)}>
+              {project ? (
+                <Menu
+                  label="Project"
+                  value={project.id}
+                  options={(projects.data ?? []).map((p) => ({ key: p.id, label: p.name }))}
+                  onPick={setProjectId}
+                  trigger={
+                    <Chip name="Project">
+                      <Mark letter={initial(project.name)} color={markColor(project.id)} size={14} radius={3} />
+                      {project.name}
+                    </Chip>
+                  }
+                />
+              ) : (
+                <span {...stylex.props(styles.none)}>No project yet</span>
+              )}
+              <Menu
+                label="Priority"
+                value={priority}
+                options={PRIORITIES}
+                onPick={setPriority}
+                trigger={<Chip name="Priority">{PRIORITIES.find((p) => p.key === priority)?.label}</Chip>}
+              />
+              {canHaveResponsible ? (
+                <Menu
+                  label="Responsible"
+                  value={responsible}
+                  options={[
+                    { key: "me", label: "You" },
+                    ...(members.data ?? [])
+                      .filter((u) => !u.disabled_at_ms && u.id !== user?.id)
+                      .map((u) => ({ key: u.id, label: u.username })),
+                    { key: "none", label: "No one" },
+                  ]}
+                  onPick={setResponsible}
+                  trigger={
+                    <Chip name="Responsible">
+                      {responsible === "me"
+                        ? "You"
+                        : responsible === "none"
+                          ? "No one"
+                          : (members.data?.find((u) => u.id === responsible)?.username ?? "No one")}
+                    </Chip>
+                  }
+                />
+              ) : null}
+              <Menu
+                label="Owner"
+                value={owner}
+                options={[
+                  { key: "dispatcher", label: "Dispatcher" },
+                  ...(employees.data ?? []).map((e) => ({ key: e.id, label: e.name })),
+                ]}
+                onPick={setOwner}
+                trigger={<Chip name="Owner">{ownerName}</Chip>}
+              />
+              <Menu
+                label="Mode"
+                value={mode}
+                options={MODES.map((m) =>
+                  m.key === "default"
+                    ? { key: m.key as string, label: "Owner's default" }
+                    : { key: m.key as string, label: m.label },
+                )}
+                onPick={setMode}
+                trigger={
+                  <Chip name="Mode">
+                    {mode === "default" ? "Owner's default" : MODES.find((m) => m.key === mode)?.label}
+                  </Chip>
+                }
+              />
+              <Menu
+                label="Model"
+                value={model}
+                options={models}
+                onPick={setModel}
+                trigger={<Chip name="Model">{models.find((m) => m.key === model)?.label ?? "Default"}</Chip>}
+              />
+            </div>
+            <div {...stylex.props(styles.twoColumns)}>
+              <TextInput label="Labels" size="sm" placeholder="backend, ui" value={labels} onChange={setLabels} />
+              <TextInput
+                label="Deadline"
+                size="sm"
+                placeholder="2026-11-04 or 2026-11-04 17:00"
+                value={deadline}
+                onChange={setDeadline}
+              />
+            </div>
+          </>
+        )}
         <AttachRow attach={attach} />
         {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
         {error ? <Banner status="error" role="alert" title={error} /> : null}
@@ -375,12 +502,31 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
       <LayoutFooter hasDivider padding={0}>
         <div {...stylex.props(styles.footer)}>
           <span {...stylex.props(styles.footerNote)}>
-            {noConnection ? <NoConnectionNote /> : "Lands in Backlog. Nothing starts until you press Start."}
+            {noConnection ? (
+              <NoConnectionNote />
+            ) : quick ? (
+              QUICK_NOTE
+            ) : (
+              "Lands in Backlog. Nothing starts until you press Start."
+            )}
           </span>
-          <Button label="Create" isDisabled={!ready || busy} onClick={() => create(false)} />
-          <Button label="Create and start" variant="primary" isDisabled={!ready || busy} onClick={() => create(true)}>
-            Create and start <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
-          </Button>
+          {quick ? (
+            <Button label="Create quick task" variant="primary" isDisabled={!ready || busy} onClick={createQuick}>
+              Create quick task <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
+            </Button>
+          ) : (
+            <>
+              <Button label="Create" isDisabled={!ready || busy} onClick={() => create(false)} />
+              <Button
+                label="Create and start"
+                variant="primary"
+                isDisabled={!ready || busy}
+                onClick={() => create(true)}
+              >
+                Create and start <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
+              </Button>
+            </>
+          )}
         </div>
       </LayoutFooter>
     </>
