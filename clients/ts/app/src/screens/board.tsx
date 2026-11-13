@@ -59,7 +59,15 @@ import { Held, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
 import { FormDialog, Page, PageHead, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
-import { type KindFilter, kindFilterOptions, quickEnabled } from "./quick-logic";
+import {
+  cancelConfirmation,
+  cancelNeedsConfirm,
+  doneConfirmation,
+  isQuick,
+  type KindFilter,
+  kindFilterOptions,
+  quickEnabled,
+} from "./quick-logic";
 import { ConfirmDialog, TicketPanel } from "./ticket-panel";
 import { TicketRows } from "./ticket-rows";
 import {
@@ -699,7 +707,8 @@ export function BoardScreen({
         void write("ticket.start", { ticket_id: t.id }, { done: `${ticketNumber(t)} started.` });
         return;
       case "back_to_backlog":
-        if (!effect.confirm) {
+        // BR4: a quick task loses its branch and worktree, so that is always asked first.
+        if (!cancelNeedsConfirm(t, effect.confirm)) {
           moveLocally(t.id, to, null);
           void write("ticket.cancel", { ticket_id: t.id }, { done: `${ticketNumber(t)} is back in Backlog.` });
         } else setPending({ kind: "back_to_backlog", ticket: t });
@@ -1086,26 +1095,24 @@ export function BoardScreen({
         <ConfirmDialog
           open
           onClose={() => setPending(null)}
-          title={
-            pending.kind === "mark_done"
-              ? `Mark ${ticketNumber(pending.ticket)} as Done?`
-              : pending.kind === "reject"
-                ? `Reject the plan of ${ticketNumber(pending.ticket)}?`
-                : `Back to Backlog: ${ticketNumber(pending.ticket)}?`
-          }
-          body={
-            pending.kind === "mark_done"
-              ? "This closes the ticket. Nothing is merged, pushed or deployed."
-              : pending.kind === "reject"
-                ? "The ticket goes back to Backlog."
-                : "This stops the work."
-          }
-          confirm={
-            pending.kind === "mark_done" ? "Mark done" : pending.kind === "reject" ? "Reject" : "Back to Backlog"
-          }
-          danger={pending.kind === "reject"}
+          {...(pending.kind === "mark_done"
+            ? doneConfirmation(pending.ticket)
+            : pending.kind === "reject"
+              ? {
+                  title: `Reject the plan of ${ticketNumber(pending.ticket)}?`,
+                  body: "The ticket goes back to Backlog.",
+                  confirm: "Reject",
+                }
+              : cancelConfirmation(pending.ticket))}
+          danger={pending.kind === "reject" || (pending.kind === "back_to_backlog" && isQuick(pending.ticket))}
           onConfirm={() =>
-            write(pending.kind === "mark_done" ? "ticket.accept" : "ticket.cancel", { ticket_id: pending.ticket.id })
+            write(
+              pending.kind === "mark_done" ? "ticket.accept" : "ticket.cancel",
+              { ticket_id: pending.ticket.id },
+              pending.kind === "mark_done" && isQuick(pending.ticket)
+                ? { done: `Merging ${ticketNumber(pending.ticket)} into main…` }
+                : {},
+            )
           }
         />
       ) : null}

@@ -346,6 +346,10 @@ describe("suggestedReplies", () => {
   it("offers a push when the report talks about pushing", () => {
     expect(suggestedReplies("Nothing was pushed.").map((r) => r.label)).toContain("Push");
   });
+
+  it("does not ask a quick task to merge: Approve and merge does that", () => {
+    expect(suggestedReplies(null, true).map((r) => r.label)).toEqual(["Explain what you did"]);
+  });
 });
 
 describe("scrollToShow", () => {

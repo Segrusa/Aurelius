@@ -502,10 +502,13 @@ export interface SuggestedReply {
   text: string;
 }
 
-/** One-click answers to a report in review: the usual next steps, plus the ones the report itself points at. */
-export function suggestedReplies(report: string | null): SuggestedReply[] {
+/**
+ * One-click answers to a report in review: the usual next steps, plus the ones the report itself points at.
+ * A quick task is merged by Approve and merge, so it is not asked to merge.
+ */
+export function suggestedReplies(report: string | null, quick = false): SuggestedReply[] {
   const text = report ?? "";
-  const replies: SuggestedReply[] = [{ label: "Merge into main", text: "Merge this into main." }];
+  const replies: SuggestedReply[] = quick ? [] : [{ label: "Merge into main", text: "Merge this into main." }];
   if (/\bpush/i.test(text) || /\bmerge[dn]?\b/i.test(text)) {
     replies.push({ label: "Push", text: "Push main to the remote." });
   }
