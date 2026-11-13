@@ -265,3 +265,16 @@ export const MODE_LABELS: Record<AgentMode, string> = {
   plan: "Plan",
 };
 export const nextMode = (mode: AgentMode) => MODES[(MODES.indexOf(mode) + 1) % MODES.length] as AgentMode;
+
+/** Lines of the instructions the employee page shows before "Show all". */
+export const INSTRUCTIONS_PREVIEW_LINES = 12;
+/** About the characters that fill those lines when the text wraps. */
+const INSTRUCTIONS_PREVIEW_CHARS = 1200;
+
+/**
+ * Whether an employee's instructions are longer than the folded preview, so
+ * the page offers "Show all": its persona and rules are in that text, and the
+ * rules usually come after the first lines.
+ */
+export const instructionsFold = (text: string) =>
+  text.split("\n").length > INSTRUCTIONS_PREVIEW_LINES || text.length > INSTRUCTIONS_PREVIEW_CHARS;

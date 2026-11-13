@@ -35,8 +35,8 @@ class MockInboxBloc extends MockBloc<InboxEvent, InboxState> implements InboxBlo
 
 const online = LinkState(status: LinkStatus.online, capabilities: ['chat']);
 
-EmployeeSummary iris({List<ConversationSummary> conversations = const [], List<AgentView> agents = const [], String? title, String? reportsTo}) =>
-    employeeOf(id: 'mgr', name: 'Iris', role: 'Marketing', title: title, reportsTo: reportsTo, conversationId: 'own', conversations: conversations, agents: agents);
+EmployeeSummary iris({List<ConversationSummary> conversations = const [], List<AgentView> agents = const [], String? title, String? reportsTo, String? instructions}) =>
+    employeeOf(id: 'mgr', name: 'Iris', role: 'Marketing', title: title, reportsTo: reportsTo, conversationId: 'own', conversations: conversations, agents: agents, instructions: instructions);
 
 AgentView subagent(String name, String conversationId, int sinceMs, {String detail = '', String? prompt, String? doing, int steps = 0}) =>
     AgentView(kind: 'subagent', name: name, detail: detail, conversationId: conversationId, sinceMs: sinceMs, prompt: prompt, doing: doing, steps: steps);
@@ -283,6 +283,71 @@ void main() {
       expect(find.byIcon(Icons.call_outlined), findsNothing, reason: 'the Call button is gone');
       verifyNever(() => repo.messages(any()));
       expect(tester.takeException(), isNull);
+    });
+
+    group('its persona, rules and guidelines (ticket #52)', () {
+      const withGuidelines = LinkState(status: LinkStatus.online, capabilities: ['chat'], features: [guidelinesFeature]);
+      const rules = 'You are Iris, head of marketing.\n\nRULE 01 — ROLE BOUNDARIES\nStay in your role.\n\nRULE 10 — AUTONOMY\nWork on your own.';
+      const coding = EffectiveGuideline(chars: 21, id: 'g1', level: GuidelineLevel.employee, text: 'Format with rustfmt.\n', title: 'Rust style', version: 2);
+
+      Future<void> open(WidgetTester tester) async {
+        tester.view.physicalSize = const Size(800, 2400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await pump(tester, iris(instructions: rules));
+      }
+
+      setUp(() {
+        when(() => repo.guidelineChanges).thenAnswer((_) => const Stream.empty());
+      });
+
+      testWidgets('the instructions open in full, with the rules past the third line', (tester) async {
+        await open(tester);
+        expect(find.text('RULE 10 — AUTONOMY'), findsNothing);
+        await tester.tap(find.byKey(const ValueKey('employee-instructions')));
+        await tester.pumpAndSettle();
+        expect(find.text('Instructions of Iris'), findsOneWidget);
+        expect(find.descendant(of: find.byKey(const ValueKey('employee-text-sheet')), matching: find.byType(SelectableText)), findsOneWidget);
+        final shown = tester.widget<SelectableText>(find.byType(SelectableText));
+        expect(shown.data, rules);
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('its linked guidelines are listed and open with their text', (tester) async {
+        when(() => repo.linkState).thenReturn(withGuidelines);
+        when(() => repo.effectiveGuidelines('mgr')).thenAnswer((_) async => const EffectiveGuidelines(guidelines: [coding], limitChars: 24000, totalChars: 21, employeeId: 'mgr'));
+        await open(tester);
+        await tester.pumpAndSettle();
+        expect(find.text('Guidelines  1', findRichText: true), findsOneWidget);
+        expect(find.text('Rust style'), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('employee-guideline-g1')));
+        await tester.pumpAndSettle();
+        expect(tester.widget<SelectableText>(find.byType(SelectableText)).data, 'Format with rustfmt.\n');
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('a failed read says so and tries again', (tester) async {
+        when(() => repo.linkState).thenReturn(withGuidelines);
+        var calls = 0;
+        when(() => repo.effectiveGuidelines('mgr')).thenAnswer((_) async {
+          calls++;
+          if (calls == 1) throw Exception('offline');
+          return const EffectiveGuidelines(guidelines: [coding], limitChars: 24000, totalChars: 21);
+        });
+        await open(tester);
+        await tester.pumpAndSettle();
+        expect(find.text("Couldn't load the guidelines"), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('employee-guidelines-retry')));
+        await tester.pumpAndSettle();
+        expect(find.text('Rust style'), findsOneWidget);
+        expect(calls, 2);
+      });
+
+      testWidgets('an older server without guidelines shows no section and is not asked', (tester) async {
+        await open(tester);
+        expect(find.textContaining('Guidelines', findRichText: true), findsNothing);
+        verifyNever(() => repo.effectiveGuidelines(any()));
+      });
     });
 
     group("its own chat's mode, browser and screen (where its group chat answers run)", () {
