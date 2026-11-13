@@ -171,3 +171,61 @@ Terraform rules for EUROCONTROL. Reference: mmit-iac.
 - Pipelines extend greenfield-ado-templates: pre-validation, validation, plan, security, apply; reader connection for plan, writer for apply.
 - pre-commit: terraform fmt, terraform-docs, tflint, validate, gitleaks; checkov skips with a reason in the comment.
 ```
+
+---
+
+# Uit online skills (2026-11-13)
+
+Bekeken: [obra/superpowers](https://github.com/obra/superpowers) (MIT: test-driven-development, systematic-debugging, verification-before-completion, writing-plans, receiving-code-review), [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) react-best-practices (MIT), [anthropics/skills](https://github.com/anthropics/skills) webapp-testing (Apache 2.0), [microsoft/skills](https://github.com/microsoft/skills) en [MicrosoftDocs/agent-skills](https://github.com/MicrosoftDocs/agent-skills) (vooral SDK-gebruik en het ophalen van Learn-documentatie, geen huisregels; niets overgenomen).
+
+De teksten hieronder zijn in eigen woorden, beperkt tot wat past bij onze stack. Een skill laadt Claude alleen als hij nodig is; een guideline gaat in elke run mee. Daarom kort: in project Aurelius blijft Titan zo onder de 16 000 tekens.
+
+| Guideline | Gekoppeld aan |
+|---|---|
+| Opteon: engineering practices | Flux, Forge, Bridge, Nexus, Schema, Orbit, Sentinel, Trace, Titan |
+| Opteon: React performance and UI testing | Flux, Bridge |
+
+## G-PRAC · Opteon: engineering practices
+
+```markdown
+How every developer works on client projects. After obra/superpowers and Anthropic's skills.
+
+Before code
+- Read the code you change and similar working code first. Restate the task in one line; ask when it is ambiguous instead of guessing.
+- Split the work into small steps, each with the files it touches and how it is checked. One step at a time.
+- Change only what the task needs: no drive-by refactors, no speculative options.
+
+Tests first where there is logic
+- Bug or business rule: write the failing test, see it fail for the right reason, make the smallest fix, clean up while green.
+- Real code over mocks; mock only an external boundary (Graph, SAP, HTTP).
+- No test setup yet: add the smallest that fits (vitest, xUnit) when you add logic, and say so.
+
+Debugging
+- Root cause before a fix: read the whole error, reproduce it, check recent changes, follow the data across each boundary (UI, API, procedure).
+- One hypothesis and one minimal change at a time. After three failed fixes stop and report: the design is probably the problem.
+- Say you do not know yet instead of guessing.
+
+Review
+- Check feedback against the code before acting. Push back with reasons when it is wrong. Blockers first, one at a time, each with its check.
+
+Done means checked: build, lint and tests that prove it, with their output (Tests and evidence).
+```
+
+## G-WEB · Opteon: React performance and UI testing
+
+```markdown
+Performance and UI-test rules for the React SPAs. After vercel-labs react-best-practices and Anthropic's webapp-testing; only what fits a Vite SPA.
+
+Performance
+- No waterfalls: start independent requests together (Promise.all, parallel thunks); await where the value is needed.
+- Bundle: import from the package path, not big barrels; lazy-load heavy pages, editors and charts with React.lazy; load third-party scripts late.
+- Re-renders: derive values while rendering instead of syncing them in useEffect; select narrow store slices; functional setState from the previous value; lazy useState for expensive defaults; memo only where profiling shows a cost.
+- Lists: stable keys, virtualise long grids, Map or Set for lookups inside loops.
+- Effects: clean up listeners and timers; useEffectEvent for handlers read inside an effect.
+- Keep the previous data visible while refetching; Spinner or Skeleton only on the first load.
+
+UI tests (Playwright)
+- Start the dev server, wait for the network to settle, look at what rendered (screenshot or DOM), then act.
+- Select by role, label and visible text (getByRole, getByLabel), not CSS classes or generated ids.
+- Wait for a state (a row, a toast), never a fixed sleep. Headless, and close the browser.
+```
