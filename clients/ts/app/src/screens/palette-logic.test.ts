@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterGroups, type PaletteItem, score } from "./palette-logic";
+import { filterGroups, type PaletteItem, quickTaskCommands, score } from "./palette-logic";
 
 const item = (label: string, detail = ""): PaletteItem => ({ id: label, label, detail, mark: "", run: () => {} });
 
@@ -24,5 +24,15 @@ describe("the palette", () => {
     expect(ranked[0]?.items.map((i) => i.label)).toEqual(["API docs", "Rapid"]);
     const exact = filterGroups("settings", [{ label: "C", items: [item("Settings: Backups"), item("Settings")] }]);
     expect(exact[0]?.items[0]?.label).toBe("Settings");
+  });
+
+  it("offers New quick task only on a server with quick tasks", () => {
+    let opened = 0;
+    expect(quickTaskCommands(false, () => opened++)).toEqual([]);
+    const [item] = quickTaskCommands(true, () => opened++);
+    expect(item?.label).toBe("New quick task");
+    item?.run();
+    expect(opened).toBe(1);
+    expect(filterGroups("quick", [{ label: "Commands", items: quickTaskCommands(true, () => {}) }])).toHaveLength(1);
   });
 });

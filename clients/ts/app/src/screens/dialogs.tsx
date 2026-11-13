@@ -554,6 +554,9 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const [projectId, setProjectId] = useState<string | null>(workspace.id);
   const [mode, setMode] = useState("default");
   const [model, setModel] = useState("default");
+  const quickOn = quickEnabled(features);
+  const [kind, setKind] = useState<"work" | "quick">("work");
+  const quick = quickOn && kind === "quick";
   const { busy, error, held, send, sendAnyway } = useSend((text) => {
     toast(text);
     onClose();
@@ -561,7 +564,10 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const active = useMemo(() => (employees.data ?? []).filter((e) => e.status === "active"), [employees.data]);
   const roots = useMemo(() => rootsOf(active), [active]);
   const others = active.filter((e) => !roots.includes(e));
-  const whoId = picked ?? defaultAssignee(employees.data ?? [], storage.get(LAST_GIVEN));
+  const whoId =
+    picked ??
+    (quick ? quickAssignee(employees.data ?? [], storage.get(LAST_QUICK)) : null) ??
+    defaultAssignee(employees.data ?? [], storage.get(LAST_GIVEN));
   const who = active.find((e) => e.id === whoId) ?? null;
   const shownProjects = projects.data ?? [];
   // Required: work should not land in a project nobody chose. The workspace chose it, or only one leaves no choice.
@@ -570,6 +576,29 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
 
   const submit = () => {
     if (!project || !who || !ready || busy) return;
+    if (quick) {
+      send(async (confirmSecret) => {
+        await connection.write(
+          "ticket.create",
+          quickCreateParams(
+            {
+              projectId: project.id,
+              title: "",
+              description: goal,
+              employeeId: who.id,
+              files: attach.paths,
+              model: model === "default" ? null : model,
+              effort: effort === "default" ? null : effort,
+            },
+            confirmSecret,
+          ),
+          { retry: false },
+        );
+        storage.set(LAST_QUICK, who.id);
+        return `Quick task started with ${who.name}.`;
+      });
+      return;
+    }
     send(async (confirmSecret) => {
       // A task only exists under a ticket: this one is for this employee, started at once.
       await connection.write(
@@ -631,7 +660,11 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
     <>
       <DialogHead
         title="Give work"
-        subtitle="starts right away, or with a plan for you to approve"
+        subtitle={
+          quick
+            ? "a quick task: starts right away on its own branch"
+            : "starts right away, or with a plan for you to approve"
+        }
         endContent={
           <SwitchDialog
             label="New ticket instead"
@@ -643,6 +676,17 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
         }}
       />
       <div {...attach.target} {...stylex.props(styles.body, styles.giveBody)}>
+        {quickOn ? (
+          <SegmentedControl
+            label="Kind"
+            size="sm"
+            value={kind}
+            onChange={(next) => setKind(next === "quick" ? "quick" : "work")}
+          >
+            <SegmentedControlItem value="work" label="Ticket" />
+            <SegmentedControlItem value="quick" label="Quick task" />
+          </SegmentedControl>
+        ) : null}
         <TextArea
           label="What needs doing"
           hasAutoFocus
@@ -738,20 +782,22 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
             onPick={setEffort}
             trigger={<Chip name="Effort">{effort === "default" ? "Default" : effort}</Chip>}
           />
-          <Menu
-            label="Mode"
-            value={mode}
-            options={MODES.map((m) => ({
-              key: m.key as string,
-              label: m.key === "default" ? "Manager chooses" : m.label,
-            }))}
-            onPick={setMode}
-            trigger={
-              <Chip name="Mode">
-                {mode === "default" ? "Manager chooses" : MODES.find((m) => m.key === mode)?.label}
-              </Chip>
-            }
-          />
+          {quick ? null : (
+            <Menu
+              label="Mode"
+              value={mode}
+              options={MODES.map((m) => ({
+                key: m.key as string,
+                label: m.key === "default" ? "Manager chooses" : m.label,
+              }))}
+              onPick={setMode}
+              trigger={
+                <Chip name="Mode">
+                  {mode === "default" ? "Manager chooses" : MODES.find((m) => m.key === mode)?.label}
+                </Chip>
+              }
+            />
+          )}
         </div>
         <AttachRow attach={attach} />
         {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
@@ -762,14 +808,21 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
           <span {...stylex.props(styles.footerNote)}>
             {noConnection ? (
               <NoConnectionNote />
+            ) : quick ? (
+              QUICK_NOTE
             ) : who ? (
               `${who.name} reports back to you when it is done.`
             ) : (
               "Choose who gets this work."
             )}
           </span>
-          <Button label="Give work" variant="primary" isDisabled={!ready || busy} onClick={submit}>
-            Give work <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
+          <Button
+            label={quick ? "Start quick task" : "Give work"}
+            variant="primary"
+            isDisabled={!ready || busy}
+            onClick={submit}
+          >
+            {quick ? "Start quick task" : "Give work"} <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
           </Button>
         </div>
       </LayoutFooter>
