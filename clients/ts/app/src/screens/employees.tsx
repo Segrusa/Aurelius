@@ -90,7 +90,7 @@ const styles = stylex.create({
     fontWeight: 500,
     color: "var(--color-text-secondary)",
   },
-  row: { height: 42 },
+  row: { height: 42, cursor: "pointer" },
   selected: { backgroundColor: "var(--color-overlay-hover)" },
   selectedEdge: { boxShadow: "inset 2px 0 0 var(--color-text-accent)" },
   nameCell: { display: "flex", minWidth: 0, alignItems: "center", gap: 10 },
@@ -459,7 +459,11 @@ export function EmployeesScreen() {
                   return (
                     <TableRow
                       key={e.id}
-                      onClick={() => setSelected(e.id)}
+                      // The whole row opens the employee: its page holds Edit and the Settings tab.
+                      onClick={() => {
+                        setSelected(e.id);
+                        void navigate({ to: "/employees/$id", params: { id: e.id } });
+                      }}
                       {...stylex.props(stylex.defaultMarker(), styles.row, isSelected && styles.selected)}
                     >
                       <TableCell xstyle={isSelected ? styles.selectedEdge : undefined}>
