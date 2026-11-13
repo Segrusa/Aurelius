@@ -62,6 +62,14 @@ import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } 
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
 import { FormDialog, Loading, Problem } from "./org-kit";
+import {
+  acceptLabel,
+  cancelConfirmation,
+  cancelNeedsConfirm,
+  doneConfirmation,
+  doneLine,
+  isQuick,
+} from "./quick-logic";
 import { TicketOdometer } from "./run-card";
 import { lastFailure, lastSummaryFailed } from "./run-logic";
 import { FileChips, useRetryAnswer } from "./run-tools";
@@ -472,7 +480,15 @@ function ReviewGate({
       return "";
     });
   const too = decideToo(t);
-  const done = () => void write("ticket.accept", { ticket_id: t.id }, { done: `${ticketNumber(t)} is Done.` });
+  const quick = isQuick(t);
+  // A quick task stays in Review while the daemon merges it; its events move the card when it worked.
+  const done = () =>
+    void write(
+      "ticket.accept",
+      { ticket_id: t.id },
+      { done: quick ? `Merging ${ticketNumber(t)} into main…` : `${ticketNumber(t)} is Done.` },
+    );
+  const accept = acceptLabel(t);
   return (
     <Box tone="amber">
       {keyed ? (
@@ -506,15 +522,15 @@ function ReviewGate({
       {whyNot ? <span {...stylex.props(styles.small)}>{whyNot}</span> : null}
       <div {...stylex.props(styles.buttonsCentered)}>
         <span {...stylex.props(styles.thirdSmall)}>Tell {t.owner_name ?? "the owner"}:</span>
-        {suggestedReplies(report).map((r) => (
+        {suggestedReplies(report, quick).map((r) => (
           <Button label={r.label} key={r.label} isDisabled={busy} onClick={() => reply(r.text)} />
         ))}
       </div>
       <div {...stylex.props(styles.buttons)}>
-        <Button variant="primary" label="Mark done" isDisabled={!ready} onClick={done}>
+        <Button variant="primary" label={accept} isDisabled={!ready} onClick={done}>
           {keyed ? (
             <>
-              Mark done <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
+              {accept} <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
             </>
           ) : null}
         </Button>
@@ -760,14 +776,16 @@ function StatusBox({
       Open run →
     </Link>
   ) : null;
+  const leave = cancelConfirmation(t);
   const dialogs = (
     <>
       <ConfirmDialog
         open={leaving === "backlog"}
         onClose={() => setLeaving(null)}
-        title={`Back to Backlog: ${ticketNumber(t)}?`}
-        body="This stops the work."
-        confirm="Back to Backlog"
+        title={leave.title}
+        body={leave.body}
+        confirm={leave.confirm}
+        danger={isQuick(t)}
         onConfirm={back}
       />
       <ConfirmDialog
@@ -839,7 +857,10 @@ function StatusBox({
               onPick={(id) => void write("ticket.assign", { ticket_id: t.id, employee_id: id })}
               trigger={<Button label={choosing ? "Choose yourself" : "Choose employee"} />}
             />
-            <Button label="Back to Backlog" onClick={() => (choosing ? setLeaving("backlog") : void back())} />
+            <Button
+              label="Back to Backlog"
+              onClick={() => (cancelNeedsConfirm(t, choosing) ? setLeaving("backlog") : void back())}
+            />
           </div>
           {dialogs}
         </Box>
@@ -890,7 +911,7 @@ function StatusBox({
     case "done":
       return (
         <Box>
-          {`Done${t.done_at_ms ? ` · ${time(t.done_at_ms)}` : ""}. Nothing was merged, pushed or deployed by closing it.`}
+          {doneLine(t, t.done_at_ms ? time(t.done_at_ms) : null)}
           {summaryFailed ? (
             <div {...stylex.props(styles.summaryLine)}>
               <span {...stylex.props(styles.red)}>✕ The summary could not be saved to project memory.</span>
@@ -942,6 +963,8 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
   const write = useTicketWrite();
   const members = useMembers();
   const [tab, setTab] = useState<Section>(message ? "discussion" : "ticket");
+  // Done or Backlog of a quick task from the More menu: merging and losing its branch are asked first.
+  const [asking, setAsking] = useState<"done" | "backlog" | null>(null);
   const t = detail.data?.ticket;
   const list = useMemo(() => (t ? [t] : []), [t]);
   const need = useTicketNeeds(list);
@@ -997,14 +1020,18 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
     const effect = dropEffect(t.column, c.column.kind, choosing);
     return effect.kind === "refused" ? [] : [{ key: c.column.kind, label: `Move to ${c.column.name}` }];
   });
+  const quick = isQuick(t);
   const move = (to: string) => {
     const effect = dropEffect(t.column, to as TicketView["column"], choosing);
     if (effect.kind === "start") void write("ticket.start", { ticket_id: t.id });
+    else if (quick && effect.kind === "back_to_backlog") setAsking("backlog");
+    else if (quick && effect.kind === "mark_done") setAsking("done");
     else if (effect.kind === "back_to_backlog" || effect.kind === "reject")
       void write("ticket.cancel", { ticket_id: t.id });
     else if (effect.kind === "mark_done") void write("ticket.accept", { ticket_id: t.id });
     else setTab("ticket");
   };
+  const asked = asking === "done" ? doneConfirmation(t) : cancelConfirmation(t);
   const more = [
     ...moves,
     ...(features.includes("ticket_follow")
@@ -1061,6 +1088,19 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
   };
   return (
     <>
+      <ConfirmDialog
+        open={asking !== null}
+        onClose={() => setAsking(null)}
+        title={asked.title}
+        body={asked.body}
+        confirm={asked.confirm}
+        danger={asking === "backlog"}
+        onConfirm={() =>
+          asking === "done"
+            ? write("ticket.accept", { ticket_id: t.id }, { done: `Merging ${ticketNumber(t)} into main…` })
+            : write("ticket.cancel", { ticket_id: t.id }, { done: `${ticketNumber(t)} is back in Backlog.` })
+        }
+      />
       <ResizeHandle resizable={resizable} isReversed hasDivider />
       <LayoutPanel
         resizable={resizable}
@@ -1153,7 +1193,7 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
               ) : (
                 <Chip disabled>{t.owner_name ?? "No owner"}</Chip>
               )}
-              {open && !locked ? (
+              {open && !locked && !quick ? (
                 <Menu
                   label="Mode"
                   value={t.run.mode ?? "default"}

@@ -8,6 +8,7 @@ import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead"
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef } from "react";
+import { useLinkState } from "../connection";
 import { useChannels, useEmployees, useGuidelines, useProjects, useTickets } from "../data";
 import { hidden } from "../hidden";
 import { keysFor, SHORTCUTS, showChord } from "../keys/keymap";
@@ -18,7 +19,8 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { useWorkspace } from "../workspace";
 import { bareName } from "./chat-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
-import { filterGroups, type PaletteGroup } from "./palette-logic";
+import { filterGroups, type PaletteGroup, quickTaskCommands } from "./palette-logic";
+import { quickEnabled } from "./quick-logic";
 import { useSwitchWorkspace } from "./workspace-kit";
 import { guidelinesIn, narrow, openProjects } from "./workspace-logic";
 
@@ -128,6 +130,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const channels = useChannels();
   const workspace = useWorkspace();
   const switchTo = useSwitchWorkspace();
+  const quick = quickEnabled(useLinkState().features);
   // The workspace's id as the only thing the search depends on: `switchTo` changes every render.
   const switchRef = useRef(switchTo);
   switchRef.current = switchTo;
@@ -245,23 +248,26 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       },
       {
         label: "Commands",
-        items: commands
-          .filter((s) => {
-            if (shown.has(s.action)) return false;
-            shown.add(s.action);
-            return s.action !== "OpenPalette";
-          })
-          .map((s) => {
-            const key = keysFor(s.keys, kind)[0];
-            return {
-              id: `command:${s.action}`,
-              label: PALETTE_LABEL[s.action] ?? s.label,
-              detail: "",
-              mark: "",
-              ...(key ? { keys: showChord(key, isMac) } : {}),
-              run: () => keys.run(s.action),
-            };
-          }),
+        items: [
+          ...quickTaskCommands(quick, () => overlays.open("ticket", { title: "", description: "", quick: true })),
+          ...commands
+            .filter((s) => {
+              if (shown.has(s.action)) return false;
+              shown.add(s.action);
+              return s.action !== "OpenPalette";
+            })
+            .map((s) => {
+              const key = keysFor(s.keys, kind)[0];
+              return {
+                id: `command:${s.action}`,
+                label: PALETTE_LABEL[s.action] ?? s.label,
+                detail: "",
+                mark: "",
+                ...(key ? { keys: showChord(key, isMac) } : {}),
+                run: () => keys.run(s.action),
+              };
+            }),
+        ],
       },
     ];
   }, [
@@ -275,6 +281,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     keys,
     kind,
     navigate,
+    quick,
   ]);
 
   const itemsById = useMemo(() => new Map(groups.flatMap((g) => g.items.map((i) => [i.id, i]))), [groups]);

@@ -23,6 +23,7 @@ import {
   priorityLabel,
   ticketNeeds,
 } from "./board-logic";
+import { quickEnabled, quickTag } from "./quick-logic";
 
 /** Who needs what on these tickets: one definition for the cards, the filter and the badges. */
 export function useTicketNeeds(tickets: TicketView[]) {
@@ -169,12 +170,14 @@ export function NeedsTag({ needs, mine }: { needs: Needs; mine: boolean }) {
   );
 }
 
-/** Priority (not Normal), deadline and labels, as tags. */
+/** Quick (a quick task), priority (not Normal), deadline and labels, as tags. */
 export function TicketTags({ t }: { t: TicketView }) {
   const offset = -new Date().getTimezoneOffset();
   const deadline = t.deadline_ms ? deadlineText(t.deadline_ms, Date.now(), t.column === "done", offset) : null;
+  const quick = quickTag(t, quickEnabled(useLinkState().features));
   return (
     <>
+      {quick ? <Tag color="var(--color-text-accent)">{quick}</Tag> : null}
       {t.priority !== "normal" ? <Tag color={priorityColor(t.priority)}>{priorityLabel(t.priority)}</Tag> : null}
       {deadline ? (
         <Tag
