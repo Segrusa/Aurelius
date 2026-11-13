@@ -9,6 +9,7 @@ import {
   employeeState,
   employeeTabs,
   inheritedRun,
+  instructionsFold,
   isEmployeeTab,
   matchesSearch,
   modelAfterProvider,
@@ -230,5 +231,13 @@ describe("the employee page's tabs", () => {
   it("reads only a tab it knows from the URL", () => {
     expect(isEmployeeTab("memory")).toBe(true);
     expect(isEmployeeTab("tasks")).toBe(false);
+  });
+});
+
+describe("instructionsFold", () => {
+  it("folds instructions whose rules come after the preview, by lines or by length", () => {
+    expect(instructionsFold("You are Iris.\nBe brief.")).toBe(false);
+    expect(instructionsFold(Array.from({ length: 13 }, (_, i) => `RULE ${i}`).join("\n"))).toBe(true);
+    expect(instructionsFold("x".repeat(1201))).toBe(true);
   });
 });

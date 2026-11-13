@@ -34,6 +34,7 @@ import {
   employeeState,
   employeeTabs,
   inheritedRun,
+  instructionsFold,
   MODE_LABELS,
   nextMode,
   position,
@@ -93,8 +94,11 @@ const styles = stylex.create({
     whiteSpace: "pre-wrap",
     color: "var(--color-text-secondary)",
     WebkitBoxOrient: "vertical",
+    // INSTRUCTIONS_PREVIEW_LINES: StyleX needs the literal here.
     WebkitLineClamp: 12,
   },
+  // "Show all": the whole text, persona and rules, selectable.
+  unfolded: { display: "block", overflow: "visible", userSelect: "text", WebkitLineClamp: "unset" },
   guidelinesTitle: { margin: 0, fontWeight: 500, color: "var(--color-text-secondary)" },
   tabPanel: {
     display: "flex",
@@ -192,6 +196,7 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
   const [editing, setEditing] = useState(false);
   const [ask, setAsk] = useState<Ask>(null);
   const [showEarlier, setShowEarlier] = useState(false);
+  const [allInstructions, setAllInstructions] = useState(false);
   const [pins, setPins] = usePins(pinKey(hostName, "pinned_employees"));
   const pairs = useMemo((): [string, null][] => [[id, null]], [id]);
   const sets = useEffectiveSets(pairs);
@@ -439,7 +444,20 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
                     {e.instructions ? (
                       <section {...stylex.props(styles.section)}>
                         <Eyebrow>INSTRUCTIONS</Eyebrow>
-                        <p {...stylex.props(styles.instructions)}>{e.instructions}</p>
+                        <p {...stylex.props(styles.instructions, allInstructions && styles.unfolded)}>
+                          {e.instructions}
+                        </p>
+                        {instructionsFold(e.instructions) ? (
+                          <div>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-expanded={allInstructions}
+                              label={allInstructions ? "Show less" : "Show all instructions"}
+                              onClick={() => setAllInstructions(!allInstructions)}
+                            />
+                          </div>
+                        ) : null}
                       </section>
                     ) : null}
                   </>
