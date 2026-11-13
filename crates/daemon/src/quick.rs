@@ -240,7 +240,8 @@ pub async fn run_cleanup(shared: Arc<Shared>, job: queries::JobRow) {
         Some(ticket) => blocking(move || s.service.quick_repo(ticket)).await.and_then(Result::ok).flatten(),
         None => None,
     };
-    if let Some(repo) = repo {
+    // A quick task started again before this job ran keeps its worktree and branch.
+    if let Some(repo) = repo.filter(|r| !r.working) {
         clean(&shared, repo).await;
     }
     close(&shared, &job.id, epoch).await;
