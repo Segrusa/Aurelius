@@ -1992,6 +1992,7 @@ export type EventKind =
   | "task.mode_chosen"
   | "task.posted"
   | "task.queued"
+  | "task.report_ready"
   | "task.resumed"
   | "task.run_changed"
   | "task.started"
