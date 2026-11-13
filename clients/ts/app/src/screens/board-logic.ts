@@ -10,6 +10,7 @@ import type {
   TicketView,
   TimelineCard,
 } from "@aurelius/protocol";
+import { type KindFilter, kindMatches } from "./quick-logic";
 
 export const DONE_SHOWN = 20;
 export const GAVE_UP_LIMIT = 20;
@@ -234,6 +235,8 @@ export interface CardFilter {
   query: string;
   needsOnly: boolean;
   needs: (t: TicketView) => boolean;
+  /** Only quick tasks, on a server with them. */
+  kind?: KindFilter;
 }
 
 /** The cards a column shows. Done: newest first, `DONE_SHOWN` unless all. */
@@ -258,7 +261,8 @@ export function shownCards(
         t.title.toLowerCase().includes(query) ||
         (number !== "" && String(t.number) === number) ||
         t.labels.some((l) => l.toLowerCase().includes(query))) &&
-      (!filter.needsOnly || filter.needs(t)),
+      (!filter.needsOnly || filter.needs(t)) &&
+      kindMatches(filter.kind ?? "all", t),
   );
   let older = 0;
   if (kind === "done") {

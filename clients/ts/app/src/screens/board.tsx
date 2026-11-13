@@ -59,6 +59,7 @@ import { Held, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
 import { FormDialog, Page, PageHead, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
+import { type KindFilter, kindFilterOptions, quickEnabled } from "./quick-logic";
 import { ConfirmDialog, TicketPanel } from "./ticket-panel";
 import { TicketRows } from "./ticket-rows";
 import {
@@ -575,6 +576,7 @@ export function BoardScreen({
   const members = useMembers();
   const [query, setQuery] = useState("");
   const [needsOnly, setNeedsOnly] = useState(false);
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [doneAll, setDoneAll] = useState(false);
   const [view, setView] = useState<"board" | "list">("board");
   const [hidden, setHidden] = useState<ColumnKind[]>(
@@ -626,9 +628,12 @@ export function BoardScreen({
     });
     return () => cancelAnimationFrame(frame);
   }, [ticket, board.isSuccess]);
+  const quickOn = quickEnabled(features);
+  // A server without quick tasks has no filter for them: every ticket shows.
+  const kind: KindFilter = quickOn ? kindFilter : "all";
   const filter = useMemo(
-    () => ({ owner, responsible, query, needsOnly, needs: need.mine }),
-    [owner, responsible, query, needsOnly, need],
+    () => ({ owner, responsible, query, needsOnly, needs: need.mine, kind }),
+    [owner, responsible, query, needsOnly, need, kind],
   );
   const shown = useMemo(
     () => columns.map((c) => ({ ...c, ...shownCards(c.column.kind, c.tickets, filter, doneAll) })),
@@ -902,6 +907,19 @@ export function BoardScreen({
                         : responsible.id === me
                           ? "Responsible: me"
                           : `Responsible: ${members.data?.find((u) => u.id === responsible.id)?.username ?? "…"}`}
+                  </button>
+                }
+              />
+            ) : null}
+            {quickOn ? (
+              <Menu
+                label="Kind"
+                value={kind}
+                options={kindFilterOptions(true)}
+                onPick={setKindFilter}
+                trigger={
+                  <button type="button" {...stylex.props(styles.pill)}>
+                    {kindFilterOptions(true).find((o) => o.key === kind)?.label}
                   </button>
                 }
               />

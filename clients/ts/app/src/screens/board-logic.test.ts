@@ -222,6 +222,15 @@ describe("the cards of a column", () => {
     expect(ids({ needsOnly: true, needs: (t: TicketView) => t.id === "2" })).toEqual(["2"]);
   });
 
+  it("filter on Quick tasks", () => {
+    const cards = [ticket({ id: "1", kind: "quick" }), ticket({ id: "2" })];
+    const ids = (kind?: "all" | "quick") =>
+      shownCards("doing", cards, { ...anyone, ...(kind ? { kind } : {}) }, false).cards.map((t) => t.id);
+    expect(ids("quick")).toEqual(["1"]);
+    expect(ids("all")).toEqual(["1", "2"]);
+    expect(ids()).toEqual(["1", "2"]);
+  });
+
   it("in Done show the newest twenty, the rest behind Show older", () => {
     const done = Array.from({ length: 25 }, (_, i) => ticket({ id: String(i), done_at_ms: i }));
     const { cards, older } = shownCards("done", done, anyone, false);
