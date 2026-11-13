@@ -18,7 +18,7 @@ Alle projecten komen uit één sjabloon (de "FA/PA"-portfolio-app): dezelfde pre
 ## Beslissingen die jij moet nemen
 
 1. **Legacy of modern?** De huisstijl heeft zichtbare conventies (prefixen `PA_`/`FA_`, `m`/`l`/`i`/`o`-namen in C#, 3 spaties, SP's met `FOR JSON`) én zwakke plekken (synchrone SQL in async functies, `new HttpClient()` per call, string-SQL, `e.Message` naar de client, status 300, geen tests, secrets in de repo). **Voorstel:** conventies behouden, zwakke plekken in nieuwe code niet herhalen. Zo staan de teksten hieronder.
-2. **De Aurelius-guidelines hangen nu aan employees** (Rust style, Flutter and Dart, Desktop app (gpui-kit), Worktrees). Ze gelden dus ook voor een run op een klantproject, en met de nieuwe teksten erbij gaat Bridge over de 16.000 tekens. **Voorstel:** die vier koppelen aan project Aurelius in plaats van aan employees. "Desktop app (gpui-kit)" is bovendien achterhaald: de desktop is nu Electron + React.
+2. **De Aurelius-guidelines hangen nu aan employees** (Rust style, Flutter and Dart, Desktop app (gpui-kit), Worktrees). Ze gelden dus ook voor een run op een klantproject, en met de nieuwe teksten erbij gaat Bridge over de 16.000 tekens. **Besloten:** Rust style, Flutter and Dart en Worktrees gaan naar project Aurelius in plaats van naar employees. "Desktop app (gpui-kit)" is achterhaald (de desktop is nu Electron + React) en wordt gearchiveerd.
 3. **Klantspecifiek of algemeen?** De Terraform-regels gelden alleen voor Eurocontrol (ECTL-modules, landing zones). **Voorstel:** "Opteon: Eurocontrol infra" aan project Eurocontrol koppelen, de algemene pipeline-regels aan Orbit. Voor PROMM (Power Platform) is er geen project in Aurelius; de PCF-regels zitten kort in de frontend-guideline.
 
 ## Koppeling per employee (na beslissing 2)
@@ -36,7 +36,7 @@ Alle projecten komen uit één sjabloon (de "FA/PA"-portfolio-app): dezelfde pre
 | Titan (tech lead) | Frontend · Backend · Security · Pipelines · Code review | 8 161 |
 | Project Eurocontrol | Eurocontrol infra | +1 648 in dat project |
 
-"Tests and evidence" (849) en "Code review" (977) bestaan al. In project Aurelius komen de Aurelius-guidelines (6 977 tekens) erbovenop; daarom krijgen Bridge, Trace en Titan geen Database-guideline (Forge en Schema hebben die), anders gaan ze daar over 16 000. De aantallen zijn de lengtes van de teksten hieronder; de server telt bij het koppelen opnieuw en weigert een koppeling die over de limiet van 16 000 gaat.
+"Tests and evidence" (849) en "Code review" (977) bestaan al. In project Aurelius komen de Aurelius-guidelines (6 234 tekens na het archiveren van gpui-kit) erbovenop; daarom krijgen Bridge, Trace en Titan geen Database-guideline (Forge en Schema hebben die), anders gaan ze daar over 16 000. De aantallen zijn de lengtes van de teksten hieronder; de server telt bij het koppelen opnieuw en weigert een koppeling die over de limiet van 16 000 gaat.
 
 ---
 
