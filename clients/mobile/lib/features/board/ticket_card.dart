@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/quick_task.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
@@ -18,7 +19,7 @@ import 'ticket_actions.dart';
 
 /// What a card needs from the board around it.
 class CardContext {
-  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false, this.responsible = false, this.follow = false, this.links = false});
+  const CardContext({required this.columns, required this.column, this.needsOwner = false, this.ownerUnknown = false, this.showProject = true, this.online = true, this.wide = false, this.me, this.myLoginExpired = false, this.responsible = false, this.follow = false, this.links = false, this.quick = false});
 
   /// Every column in board order (Move to…).
   final List<BoardColumnView> columns;
@@ -55,6 +56,9 @@ class CardContext {
 
   /// The server can open a link (`message_locate`): Copy link in the menu.
   final bool links;
+
+  /// The server has quick tasks (`quick_task`, ticket #53): their tag and merge commit.
+  final bool quick;
 }
 
 /// The card's main action, by column (§4.2, §5.1): Start, Choose owner, Review, Start again.
@@ -120,9 +124,12 @@ class TicketCard extends StatelessWidget {
     // The ◆ is the responsible's (B6); the line and the button stay for anyone.
     final mine = needsMe(ticket, state, me: board.me);
     final line = state.line(owner: owner, dispatcher: dispatcher, tester: testerName(company), login: ticket.loginUsername, mine: ticket.loginUser == board.me, untilMs: root?.waitingUntilMs, expired: board.myLoginExpired, others: decidedByOther(ticket, state, me: board.me));
+    final quick = isQuickTask(ticket, on: board.quick);
+    final doneLine = _doneLine(ticket, quick: quick);
 
     final summary = [
       'Ticket ${ticket.number}, ${ticket.title}',
+      if (quick) 'quick task',
       if (ticket.priority != TicketPriority.normal) 'priority ${ticket.priority.label}',
       owner == null ? 'no owner' : 'owner $owner',
       ?line,
@@ -137,6 +144,7 @@ class TicketCard extends StatelessWidget {
       children: [
         Row(children: [
           Text('#${ticket.number}', style: Tokens.monoSmall()),
+          if (quick) ...[const SizedBox(width: 6), QuickTag(keyId: ticket.id)],
           if (board.showProject) ...[
             const SizedBox(width: 8),
             Flexible(child: Text(ticket.projectName, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: Tokens.label2))),
@@ -190,7 +198,7 @@ class TicketCard extends StatelessWidget {
         if (board.responsible) ...[
           WhoBlock(ticket: ticket, owner: owner, me: board.me, keyId: ticket.id),
           if (done || deadline != null) const SizedBox(height: 2),
-          if (done) Text(_doneLine(ticket), style: TextStyle(fontSize: 13, color: Tokens.label2)),
+          if (done) Text(doneLine, key: ValueKey('card-done-${ticket.id}'), style: TextStyle(fontSize: 13, color: Tokens.label2)),
           if (deadline != null) Text(deadline.text, style: TextStyle(fontSize: 13, color: deadline.late ? Tokens.negative : deadline.soon ? Tokens.warning : Tokens.label2)),
         ] else
         Wrap(
@@ -198,7 +206,7 @@ class TicketCard extends StatelessWidget {
           runSpacing: 2,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (done) Text(_doneLine(ticket), style: TextStyle(fontSize: 13, color: Tokens.label2)),
+            if (done) Text(doneLine, key: ValueKey('card-done-${ticket.id}'), style: TextStyle(fontSize: 13, color: Tokens.label2)),
             ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 200),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -283,7 +291,29 @@ class TicketCard extends StatelessWidget {
   }
 }
 
-String _doneLine(TicketView ticket) => '✓ Done${ticket.doneAtMs == null ? '' : ' ${DateFormat.MMMd().format(DateTime.fromMillisecondsSinceEpoch(ticket.doneAtMs!))}'}';
+/// "✓ Done Nov 13", with a quick task's merge commit ("· merged 1a2b3c4", ticket #53).
+String _doneLine(TicketView ticket, {bool quick = false}) =>
+    '✓ Done${ticket.doneAtMs == null ? '' : ' ${DateFormat.MMMd().format(DateTime.fromMillisecondsSinceEpoch(ticket.doneAtMs!))}'}${quick && ticket.mergeCommit != null ? ' · merged ${shortCommit(ticket.mergeCommit!)}' : ''}';
+
+/// The tag "Quick" of a quick task (ticket #53), on its card and its page: an icon and the word, never colour alone.
+class QuickTag extends StatelessWidget {
+  const QuickTag({super.key, required this.keyId});
+
+  /// Tells the tags apart in tests.
+  final String keyId;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        key: ValueKey('quick-tag-$keyId'),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(color: Tokens.accentTint, borderRadius: BorderRadius.circular(999)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(CupertinoIcons.bolt_fill, size: 11, color: Tokens.accentText),
+          const SizedBox(width: 3),
+          Text(quickLabel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Tokens.accentText)),
+        ]),
+      );
+}
 
 /// Who does what (§1.2–§1.3), on a card and at the top of the ticket page: who
 /// does the work and on whose login, and who follows up. Always with the role in

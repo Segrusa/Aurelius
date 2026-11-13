@@ -10,6 +10,7 @@ import '../../core/widgets/refresh.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/links.dart';
+import '../../data/quick_task.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
@@ -289,7 +290,7 @@ class _BoardPageState extends State<BoardPage> {
     if (columns == null) return null;
     final own = columns.where((c) => c.column.kind == t.column).firstOrNull ?? BoardColumnCards(column: BoardColumnView(id: t.columnId, kind: t.column, name: t.column.name, position: 0, version: 1), tickets: const []);
     final link = context.read<ConnectionBloc>().state;
-    final ctx = CardContext(columns: [for (final c in columns) c.column], column: own, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), online: online, me: _me, myLoginExpired: _myLoginExpired, responsible: link.has(ticketResponsibleFeature), follow: link.has(ticketFollowFeature), links: link.has(messageLocateFeature));
+    final ctx = CardContext(columns: [for (final c in columns) c.column], column: own, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), online: online, me: _me, myLoginExpired: _myLoginExpired, responsible: link.has(ticketResponsibleFeature), follow: link.has(ticketFollowFeature), links: link.has(messageLocateFeature), quick: quickTasksOn(link));
     return TicketCard(key: ValueKey('ticket-${t.id}'), ticket: t, board: ctx);
   }
 
@@ -305,6 +306,7 @@ class _BoardPageState extends State<BoardPage> {
     _myLoginExpired = link.claudeLogin?.status == ClaudeLoginStatus.expired;
     final wide = MediaQuery.sizeOf(context).width >= boardWideWidth;
     final responsibleOn = link.has(ticketResponsibleFeature);
+    final quickOn = quickTasksOn(link);
     final columns = !responsibleOn || !board.needsMeOnly ? board.columns : [for (final c in board.columns) BoardColumnCards(column: c.column, tickets: [for (final t in c.tickets) if (needsMeOf(t, company, board, me: _me)) t])];
     final tickets = [for (final c in columns) ...c.tickets];
     final needYou = tickets.where((t) => needsMeOf(t, company, board, me: _me)).length;
@@ -327,14 +329,14 @@ class _BoardPageState extends State<BoardPage> {
     } else if (board.board == null) {
       content = const _Skeleton();
     } else {
-      final filteredEmpty = tickets.isEmpty && ((board.projectId != null && !widget.inProject) || board.owner != null || board.createdBy != null || responsible != null || (responsibleOn && board.needsMeOnly));
+      final filteredEmpty = tickets.isEmpty && ((board.projectId != null && !widget.inProject) || board.owner != null || board.createdBy != null || responsible != null || (responsibleOn && board.needsMeOnly) || (quickOn && board.quickOnly));
       final body = wide ? _wide(context, board, company, columns, online) : _phone(context, board, company, columns, online);
       content = Column(children: [
         if (filteredEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
             child: Row(children: [
-              Expanded(child: Text(responsible != null && responsible != 'No one' && responsible != 'Me' ? 'No tickets for $responsible.' : 'No tickets in ${(widget.inProject ? null : project?.name) ?? owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
+              Expanded(child: Text(responsible != null && responsible != 'No one' && responsible != 'Me' ? 'No tickets for $responsible.' : quickOn && board.quickOnly ? 'No quick tasks.' : 'No tickets in ${(widget.inProject ? null : project?.name) ?? owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
               TextButton(
                 onPressed: () {
                   final bloc = context.read<BoardBloc>();
@@ -342,6 +344,7 @@ class _BoardPageState extends State<BoardPage> {
                   bloc.add(const BoardCreatorChosen(null));
                   bloc.add(const BoardResponsibleChosen(null));
                   bloc.add(const BoardNeedsMeOnly(false));
+                  bloc.add(const BoardQuickOnly(false));
                   if (!widget.inProject) bloc.add(const BoardProjectChosen(null));
                 },
                 child: const Text('Clear filter'),
@@ -395,6 +398,18 @@ class _BoardPageState extends State<BoardPage> {
                     selected: board.needsMeOnly,
                     showCheckmark: false,
                     onSelected: (on) => context.read<BoardBloc>().add(BoardNeedsMeOnly(on)),
+                  ),
+                ),
+              if (quickOn)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    key: const ValueKey('board-filter-quick'),
+                    avatar: const Icon(CupertinoIcons.bolt, size: 16),
+                    label: const Text(quickFilterName),
+                    selected: board.quickOnly,
+                    showCheckmark: false,
+                    onSelected: (on) => context.read<BoardBloc>().add(BoardQuickOnly(on)),
                   ),
                 ),
               if (responsibleOn) _FilterPill(key: const ValueKey('board-filter-responsible'), label: 'Responsible: ${responsible ?? 'Anyone'}', active: responsible != null, onTap: () => _pickResponsible(context, board)),
@@ -515,7 +530,7 @@ class _BoardPageState extends State<BoardPage> {
     }
     final allColumns = [for (final x in columns) x.column];
     Widget card(TicketView t) {
-      final ctx = CardContext(columns: allColumns, column: c, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), showProject: board.projectId == null, online: online, wide: wide, me: _me, myLoginExpired: _myLoginExpired, responsible: context.read<ConnectionBloc>().state.has(ticketResponsibleFeature), follow: context.read<ConnectionBloc>().state.has(ticketFollowFeature), links: context.read<ConnectionBloc>().state.has(messageLocateFeature));
+      final ctx = CardContext(columns: allColumns, column: c, needsOwner: needsOwnerOf(t, company, board), ownerUnknown: board.ownerUnknown.contains(t.id), showProject: board.projectId == null, online: online, wide: wide, me: _me, myLoginExpired: _myLoginExpired, responsible: context.read<ConnectionBloc>().state.has(ticketResponsibleFeature), follow: context.read<ConnectionBloc>().state.has(ticketFollowFeature), links: context.read<ConnectionBloc>().state.has(messageLocateFeature), quick: quickTasksOn(context.read<ConnectionBloc>().state));
       final face = TicketCard(key: ValueKey('ticket-${t.id}'), ticket: t, board: ctx);
       if (!wide || !online || kind == ColumnKind.done) return face;
       // Drop on a card: it lands above it.

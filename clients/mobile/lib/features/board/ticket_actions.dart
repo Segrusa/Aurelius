@@ -12,6 +12,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/company.dart';
 import '../../data/discussion.dart';
+import '../../data/quick_task.dart';
 import '../../data/secret_write.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
@@ -59,6 +60,19 @@ Future<bool> ticketWrite(BuildContext context, Map<String, dynamic> request, {in
     return false;
   }
 }
+
+/// Whether [ticket] is a quick task on a server that has them (ticket #53).
+bool quickTaskOf(BuildContext context, TicketView ticket) {
+  try {
+    return isQuickTask(ticket, on: quickTasksOn(context.read<ConnectionBloc>().state));
+  } on ProviderNotFoundException {
+    return false;
+  }
+}
+
+/// The word on the button that closes [ticket] in Review: "Approve and merge"
+/// for a quick task (ST-05 AC1), else "Done".
+String acceptLabel(TicketView ticket, {required bool quickOn}) => isQuickTask(ticket, on: quickOn) ? approveAndMerge : 'Done';
 
 /// The name of the employee [id], or null.
 String? employeeName(CompanyState company, String? id) => id == null ? null : company.employee(id)?.name;
@@ -157,10 +171,16 @@ Future<void> _undoStart(BuildContext context, TicketView started) async {
 }
 
 /// Back to Backlog: stops the work (`ticket.cancel`), after a confirmation
-/// where work runs; in Plan review it is "Afwijzen".
+/// where work runs; in Plan review it is "Afwijzen". A quick task always asks
+/// first: its branch and worktree go, and unmerged work with them (BR4).
 Future<bool> backToBacklog(BuildContext context, TicketView ticket) async {
   final rule = moveRule(ticket.column, ColumnKind.backlog);
   if (rule is! MoveAllowed) return false;
+  if (quickTaskOf(context, ticket)) {
+    final ok = await confirm(context, title: quickCancelTitle, body: quickCancelBody, action: 'Back to Backlog', danger: true);
+    if (!ok || !context.mounted) return false;
+    return ticketWrite(context, ticketCancel(ticketId: ticket.id), expectedVersion: ticket.version, retry: false, done: '#${ticket.number} is back in Backlog. Its branch is removed.');
+  }
   if (rule.confirm != null) {
     // In Plan review this is rejecting the plan; it says so, as the plan page's button does.
     final reject = ticket.column == ColumnKind.planReview;
@@ -248,10 +268,10 @@ Future<void> showMoveSheet(BuildContext context, TicketView ticket, List<BoardCo
                     null => 'Current',
                     MoveRefused(:final reason) => reason,
                     MoveAllowed(kind: MoveKind.start) => 'Starts the ticket',
-                    MoveAllowed(kind: MoveKind.cancel) => 'Stops the work',
+                    MoveAllowed(kind: MoveKind.cancel) => quickTaskOf(context, ticket) ? 'Stops the work and removes its branch' : 'Stops the work',
                     MoveAllowed(kind: MoveKind.reviewPlan) => 'Opens the plan',
                     MoveAllowed(kind: MoveKind.sendBack) => 'With feedback for the owner',
-                    MoveAllowed(kind: MoveKind.accept) => 'Closes the ticket',
+                    MoveAllowed(kind: MoveKind.accept) => quickTaskOf(context, ticket) ? 'Approves it and merges it into main' : 'Closes the ticket',
                     MoveAllowed() => '',
                   },
                   style: TextStyle(color: Tokens.label2),
@@ -587,8 +607,11 @@ Future<({List<TaskView> tasks, bool conversation})?> doneHolds(AureliusRepositor
 /// "Mark #40 as Done?" (§9.3, MU1-16 AC1/AC4, MU1-17): always a confirmation,
 /// since Done cannot be undone. Done waits until nothing linked still works
 /// (B6, [doneHolds], read fresh): the running tasks are listed and Done stays
-/// off; also when that could not be read.
+/// off; also when that could not be read. For a quick task it is "Approve and
+/// merge" (ST-05): the card stays in Review while the daemon merges, goes to
+/// Done when that worked, and a failure comes as a line in the discussion.
 Future<bool> showMarkDone(BuildContext context, TicketView ticket) async {
+  final quick = quickTaskOf(context, ticket);
   final holds = await doneHolds(context.read<AureliusRepository>(), ticket);
   if (!context.mounted) return false;
   final running = holds?.tasks ?? const <TaskView>[];
@@ -597,12 +620,17 @@ Future<bool> showMarkDone(BuildContext context, TicketView ticket) async {
   final ok = await showDialog<bool>(
     context: context,
     builder: (dialog) => AlertDialog(
-      title: Text('Mark #${ticket.number} as Done?'),
+      title: Text(quick ? '$approveAndMerge #${ticket.number}?' : 'Mark #${ticket.number} as Done?'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Done closes the ticket. It cannot be reopened.\nNothing is merged, pushed or deployed.'),
+          Text(
+            quick
+                ? "Its branch is merged into the project's main and then removed; it goes to Done once the merge worked. Nothing is pushed.\nIf the merge fails it stays in Review and the discussion says why."
+                : 'Done closes the ticket. It cannot be reopened.\nNothing is merged, pushed or deployed.',
+            key: const ValueKey('mark-done-explain'),
+          ),
           if (holds == null) ...[
             const SizedBox(height: 12),
             Text('⚠ Could not check whether anything still runs.', key: const ValueKey('mark-done-unknown'), style: TextStyle(color: Tokens.warning, fontWeight: FontWeight.w600)),
@@ -626,10 +654,10 @@ Future<bool> showMarkDone(BuildContext context, TicketView ticket) async {
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
-        FilledButton.icon(key: const ValueKey('mark-done'), onPressed: allowed ? () => Navigator.pop(dialog, true) : null, icon: const Icon(Icons.check), label: const Text('Done')),
+        FilledButton.icon(key: const ValueKey('mark-done'), onPressed: allowed ? () => Navigator.pop(dialog, true) : null, icon: const Icon(Icons.check), label: Text(quick ? approveAndMerge : 'Done')),
       ],
     ),
   );
   if (ok != true || !context.mounted) return false;
-  return ticketWrite(context, ticketAccept(ticketId: ticket.id), expectedVersion: ticket.version, retry: false, done: '#${ticket.number} is Done. A summary goes to project memory.');
+  return ticketWrite(context, ticketAccept(ticketId: ticket.id), expectedVersion: ticket.version, retry: false, done: quick ? '#${ticket.number} is approved. Merging into main…' : '#${ticket.number} is Done. A summary goes to project memory.');
 }
