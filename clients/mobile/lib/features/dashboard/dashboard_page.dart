@@ -8,8 +8,10 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/refresh.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/company.dart';
+import '../../data/quick_task.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
+import '../connection/connection_bloc.dart';
 import '../company_org/employee_widgets.dart';
 import '../project/task_status_mark.dart';
 import 'give_work.dart';
@@ -135,16 +137,34 @@ class _GiveWorkBoxState extends State<GiveWorkBox> {
   String? _lead;
   String? _project;
 
+  /// A quick task rather than a ticket (ticket #53); only with [quickTaskFeature].
+  bool _quick = false;
+
+  /// The employee picked for a quick task in this box.
+  String? _quickLead;
+
   CompanyState get _company => widget.state;
 
   @override
   void initState() {
     super.initState();
-    if (LastGiven.hostOf(context) case final host?) LastGiven.load(host).then((_) => mounted ? setState(() {}) : null);
+    if (LastGiven.hostOf(context) case final host?) {
+      LastGiven.load(host).then((_) => mounted ? setState(() {}) : null);
+      LastQuickEmployee.load(host).then((_) => mounted ? setState(() {}) : null);
+    }
   }
 
+  bool get _quickOn => _quick && quickTasksOn(context.read<ConnectionBloc?>()?.state);
+
   /// The lead shown: the user's pick, else the last one given work, else the single root of the company.
+  /// For a quick task: the pick, else the last one given a quick task (ST-01 AC2); no root, it is required.
   String? get _leadId {
+    if (_quickOn) {
+      for (final id in [_quickLead, LastQuickEmployee.employee]) {
+        if (id != null && _company.activeEmployees.any((e) => e.id == id)) return id;
+      }
+      return null;
+    }
     for (final id in [_lead, LastGiven.lead]) {
       if (id != null && _company.employee(id) != null) return id;
     }
@@ -159,7 +179,7 @@ class _GiveWorkBoxState extends State<GiveWorkBox> {
     return _company.openProjects.where((p) => p.status == ProjectStatus.active).firstOrNull?.id;
   }
 
-  bool get _ready => _title.text.trim().isNotEmpty && _projectId != null;
+  bool get _ready => _title.text.trim().isNotEmpty && _projectId != null && (!_quickOn || _leadId != null);
 
   @override
   void dispose() {
@@ -173,18 +193,19 @@ class _GiveWorkBoxState extends State<GiveWorkBox> {
     _title.clear();
     setState(() {});
     // Not made (B10, offline): the title comes back to change it (QA2 m8).
-    if (!await sendGivenWork(context, _projectId!, title, _leadId) && mounted && _title.text.isEmpty) setState(() => _title.text = title);
+    if (!await sendGivenWork(context, _projectId!, title, _leadId, quick: _quickOn) && mounted && _title.text.isEmpty) setState(() => _title.text = title);
   }
 
   Future<void> _details() async {
     final title = _title.text.trim();
     _title.clear();
     setState(() {});
-    await giveWork(context, title: title.isEmpty ? null : title, employeeId: _leadId, projectId: _projectId);
+    await giveWork(context, title: title.isEmpty ? null : title, employeeId: _leadId, projectId: _projectId, quick: _quickOn);
   }
 
   Future<void> _pickLead() async {
-    final groups = pickerGroups(_company.employees);
+    // A quick task goes to an active employee only.
+    final groups = pickerGroups(_quickOn ? _company.activeEmployees.toList() : _company.employees);
     final picked = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -211,7 +232,8 @@ class _GiveWorkBoxState extends State<GiveWorkBox> {
         ),
       ),
     );
-    if (picked != null) setState(() => _lead = picked);
+    if (picked == null) return;
+    setState(() => _quickOn ? _quickLead = picked : _lead = picked);
   }
 
   Future<void> _pickProject() async {
@@ -245,6 +267,8 @@ class _GiveWorkBoxState extends State<GiveWorkBox> {
   Widget build(BuildContext context) {
     final lead = _company.employee(_leadId ?? '');
     final project = _company.project(_projectId ?? '');
+    final quickOn = context.select<ConnectionBloc, bool>((b) => quickTasksOn(b.state));
+    final quick = quickOn && _quick;
     return Padding(
       key: const ValueKey('give-work'),
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -261,8 +285,11 @@ class _GiveWorkBoxState extends State<GiveWorkBox> {
                 controller: _title,
                 textCapitalization: TextCapitalization.sentences,
                 textInputAction: TextInputAction.send,
-                maxLength: 160,
-                decoration: const InputDecoration(hintText: 'What should be done?', border: InputBorder.none, counterText: ''),
+                // A quick task's text is its description: no title limit, the server takes the first line.
+                maxLength: quick ? null : 160,
+                minLines: 1,
+                maxLines: quick ? 5 : 1,
+                decoration: InputDecoration(hintText: quick ? 'Describe the small change' : 'What should be done?', border: InputBorder.none, counterText: ''),
                 onChanged: (_) => setState(() {}),
                 onSubmitted: (_) => _give(),
               ),
@@ -274,9 +301,18 @@ class _GiveWorkBoxState extends State<GiveWorkBox> {
                   ActionChip(
                     key: const ValueKey('give-work-lead'),
                     avatar: lead == null ? const Icon(CupertinoIcons.person, size: 16) : Monogram(lead.monogram, size: 20),
-                    label: Text(lead == null ? 'Choose who leads' : lead.name),
+                    label: Text(lead == null ? (quick ? 'Choose an employee' : 'Choose who leads') : lead.name),
                     onPressed: _pickLead,
                   ),
+                  if (quickOn)
+                    FilterChip(
+                      key: const ValueKey('give-work-quick'),
+                      avatar: const Icon(CupertinoIcons.bolt, size: 16),
+                      label: const Text(quickTaskName),
+                      selected: _quick,
+                      showCheckmark: false,
+                      onSelected: (on) => setState(() => _quick = on),
+                    ),
                   ActionChip(
                     key: const ValueKey('give-work-project'),
                     avatar: const Icon(CupertinoIcons.folder, size: 16),

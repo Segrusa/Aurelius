@@ -16,6 +16,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/company.dart';
 import '../../data/discussion.dart';
+import '../../data/quick_task.dart';
 import '../../data/secret_write.dart';
 import '../../data/tickets.dart';
 import '../../data/views.dart';
@@ -34,7 +35,9 @@ const ticketTitleMax = 160;
 /// responsible (You unless chosen otherwise, B9),
 /// labels, a photo or file (also pasted into the title or description); mode
 /// and deadline under Advanced. Create puts it
-/// in Backlog; "Create and start" also starts it (D-09).
+/// in Backlog; "Create and start" also starts it (D-09). On a server with
+/// quick tasks (ticket #53) it can be a Quick task instead: description and
+/// employee required, the title optional, and it starts in Doing at once.
 class NewTicketPage extends StatefulWidget {
   const NewTicketPage({super.key, this.projectId, this.draft});
 
@@ -70,6 +73,9 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
   DateTime? _deadline;
   final _files = <({String name, String path})>[];
   bool _advanced = false;
+
+  /// A quick task rather than a ticket (ticket #53); only shown with [quickTaskFeature].
+  late bool _quick = widget.draft?.quick ?? false;
   bool _tried = false;
   bool _busy = false;
   bool _uploading = false;
@@ -78,6 +84,10 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
   void initState() {
     super.initState();
     _title.addListener(() => setState(() {}));
+    // A quick task's description is required: its error goes once there is text.
+    _description.addListener(() {
+      if (_tried && _quick) setState(() {});
+    });
     WidgetsBinding.instance.addObserver(this);
     for (final focus in [_titleFocus, _descriptionFocus]) {
       focus.addListener(() {
@@ -87,6 +97,27 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
     // One open project: it is the project.
     final open = context.read<CompanyBloc>().state.openProjects;
     if (_project == null && open.length == 1) _project = open.single.id;
+    if (_quick) _fillLastQuickEmployee();
+  }
+
+  /// The employee last given a quick task, when none is chosen yet (ST-01 AC2).
+  Future<void> _fillLastQuickEmployee() async {
+    try {
+      await LastQuickEmployee.load(context.read<AureliusRepository>().host.hostId);
+    } catch (_) {
+      // No host (tests): nothing saved.
+    }
+    if (!mounted || _owner != null) return;
+    final last = LastQuickEmployee.employee;
+    if (last != null && context.read<CompanyBloc>().state.activeEmployees.any((e) => e.id == last)) setState(() => _owner = last);
+  }
+
+  void _setQuick(bool quick) {
+    setState(() {
+      _quick = quick;
+      _tried = false;
+    });
+    if (quick) _fillLastQuickEmployee();
   }
 
   @override
@@ -106,15 +137,20 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
   }
 
   String? get _titleError {
-    if (!_tried) return null;
+    if (!_tried || _quick) return null;
     if (_title.text.trim().isEmpty) return 'Required.';
     return null;
   }
+
+  String? get _descriptionError => _tried && _quick && _description.text.trim().isEmpty ? 'Required.' : null;
+
+  String? get _ownerError => _tried && _quick && _owner == null ? 'Choose an employee.' : null;
 
   String? get _projectError => _tried && _project == null ? 'Choose a project.' : null;
 
   Future<void> _create({required bool start}) async {
     setState(() => _tried = true);
+    if (_quick && quickTasksOn(context.read<AureliusRepository>().linkState)) return _createQuick();
     final title = _title.text.trim();
     if (title.isEmpty) {
       _titleFocus.requestFocus();
@@ -161,6 +197,52 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
     }
   }
 
+  /// Create a quick task (ticket #53): the server starts it in Doing at once.
+  /// Its errors ("Dit project heeft geen git-map") show as they come.
+  Future<void> _createQuick() async {
+    final description = _description.text.trim();
+    if (description.isEmpty) {
+      _descriptionFocus.requestFocus();
+      return;
+    }
+    final employee = _owner;
+    if (_project == null || employee == null || _busy) return;
+    final repository = context.read<AureliusRepository>();
+    final router = GoRouter.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final name = employeeName(context.read<CompanyBloc>().state, employee) ?? 'its employee';
+    setState(() => _busy = true);
+    try {
+      final link = repository.linkState;
+      final receipt = await writeConfirmingSecret(repository, quickTaskRequest(
+        projectId: _project!,
+        title: _title.text,
+        description: description,
+        employeeId: employee,
+        responsibleUserId: link.has(ticketResponsibleFeature) ? (_responsible == null ? link.user?.id : _responsible!.id) : null,
+        priority: _priority == TicketPriority.normal ? null : _priority,
+        labels: parseLabels(_labels.text),
+        files: [for (final f in _files) f.path],
+        deadlineMs: _deadline?.millisecondsSinceEpoch,
+        fromIdea: widget.draft?.fromIdea,
+        fromMessage: link.has(ticketDiscussionFeature) ? widget.draft?.fromMessage : null,
+      ), sendAnywayDialog(context));
+      if (receipt == null) return;
+      LastQuickEmployee.remember(repository.host.hostId, employee);
+      final number = switch (receipt.command) { CommandResultTicketCreated(:final number) => number, _ => null };
+      final ticketId = switch (receipt.command) { CommandResultTicketCreated(:final ticketId) => ticketId, _ => null };
+      messenger.showSnackBar(SnackBar(
+        content: Text('Quick task #$number started with $name.${waitsForMyLogin(link, link.user?.id) ? ' $waitsForLoginNote' : ''}'),
+        action: ticketId == null ? null : SnackBarAction(label: 'Open', onPressed: () => router.push('/ticket/$ticketId')),
+      ));
+      if (mounted && context.canPop()) context.pop();
+    } on Object catch (e) {
+      if (mounted) toast(context, ticketFailure(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _pickOwner(CompanyState company) async {
     final dispatcher = _project == null ? null : dispatcherName(company, _project!);
     final groups = pickerGroups(company.employees.where((e) => e.status == LifecycleStatus.active).toList());
@@ -172,6 +254,8 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
         child: ConstrainedBox(
           constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.75),
           child: ListView(shrinkWrap: true, children: [
+            // A quick task is never dispatched: its employee is chosen here.
+            if (!_quick)
             ListTile(
               key: const ValueKey('new-owner-dispatcher'),
               title: Text(dispatcher == null ? 'Dispatcher' : 'Dispatcher ($dispatcher)'),
@@ -308,6 +392,8 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
     final dispatcher = _project == null ? null : dispatcherName(company, _project!);
     final owner = employeeName(company, _owner);
     final can = online && !_busy && !_uploading;
+    final quickOn = context.select<ConnectionBloc, bool>((b) => quickTasksOn(b.state));
+    final quick = quickOn && _quick;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.enter, meta: true): () => _create(start: false),
@@ -317,7 +403,7 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
       },
       child: Scaffold(
         appBar: GlassAppBar(
-          title: const Text('New ticket'),
+          title: Text(quick ? 'New quick task' : 'New ticket'),
           actions: [
             TextButton(key: const ValueKey('new-ticket-create'), onPressed: can ? () => _create(start: false) : null, child: const Text('Create')),
           ],
@@ -325,6 +411,16 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
         body: ListView(
           padding: EdgeInsets.fromLTRB(0, 8, 0, listBottom(context)),
           children: [
+            if (quickOn)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: PillSegments<bool>(
+                  key: const ValueKey('new-ticket-kind'),
+                  segments: const [(false, 'Ticket'), (true, quickTaskName)],
+                  selected: _quick,
+                  onChanged: _setQuick,
+                ),
+              ),
             InsetGroup(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), children: [
               TextField(
                 key: const ValueKey('new-ticket-title'),
@@ -337,7 +433,7 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
                 contextMenuBuilder: _menu,
                 contentInsertionConfiguration: ContentInsertionConfiguration(allowedMimeTypes: pastedImageMimeTypes, onContentInserted: _insert),
                 buildCounter: (context, {required currentLength, required isFocused, maxLength}) => currentLength >= 140 ? Text('$currentLength/$maxLength') : null,
-                decoration: InputDecoration(labelText: 'Title *', border: InputBorder.none, errorText: _titleError),
+                decoration: InputDecoration(labelText: quick ? 'Title' : 'Title *', hintText: quick ? 'From the first line of the description' : null, border: InputBorder.none, errorText: _titleError),
               ),
               TextField(
                 key: const ValueKey('new-ticket-description'),
@@ -349,7 +445,7 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
                 onTap: _checkClipboard,
                 contextMenuBuilder: _menu,
                 contentInsertionConfiguration: ContentInsertionConfiguration(allowedMimeTypes: pastedImageMimeTypes, onContentInserted: _insert),
-                decoration: const InputDecoration(labelText: 'Description', border: InputBorder.none, alignLabelWithHint: true),
+                decoration: InputDecoration(labelText: quick ? 'Description *' : 'Description', border: InputBorder.none, alignLabelWithHint: true, errorText: _descriptionError),
               ),
             ]),
             const GroupHeader('Project *', caps: true),
@@ -385,7 +481,10 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
             ),
             const SizedBox(height: 12),
             InsetGroup(children: [
-              DetailRow(key: const ValueKey('new-ticket-owner'), label: 'Owner', value: owner ?? (dispatcher == null ? 'Dispatcher' : 'Dispatcher ($dispatcher)'), onTap: () => _pickOwner(company)),
+              quick
+                  ? DetailRow(key: const ValueKey('new-ticket-owner'), label: 'Employee *', value: owner ?? 'Choose', color: _ownerError == null ? null : Tokens.negative, onTap: () => _pickOwner(company))
+                  : DetailRow(key: const ValueKey('new-ticket-owner'), label: 'Owner', value: owner ?? (dispatcher == null ? 'Dispatcher' : 'Dispatcher ($dispatcher)'), onTap: () => _pickOwner(company)),
+              if (_ownerError != null) Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: Text(_ownerError!, key: const ValueKey('new-ticket-owner-error'), style: TextStyle(color: Tokens.negative, fontSize: 13))),
               if (responsibleOn) DetailRow(key: const ValueKey('new-ticket-responsible'), label: 'Responsible', value: _responsible?.label ?? 'You', onTap: _pickResponsible),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -403,8 +502,10 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
             ]),
             const SizedBox(height: 12),
             InsetGroup(children: [
-              DetailRow(key: const ValueKey('new-ticket-advanced'), label: 'Advanced', value: _advanced ? '' : [if (_mode != null) _mode!.label, if (_deadline != null) DateFormat.MMMd().format(_deadline!)].join(' · '), onTap: () => setState(() => _advanced = !_advanced)),
+              DetailRow(key: const ValueKey('new-ticket-advanced'), label: 'Advanced', value: _advanced ? '' : [if (_mode != null && !quick) _mode!.label, if (_deadline != null) DateFormat.MMMd().format(_deadline!)].join(' · '), onTap: () => setState(() => _advanced = !_advanced)),
               if (_advanced) ...[
+                // A quick task always runs in Auto (ST-01 AC4): no mode to choose.
+                if (!quick)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -423,8 +524,15 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
             ]),
             Padding(
               padding: const EdgeInsets.fromLTRB(32, 16, 32, 8),
-              child: Text('Lands in Backlog. Nothing starts until you press Start.${me == null ? '' : ' Created by $me.'}', style: TextStyle(color: Tokens.label2, fontSize: 13)),
+              child: Text(
+                quick
+                    ? 'Starts in Doing at once with the chosen employee, on its own branch. $approveAndMerge brings it into main.${me == null ? '' : ' Created by $me.'}'
+                    : 'Lands in Backlog. Nothing starts until you press Start.${me == null ? '' : ' Created by $me.'}',
+                key: const ValueKey('new-ticket-note'),
+                style: TextStyle(color: Tokens.label2, fontSize: 13),
+              ),
             ),
+            if (!quick)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: OutlinedButton(key: const ValueKey('new-ticket-create-start'), onPressed: can ? () => _create(start: true) : null, child: const Text('Create and start')),

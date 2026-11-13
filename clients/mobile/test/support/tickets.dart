@@ -94,6 +94,8 @@ TicketView ticketOf({
   TicketNeed? needs,
   UserView? responsible,
   bool? responsibleDisabled,
+  String? kind,
+  String? mergeCommit,
 }) =>
     TicketView(
       archivedAtMs: archivedAtMs,
@@ -107,9 +109,11 @@ TicketView ticketOf({
       description: description,
       doneAtMs: doneAtMs,
       id: id,
+      kind: kind,
       labels: labels,
       loginUser: (login ?? creator).id,
       loginUsername: (login ?? creator).username,
+      mergeCommit: mergeCommit,
       needs: needs,
       number: number,
       ownerEmployeeId: ownerEmployeeId,

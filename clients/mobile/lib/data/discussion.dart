@@ -143,7 +143,7 @@ class TicketSource {
 
 /// What "New ticket" starts with when it is made from a message (MU2-10 AC1, Fase 1 §10.3).
 class TicketDraft {
-  const TicketDraft({required this.title, required this.description, this.projectId, this.fromMessage, this.fromIdea, this.ideaFiles = 0, this.labels = '', this.ownerId});
+  const TicketDraft({required this.title, required this.description, this.projectId, this.fromMessage, this.fromIdea, this.ideaFiles = 0, this.labels = '', this.ownerId, this.quick = false});
 
   final String title;
   final String description;
@@ -161,6 +161,9 @@ class TicketDraft {
 
   /// The owner chosen beforehand (Give work).
   final String? ownerId;
+
+  /// Opens as a quick task (Give work's Quick task, ticket #53); only on a server with `quick_task`.
+  final bool quick;
 }
 
 /// The draft for a ticket from [idea]: its title and note, in its project; a bug keeps that word as a label.
