@@ -205,6 +205,7 @@ fn shared_ticket(s: &CommandService, project_id: ProjectId) -> aurelius_domain::
         start: false,
         from_message: None,
         from_idea: None,
+        kind: None,
     };
     let by = CommandContext { user_id: Some(user), ..ctx() };
     match s.execute(&by, CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::CreateTicket(create) }).unwrap().receipt.result {

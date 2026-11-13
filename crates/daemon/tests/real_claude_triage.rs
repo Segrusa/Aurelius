@@ -111,6 +111,7 @@ async fn a_real_dispatcher_assigns_the_ticket() {
             start: true,
             from_message: None,
             from_idea: None,
+            kind: None,
         })
         .await
         .unwrap();

@@ -59,6 +59,15 @@ import { Held, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
 import { FormDialog, Page, PageHead, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
+import {
+  cancelConfirmation,
+  cancelNeedsConfirm,
+  doneConfirmation,
+  isQuick,
+  type KindFilter,
+  kindFilterOptions,
+  quickEnabled,
+} from "./quick-logic";
 import { ConfirmDialog, TicketPanel } from "./ticket-panel";
 import { TicketRows } from "./ticket-rows";
 import {
@@ -575,6 +584,7 @@ export function BoardScreen({
   const members = useMembers();
   const [query, setQuery] = useState("");
   const [needsOnly, setNeedsOnly] = useState(false);
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [doneAll, setDoneAll] = useState(false);
   const [view, setView] = useState<"board" | "list">("board");
   const [hidden, setHidden] = useState<ColumnKind[]>(
@@ -626,9 +636,12 @@ export function BoardScreen({
     });
     return () => cancelAnimationFrame(frame);
   }, [ticket, board.isSuccess]);
+  const quickOn = quickEnabled(features);
+  // A server without quick tasks has no filter for them: every ticket shows.
+  const kind: KindFilter = quickOn ? kindFilter : "all";
   const filter = useMemo(
-    () => ({ owner, responsible, query, needsOnly, needs: need.mine }),
-    [owner, responsible, query, needsOnly, need],
+    () => ({ owner, responsible, query, needsOnly, needs: need.mine, kind }),
+    [owner, responsible, query, needsOnly, need, kind],
   );
   const shown = useMemo(
     () => columns.map((c) => ({ ...c, ...shownCards(c.column.kind, c.tickets, filter, doneAll) })),
@@ -694,7 +707,8 @@ export function BoardScreen({
         void write("ticket.start", { ticket_id: t.id }, { done: `${ticketNumber(t)} started.` });
         return;
       case "back_to_backlog":
-        if (!effect.confirm) {
+        // BR4: a quick task loses its branch and worktree, so that is always asked first.
+        if (!cancelNeedsConfirm(t, effect.confirm)) {
           moveLocally(t.id, to, null);
           void write("ticket.cancel", { ticket_id: t.id }, { done: `${ticketNumber(t)} is back in Backlog.` });
         } else setPending({ kind: "back_to_backlog", ticket: t });
@@ -906,6 +920,19 @@ export function BoardScreen({
                 }
               />
             ) : null}
+            {quickOn ? (
+              <Menu
+                label="Kind"
+                value={kind}
+                options={kindFilterOptions(true)}
+                onPick={setKindFilter}
+                trigger={
+                  <button type="button" {...stylex.props(styles.pill)}>
+                    {kindFilterOptions(true).find((o) => o.key === kind)?.label}
+                  </button>
+                }
+              />
+            ) : null}
             <TextInput
               label="Find a ticket"
               isLabelHidden
@@ -1068,26 +1095,24 @@ export function BoardScreen({
         <ConfirmDialog
           open
           onClose={() => setPending(null)}
-          title={
-            pending.kind === "mark_done"
-              ? `Mark ${ticketNumber(pending.ticket)} as Done?`
-              : pending.kind === "reject"
-                ? `Reject the plan of ${ticketNumber(pending.ticket)}?`
-                : `Back to Backlog: ${ticketNumber(pending.ticket)}?`
-          }
-          body={
-            pending.kind === "mark_done"
-              ? "This closes the ticket. Nothing is merged, pushed or deployed."
-              : pending.kind === "reject"
-                ? "The ticket goes back to Backlog."
-                : "This stops the work."
-          }
-          confirm={
-            pending.kind === "mark_done" ? "Mark done" : pending.kind === "reject" ? "Reject" : "Back to Backlog"
-          }
-          danger={pending.kind === "reject"}
+          {...(pending.kind === "mark_done"
+            ? doneConfirmation(pending.ticket)
+            : pending.kind === "reject"
+              ? {
+                  title: `Reject the plan of ${ticketNumber(pending.ticket)}?`,
+                  body: "The ticket goes back to Backlog.",
+                  confirm: "Reject",
+                }
+              : cancelConfirmation(pending.ticket))}
+          danger={pending.kind === "reject" || (pending.kind === "back_to_backlog" && isQuick(pending.ticket))}
           onConfirm={() =>
-            write(pending.kind === "mark_done" ? "ticket.accept" : "ticket.cancel", { ticket_id: pending.ticket.id })
+            write(
+              pending.kind === "mark_done" ? "ticket.accept" : "ticket.cancel",
+              { ticket_id: pending.ticket.id },
+              pending.kind === "mark_done" && isQuick(pending.ticket)
+                ? { done: `Merging ${ticketNumber(pending.ticket)} into main…` }
+                : {},
+            )
           }
         />
       ) : null}

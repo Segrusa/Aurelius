@@ -800,7 +800,7 @@ export type Command =
   /**
    * A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
    */
-  | ({ type: "create_ticket"; confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; files?: string[]; from_idea?: string | null; from_message?: string | null; labels?: string[]; owner_employee_id?: string | null; priority?: TicketPriority; project_id: string; responsible_user_id?: string | null; run?: TaskRun; start?: boolean; title: string })
+  | ({ type: "create_ticket"; confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; files?: string[]; from_idea?: string | null; from_message?: string | null; kind?: TicketKind | null; labels?: string[]; owner_employee_id?: string | null; priority?: TicketPriority; project_id: string; responsible_user_id?: string | null; run?: TaskRun; start?: boolean; title: string })
   | ({ type: "decide_approval" } & DecideApproval)
   /**
    * `guideline.decide_proposal` (B5): approve (with `title`/`text` edited by the
@@ -5765,6 +5765,22 @@ export interface TicketFollowersView {
 }
 
 /**
+ * What sort of ticket it is (protocol 5, feature `quick_task`, ticket #53).
+ */
+export type TicketKind =
+  /**
+   * Triage, Plan review, delegation and Testing as the board has them.
+   */
+  | "normal"
+  /**
+   * A small piece of work: it starts in Doing with its chosen employee in Auto mode,
+   * never gets triage, Plan review or Testing, cannot be delegated, works on its own
+   * branch `quick/ticket-<N>` and is merged into the project's local main on Done.
+   */
+  | "quick"
+;
+
+/**
  * Why a ticket cannot run yet (`TicketView::needs`).
  */
 export type TicketNeed =
@@ -5820,6 +5836,12 @@ export interface TicketView {
   design_url?: string | null;
   done_at_ms?: number | null;
   id: string;
+  /**
+   * `"quick"` for a quick task (feature `quick_task`, `TicketKind::as_str`); left out for a
+   * normal ticket, so its view is as before and an older client shows a quick task as a
+   * normal one. Text, not an enum: a view never holds an enum value an older client does not know (R1).
+   */
+  kind?: string | null;
   labels: string[];
   /**
    * Whose Claude login its runs use (protocol 5): the creator, unless a
@@ -5827,6 +5849,10 @@ export interface TicketView {
    */
   login_user: string;
   login_username: string;
+  /**
+   * The merge commit of a quick task accepted into the project's main (feature `quick_task`).
+   */
+  merge_commit?: string | null;
   /**
    * What the ticket waits for before it can run; none: nothing.
    */

@@ -387,6 +387,12 @@ pub mod feature {
     /// `ticket.update { design_url }`. `ticket.updated` says `changed: ["design"]`. A client
     /// without this feature does not offer the fields (a project or ticket update refuses them).
     pub const DESIGN_LINKS: &str = "design_links";
+    /// Quick tasks (protocol 5, additive, ticket #53): `ticket.create { kind: "quick" }` with an
+    /// owner starts at once in Doing, in Auto, without triage, Plan review or Testing, on the
+    /// branch `quick/ticket-<N>`; `ticket.accept` merges that branch into the project's local main
+    /// first (the card stays in Review until the merge worked). `TicketView::kind` and
+    /// `merge_commit`. A client without this feature does not offer quick tasks.
+    pub const QUICK_TASK: &str = "quick_task";
 }
 
 /// Every feature this build has.
@@ -436,6 +442,7 @@ pub const FEATURES: &[&str] = &[
     feature::DESIGN_LINKS,
     feature::EVERYONE_MENTION,
     feature::ACTIVITY_OVERVIEW,
+    feature::QUICK_TASK,
 ];
 
 /// Daemon → client.

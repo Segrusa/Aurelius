@@ -57,6 +57,7 @@ fn new_ticket(project_id: ProjectId, owner: Option<EmployeeId>) -> CreateTicket 
         start: false,
         from_message: None,
         from_idea: None,
+        kind: None,
     }
 }
 

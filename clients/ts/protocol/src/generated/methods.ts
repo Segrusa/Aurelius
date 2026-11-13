@@ -802,7 +802,7 @@ export interface MethodParams {
   /**
    * A new ticket in Backlog (`start`: straight to Todo, as `ticket.start` would).
    */
-  "ticket.create": { confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; files?: string[]; from_idea?: string | null; from_message?: string | null; labels?: string[]; owner_employee_id?: string | null; priority?: M.TicketPriority; project_id: string; responsible_user_id?: string | null; run?: M.TaskRun; start?: boolean; title: string };
+  "ticket.create": { confirm_secret?: boolean; deadline_ms?: number | null; description?: string | null; files?: string[]; from_idea?: string | null; from_message?: string | null; kind?: M.TicketKind | null; labels?: string[]; owner_employee_id?: string | null; priority?: M.TicketPriority; project_id: string; responsible_user_id?: string | null; run?: M.TaskRun; start?: boolean; title: string };
   "ticket.follow": M.FollowTicket;
   /**
    * Who follows a ticket (feature `ticket_follow`). Not for apps.

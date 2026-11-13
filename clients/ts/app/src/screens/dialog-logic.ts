@@ -1,5 +1,46 @@
 // The rules of New ticket and Give work, pure.
 
+import type { MethodParams, TaskRun, TicketPriority } from "@aurelius/protocol";
+
+/** A normal ticket from New ticket. It never names a kind: an older server refuses a field it does not know. */
+export interface TicketForm {
+  projectId: string;
+  title: string;
+  description: string;
+  priority: TicketPriority;
+  labels: string[];
+  deadlineMs: number | null;
+  files: string[];
+  start: boolean;
+  run: TaskRun;
+  /** Only on a server with `ticket_responsible`; none sends nothing. */
+  responsibleUserId: string | null;
+  /** None: the dispatcher chooses. */
+  ownerEmployeeId: string | null;
+  fromMessage?: string | undefined;
+  fromIdea?: string | undefined;
+}
+
+export function ticketCreateParams(form: TicketForm, confirmSecret: boolean): MethodParams["ticket.create"] {
+  return {
+    project_id: form.projectId,
+    title: form.title.trim(),
+    description: form.description.trim() || null,
+    priority: form.priority,
+    labels: form.labels,
+    deadline_ms: form.deadlineMs,
+    ...(form.files.length > 0 ? { files: form.files } : {}),
+    start: form.start,
+    run: form.run,
+    confirm_secret: confirmSecret,
+    // A server without the feature refuses a field it does not know.
+    ...(form.responsibleUserId ? { responsible_user_id: form.responsibleUserId } : {}),
+    ...(form.ownerEmployeeId ? { owner_employee_id: form.ownerEmployeeId } : {}),
+    ...(form.fromMessage ? { from_message: form.fromMessage } : {}),
+    ...(form.fromIdea ? { from_idea: form.fromIdea } : {}),
+  };
+}
+
 const WRONG = "Write the date as 2026-11-03, optionally with a time: 2026-11-03 17:00.";
 
 /** Milliseconds, or null for an empty field. A date alone means the end of that day. Throws `WRONG`. */

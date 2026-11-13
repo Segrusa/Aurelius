@@ -13,6 +13,8 @@ export interface TicketPrefill {
   labels?: string;
   projectId?: string;
   employeeId?: string;
+  /** Opens New ticket as a quick task (feature `quick_task`). */
+  quick?: boolean;
 }
 
 let current: OverlayName | null = null;

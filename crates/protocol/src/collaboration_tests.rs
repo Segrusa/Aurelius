@@ -78,6 +78,7 @@ fn a_ticket_create_without_a_responsible_is_written_as_before() {
         from_message: None,
         from_idea: None,
         responsible_user_id: None,
+        kind: None,
     };
     let json = serde_json::to_value(&create).unwrap();
     assert!(json.get("responsible_user_id").is_none(), "an older server refuses a field it does not know");
@@ -190,6 +191,8 @@ fn the_new_answers_have_their_wire_form() {
 fn ticket() -> TicketView {
     TicketView {
         design_url: None,
+        kind: None,
+        merge_commit: None,
         id: TicketId::new(),
         number: 12,
         project_id: ProjectId::new(),

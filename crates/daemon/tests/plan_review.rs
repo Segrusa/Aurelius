@@ -44,6 +44,7 @@ async fn planned_ticket(client: &Client, project_id: ProjectId, owner: EmployeeI
             start: true,
             from_message: None,
             from_idea: None,
+            kind: None,
         })
         .await
         .unwrap();

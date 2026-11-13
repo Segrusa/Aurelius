@@ -50,3 +50,8 @@ export function filterGroups(query: string, groups: PaletteGroup[]): PaletteGrou
   }
   return out;
 }
+
+/** "New quick task" among the commands, only on a server with quick tasks (feature `quick_task`). */
+export function quickTaskCommands(enabled: boolean, open: () => void): PaletteItem[] {
+  return enabled ? [{ id: "command:NewQuickTask", label: "New quick task", detail: "", mark: "", run: open }] : [];
+}

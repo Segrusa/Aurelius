@@ -130,6 +130,7 @@ async fn ticket(client: &Client, project_id: ProjectId, title: &str, description
             start,
             from_message: None,
             from_idea: None,
+            kind: None,
         })
         .await
         .unwrap();

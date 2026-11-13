@@ -49,6 +49,7 @@ fn new_ticket(project_id: ProjectId, responsible_user_id: Option<UserId>) -> Cre
         from_message: None,
         from_idea: None,
         responsible_user_id,
+        kind: None,
     }
 }
 

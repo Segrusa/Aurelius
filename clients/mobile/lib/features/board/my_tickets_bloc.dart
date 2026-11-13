@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/bloc/transformers.dart';
 import '../../core/net/protocol.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/quick_task.dart';
 import '../../data/views.dart';
 
 /// The four lists of My tickets (US-A4, ui §5.3).
@@ -51,8 +52,15 @@ class MyTicketsDoneShown extends MyTicketsEvent {
   final bool on;
 }
 
+/// The filter Quick tasks (ticket #53): only quick tasks in every list.
+class MyTicketsQuickOnly extends MyTicketsEvent {
+  const MyTicketsQuickOnly(this.on);
+
+  final bool on;
+}
+
 class MyTicketsState extends Equatable {
-  const MyTicketsState({this.loading = true, this.mine, this.error, this.projectId, this.includeDone = false});
+  const MyTicketsState({this.loading = true, this.mine, this.error, this.projectId, this.includeDone = false, this.quickOnly = false});
 
   /// Until the first `ticket.my_tickets` answered.
   final bool loading;
@@ -63,12 +71,15 @@ class MyTicketsState extends Equatable {
   final String? projectId;
   final bool includeDone;
 
+  /// The filter Quick tasks (ticket #53).
+  final bool quickOnly;
+
   List<TicketView> get tickets => mine?.tickets ?? const [];
 
   /// The tickets of [tab] for [me]. [needsMe] is the ◆ of the card (B6): Waiting on me is exactly that.
   List<TicketView> inTab(MyTab tab, {required String? me, required bool Function(TicketView) needsMe}) => [
         for (final t in tickets)
-          if (switch (tab) {
+          if ((!quickOnly || t.kind == quickKind) && switch (tab) {
             MyTab.responsible => me != null && t.responsibleUserId == me,
             MyTab.created => me != null && t.createdByUser == me,
             MyTab.following => mine?.following.contains(t.id) ?? false,
@@ -77,16 +88,17 @@ class MyTicketsState extends Equatable {
             t,
       ];
 
-  MyTicketsState copyWith({bool? loading, MyTicketsView? mine, String? error, String? projectId, bool clearProject = false, bool? includeDone}) => MyTicketsState(
+  MyTicketsState copyWith({bool? loading, MyTicketsView? mine, String? error, String? projectId, bool clearProject = false, bool? includeDone, bool? quickOnly}) => MyTicketsState(
         loading: loading ?? this.loading,
         mine: mine ?? this.mine,
         error: error,
         projectId: clearProject ? null : projectId ?? this.projectId,
         includeDone: includeDone ?? this.includeDone,
+        quickOnly: quickOnly ?? this.quickOnly,
       );
 
   @override
-  List<Object?> get props => [loading, [for (final t in tickets) (t.id, t.version, t.columnId, t.responsibleUserId, t.responsibleDisabled)], mine?.following, error, projectId, includeDone];
+  List<Object?> get props => [loading, [for (final t in tickets) (t.id, t.version, t.columnId, t.responsibleUserId, t.responsibleDisabled, t.kind, t.mergeCommit)], mine?.following, error, projectId, includeDone, quickOnly];
 }
 
 /// My tickets (A4): `ticket.my_tickets` for the chosen project, again on every
@@ -102,6 +114,7 @@ class MyTicketsBloc extends Bloc<MyTicketsEvent, MyTicketsState> {
       emit(state.copyWith(includeDone: e.on, loading: true));
       add(const MyTicketsRefreshed());
     });
+    on<MyTicketsQuickOnly>((e, emit) => emit(state.copyWith(quickOnly: e.on)));
     on<MyTicketsShown>((e, emit) {
       _visible = e.visible;
       if (_visible && _stale) {

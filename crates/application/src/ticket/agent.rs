@@ -326,6 +326,7 @@ pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>
             labels: &labels,
             deadline_ms: None,
             attachments: None,
+            kind: aurelius_domain::ticket::TicketKind::Normal,
         },
     )?;
     let mut notices = settle_created(tx, id, e)?;

@@ -11,10 +11,12 @@ import { useLinkState } from "../connection";
 import { useBoard, useMyTickets } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { KeyHint } from "../ui/key-hint";
+import { Menu } from "../ui/menu";
 import { useWorkspace } from "../workspace";
 import { inMyTab, MY_TABS, type MyTab } from "./board-logic";
 import { Loading, Page, Problem } from "./org-kit";
 import { overlays } from "./overlays-store";
+import { type KindFilter, kindFilterOptions, kindMatches, quickEnabled } from "./quick-logic";
 import { TicketPanel } from "./ticket-panel";
 import { TicketRows } from "./ticket-rows";
 import { useTicketNeeds } from "./tickets-kit";
@@ -57,7 +59,11 @@ export function MyTicketsScreen({ ticket }: { ticket: string | undefined }) {
   const workspace = useWorkspace();
   const mine = useMyTickets(workspace.id, includeDone, supported);
   const board = useBoard(null);
-  const tickets = useMemo(() => mine.data?.tickets ?? [], [mine.data]);
+  const quickOn = quickEnabled(features);
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  // A server without quick tasks has no filter for them: every ticket shows.
+  const kind: KindFilter = quickOn ? kindFilter : "all";
+  const tickets = useMemo(() => (mine.data?.tickets ?? []).filter((t) => kindMatches(kind, t)), [mine.data, kind]);
   const need = useTicketNeeds(tickets);
   const me = user?.id ?? null;
   const counts = useMemo(
@@ -116,6 +122,17 @@ export function MyTicketsScreen({ ticket }: { ticket: string | undefined }) {
             ))}
           </ToggleButtonGroup>
           <div {...stylex.props(styles.actions)}>
+            {quickOn ? (
+              <Menu
+                label="Kind"
+                value={kind}
+                options={kindFilterOptions(true)}
+                onPick={setKindFilter}
+                trigger={
+                  <Button variant="ghost" label={kindFilterOptions(true).find((o) => o.key === kind)?.label ?? ""} />
+                }
+              />
+            ) : null}
             <Button variant="primary" label="New ticket" onClick={() => overlays.open("ticket")}>
               New ticket <KeyHint onAccent>N</KeyHint>
             </Button>

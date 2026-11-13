@@ -111,7 +111,11 @@ fn open_test_task(tx: &Tx<'_>, ticket: TicketId) -> Result<Option<TaskId>, Stora
 }
 
 /// Where a main task that just reported goes: Testing with an active tester, else Review.
-pub(crate) fn column_after_report(tx: &Tx<'_>) -> Result<ColumnKind, StorageError> {
+/// A quick task always goes to Review: it is tested only when the board member asks (ST-03 AC1).
+pub(crate) fn column_after_report(tx: &Tx<'_>, ticket: TicketId) -> Result<ColumnKind, StorageError> {
+    if store::state(tx, ticket)?.is_some_and(|s| s.kind == aurelius_domain::ticket::TicketKind::Quick) {
+        return Ok(ColumnKind::Review);
+    }
     Ok(if company_store::active_tester(tx)?.is_some() { ColumnKind::Testing } else { ColumnKind::Review })
 }
 

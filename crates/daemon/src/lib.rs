@@ -11,6 +11,7 @@ mod dispatcher;
 mod runtimes;
 mod tasks;
 mod triage;
+mod quick;
 mod memory;
 mod updates;
 mod recurring_tasks;
@@ -354,6 +355,11 @@ async fn run_inner(
     {
         let store = store.clone();
         tokio::task::spawn_blocking(move || store.write(|tx| queries::release_leases(tx, aurelius_application::task::triage::TRIAGE_JOB_KIND, i64::MAX))).await??;
+    }
+    // So are the quick tasks' merge and cleanup: each checks the repository again before it acts.
+    for kind in [aurelius_application::ticket::quick::QUICK_MERGE_JOB_KIND, aurelius_application::ticket::quick::QUICK_CLEANUP_JOB_KIND] {
+        let store = store.clone();
+        tokio::task::spawn_blocking(move || store.write(|tx| queries::release_leases(tx, kind, i64::MAX))).await??;
     }
     // This host's own data folder, not a copy or a test instance (also with AURELIUS_DATA_DIR).
     let own_root = aurelius_host::default_data_dir().ok().is_some_and(|d| d == root);

@@ -147,6 +147,7 @@ fn new_ticket(project_id: ProjectId, owner: Option<EmployeeId>, description: Str
         start,
         from_message: None,
         from_idea: None,
+        kind: None,
     }
 }
 

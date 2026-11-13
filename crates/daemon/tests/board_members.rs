@@ -73,6 +73,7 @@ fn ticket(project_id: ProjectId, title: &str) -> Command {
         start: false,
         from_message: None,
         from_idea: None,
+        kind: None,
     })
 }
 

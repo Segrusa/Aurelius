@@ -96,6 +96,44 @@ impl TicketPriority {
     }
 }
 
+/// What sort of ticket it is (protocol 5, feature `quick_task`, ticket #53).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TicketKind {
+    /// Triage, Plan review, delegation and Testing as the board has them.
+    #[default]
+    Normal,
+    /// A small piece of work: it starts in Doing with its chosen employee in Auto mode,
+    /// never gets triage, Plan review or Testing, cannot be delegated, works on its own
+    /// branch `quick/ticket-<N>` and is merged into the project's local main on Done.
+    Quick,
+}
+
+impl TicketKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Quick => "quick",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        [Self::Normal, Self::Quick].into_iter().find(|k| k.as_str() == text)
+    }
+}
+
+/// The branch a quick task's employee works on (`quick/ticket-<N>`).
+pub fn quick_branch(number: u32) -> String {
+    format!("quick/ticket-{number}")
+}
+
+impl TicketView {
+    /// Whether this ticket is a quick task (`kind`).
+    pub fn is_quick(&self) -> bool {
+        self.kind.as_deref() == Some(TicketKind::Quick.as_str())
+    }
+}
+
 /// Who changed a ticket's column: a board member (by hand or a button) or an
 /// employee (the engine, the dispatcher). In the metadata of `ticket.moved` as `by`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -182,6 +220,14 @@ pub struct TicketView {
     /// its runs read the artifact themselves. Left out when none and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design_url: Option<String>,
+    /// `"quick"` for a quick task (feature `quick_task`, `TicketKind::as_str`); left out for a
+    /// normal ticket, so its view is as before and an older client shows a quick task as a
+    /// normal one. Text, not an enum: a view never holds an enum value an older client does not know (R1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// The merge commit of a quick task accepted into the project's main (feature `quick_task`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_commit: Option<String>,
 }
 
 /// Why a ticket cannot run yet (`TicketView::needs`).
@@ -304,6 +350,11 @@ pub struct CreateTicket {
     /// as above: older servers refuse fields they do not know.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_idea: Option<IdeaId>,
+    /// A quick task (feature `quick_task`): it needs `owner_employee_id`, starts at once
+    /// in Doing and ignores `start`. Left out: a normal ticket. Optional, as above:
+    /// older servers refuse fields they do not know.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<TicketKind>,
 }
 
 /// Choose the board member responsible for a ticket (`ticket.set_responsible`,
