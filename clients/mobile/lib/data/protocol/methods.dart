@@ -379,6 +379,14 @@ abstract final class Methods {
   static const String ticketFollowers = 'ticket.followers';
   /// One ticket with its main task and every task linked to it.
   static const String ticketGet = 'ticket.get';
+  /// The History (feature `ticket_history`, ticket #57): tickets on Done, the newest
+  /// Done first, each with the summary of what it delivered. Every given filter
+  /// applies: `employee_id` is the ticket's owner, `from_ms`/`to_ms` the period of its
+  /// Done (`to_ms` excluded), `query` looks in the title and the summary. Keyset
+  /// paging: the next page passes the last row's `done_at_ms` and `number` as
+  /// `before_done_at_ms`/`before_number`. `limit`: at most 100, default 50. The same
+  /// rights as `board.get` (B3); an archived ticket or project stays in it.
+  static const String ticketHistory = 'ticket.history';
   /// Tickets in board order (not archived); every given filter applies. `query`
   /// searches title, description and `#number`.
   static const String ticketList = 'ticket.list';
@@ -1102,6 +1110,27 @@ Map<String, dynamic> ticketGet({required String ticketId}) => <String, dynamic>{
   'method': Methods.ticketGet,
   'params': <String, dynamic>{
     'ticket_id': ticketId,
+  },
+};
+
+/// The History (feature `ticket_history`, ticket #57): tickets on Done, the newest
+/// Done first, each with the summary of what it delivered. Every given filter
+/// applies: `employee_id` is the ticket's owner, `from_ms`/`to_ms` the period of its
+/// Done (`to_ms` excluded), `query` looks in the title and the summary. Keyset
+/// paging: the next page passes the last row's `done_at_ms` and `number` as
+/// `before_done_at_ms`/`before_number`. `limit`: at most 100, default 50. The same
+/// rights as `board.get` (B3); an archived ticket or project stays in it.
+Map<String, dynamic> ticketHistory({int? beforeDoneAtMs, int? beforeNumber, String? employeeId, int? fromMs, int? limit, String? projectId, String? query, int? toMs}) => <String, dynamic>{
+  'method': Methods.ticketHistory,
+  'params': <String, dynamic>{
+    if (beforeDoneAtMs != null) 'before_done_at_ms': beforeDoneAtMs,
+    if (beforeNumber != null) 'before_number': beforeNumber,
+    if (employeeId != null) 'employee_id': employeeId,
+    if (fromMs != null) 'from_ms': fromMs,
+    if (limit != null) 'limit': limit,
+    if (projectId != null) 'project_id': projectId,
+    if (query != null) 'query': query,
+    if (toMs != null) 'to_ms': toMs,
   },
 };
 

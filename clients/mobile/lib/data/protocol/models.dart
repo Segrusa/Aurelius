@@ -7180,6 +7180,112 @@ final class HelloResult {
   };
 }
 
+/// One finished ticket in the History.
+final class HistoryEntry {
+  const HistoryEntry({
+    required this.doneAtMs,
+    required this.number,
+    this.ownerEmployeeId,
+    this.ownerName,
+    required this.projectId,
+    required this.projectName,
+    this.summary,
+    required this.summaryState,
+    required this.ticketId,
+    required this.title,
+  });
+
+  /// When the ticket went to Done (for a quick task: after its merge).
+  final int doneAtMs;
+  final int number;
+  /// The ticket's owner (an archived employee keeps its name); none: "—".
+  final String? ownerEmployeeId;
+  final String? ownerName;
+  final String projectId;
+  final String projectName;
+  /// What the ticket delivered (through the vault redactor), when `summary_state` is `ready`.
+  final String? summary;
+  final HistorySummaryState summaryState;
+  final String ticketId;
+  final String title;
+
+  factory HistoryEntry.fromJson(Map<String, dynamic> json) => HistoryEntry(
+    doneAtMs: (json['done_at_ms'] as num).toInt(),
+    number: (json['number'] as num).toInt(),
+    ownerEmployeeId: (json['owner_employee_id'] == null ? null : (json['owner_employee_id'] as String)),
+    ownerName: (json['owner_name'] == null ? null : (json['owner_name'] as String)),
+    projectId: (json['project_id'] as String),
+    projectName: (json['project_name'] as String),
+    summary: (json['summary'] == null ? null : (json['summary'] as String)),
+    summaryState: HistorySummaryState.fromJson(json['summary_state'] as String),
+    ticketId: (json['ticket_id'] as String),
+    title: (json['title'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'done_at_ms': doneAtMs,
+    'number': number,
+    if (ownerEmployeeId != null) 'owner_employee_id': ownerEmployeeId,
+    if (ownerName != null) 'owner_name': ownerName,
+    'project_id': projectId,
+    'project_name': projectName,
+    if (summary != null) 'summary': summary,
+    'summary_state': summaryState.toJson(),
+    'ticket_id': ticketId,
+    'title': title,
+  };
+}
+
+/// `ticket.history`: finished tickets, newest first.
+final class HistoryPage {
+  const HistoryPage({
+    required this.asOfSeq,
+    required this.entries,
+    this.hasMore = false,
+  });
+
+  final int asOfSeq;
+  final List<HistoryEntry> entries;
+  /// There are older rows: ask again with the last row's `done_at_ms` and `number`.
+  final bool hasMore;
+
+  factory HistoryPage.fromJson(Map<String, dynamic> json) => HistoryPage(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    entries: (json['entries'] as List<dynamic>).map((x0) => HistoryEntry.fromJson(x0 as Map<String, dynamic>)).toList(),
+    hasMore: (json['has_more'] == null ? false : (json['has_more'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'entries': entries.map((x0) => x0.toJson()).toList(),
+    'has_more': hasMore,
+  };
+}
+
+/// Where a row's summary stands, as the History shows it.
+enum HistorySummaryState {
+  /// The ticket went to Done before the History existed and its project memory
+  /// has no summary of it ("No summary (finished before History)").
+  beforeHistory('before_history'),
+  /// It failed or gave nothing ("Summary not available"); a board member may try again.
+  notAvailable('not_available'),
+  /// `summary` holds the text.
+  ready('ready'),
+  /// The extraction is queued or running ("Summarizing…").
+  summarizing('summarizing');
+
+  const HistorySummaryState(this.wire);
+
+  final String wire;
+
+  static HistorySummaryState fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown HistorySummaryState value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
 /// What a host write answers.
 sealed class HostResult {
   const HostResult();
@@ -10580,6 +10686,20 @@ sealed class Method {
           ticketId: (src['ticket_id'] as String),
         );
         }
+      case 'ticket.history':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodTicketHistory(
+          beforeDoneAtMs: (src['before_done_at_ms'] == null ? null : (src['before_done_at_ms'] as num).toInt()),
+          beforeNumber: (src['before_number'] == null ? null : (src['before_number'] as num).toInt()),
+          employeeId: (src['employee_id'] == null ? null : (src['employee_id'] as String)),
+          fromMs: (src['from_ms'] == null ? null : (src['from_ms'] as num).toInt()),
+          limit: (src['limit'] == null ? null : (src['limit'] as num).toInt()),
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+          query: (src['query'] == null ? null : (src['query'] as String)),
+          toMs: (src['to_ms'] == null ? null : (src['to_ms'] as num).toInt()),
+        );
+        }
       case 'ticket.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11848,6 +11968,50 @@ final class MethodTicketGet extends Method {
       'method': 'ticket.get',
       'params': <String, dynamic>{
       'ticket_id': ticketId,
+    },
+    };
+}
+
+/// The History (feature `ticket_history`, ticket #57): tickets on Done, the newest
+/// Done first, each with the summary of what it delivered. Every given filter
+/// applies: `employee_id` is the ticket's owner, `from_ms`/`to_ms` the period of its
+/// Done (`to_ms` excluded), `query` looks in the title and the summary. Keyset
+/// paging: the next page passes the last row's `done_at_ms` and `number` as
+/// `before_done_at_ms`/`before_number`. `limit`: at most 100, default 50. The same
+/// rights as `board.get` (B3); an archived ticket or project stays in it.
+final class MethodTicketHistory extends Method {
+  const MethodTicketHistory({
+    this.beforeDoneAtMs,
+    this.beforeNumber,
+    this.employeeId,
+    this.fromMs,
+    this.limit,
+    this.projectId,
+    this.query,
+    this.toMs,
+  });
+
+  final int? beforeDoneAtMs;
+  final int? beforeNumber;
+  final String? employeeId;
+  final int? fromMs;
+  final int? limit;
+  final String? projectId;
+  final String? query;
+  final int? toMs;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'ticket.history',
+      'params': <String, dynamic>{
+      if (beforeDoneAtMs != null) 'before_done_at_ms': beforeDoneAtMs,
+      if (beforeNumber != null) 'before_number': beforeNumber,
+      if (employeeId != null) 'employee_id': employeeId,
+      if (fromMs != null) 'from_ms': fromMs,
+      if (limit != null) 'limit': limit,
+      if (projectId != null) 'project_id': projectId,
+      if (query != null) 'query': query,
+      if (toMs != null) 'to_ms': toMs,
     },
     };
 }
@@ -13465,6 +13629,8 @@ sealed class ResponseBody {
         return ResponseBodyHealth(value: HealthResult.fromJson(json['value'] as Map<String, dynamic>));
       case 'hello':
         return ResponseBodyHello(value: HelloResult.fromJson(json['value'] as Map<String, dynamic>));
+      case 'history':
+        return ResponseBodyHistory(value: HistoryPage.fromJson(json['value'] as Map<String, dynamic>));
       case 'ideas':
         return ResponseBodyIdeas(value: IdeasSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'jobs':
@@ -14082,6 +14248,21 @@ final class ResponseBodyHello extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'hello',
+      'value': value.toJson(),
+    };
+}
+
+/// `ticket.history`.
+final class ResponseBodyHistory extends ResponseBody {
+  const ResponseBodyHistory({
+    required this.value,
+  });
+
+  final HistoryPage value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'history',
       'value': value.toJson(),
     };
 }
