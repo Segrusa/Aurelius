@@ -15,7 +15,15 @@ export function Menu<T extends string>({
   onOpenChange,
 }: {
   trigger: ReactElement;
-  options: { key: T; label: string; danger?: boolean; icon?: ReactNode; dividerBefore?: boolean }[];
+  options: {
+    key: T;
+    label: string;
+    /** A second, quieter line under the label. */
+    description?: string;
+    danger?: boolean;
+    icon?: ReactNode;
+    dividerBefore?: boolean;
+  }[];
   value?: T;
   onPick: (key: T) => void;
   label: string;
@@ -59,6 +67,7 @@ export function Menu<T extends string>({
           ...(o.dividerBefore ? [{ type: "divider" as const }] : []),
           {
             label: o.label,
+            ...(o.description ? { description: o.description } : {}),
             onClick: () => onPick(o.key),
             ...(o.icon ? { icon: o.icon } : {}),
             ...(o.danger ? { variant: "destructive" as const } : {}),

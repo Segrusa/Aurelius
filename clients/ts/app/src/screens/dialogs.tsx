@@ -384,7 +384,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
             <Menu
               label="Employee"
               {...(quickWho ? { value: quickWho } : {})}
-              options={activeEmployees.map((e) => ({ key: e.id, label: e.name }))}
+              options={activeEmployees.map((e) => ({ key: e.id, label: e.name, description: e.title ?? e.role }))}
               onPick={setQuickPick}
               trigger={
                 <Chip name="Employee" style={quickName ? undefined : PICKED}>
@@ -726,7 +726,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
               <Menu
                 label="Someone else"
                 {...(whoId ? { value: whoId } : {})}
-                options={others.map((e) => ({ key: e.id, label: e.name }))}
+                options={others.map((e) => ({ key: e.id, label: e.name, description: e.title ?? e.role }))}
                 onPick={setPicked}
                 trigger={
                   <Chip style={chosenOther ? PICKED : undefined}>{chosenOther ? chosenOther.name : "Anyone…"}</Chip>
