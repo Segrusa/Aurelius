@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { giveWorkParams, LAST_GIVEN, ticketCreateParams } from "./dialog-logic";
 import {
   COMPOSER_ROWS_MAX,
+  COMPOSER_ROWS_MIN,
   columnLabel,
   composerRows,
   continueTickets,
@@ -265,7 +266,8 @@ describe("the composer", () => {
   });
 
   it("grows from one line up to ten, then scrolls", () => {
-    expect(composerRows("")).toBe(1);
+    expect(composerRows("")).toBe(COMPOSER_ROWS_MIN);
+    expect(composerRows("one line")).toBe(COMPOSER_ROWS_MIN);
     expect(composerRows("a\nb\nc")).toBe(3);
     expect(composerRows("x\n".repeat(30))).toBe(COMPOSER_ROWS_MAX);
   });

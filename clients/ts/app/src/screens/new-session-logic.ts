@@ -16,6 +16,9 @@ export const PROJECT_ROWS = 6;
 /** Tickets offered to continue. */
 export const CONTINUE_MAX = 3;
 
+/** The composer is never shorter than this, so it reads as a place to write, as a chat app's input does. */
+export const COMPOSER_ROWS_MIN = 2;
+
 /** The composer grows to this many lines, then scrolls. */
 export const COMPOSER_ROWS_MAX = 10;
 
@@ -237,7 +240,7 @@ export function placeholderOf(kind: SessionKind): string {
 }
 
 export function composerRows(text: string): number {
-  return Math.min(COMPOSER_ROWS_MAX, Math.max(1, text.split("\n").length));
+  return Math.min(COMPOSER_ROWS_MAX, Math.max(COMPOSER_ROWS_MIN, text.split("\n").length));
 }
 
 /** §4.2: the board member's tickets still in the works, newest activity first. */
