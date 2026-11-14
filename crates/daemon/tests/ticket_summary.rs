@@ -413,3 +413,38 @@ async fn a_failed_summary_is_visible_and_a_retry_writes_it_once() {
     drop(client);
     common::stop(dir.path(), daemon).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retry_that_fails_again_tells_an_open_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let rt = Scripted::new();
+    rt.main.send_replace(true);
+    rt.fail_memory.store(true, Ordering::SeqCst);
+    let daemon = common::start_with(dir.path(), rt.clone()).await;
+    let client = common::connect_as(dir.path(), "grace").await;
+    let builder = employee(&client, "Builder", None).await;
+    let atlas = project(&client, "Atlas").await;
+    let id = ticket(&client, atlas, "Login page", "A login page.", builder).await;
+    until(&client, id, ColumnKind::Review, TaskStatus::Review).await;
+    client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await.unwrap();
+    line_of(&client, id, SystemLineKind::SummaryFailed).await;
+    assert_eq!(summary_events(dir.path(), id), 1, "the first failure");
+
+    // The retry fails as well: an open History must hear it, not stay on "Summarizing…".
+    client.ticket_command(Command::RetryTicketSummary(RetryTicketSummary { ticket_id: id }), None).await.unwrap();
+    assert_eq!(summary_events(dir.path(), id), 2, "the retry");
+    assert_eq!(history(&client, None).await[0].summary_state, aurelius_domain::history::HistorySummaryState::Summarizing);
+    for _ in 0..800 {
+        if extractions_ended(dir.path()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(extractions_ended(dir.path()));
+    assert_eq!(summary_events(dir.path(), id), 3, "a live update for the second failure");
+    assert_eq!(history(&client, None).await[0].summary_state, aurelius_domain::history::HistorySummaryState::NotAvailable);
+    assert_eq!(stored_summary(dir.path(), id), (Some("failed".into()), None));
+
+    drop(client);
+    common::stop(dir.path(), daemon).await;
+}
