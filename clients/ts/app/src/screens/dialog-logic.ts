@@ -116,3 +116,14 @@ export function cycle<T>(options: readonly T[], current: T): T {
   const at = options.indexOf(current);
   return options[(at + 1) % options.length] as T;
 }
+
+/** How far from the top a dialog sits that must not jump while its content grows (palette, pickers). */
+export const DIALOG_TOP = "14vh";
+
+/**
+ * A dialog pinned at DIALOG_TOP and still centred: a position drops the dialog's auto margins, so it
+ * would stick to the left. Narrower windows clamp the dialog to their width, and the offset to 0.
+ */
+export function topCentered(width: number): { top: string; start: string } {
+  return { top: DIALOG_TOP, start: `max(0px, calc((100vw - ${width}px) / 2))` };
+}
