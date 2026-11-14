@@ -123,6 +123,11 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::MessageLocate { message_id } => message_location(shared, message_id).await,
         Method::TicketFollowers { ticket_id } => ticket_followers(shared, ticket_id).await,
         Method::TicketMyTickets { project_id, include_done } => my_tickets(shared, reader, project_id, include_done).await,
+        Method::TicketHistory { project_id, employee_id, from_ms, to_ms, query, before_done_at_ms, before_number, limit } => {
+            let before = before_done_at_ms.zip(before_number);
+            let filter = aurelius_storage::history::Filter { project: project_id, employee: employee_id, from_ms, to_ms, query, before };
+            ticket_history(shared, filter, limit).await
+        }
         Method::MessageHistory { message_id } => message_history(shared, reader, message_id).await,
         Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
         Method::ApprovalList { project_id } => approvals(shared, project_id).await,
@@ -849,6 +854,22 @@ async fn guidelines(shared: &Arc<Shared>, method: Method) -> Result<ResponseBody
         }
         _ => Err(internal("not a guideline read")),
     }
+}
+
+/// `ticket.history` (ticket #57): the tickets on Done, newest first. Every board
+/// read sees every ticket (B3: the board has no narrower visibility). Each summary
+/// goes through the vault redactor on the way out too: a secret added to the vault
+/// after the summary was kept, or a summary from memory (A3), shows as its marker.
+async fn ticket_history(shared: &Arc<Shared>, filter: aurelius_storage::history::Filter, limit: Option<u32>) -> Result<ResponseBody, ProtocolError> {
+    use aurelius_domain::history::{HISTORY_PAGE, HISTORY_PAGE_MAX, HistoryPage};
+    let store = shared.store().clone();
+    let limit = limit.unwrap_or(HISTORY_PAGE).clamp(1, HISTORY_PAGE_MAX);
+    let kind = aurelius_application::memory::EXTRACT_JOB_KIND;
+    let (as_of_seq, (mut entries, has_more)) = storage_task(move || store.read(|c| Ok((queries::last_seq(c)?, aurelius_storage::history::list(c, &filter, limit, kind)?)))).await?;
+    for entry in &mut entries {
+        entry.summary = entry.summary.take().map(aurelius_runtime::redact::string);
+    }
+    Ok(ResponseBody::History(HistoryPage { as_of_seq, entries, has_more }))
 }
 
 /// `ticket.my_tickets`: the tickets of the board member of the session, never of

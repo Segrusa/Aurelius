@@ -183,6 +183,24 @@ async fn line_of(client: &Client, id: TicketId, kind: SystemLineKind) -> Message
     panic!("no {kind:?} line: {:#?}", lines(&discussion(client, id).await));
 }
 
+/// One History page (feature `ticket_history`, ticket #57), narrowed by `query`.
+async fn history(client: &Client, query: Option<&str>) -> Vec<aurelius_domain::history::HistoryEntry> {
+    let method = aurelius_protocol::Method::TicketHistory { project_id: None, employee_id: None, from_ms: None, to_ms: None, query: query.map(Into::into), before_done_at_ms: None, before_number: None, limit: None };
+    client.history(method).await.unwrap().entries
+}
+
+/// The `ticket.updated { changed: ["summary"] }` events of a ticket (live updates of the History).
+fn summary_events(root: &std::path::Path, id: TicketId) -> usize {
+    common::db(root)
+        .query_row("SELECT COUNT(*) FROM events WHERE aggregate_type = 'ticket' AND aggregate_id = ?1 AND type = 'ticket.updated' AND json_extract(metadata_json, '$.changed[0]') = 'summary'", [id.to_string()], |r| r.get::<_, i64>(0))
+        .unwrap() as usize
+}
+
+/// The summary kept on the ticket, as stored.
+fn stored_summary(root: &std::path::Path, id: TicketId) -> (Option<String>, Option<String>) {
+    common::db(root).query_row("SELECT summary_state, summary_text FROM tickets WHERE id = ?1", [id.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).unwrap()
+}
+
 fn code<T: std::fmt::Debug>(result: Result<T, aurelius_client::ClientError>) -> ErrorCode {
     match result {
         Err(aurelius_client::ClientError::Protocol(err)) => err.code,
@@ -247,6 +265,8 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     assert_eq!(runs(dir.path()), before + 1, "a run of the main task answers it");
     quiet(dir.path(), main.conversation_id.unwrap()).await;
     until(&client, id, ColumnKind::Review, TaskStatus::Review).await;
+    // B1: in Review it is not done yet.
+    assert!(history(&client, None).await.is_empty(), "nothing finished before Done");
     client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await.unwrap();
     let done = until(&client, id, ColumnKind::Done, TaskStatus::Succeeded).await;
     let summary = line_of(&client, id, SystemLineKind::Summary).await;
@@ -267,6 +287,21 @@ async fn a_tickets_work_leaves_system_lines_and_done_one_summary_over_the_whole_
     assert_eq!(locator, id.to_string());
     assert_eq!(extractions_of(dir.path(), main.id), 1, "one extraction for the ticket");
     assert_eq!(extractions_of(dir.path(), part.id), 0, "still none for the part");
+    // H-01 (ticket #57): the same text on the ticket, without its head; the History shows it.
+    let rows = history(&client, None).await;
+    assert_eq!(rows.len(), 1, "{rows:#?}");
+    let row = &rows[0];
+    assert_eq!((row.ticket_id, row.number, row.title.as_str(), row.project_name.as_str()), (id, done.ticket.number, "CSV export", "Atlas"));
+    assert_eq!((row.owner_employee_id, row.owner_name.as_deref()), (Some(builder), Some("Builder")));
+    assert_eq!(row.done_at_ms, done.ticket.done_at_ms.expect("a Done moment"));
+    assert_eq!(row.summary_state, aurelius_domain::history::HistorySummaryState::Ready);
+    let text = row.summary.clone().expect("a summary");
+    assert!(summaries[0].content.ends_with(&text) && !text.starts_with("Ticket #"), "the memory's text without its head: {text} / {}", summaries[0].content);
+    assert_eq!(summary_events(dir.path(), id), 1, "one live update when it came");
+    // H-03 AC3: the search looks in the summary and the title.
+    assert_eq!(history(&client, Some("DELIVERED")).await.len(), 1);
+    assert_eq!(history(&client, Some("csv")).await.len(), 1);
+    assert!(history(&client, Some("nothing like this")).await.is_empty());
     // B4: its input is the whole ticket: fields, discussion and the part's report.
     let prompts = rt.prompts.lock().unwrap().clone();
     let ticket_prompt = prompts.iter().find(|p| p.contains("Discussion of the ticket")).unwrap_or_else(|| panic!("{prompts:#?}"));
@@ -336,10 +371,19 @@ async fn a_failed_summary_is_visible_and_a_retry_writes_it_once() {
     assert!(extractions_ended(dir.path()), "it does not retry by itself");
     assert_eq!(client.ticket(id).await.unwrap().ticket.column, ColumnKind::Done);
     assert!(ticket_summaries(&client, atlas).await.is_empty());
+    // H-01 AC5 (ticket #57): the History says so, never an endless "Summarizing…".
+    let rows = history(&client, None).await;
+    assert_eq!((rows.len(), rows[0].summary_state, rows[0].summary.clone()), (1, aurelius_domain::history::HistorySummaryState::NotAvailable, None));
+    assert_eq!(stored_summary(dir.path(), id), (Some("failed".into()), None));
+    assert_eq!(summary_events(dir.path(), id), 1, "a live update for the failure");
 
     // A board member tries again: one item, a summary line after the failure.
+    // H-01 AC4: a vault value in the summary is kept as its marker, not as itself.
+    let owner = dir.path().to_string_lossy().into_owned();
+    aurelius_runtime::redact::add_to_set(&owner, aurelius_runtime::redact::Secret { name: "HISTORY_TITLE".into(), label: String::new(), value: zeroize::Zeroizing::new("Login page".into()) });
     rt.fail_memory.store(false, Ordering::SeqCst);
     client.ticket_command(Command::RetryTicketSummary(RetryTicketSummary { ticket_id: id }), None).await.unwrap();
+    assert_eq!(summary_events(dir.path(), id), 2, "a live update: it is made again");
     // A second retry is always refused: while the first is made (pending) or once it is
     // there (the summary and the job's end are one transaction), never a second job.
     let twice = client.ticket_command(Command::RetryTicketSummary(RetryTicketSummary { ticket_id: id }), None).await;
@@ -357,6 +401,14 @@ async fn a_failed_summary_is_visible_and_a_retry_writes_it_once() {
     assert_eq!(ticket_summaries(&client, atlas).await.len(), 1, "still exactly one");
     let kinds: Vec<SystemLineKind> = lines(&discussion(&client, id).await).into_iter().map(|(k, _)| k).filter(|k| matches!(k, SystemLineKind::Summary | SystemLineKind::SummaryFailed)).collect();
     assert_eq!(kinds, [SystemLineKind::SummaryFailed, SystemLineKind::Summary], "the newest line decides");
+    // The retry's text is on the ticket, redacted when it was kept.
+    let (state, text) = stored_summary(dir.path(), id);
+    let text = text.expect("the retry's summary");
+    assert_eq!(state.as_deref(), Some("ready"));
+    assert!(text.contains(&aurelius_runtime::redact::marker("HISTORY_TITLE")) && !text.contains("Login page"), "{text}");
+    let rows = history(&client, None).await;
+    assert_eq!((rows[0].summary_state, rows[0].summary.as_deref()), (aurelius_domain::history::HistorySummaryState::Ready, Some(text.as_str())));
+    aurelius_runtime::redact::install_set(&owner, Vec::new());
 
     drop(client);
     common::stop(dir.path(), daemon).await;

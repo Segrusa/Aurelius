@@ -393,6 +393,11 @@ pub mod feature {
     /// first (the card stays in Review until the merge worked). `TicketView::kind` and
     /// `merge_commit`. A client without this feature does not offer quick tasks.
     pub const QUICK_TASK: &str = "quick_task";
+    /// The History (protocol 5, additive, ticket #57): the read `ticket.history` of the
+    /// tickets on Done with their summary, kept on the ticket at Done; `ticket.updated`
+    /// says `changed: ["summary"]` when it comes, fails or is made again. A client
+    /// without this feature does not show the History.
+    pub const TICKET_HISTORY: &str = "ticket_history";
 }
 
 /// Every feature this build has.
@@ -443,6 +448,7 @@ pub const FEATURES: &[&str] = &[
     feature::EVERYONE_MENTION,
     feature::ACTIVITY_OVERVIEW,
     feature::QUICK_TASK,
+    feature::TICKET_HISTORY,
 ];
 
 /// Daemon → client.
@@ -561,6 +567,8 @@ pub enum ResponseBody {
     TicketFollowers(aurelius_domain::ticket::TicketFollowersView),
     /// `ticket.my_tickets`.
     MyTickets(aurelius_domain::ticket::MyTicketsView),
+    /// `ticket.history`.
+    History(aurelius_domain::history::HistoryPage),
     /// `message.locate`.
     MessageLocation(aurelius_domain::views::MessageLocation),
     /// `message.history`.

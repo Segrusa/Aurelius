@@ -66,6 +66,7 @@ fn every_board_method_round_trips_under_its_name() {
         (Method::BoardGet { project_id: None }, "board.get"),
         (Method::TicketGet { ticket_id: TicketId::new() }, "ticket.get"),
         (Method::TicketList { project_id: None, column: Some(ColumnKind::PlanReview), query: Some("#3".into()) }, "ticket.list"),
+        (history(), "ticket.history"),
     ];
     for (method, name) in reads {
         let request = Request::read(2, method);
@@ -85,7 +86,7 @@ fn every_board_method_round_trips_under_its_name() {
 
 #[test]
 fn devices_need_task_control_for_tickets_and_read_for_the_board() {
-    for method in [Method::BoardGet { project_id: None }, Method::TicketGet { ticket_id: TicketId::new() }, Method::TicketList { project_id: None, column: None, query: None }] {
+    for method in [Method::BoardGet { project_id: None }, Method::TicketGet { ticket_id: TicketId::new() }, Method::TicketList { project_id: None, column: None, query: None }, history()] {
         assert_eq!(required(&Call::Read(method)), Needs::Cap(Capability::Read));
     }
     for command in writes() {
@@ -187,4 +188,28 @@ fn files_added_to_a_ticket_ride_on_ticket_update_with_the_same_rights() {
     let Call::Write(WriteMethod::Domain(Command::UpdateTicket(update))) = &parsed.call else { panic!("ticket.update") };
     assert_eq!(update.add_files, Some(vec!["/inbox/shot.png".to_string()]));
     assert_eq!(required(&parsed.call), Needs::Cap(Capability::TaskControl));
+}
+
+/// A `ticket.history` with every filter (ticket #57).
+fn history() -> Method {
+    Method::TicketHistory {
+        project_id: Some(ProjectId::new()),
+        employee_id: Some(aurelius_domain::EmployeeId::new()),
+        from_ms: Some(1),
+        to_ms: Some(2),
+        query: Some("export".into()),
+        before_done_at_ms: Some(2),
+        before_number: Some(7),
+        limit: Some(50),
+    }
+}
+
+#[test]
+fn the_history_is_additive_a_bare_read_has_no_params_and_the_server_says_it_has_it() {
+    let bare: Method = crate::rpc::from_method_value(serde_json::json!({ "method": "ticket.history" })).unwrap();
+    assert_eq!(bare, Method::TicketHistory { project_id: None, employee_id: None, from_ms: None, to_ms: None, query: None, before_done_at_ms: None, before_number: None, limit: None });
+    assert_eq!(serde_json::to_value(&bare).unwrap(), serde_json::json!({ "method": "ticket.history", "params": {} }));
+    assert!(crate::rpc::FEATURES.contains(&crate::rpc::feature::TICKET_HISTORY));
+    let state = serde_json::to_value(aurelius_domain::history::HistorySummaryState::BeforeHistory).unwrap();
+    assert_eq!(state, "before_history");
 }
