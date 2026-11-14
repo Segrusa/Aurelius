@@ -149,3 +149,14 @@ fn a_summary_belongs_to_one_done_and_a_new_done_starts_again() {
     assert!(store.write(|tx| history::set_summary(tx, id(1), "It shipped again.")).unwrap(), "after a failure the retry's text comes");
     assert_eq!(state(1), Some((HistorySummaryState::Ready, Some("It shipped again.".into()))));
 }
+
+#[test]
+fn a_search_finds_a_title_with_an_accented_capital() {
+    let (_dir, store) = store();
+    store.write(|tx| Ok(tx.execute("UPDATE tickets SET title = 'Écran de connexion' WHERE number = 1", [])?)).unwrap();
+    let found = |q: &str| numbers(&store, &history::Filter { query: Some(q.into()), ..Default::default() }, 50).0;
+    // SQLite's lower() folds only ASCII, so the typed text is folded the same way.
+    assert_eq!(found("Écran"), vec![1], "as shown");
+    assert_eq!(found("ÉCRAN DE"), vec![1], "the ASCII letters in any case");
+    assert_eq!(found("connexion"), vec![1]);
+}

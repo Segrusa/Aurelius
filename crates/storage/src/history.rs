@@ -94,7 +94,9 @@ pub fn list(conn: &Connection, filter: &Filter, limit: u32, extract_kind: &str) 
     if let Some(to) = filter.to_ms {
         add(&|n| format!("k.done_at_ms < ?{n}"), Box::new(to));
     }
-    let needle = filter.query.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(|q| q.chars().take(history::HISTORY_QUERY_MAX_CHARS).collect::<String>().to_lowercase());
+    // Folded like SQLite's lower(), which only folds ASCII: a Unicode fold here would
+    // turn "É" into "é" while the column keeps "É", and the search would miss it.
+    let needle = filter.query.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(|q| q.chars().take(history::HISTORY_QUERY_MAX_CHARS).collect::<String>().to_ascii_lowercase());
     if let Some(needle) = needle {
         // instr, not LIKE: a % or _ in what was typed is just a character.
         add(&|n| format!("(instr(lower(k.title), ?{n}) > 0 OR instr(lower(COALESCE(k.summary_text, '')), ?{n}) > 0)"), Box::new(needle));
