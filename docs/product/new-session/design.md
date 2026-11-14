@@ -126,7 +126,7 @@ The right group sits right-aligned on the same line when it fits.
 ### 4.6 Start
 | Kind / Who | Request | Toast | After |
 |---|---|---|---|
-| Ticket + Dispatcher | `ticket.create` start=true, owner none, responsible = me (if `ticket_responsible`) | "Ticket created and started." | navigate to `/board?ticket=<new id>` |
+| Ticket + Dispatcher | `ticket.create` start=true, owner none, responsible = me (if `ticket_responsible`) | "Ticket created and started." | open the new ticket's chat (`/chat?channel=<conversation>`), as New ticket and Give work do since #58; `/board?ticket=<new id>` without ticket channels or when the ticket cannot be read |
 | Ticket + employee | Give work body (owner = employee, start=true, run mode/model/effort) | "Created and started with <Name>." | same |
 | Quick task | `quickCreateParams` | "Quick task started with <Name>." | same |
 
@@ -152,7 +152,7 @@ The right group sits right-aligned on the same line when it fits.
 ## 7. Acceptance criteria
 1. Sidebar shows **New session** first; `+` in the sidebar head and the general New (`secondary-n`, where it opened Give work) open it with the composer focused.
 2. From that page alone a board member can start: a ticket for the dispatcher, a ticket for a chosen employee, and (with the feature) a quick task, choosing project, model, effort and (ticket) mode.
-3. Each start sends the same request as the dialog it replaces and lands on the new ticket's panel.
+3. Each start sends the same request as the dialog it replaces and lands on the new ticket's chat, as the dialogs do.
 4. Defaults follow §4.1/§4.4 and are remembered per host.
 5. Empty, offline and error states show text and never an endless "Loading…".
 6. Desktop type check, Biome and the app's unit tests pass; logic (defaults, request building, footer text) lives in `new-session-logic.ts` with tests.

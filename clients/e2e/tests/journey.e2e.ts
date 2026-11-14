@@ -166,7 +166,9 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
       await act(() => p.keyboard.press("Alt+m"));
       await expect(p.getByRole("button", { name: /^Who/ })).toContainText("Builder");
       await act(() => p.keyboard.press("Control+Enter"));
-      await expect(p).toHaveURL(/\/board\?ticket=/);
+      // The new ticket's chat opens, as after New ticket and Give work (#58); its plan shows on the Board.
+      await expect(p).toHaveURL(/\/chat\?channel=/);
+      await act(() => nav("Board").click());
       // The first employee is management, which starts in Plan: this stops at a plan first.
       await expect(
         p.getByRole("region", { name: "Plan review", exact: true }).getByText(/hosting options/),

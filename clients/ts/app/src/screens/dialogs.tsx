@@ -182,7 +182,7 @@ export function useSend(onDone: (text: string) => void) {
  * so the board member lands where the work is discussed. Without ticket channels, or when the ticket
  * cannot be read, it opens the ticket on the Board instead.
  */
-function useOpenCreated() {
+export function useOpenCreated() {
   const navigate = useNavigate();
   const connection = useConnection();
   const { features } = useLinkState();

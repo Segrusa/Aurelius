@@ -23,8 +23,8 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
-import { createdTicketId, cycle, EFFORTS, MODES, titleOfGoal } from "./dialog-logic";
-import { Held, useModels, useSend } from "./dialogs";
+import { cycle, EFFORTS, MODES, titleOfGoal } from "./dialog-logic";
+import { Held, useModels, useOpenCreated, useSend } from "./dialogs";
 import {
   columnLabel,
   composerRows,
@@ -228,15 +228,14 @@ export function NewSessionScreen() {
       : (who?.name ?? (active.length === 0 ? "No employee yet" : "Choose who does it"));
 
   const problem = startProblem({ projectId, text, kind, who: whoId, offline });
-  const created = useRef<string | null>(null);
+  // Lands where the dialogs land since #58: the new ticket's chat, else its panel on the Board.
+  const created = useOpenCreated();
   const { busy, error, held, send, sendAnyway } = useSend((done) => {
     toast(done);
     drafts.clear(hostId);
     setText("");
     attach.clear();
-    const ticket = created.current;
-    created.current = null;
-    if (ticket) void navigate({ to: "/board", search: { ticket } });
+    created.open();
   });
 
   const start = () => {
@@ -258,7 +257,7 @@ export function NewSessionScreen() {
         confirmSecret,
       );
       const receipt = await connection.write("ticket.create", params, { retry: false });
-      created.current = createdTicketId(receipt);
+      created.remember(receipt);
       for (const [key, value] of remembered(hostId, { kind, projectId: project.id, who: whoId }, recent)) {
         storage.set(key, value);
       }
