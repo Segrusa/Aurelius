@@ -159,8 +159,8 @@ export const SHORTCUTS: Shortcut[] = [
     context: "Aurelius",
     navKeys: ["n"],
     label: hidden("Ideas")
-      ? "New (give work, project, task or memory, depending on the page)"
-      : "New (give work, project, task, memory or idea, depending on the page)",
+      ? "New (new session, project, task or memory, depending on the page)"
+      : "New (new session, project, task, memory or idea, depending on the page)",
     section: "General",
     inPalette: true,
     action: "NewItem",
@@ -767,6 +767,11 @@ export const CONTEXT_BINDINGS: { key: string; action: string; context: string }[
   { key: "alt-j", action: "CycleGiveProject", context: "GiveWork" },
   { key: "secondary-enter", action: "SubmitGiveWork", context: "GiveWork" },
   { key: "secondary-enter", action: "ConfirmPrimary", context: "AureliusDialog" },
+  { key: "secondary-enter", action: "StartNewSession", context: "NewSession" },
+  { key: "alt-e", action: "CycleTaskEffort", context: "NewSession" },
+  { key: "alt-m", action: "CycleTaskManager", context: "NewSession" },
+  { key: "alt-o", action: "CycleTaskMode", context: "NewSession" },
+  { key: "alt-l", action: "CycleTaskModel", context: "NewSession" },
 ];
 
 /** A browser keeps these for itself; on the web the action gets another key. */

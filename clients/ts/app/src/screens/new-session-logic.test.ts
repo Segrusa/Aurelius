@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { giveWorkParams, LAST_GIVEN, ticketCreateParams } from "./dialog-logic";
 import {
   COMPOSER_ROWS_MAX,
+  columnLabel,
   composerRows,
   continueTickets,
   createDrafts,
@@ -301,5 +302,9 @@ describe("the tickets to continue (§4.2)", () => {
     ];
     expect(continueTickets(list).map((t) => t.id)).toEqual(["t2", "t4", "t6"]);
     expect(continueTickets([])).toEqual([]);
+  });
+
+  it("show their column in words", () => {
+    expect(["doing", "testing", "review"].map(columnLabel)).toEqual(["Doing", "Testing", "Review"]);
   });
 });

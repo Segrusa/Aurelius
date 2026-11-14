@@ -44,6 +44,7 @@ import { recentChats } from "./employee-logic";
 import { pinKey, usePins } from "./employees";
 import { useInbox } from "./inbox";
 import { needsYouCount, newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
+import { useOpenNewSession } from "./new-session";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
 import { SettingsSidebar } from "./settings";
@@ -128,9 +129,10 @@ const styles = stylex.create({
   barFill: { height: 3, borderRadius: 2, backgroundColor: "var(--color-text-accent)" },
 });
 
-const NAV_MAIN: { to: string; label: string; icon: NavIcon }[] = [
-  { to: "/inbox", label: "Inbox", icon: "inbox" },
-  { to: "/my-tickets", label: "My tickets", icon: "mine" },
+const NAV_MAIN: { to: string; label: string; icon: IconType }[] = [
+  { to: "/new", label: "New session", icon: NewIcon },
+  { to: "/inbox", label: "Inbox", icon: NAV_ICONS.inbox },
+  { to: "/my-tickets", label: "My tickets", icon: NAV_ICONS.mine },
 ];
 // `server`: the row shows only when the server has that feature.
 const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Feature; server?: string }[] = [
@@ -368,6 +370,7 @@ function useGlobalActions(): void {
   const platform = usePlatform();
   const connection = useConnection();
   const navigate = useNavigate();
+  const openNewSession = useOpenNewSession();
   useAction("Quit", () => platform.quit?.(), platform.quit !== null);
   useAction("OpenUpdates", () => {
     connection
@@ -385,7 +388,8 @@ function useGlobalActions(): void {
   useFallbackAction("OpenMemory", () => void navigate({ to: "/knowledge/$tab", params: { tab: "memory" } }));
   useAction("OpenPalette", () => open("palette"));
   useAction("MakeTicket", () => open("ticket"));
-  useAction("NewItem", () => open("give"));
+  // Pages with their own New (projects, memory, ideas…) answer it first; elsewhere it is a new session.
+  useFallbackAction("NewItem", openNewSession);
   useAction("NavBack", () => window.history.back());
   useAction("NavForward", () => window.history.forward());
   useAction("ScrollPageUp", () => scrollMain((el) => el.scrollBy({ top: -el.clientHeight * 0.9 })));
@@ -439,6 +443,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
     (id) => employees.data?.filter((e) => e.id === id && e.status !== "archived") ?? [],
   );
   const inbox = needsYouCount(groups);
+  const openNewSession = useOpenNewSession();
   return (
     <SideNav
       aria-label="Main"
@@ -461,8 +466,8 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
                   onClick={() => open("palette")}
                 />
               </Tooltip>
-              <Tooltip content="New ticket" delay={400} hasHoverIndication={false}>
-                <IconButton label="New ticket" icon={<NewIcon />} size="sm" onClick={() => open("ticket")} />
+              <Tooltip content="New session" delay={400} hasHoverIndication={false}>
+                <IconButton label="New session" icon={<NewIcon />} size="sm" onClick={openNewSession} />
               </Tooltip>
             </div>
           )}
@@ -486,7 +491,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
           key={n.to}
           to={n.to}
           label={n.label}
-          icon={NAV_ICONS[n.icon]}
+          icon={n.icon}
           end={n.to === "/inbox" && inbox ? <Counted count={inbox} /> : undefined}
         />
       ))}

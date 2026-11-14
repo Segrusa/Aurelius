@@ -248,6 +248,11 @@ export function continueTickets<T extends { column: string; updated_at_ms: numbe
     .slice(0, CONTINUE_MAX);
 }
 
+/** The pill on a ticket to continue. */
+export function columnLabel(column: string): string {
+  return column === "doing" ? "Doing" : column === "testing" ? "Testing" : column === "review" ? "Review" : column;
+}
+
 /** The composer's text per server, kept while the app runs and cleared by a successful start. */
 export function createDrafts() {
   const texts = new Map<string, string>();

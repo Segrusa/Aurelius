@@ -83,6 +83,16 @@ describe("what a chord means", () => {
     expect(actionsFor("secondary-enter", dialog)).toEqual(["ConfirmPrimary"]);
   });
 
+  it("starts and cycles Give work's choices on New session, also while typing in its composer", () => {
+    const session = { ...base, typing: true, stack: [...base.stack, { name: "NewSession", modal: false }] };
+    expect(actionsFor("secondary-enter", session)[0]).toBe("StartNewSession");
+    expect(actionsFor("alt-m", session)[0]).toBe("CycleTaskManager");
+    expect(actionsFor("alt-o", session)[0]).toBe("CycleTaskMode");
+    expect(actionsFor("alt-l", session)[0]).toBe("CycleTaskModel");
+    expect(actionsFor("alt-e", session)[0]).toBe("CycleTaskEffort");
+    expect(actionsFor("alt-j", session)).toContain("CycleGiveProject");
+  });
+
   it("gets another key where a browser keeps it", () => {
     expect(keysFor(["secondary-t"], "web")).toEqual(["alt-t"]);
     expect(keysFor(["secondary-q"], "web")).toEqual([]);

@@ -18,8 +18,9 @@ import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
 import { useWorkspace } from "../workspace";
 import { bareName } from "./chat-logic";
-import { overlays, useOpenOverlay } from "./overlays-store";
 import { topCentered } from "./dialog-logic";
+import { useOpenNewSession } from "./new-session";
+import { overlays, useOpenOverlay } from "./overlays-store";
 import { filterGroups, type PaletteGroup, quickTaskCommands } from "./palette-logic";
 import { quickEnabled } from "./quick-logic";
 import { useSwitchWorkspace } from "./workspace-kit";
@@ -28,8 +29,8 @@ import { guidelinesIn, narrow, openProjects } from "./workspace-logic";
 // The CommandPalette's own default width; the centring of its pinned Dialog needs it.
 const PALETTE_WIDTH = 640;
 
-// The table's label says what the key does on every page; here it is one command.
-const PALETTE_LABEL: Record<string, string> = { NewItem: "Give work" };
+// The general New is "New session" here: on other pages the key means that page's New.
+const NEW_SESSION_KEYS = SHORTCUTS.find((s) => s.action === "NewItem")?.keys ?? [];
 
 const styles = stylex.create({
   label: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 },
@@ -135,6 +136,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const workspace = useWorkspace();
   const switchTo = useSwitchWorkspace();
   const quick = quickEnabled(useLinkState().features);
+  const openNewSession = useOpenNewSession();
   // The workspace's id as the only thing the search depends on: `switchTo` changes every render.
   const switchRef = useRef(switchTo);
   switchRef.current = switchTo;
@@ -144,6 +146,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     const here = workspace.id;
     const commands = SHORTCUTS.filter((s) => s.inPalette && keys.has(s.action) && !(s.feature && hidden(s.feature)));
     const shown = new Set<string>();
+    const newKey = keysFor(NEW_SESSION_KEYS, kind)[0];
     return [
       ...(workspace.available && !workspace.locked
         ? [
@@ -253,18 +256,26 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
       {
         label: "Commands",
         items: [
+          {
+            id: "command:NewSession",
+            label: "New session",
+            detail: "",
+            mark: "",
+            ...(newKey ? { keys: showChord(newKey, isMac) } : {}),
+            run: openNewSession,
+          },
           ...quickTaskCommands(quick, () => overlays.open("ticket", { title: "", description: "", quick: true })),
           ...commands
             .filter((s) => {
               if (shown.has(s.action)) return false;
               shown.add(s.action);
-              return s.action !== "OpenPalette";
+              return s.action !== "OpenPalette" && s.action !== "NewItem";
             })
             .map((s) => {
               const key = keysFor(s.keys, kind)[0];
               return {
                 id: `command:${s.action}`,
-                label: PALETTE_LABEL[s.action] ?? s.label,
+                label: s.label,
                 detail: "",
                 mark: "",
                 ...(key ? { keys: showChord(key, isMac) } : {}),
@@ -286,6 +297,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     kind,
     navigate,
     quick,
+    openNewSession,
   ]);
 
   const itemsById = useMemo(() => new Map(groups.flatMap((g) => g.items.map((i) => [i.id, i]))), [groups]);
