@@ -91,11 +91,21 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await pasteImage(page.getByLabel("Description"));
     await expect(page.getByRole("button", { name: "Remove pasted.png" })).toBeVisible();
     await page.getByRole("button", { name: "Create", exact: true }).click();
-    await expect(page.getByRole("button", { name: /Ticket with a picture/ }).first()).toBeVisible();
-    // A new ticket opens on its chat (ticket #58); its files are on the Ticket tab.
-    const sections = page.getByRole("tablist", { name: "Ticket sections" });
-    await expect(sections.getByRole("tab", { name: /Discussion/ })).toHaveAttribute("aria-selected", "true");
-    await sections.getByRole("tab", { name: "Ticket", exact: true }).click();
+    // A new ticket opens on its chat (ticket #58): its channel in Chat, since the panel has no discussion (#56).
+    const pictured = await until("created", async () => {
+      const all = expectBody(await server.call("ticket.list", { project_id: project }), "tickets").value.tickets;
+      return all.find((t) => t.title === "Ticket with a picture");
+    });
+    const detail = expectBody(await server.call("ticket.get", { ticket_id: pictured.id }), "ticket").value;
+    expect(detail.ticket.conversation_id).toBeTruthy();
+    await expect(page).toHaveURL(new RegExp(`/chat\\?channel=${detail.ticket.conversation_id}`));
+    // Its files are on the ticket, on the Board.
+    await page.getByRole("navigation").getByRole("link", { name: "Board" }).first().click();
+    await page
+      .getByRole("button", { name: /Ticket with a picture/ })
+      .first()
+      .click();
+    await expect(page.getByRole("tab", { name: /Discussion/ })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /View pasted/ })).toBeVisible();
     await page.keyboard.press("Escape");
 
@@ -141,7 +151,7 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await page.keyboard.press("Control+Enter");
     await expect(page.getByRole("dialog")).toBeHidden();
 
-    // The same with a picture, on the key. The new ticket's panel is open behind the dialog now.
+    // The same with a picture, on the key. The last new ticket's chat is open behind the dialog now.
     await page.keyboard.press("Control+t");
     const form = page.getByRole("dialog");
     await form.getByLabel("Title").fill("Started with a picture");

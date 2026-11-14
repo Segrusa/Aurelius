@@ -196,6 +196,7 @@ function useOpenCreated() {
   const navigate = useNavigate();
   const connection = useConnection();
   const { features } = useLinkState();
+  const client = useQueryClient();
   const created = useRef<string | null>(null);
   return {
     remember: (receipt: Receipt) => {
@@ -209,7 +210,12 @@ function useOpenCreated() {
       if (!features.includes("ticket_channels")) return go(null);
       connection
         .call("ticket.get", { ticket_id: ticket })
-        .then((body) => go(expectBody(body, "ticket").value.ticket.conversation_id ?? null))
+        .then(async (body) => {
+          const conversation = expectBody(body, "ticket").value.ticket.conversation_id ?? null;
+          // Chat sends a channel it does not know back to general, and the cached list predates this one.
+          if (conversation) await client.invalidateQueries({ queryKey: ["messages", "channels"], refetchType: "all" });
+          go(conversation);
+        })
         .catch(() => go(null));
     },
   };

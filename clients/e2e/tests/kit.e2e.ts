@@ -109,7 +109,7 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
 
     // New ticket: the choices arrive, a wrong date is said, and the fields end up on the server.
     await page.getByRole("button", { name: "New ticket" }).click();
-    // In the dialog: after a create the new ticket's panel is open behind it, with an "Edit Title" of its own.
+    // In the dialog: after a create the new ticket's chat is open behind it, with fields of its own.
     const form = page.getByRole("dialog");
     const title = form.getByLabel("Title");
     await expect(title).toBeFocused();
@@ -152,7 +152,7 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     );
 
     // Give work: the top of the org chart by default, a ticket started at once. The create above opened
-    // the ticket on the Board, where n is New ticket; on the Inbox it is Give work.
+    // the ticket's chat; n is Give work on the Inbox.
     await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     await page.keyboard.press("n");
@@ -166,7 +166,7 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     expect([...(given?.title ?? "")]).toHaveLength(61);
 
     // Someone else, through the menu; the next time starts from whom it went to last. Give work opened
-    // its ticket on the Board too.
+    // its ticket's chat too.
     await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     await page.keyboard.press("n");
@@ -178,14 +178,14 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     expect((await tickets()).find((t) => t.title === "Fix the build")?.owner_name).toBe("Ben");
     expect(await page.evaluate(() => localStorage.getItem("aurelius.last_given_to"))).toBeTruthy();
 
-    // The screen counter kept the desktop's numbers and adds its own, on this device only: the seeded 3,
-    // plus the three tickets made here that each opened on the Board.
+    // The screen counter kept the desktop's numbers and adds its own, on this device only: the seeded 3
+    // Board opens stay 3, since the tickets made here opened in the chat, not on the Board.
     await until(
       "the counter saved",
       () =>
         page.evaluate(() => {
           const screens = JSON.parse(localStorage.getItem("aurelius.screen_use") ?? "{}").screens ?? {};
-          return screens.board?.opens === 6 && screens.inbox?.opens >= 2;
+          return screens.board?.opens === 3 && screens.inbox?.opens >= 2;
         }),
       10_000,
     );
