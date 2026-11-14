@@ -6,6 +6,8 @@ import { runLabel, type Todo, type TodoState } from "./chat-logic";
 import { isActive, treeOrder } from "./tasks-logic";
 
 const TODO_TOOL = "TodoWrite";
+const CREATE_TOOL = "TaskCreate";
+const UPDATE_TOOL = "TaskUpdate";
 
 function todoState(status: unknown): TodoState {
   if (status === "completed") return "done";
@@ -13,23 +15,68 @@ function todoState(status: unknown): TodoState {
   return "open";
 }
 
-/** The latest todo list among these calls (Claude's TodoWrite), or null when there is none. */
-export function todosOf(activity: readonly ActivityView[]): Todo[] | null {
+const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+
+/** One item as the list shows it: what is going on reads as "Running the tests", the rest as the plan says it. */
+function todoOf(content: unknown, activeForm: unknown, status: unknown): Todo | null {
+  const state = todoState(status);
+  const words = (state === "doing" ? str(activeForm) : null) ?? str(content);
+  return words ? { text: words, state } : null;
+}
+
+/** The whole list of the newest TodoWrite call (Claude Code before 2.1.318). */
+function fromTodoWrite(calls: readonly ActivityView[]): Todo[] | null {
   let best: ActivityView | null = null;
-  for (const a of activity) if (a.tool === TODO_TOOL && (!best || a.offset >= best.offset)) best = a;
+  for (const a of calls) if (a.tool === TODO_TOOL && (!best || a.offset >= best.offset)) best = a;
   const list = (best?.input as { todos?: unknown } | undefined)?.todos;
   if (!Array.isArray(list)) return null;
   const todos: Todo[] = [];
   for (const item of list as unknown[]) {
     if (typeof item !== "object" || item === null) continue;
     const { content, activeForm, status } = item as { content?: unknown; activeForm?: unknown; status?: unknown };
-    const state = todoState(status);
-    // What is going on reads as "Running the tests"; the rest as the plan says it.
-    const words = state === "doing" && typeof activeForm === "string" && activeForm.trim() ? activeForm : content;
-    if (typeof words !== "string" || !words.trim()) continue;
-    todos.push({ text: words.trim(), state });
+    const todo = todoOf(content, activeForm, status);
+    if (todo) todos.push(todo);
   }
-  return todos.length > 0 ? todos : null;
+  return todos;
+}
+
+/** The list TaskCreate and TaskUpdate build one call at a time (Claude Code 2.1.318). A run
+ *  numbers its items 1, 2, 3 in the order it makes them; the result says the number too. */
+function fromTaskCalls(calls: readonly ActivityView[]): Todo[] {
+  type Item = { subject: string | null; activeForm: string | null; status: string };
+  const items = new Map<string, Item>();
+  for (const a of [...calls].sort((x, y) => x.offset - y.offset)) {
+    if (a.ok === false) continue;
+    const input = (a.input ?? {}) as Record<string, unknown>;
+    if (a.tool === CREATE_TOOL) {
+      const id = /#(\d+)/.exec(a.output ?? "")?.[1] ?? String(items.size + 1);
+      items.set(id, { subject: str(input.subject), activeForm: str(input.activeForm), status: "pending" });
+    } else if (a.tool === UPDATE_TOOL) {
+      const id = String(input.taskId ?? "");
+      const item = items.get(id);
+      if (!item) continue;
+      if (input.status === "deleted") {
+        items.delete(id);
+        continue;
+      }
+      if (typeof input.status === "string") item.status = input.status;
+      item.subject = str(input.subject) ?? item.subject;
+      item.activeForm = str(input.activeForm) ?? item.activeForm;
+    }
+  }
+  const todos: Todo[] = [];
+  for (const item of items.values()) {
+    const todo = todoOf(item.subject, item.activeForm, item.status);
+    if (todo) todos.push(todo);
+  }
+  return todos;
+}
+
+/** The todo list among one answer's calls, or null when there is none. */
+export function todosOf(activity: readonly ActivityView[]): Todo[] | null {
+  const tasks = activity.some((a) => a.tool === CREATE_TOOL) ? fromTaskCalls(activity) : null;
+  const todos = tasks ?? fromTodoWrite(activity);
+  return todos && todos.length > 0 ? todos : null;
 }
 
 /** The newest todo list of a conversation: what is streaming first, then the answers from new to old. */

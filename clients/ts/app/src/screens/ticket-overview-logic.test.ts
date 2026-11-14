@@ -71,6 +71,47 @@ describe("the todo list", () => {
     expect(todosOf([todoCall(0, [])])).toBeNull();
   });
 
+  it("builds the list from TaskCreate and TaskUpdate (Claude Code 2.1.318)", () => {
+    const made = (offset: number, n: number, subject: string, activeForm?: string) => ({
+      ...call("TaskCreate", { subject, description: subject, activeForm }, offset),
+      call_id: `c${n}`,
+      output: `Task #${n} created successfully: ${subject}`,
+    });
+    const update = (offset: number, taskId: string, more: Record<string, unknown>) => ({
+      ...call("TaskUpdate", { taskId, ...more }, offset),
+      call_id: `u${offset}-${taskId}`,
+    });
+    const todos = todosOf([
+      made(0, 1, "Find causes"),
+      made(0, 2, "Run the tests", "Running the tests"),
+      made(0, 3, "Release"),
+      made(0, 4, "Dropped"),
+      update(3, "1", { status: "completed" }),
+      update(5, "2", { status: "in_progress" }),
+      update(5, "4", { status: "deleted" }),
+      update(6, "9", { status: "completed" }),
+      call("Bash", { command: "ls" }, 7),
+    ]);
+    expect(todos).toEqual([
+      { text: "Find causes", state: "done" },
+      { text: "Running the tests", state: "doing" },
+      { text: "Release", state: "open" },
+    ]);
+  });
+
+  it("numbers the items in order when a result is not there yet", () => {
+    const todos = todosOf([
+      call("TaskCreate", { subject: "a" }, 0, null),
+      call("TaskCreate", { subject: "b" }, 0, null),
+      { ...call("TaskUpdate", { taskId: "2", status: "completed" }, 1), call_id: "u" },
+      { ...call("TaskCreate", { subject: "failed" }, 2, false), call_id: "f" },
+    ]);
+    expect(todos).toEqual([
+      { text: "a", state: "open" },
+      { text: "b", state: "done" },
+    ]);
+  });
+
   it("prefers what streams, then the newest answer", () => {
     const answer = (n: number, text: string) =>
       ({ id: `m${n}`, activity: [todoCall(0, [{ content: text, status: "pending" }])] }) as unknown as MessageView;

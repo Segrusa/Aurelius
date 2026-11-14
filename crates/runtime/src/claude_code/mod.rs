@@ -210,6 +210,12 @@ pub const SUBAGENT_TOOL: &str = "Task";
 /// definition when it needs one; without it every definition is sent upfront on
 /// every request (CLI 2.1.301). It only reads, so it is allowed by rule.
 pub const TOOL_SEARCH_TOOL: &str = "ToolSearch";
+/// Claude Code's own todo list: the run keeps its plan with it, and a ticket's chat
+/// shows that list beside the talk. CLI 2.1.318 keeps it with `TaskCreate` and
+/// `TaskUpdate` (one item a call) and drops `TodoWrite` from `--tools` without a word;
+/// older versions have only `TodoWrite`. Each offers what it knows. They only touch
+/// the run's own list, so every level has them and they are allowed by rule.
+pub const TODO_TOOLS: &[&str] = &["TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TodoWrite"];
 /// Claude Code's tool for claude.ai artifacts (the Design System and Design types of
 /// Claude Design). Works on the run's Claude login; only with a design link, see `ToolProfile::Work`.
 pub const ARTIFACT_TOOL: &str = "Artifact";
@@ -254,6 +260,10 @@ pub fn profile_arguments(profile: &ToolProfile, model: Option<&str>, system_file
             let mut tools = listed.join(",");
             tools.push(',');
             tools.push_str(TOOL_SEARCH_TOOL);
+            for todo in TODO_TOOLS {
+                tools.push(',');
+                tools.push_str(todo);
+            }
             if *artifact {
                 tools.push(',');
                 tools.push_str(ARTIFACT_TOOL);
@@ -284,7 +294,7 @@ pub fn profile_arguments(profile: &ToolProfile, model: Option<&str>, system_file
             let own = MEMORY_TOOLS.iter().copied().filter(|t| tool_policy.allows(t) && !tool_policy.needs_approval(t));
             let subagent = (listed.contains(&SUBAGENT_TOOL) && !tool_policy.needs_approval(SUBAGENT_TOOL)).then_some(SUBAGENT_TOOL);
             let artifact_rule = artifact.then_some(ARTIFACT_TOOL);
-            let allowed: Vec<&str> = SCREEN_TOOLS.iter().copied().chain(own).chain(subagent).chain([TOOL_SEARCH_TOOL]).chain(artifact_rule).collect();
+            let allowed: Vec<&str> = SCREEN_TOOLS.iter().copied().chain(own).chain(subagent).chain([TOOL_SEARCH_TOOL]).chain(TODO_TOOLS.iter().copied()).chain(artifact_rule).collect();
             if *browser && playwright.is_none() {
                 args.push("--chrome".into());
                 // Claude in Chrome's tab group belongs to the session id: a fixed one
@@ -1338,13 +1348,13 @@ mod mode_switch_tests {
         use aurelius_domain::employee::AccessLevel::*;
         let args = |level| profile_arguments(&work_at(level).confined(), None, None, None);
         let inherit = args(Inherit);
-        assert_eq!(listed_tools(&inherit), format!("{},ToolSearch", WORK_TOOLS.join(",")));
+        assert_eq!(listed_tools(&inherit), format!("{},ToolSearch,TaskCreate,TaskUpdate,TaskList,TaskGet,TodoWrite", WORK_TOOLS.join(",")));
         assert!(allowed_rules(&inherit).contains("Task") && inherit.join(" ").contains("notes"));
 
         let read_only = args(ReadOnly);
-        assert_eq!(listed_tools(&read_only), "Read,Glob,Grep,AskUserQuestion,ExitPlanMode,ToolSearch");
+        assert_eq!(listed_tools(&read_only), "Read,Glob,Grep,AskUserQuestion,ExitPlanMode,ToolSearch,TaskCreate,TaskUpdate,TaskList,TaskGet,TodoWrite");
         let read_edit = args(ReadEdit);
-        assert_eq!(listed_tools(&read_edit), "Read,Glob,Grep,Edit,Write,AskUserQuestion,ExitPlanMode,ToolSearch");
+        assert_eq!(listed_tools(&read_edit), "Read,Glob,Grep,Edit,Write,AskUserQuestion,ExitPlanMode,ToolSearch,TaskCreate,TaskUpdate,TaskList,TaskGet,TodoWrite");
         for restricted in [&read_only, &read_edit, &args(Unknown)] {
             let joined = restricted.join(" ");
             assert!(joined.contains("--restricted") && joined.contains("mcp__aurelius__approve"), "still the bridge: {joined}");
