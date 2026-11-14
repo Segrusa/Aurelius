@@ -1,6 +1,6 @@
 // The rules of New ticket and Give work, pure.
 
-import type { MethodParams, Receipt, TaskRun, TicketPriority } from "@aurelius/protocol";
+import type { AgentMode, MethodParams, Receipt, TaskRun, TicketPriority } from "@aurelius/protocol";
 
 /** A normal ticket from New ticket. It never names a kind: an older server refuses a field it does not know. */
 export interface TicketForm {
@@ -38,6 +38,55 @@ export function ticketCreateParams(form: TicketForm, confirmSecret: boolean): Me
     ...(form.ownerEmployeeId ? { owner_employee_id: form.ownerEmployeeId } : {}),
     ...(form.fromMessage ? { from_message: form.fromMessage } : {}),
     ...(form.fromIdea ? { from_idea: form.fromIdea } : {}),
+  };
+}
+
+/** The run modes a dialog offers; "default" leaves it to the owner. */
+export const MODES: { key: AgentMode | "default"; label: string }[] = [
+  { key: "default", label: "Default" },
+  { key: "ask", label: "Ask" },
+  { key: "accept_edits", label: "Accept edits" },
+  { key: "auto", label: "Auto" },
+  { key: "plan", label: "Plan" },
+];
+
+/** The efforts a dialog offers, in the order the effort key cycles them. */
+export const EFFORTS = ["default", "low", "medium", "high", "xhigh", "max"];
+
+/** Where the employee last given work is remembered, like the other desktop prefs. */
+export const LAST_GIVEN = "last_given_to";
+
+/** A choice still on "default" is left out, so the owner's own setting applies. */
+export function taskRun(mode: string, model: string, effort = "default"): TaskRun {
+  return {
+    ...(mode === "default" ? {} : { mode: mode as AgentMode }),
+    ...(model === "default" ? {} : { model }),
+    ...(effort === "default" ? {} : { effort }),
+  };
+}
+
+/** What Give work sends: a ticket for one employee, started at once. Shared with New session. */
+export interface GiveWorkForm {
+  projectId: string;
+  goal: string;
+  employeeId: string;
+  run: TaskRun;
+  files: string[];
+  /** Only on a server with `ticket_responsible`; none sends nothing. */
+  responsibleUserId: string | null;
+}
+
+export function giveWorkParams(form: GiveWorkForm, confirmSecret: boolean): MethodParams["ticket.create"] {
+  return {
+    project_id: form.projectId,
+    title: titleOfGoal(form.goal),
+    description: form.goal.trim(),
+    owner_employee_id: form.employeeId,
+    start: true,
+    run: form.run,
+    ...(form.files.length > 0 ? { files: form.files } : {}),
+    confirm_secret: confirmSecret,
+    ...(form.responsibleUserId ? { responsible_user_id: form.responsibleUserId } : {}),
   };
 }
 

@@ -6,9 +6,11 @@ import {
   cycle,
   DIALOG_TOP,
   defaultAssignee,
+  giveWorkParams,
   parseDeadline,
   parseLabels,
   rootsOf,
+  taskRun,
   titleOfGoal,
   topCentered,
 } from "./dialog-logic";
@@ -101,5 +103,58 @@ describe("the ticket a create made", () => {
   it("opens on its channel in Chat, or on the Board when there is no channel", () => {
     expect(createdTicketPlace("t-58", "c-58")).toEqual({ to: "/chat", search: { channel: "c-58" } });
     expect(createdTicketPlace("t-58", null)).toEqual({ to: "/board", search: { ticket: "t-58" } });
+  });
+});
+
+describe("the run a dialog sends", () => {
+  it("leaves out every choice still on Default, so the owner's own settings apply", () => {
+    expect(taskRun("default", "default")).toEqual({});
+    expect(taskRun("default", "default", "default")).toEqual({});
+  });
+
+  it("names the mode, model and effort that were chosen", () => {
+    expect(taskRun("plan", "claude-opus-5-5", "high")).toEqual({
+      mode: "plan",
+      model: "claude-opus-5-5",
+      effort: "high",
+    });
+    expect(taskRun("auto", "default")).toEqual({ mode: "auto" });
+  });
+});
+
+describe("the ticket Give work makes", () => {
+  const form = {
+    projectId: "p-1",
+    goal: "  Compare three hosting options\nwith prices  ",
+    employeeId: "e-1",
+    run: { mode: "plan" as const, effort: "high" },
+    files: [] as string[],
+    responsibleUserId: null as string | null,
+  };
+
+  it("is started at once for the chosen employee, titled by its first line", () => {
+    expect(giveWorkParams(form, false)).toEqual({
+      project_id: "p-1",
+      title: "Compare three hosting options",
+      description: "Compare three hosting options\nwith prices",
+      owner_employee_id: "e-1",
+      start: true,
+      run: { mode: "plan", effort: "high" },
+      confirm_secret: false,
+    });
+  });
+
+  it("adds files and the responsible board member only when there are any", () => {
+    expect(giveWorkParams({ ...form, files: ["/tmp/a.png"], responsibleUserId: "u-1" }, true)).toEqual({
+      project_id: "p-1",
+      title: "Compare three hosting options",
+      description: "Compare three hosting options\nwith prices",
+      owner_employee_id: "e-1",
+      start: true,
+      run: { mode: "plan", effort: "high" },
+      files: ["/tmp/a.png"],
+      confirm_secret: true,
+      responsible_user_id: "u-1",
+    });
   });
 });
