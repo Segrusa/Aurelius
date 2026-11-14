@@ -123,6 +123,21 @@ void main() {
       expect(LastQuickEmployee.employee, 'forge');
     });
 
+    testWidgets('a created quick task opens on its discussion right away (ticket #58)', (tester) async {
+      final repo = boardRepository(link: quickLink);
+      when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
+          .thenAnswer((_) async => receiptOf(const CommandResultTicketCreated(number: 53, ticketId: 'k53')));
+      final router = await pumpBoardPage(tester, repo, const NewTicketPage(projectId: 'p1'), link: quickLink);
+      await tester.tap(find.text(quickTaskName));
+      await settleBoard(tester);
+      await tester.enterText(find.byKey(const ValueKey('new-ticket-description')), 'Fix the typo in the footer');
+      await tapKey(tester, 'new-ticket-owner');
+      await tester.tap(find.byKey(const ValueKey('new-owner-forge')));
+      await settleBoard(tester);
+      await tapKey(tester, 'new-ticket-create');
+      expect(router.state.uri.toString(), '/ticket/k53?tab=discussion');
+    });
+
     testWidgets('the employee last given a quick task is filled in', (tester) async {
       SharedPreferences.setMockInitialValues({'quick.last.h': 'forge'});
       await open(tester);
@@ -160,6 +175,20 @@ void main() {
       await pumpBoardPage(tester, repo, Scaffold(body: GiveWorkBox(state: companyWith())), link: link);
       return repo;
     }
+
+    testWidgets('the ticket it makes opens on its discussion right away (ticket #58)', (tester) async {
+      final repo = boardRepository(link: quickLink);
+      when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
+          .thenAnswer((_) async => receiptOf(const CommandResultTicketCreated(number: 54, ticketId: 'k54')));
+      final router = await pumpBoardPage(tester, repo, Scaffold(body: GiveWorkBox(state: companyWith())), link: quickLink);
+      await tester.enterText(find.byKey(const ValueKey('give-work-title')), 'Fix the typo');
+      await tester.pump();
+      await tapKey(tester, 'give-work-lead');
+      await tester.tap(find.byKey(const ValueKey('give-lead-forge')));
+      await settleBoard(tester);
+      await tapKey(tester, 'give-work-send');
+      expect(router.state.uri.toString(), '/ticket/k54?tab=discussion');
+    });
 
     testWidgets('without the feature there is no Quick task chip', (tester) async {
       await open(tester, link: onlineLink);

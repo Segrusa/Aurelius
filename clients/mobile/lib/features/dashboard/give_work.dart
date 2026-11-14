@@ -110,7 +110,7 @@ Future<bool> sendGivenWork(BuildContext context, String projectId, String title,
     }
     if (receipt.command case CommandResultTicketCreated(:final ticketId, :final number)) {
       toast(context, quick ? 'Quick task #$number started.' : '#$number created and started.');
-      router.push('/ticket/$ticketId');
+      router.push(ticketChatPlace(ticketId));
     }
     return true;
   } on Object catch (e) {
