@@ -315,7 +315,9 @@ test.describe("around the work", () => {
     await page.route("**/v1/upload", (route) =>
       route.fulfill({ json: { path: "/srv/inbox/1/notes.txt", name: "notes.txt", byte_length: 5 } }),
     );
-    await page.getByRole("button", { name: "New ticket" }).first().click();
+    // The sidebar's + is New session now (ticket #60); New ticket is Alt+T on the web, once the app is up.
+    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await page.keyboard.press("Alt+t");
     await page.getByPlaceholder("What should happen?").fill("With a file");
     const [chooser] = await Promise.all([
       page.waitForEvent("filechooser"),

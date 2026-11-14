@@ -7,6 +7,7 @@ import { _electron, expect, type Page, test } from "@playwright/test";
 import { daemonEndpoint, openPipe } from "../../electron/src/main/pipe";
 import { REPO, serveStatic, TestDaemon, until, WEB_DIST } from "./daemon";
 import { scriptServer } from "./fake-server";
+import { expectNewSession, openGiveWork } from "./new-session";
 
 const PASSWORD = "a-long-enough-password";
 
@@ -107,8 +108,14 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await page.keyboard.press("Control+1");
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
+    // The sidebar's + is New session now (ticket #60), with the composer ready to type in.
+    await page.getByRole("button", { name: "New session" }).first().click();
+    await expectNewSession(page);
+    await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
+    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+
     // New ticket: the choices arrive, a wrong date is said, and the fields end up on the server.
-    await page.getByRole("button", { name: "New ticket" }).click();
+    await page.keyboard.press("Control+t");
     // In the dialog: after a create the new ticket's chat is open behind it, with fields of its own.
     const form = page.getByRole("dialog");
     const title = form.getByLabel("Title");
@@ -151,11 +158,17 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
       (await tickets()).find((t) => t.title === "Rotate the key" && t.column !== "backlog"),
     );
 
-    // Give work: the top of the org chart by default, a ticket started at once. The create above opened
-    // the ticket's chat; n is Give work on the Inbox.
+    // n on the Inbox is New session now (ticket #60), not Give work. The create above opened the ticket's chat.
     await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     await page.keyboard.press("n");
+    await expectNewSession(page);
+    await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
+    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+
+    // Give work: the top of the org chart by default, a ticket started at once. Its own way in is the
+    // Tasks screen, through the palette.
+    await openGiveWork(page);
     const goal = page.getByLabel("What needs doing");
     await expect(goal).toBeFocused();
     await expect(page.getByRole("button", { name: "Ava" })).toHaveAttribute("aria-pressed", "true");
@@ -167,13 +180,15 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
 
     // Someone else, through the menu; the next time starts from whom it went to last. Give work opened
     // its ticket's chat too.
-    await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-    await page.keyboard.press("n");
+    await openGiveWork(page);
     await page.getByRole("button", { name: "Someone else" }).click();
     await page.getByRole("menuitem", { name: "Ben" }).click();
     await goal.fill("Fix the build");
-    await page.getByRole("button", { name: /^Give work/ }).click();
+    // The Tasks screen behind it has a Give work button of its own.
+    await page
+      .getByRole("dialog", { name: "Give work" })
+      .getByRole("button", { name: /^Give work/ })
+      .click();
     await expect(toast(page, "Created and started with Ben.")).toBeVisible();
     expect((await tickets()).find((t) => t.title === "Fix the build")?.owner_name).toBe("Ben");
     expect(await page.evaluate(() => localStorage.getItem("aurelius.last_given_to"))).toBeTruthy();

@@ -135,7 +135,7 @@ test("pairs with a server elsewhere, works there, comes back and forgets it", as
     await app.evaluate(({ dialog }, file) => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [file] })) as typeof dialog.showOpenDialog;
     }, here);
-    await page.getByRole("button", { name: "New ticket" }).first().click();
+    await page.keyboard.press("Control+t");
     await page.getByPlaceholder("What should happen?").fill("With a remote file");
     await page.getByRole("button", { name: "Add files…" }).click();
     await page.getByRole("button", { name: "Remove notes.txt" }).click({ trial: true });
