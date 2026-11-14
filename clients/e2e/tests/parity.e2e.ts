@@ -92,10 +92,10 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await expect(page.getByRole("button", { name: "Remove pasted.png" })).toBeVisible();
     await page.getByRole("button", { name: "Create", exact: true }).click();
     await expect(page.getByRole("button", { name: /Ticket with a picture/ }).first()).toBeVisible();
-    await page
-      .getByRole("button", { name: /Ticket with a picture/ })
-      .first()
-      .click();
+    // A new ticket opens on its chat (ticket #58); its files are on the Ticket tab.
+    const sections = page.getByRole("tablist", { name: "Ticket sections" });
+    await expect(sections.getByRole("tab", { name: /Discussion/ })).toHaveAttribute("aria-selected", "true");
+    await sections.getByRole("tab", { name: "Ticket", exact: true }).click();
     await expect(page.getByRole("button", { name: /View pasted/ })).toBeVisible();
     await page.keyboard.press("Escape");
 
@@ -141,11 +141,12 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await page.keyboard.press("Control+Enter");
     await expect(page.getByRole("dialog")).toBeHidden();
 
-    // The same with a picture, on the key.
+    // The same with a picture, on the key. The new ticket's panel is open behind the dialog now.
     await page.keyboard.press("Control+t");
-    await page.getByLabel("Title").fill("Started with a picture");
-    await page.getByLabel("Description").focus();
-    await pasteImage(page.getByLabel("Description"));
+    const form = page.getByRole("dialog");
+    await form.getByLabel("Title").fill("Started with a picture");
+    await form.getByLabel("Description").focus();
+    await pasteImage(form.getByLabel("Description"));
     await expect(page.getByRole("button", { name: "Remove pasted.png" })).toBeVisible();
     await page.keyboard.press("Control+Enter");
     await expect(page.getByRole("dialog")).toBeHidden();
