@@ -28,6 +28,8 @@ import { EmployeesScreen, OrgChartScreen } from "./screens/employees";
 import { Frame } from "./screens/frame";
 import { Gate } from "./screens/gate";
 import { GuidelineEditor, GuidelinesScreen } from "./screens/guidelines";
+import { HistoryScreen } from "./screens/history";
+import { historyFilters } from "./screens/history-logic";
 import { IdeasBody } from "./screens/ideas";
 import { InboxScreen } from "./screens/inbox";
 import { LinkFollower } from "./screens/links";
@@ -179,6 +181,14 @@ const project = createRoute({
   },
 });
 
+const history = createRoute({
+  getParentRoute: () => root,
+  path: "/history",
+  validateSearch: historyFilters,
+  component: function HistoryRoute() {
+    return <HistoryScreen filters={history.useSearch()} />;
+  },
+});
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
 const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
 // The log lives in Settings now; an old link keeps what it narrowed on.
@@ -222,6 +232,7 @@ const router = createRouter({
     inbox,
     board,
     myTickets,
+    history,
     tasks,
     taskRun,
     chat,
