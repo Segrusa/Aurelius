@@ -1,4 +1,4 @@
-// What the Board, My tickets and the ticket panel share: who needs what, the writes, and a card's marks.
+// What the Board and the ticket panel share: who needs what, the writes, and a card's marks.
 
 import { Link } from "@astryxdesign/core/Link";
 import { expectBody } from "@aurelius/client";

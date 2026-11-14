@@ -24,7 +24,7 @@ async function drag(page: Page, from: Locator, to: Locator) {
 const nav = (page: Page, name: string) =>
   page.getByRole("navigation").getByRole("link", { name, exact: false }).first().click();
 
-test("the board, the ticket panel and My tickets against a real daemon", async () => {
+test("the board and the ticket panel against a real daemon", async () => {
   const daemon = new TestDaemon();
   await daemon.start();
   const profile = mkdtempSync(join(tmpdir(), "aurelius-electron-"));
@@ -139,13 +139,6 @@ test("the board, the ticket panel and My tickets against a real daemon", async (
     await page.waitForTimeout(100);
     await page.keyboard.press("Space");
     await until("moved by keyboard", async () => ((await read()).todo as string[]).includes("First ticket"));
-
-    await nav(page, "My tickets");
-    await expect(page.getByRole("heading", { name: "My tickets" })).toBeVisible();
-    await page.getByRole("button", { name: /^Created by me/ }).click();
-    await expect(page.getByRole("button", { name: /Second ticket, renamed/ })).toBeVisible();
-    await page.getByRole("button", { name: /Second ticket, renamed/ }).click();
-    await expect(page.getByRole("complementary", { name: /Second ticket, renamed/ })).toBeVisible();
 
     await page.keyboard.press("Control+7");
     await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
@@ -718,10 +711,6 @@ test("shots", async ({ page }) => {
   await expect(page.getByText("In review · your decision")).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({ path: join(out, "board.png") });
-  await nav(page, "My tickets");
-  await expect(page.getByRole("heading", { name: "My tickets" })).toBeVisible();
-  await page.waitForTimeout(300);
-  await page.screenshot({ path: join(out, "my.png") });
   await page.goto(`${site.origin}/tasks`);
   await expect(page.getByText("Write the regression test").first()).toBeVisible();
   await page.waitForTimeout(300);

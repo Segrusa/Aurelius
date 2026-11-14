@@ -15,7 +15,6 @@ import {
   dropEffect,
   feedbackLabel,
   foldUpdates,
-  inMyTab,
   isChoosing,
   latestPlan,
   loginWait,
@@ -285,15 +284,7 @@ describe("a ticket's panel", () => {
   });
 });
 
-describe("My tickets", () => {
-  it("sorts into the tabs", () => {
-    const t = ticket({ responsible_user_id: "me", created_by_user: "other" });
-    expect(inMyTab("responsible", t, [], "me", false)).toBe(true);
-    expect(inMyTab("created", t, [], "me", false)).toBe(false);
-    expect(inMyTab("following", t, ["t"], "me", false)).toBe(true);
-    expect(inMyTab("waiting", t, [], "me", true)).toBe(true);
-  });
-
+describe("the Testing column", () => {
   it("hides Testing on a server without it", () => {
     expect(columnShown("testing", false)).toBe(false);
     expect(columnShown("testing", true)).toBe(true);

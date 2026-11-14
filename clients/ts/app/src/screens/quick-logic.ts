@@ -26,7 +26,7 @@ export function quickTag(t: { kind?: string | null }, enabled: boolean): string 
   return enabled && isQuick(t) ? "Quick" : null;
 }
 
-/** The board's and My tickets' choice: every ticket, or only quick tasks. */
+/** The board's choice: every ticket, or only quick tasks. */
 export type KindFilter = "all" | "quick";
 
 export function kindMatches(filter: KindFilter, t: { kind?: string | null }): boolean {

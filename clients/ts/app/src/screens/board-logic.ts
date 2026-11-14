@@ -431,30 +431,6 @@ export function latestPlan(messages: { update?: string | null; text: string }[])
   return null;
 }
 
-export type MyTab = "responsible" | "created" | "following" | "waiting";
-
-export const MY_TABS: { key: MyTab; label: string; empty: string }[] = [
-  {
-    key: "responsible",
-    label: "Responsible",
-    empty: "You're not responsible for any open ticket. You'd follow up and review; employees do the work.",
-  },
-  { key: "created", label: "Created by me", empty: "You haven't created a ticket yet." },
-  {
-    key: "following",
-    label: "Following",
-    empty:
-      "You don't follow any open ticket. You follow one by creating it, becoming responsible, being @mentioned or pressing F.",
-  },
-  { key: "waiting", label: "Waiting on me", empty: "Nothing waits for you." },
-];
-
-export function inMyTab(tab: MyTab, t: TicketView, following: string[], me: string | null, mine: boolean): boolean {
-  if (tab === "responsible") return t.responsible_user_id === me;
-  if (tab === "created") return t.created_by_user === me;
-  return tab === "following" ? following.includes(t.id) : mine;
-}
-
 /** What keeps the column names from being saved, or null. */
 export function columnsProblem(columns: { name: string; title: string }[]): string | null {
   const blank = columns.find((c) => c.name === "");
