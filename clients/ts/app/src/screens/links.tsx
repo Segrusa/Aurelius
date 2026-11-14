@@ -34,10 +34,6 @@ export function LinkFollower({ children }: { children: ReactNode }) {
       try {
         const body = await connection.call("message.locate", { message_id: link.id });
         const place = expectBody(body, "message_location").value;
-        if (place.ticket_id) {
-          void navigate({ to: "/board", search: { ticket: place.ticket_id, message: place.message_id } });
-          return;
-        }
         void navigate({
           to: "/chat",
           search: {

@@ -50,14 +50,12 @@ import {
   loginWait,
   ownerChoosable,
   PRIORITIES,
-  peopleCount,
   priorityLabel,
   runLocked,
   suggestedReplies,
   takeOverOffered,
   testingNote,
 } from "./board-logic";
-import { TicketChat } from "./chat";
 import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
@@ -472,7 +470,9 @@ function ReviewGate({
     setFeedback("");
   });
   const navigate = useNavigate();
-  const discussion = useMessages(t.conversation_id);
+  const { features } = useLinkState();
+  // The discussion is the ticket's channel in the chat; an older server without ticket channels has none to open.
+  const discussion = useMessages(features.includes("ticket_channels") ? t.conversation_id : null);
   const lastMessage = (discussion.data?.messages ?? []).filter((m) => !m.deleted_at_ms).at(-1);
   const reply = (text: string) =>
     send(async (confirmSecret) => {
@@ -571,7 +571,9 @@ function ReviewGate({
         {lastMessage ? (
           <Button
             label="Open discussion"
-            onClick={() => void navigate({ to: "/board", search: { ticket: t.id, message: lastMessage.id } })}
+            onClick={() =>
+              void navigate({ to: "/chat", search: { channel: t.conversation_id, message: lastMessage.id } })
+            }
           />
         ) : null}
         {t.root_task_id ? (
@@ -946,9 +948,9 @@ function Activity({ id }: { id: string }) {
   );
 }
 
-type Section = "ticket" | "discussion" | "activity";
+type Section = "ticket" | "activity";
 
-export function TicketPanel({ id, onClose, message }: { id: string; onClose: () => void; message?: string }) {
+export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }) {
   const platform = usePlatform();
   const { hostId } = useLinkState();
   useKeyContext("TicketPanel");
@@ -962,7 +964,7 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
   const models = useModels();
   const write = useTicketWrite();
   const members = useMembers();
-  const [tab, setTab] = useState<Section>(message ? "discussion" : "ticket");
+  const [tab, setTab] = useState<Section>("ticket");
   // Done or Backlog of a quick task from the More menu: merging and losing its branch are asked first.
   const [asking, setAsking] = useState<"done" | "backlog" | null>(null);
   const t = detail.data?.ticket;
@@ -970,7 +972,6 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
   const need = useTicketNeeds(list);
   const rootConversation = detail.data?.root_task?.conversation_id;
   const rootMessages = useMessages(t?.column === "plan_review" ? rootConversation : null);
-  const discussion = useMessages(t?.conversation_id);
   const activity = useTicketActivity(t?.review_feedback ? id : null);
   const tasks = useMemo(() => foldTree(treeOrder(detail.data?.tasks ?? []), {}), [detail.data?.tasks]);
 
@@ -1012,7 +1013,6 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
       : dispatcher.kind === "inactive"
         ? `${dispatcher.name} is ${dispatcher.state}. Choose an employee.`
         : `${dispatcher.name} could not choose. Choose an employee.`;
-  const count = peopleCount((discussion.data?.messages ?? []).filter((m) => !m.deleted_at_ms && !m.thread_parent));
   const update = (params: Record<string, unknown>) =>
     write("ticket.update", { ticket_id: t.id, ...params } as never, { expectedVersion: t.version });
   const columns = (board.data?.columns ?? []).filter((c) => c.column.kind !== t.column);
@@ -1248,9 +1248,6 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
               {(
                 [
                   ["ticket", "Ticket"],
-                  ...(features.includes("ticket_discussion")
-                    ? ([["discussion", count > 0 ? `Discussion ${count}` : "Discussion"]] as [Section, string][])
-                    : []),
                   ["activity", "Activity"],
                 ] as [Section, string][]
               ).map(([key, label]) => (
@@ -1259,138 +1256,123 @@ export function TicketPanel({ id, onClose, message }: { id: string; onClose: () 
             </TabList>
           </div>
           <div id="ticket-section" role="tabpanel" aria-label="Ticket section" {...stylex.props(styles.tabPanel)}>
-            {tab === "discussion" ? (
-              t.conversation_id ? (
-                <TicketChat
-                  key={t.conversation_id}
-                  conversationId={t.conversation_id}
-                  ticketId={t.id}
-                  {...(message ? { message } : {})}
-                />
-              ) : null
-            ) : (
-              <div {...stylex.props(styles.section)}>
-                {tab === "activity" ? (
-                  <Activity id={t.id} />
-                ) : (
-                  <>
-                    {t.review_feedback && t.column === "doing" ? (
-                      <Box>
-                        <span {...stylex.props(styles.sectionLabel)}>{feedbackLabel(activity.data)}</span>
-                        <span>{t.review_feedback}</span>
-                      </Box>
+            <div {...stylex.props(styles.section)}>
+              {tab === "activity" ? (
+                <Activity id={t.id} />
+              ) : (
+                <>
+                  {t.review_feedback && t.column === "doing" ? (
+                    <Box>
+                      <span {...stylex.props(styles.sectionLabel)}>{feedbackLabel(activity.data)}</span>
+                      <span>{t.review_feedback}</span>
+                    </Box>
+                  ) : null}
+                  <Editable
+                    label="Description"
+                    value={t.description ?? ""}
+                    enabled={open}
+                    multiline
+                    display={
+                      t.description?.trim() ? (
+                        <Markdown text={t.description} />
+                      ) : (
+                        <span {...stylex.props(styles.third)}>No description.</span>
+                      )
+                    }
+                    onSave={(description) => update({ description })}
+                  />
+                  <div {...stylex.props(styles.rows)}>
+                    <Row name="Project">{t.project_name}</Row>
+                    <Row name="Labels">
+                      <Editable
+                        label="Labels"
+                        value={t.labels.join(", ")}
+                        enabled={open}
+                        placeholder="backend, ui"
+                        display={
+                          t.labels.length > 0 ? t.labels.join(", ") : <span {...stylex.props(styles.third)}>None</span>
+                        }
+                        onSave={(text) => update({ labels: parseLabels(text) })}
+                      />
+                    </Row>
+                    <Row name="Deadline">
+                      <Editable
+                        label="Deadline"
+                        value={t.deadline_ms ? deadlineInput(t.deadline_ms, -new Date().getTimezoneOffset()) : ""}
+                        enabled={open}
+                        placeholder="2026-11-04 or 2026-11-04 17:00"
+                        display={
+                          t.deadline_ms ? time(t.deadline_ms) : <span {...stylex.props(styles.third)}>None</span>
+                        }
+                        onSave={async (text) => {
+                          try {
+                            const ms = parseDeadline(text, -new Date().getTimezoneOffset());
+                            return await update(ms === null ? { clear_deadline: true } : { deadline_ms: ms });
+                          } catch (e) {
+                            toast((e as Error).message);
+                            return false;
+                          }
+                        }}
+                      />
+                    </Row>
+                    {features.includes(DESIGN_FEATURE) ? (
+                      <DesignRow
+                        url={t.design_url ?? null}
+                        enabled={open}
+                        onSave={async (text) => {
+                          const problem = artifactProblem(text);
+                          if (problem) {
+                            toast(problem);
+                            return false;
+                          }
+                          return update({ design_url: text.trim() });
+                        }}
+                      />
                     ) : null}
-                    <Editable
-                      label="Description"
-                      value={t.description ?? ""}
-                      enabled={open}
-                      multiline
-                      display={
-                        t.description?.trim() ? (
-                          <Markdown text={t.description} />
-                        ) : (
-                          <span {...stylex.props(styles.third)}>No description.</span>
-                        )
-                      }
-                      onSave={(description) => update({ description })}
-                    />
-                    <div {...stylex.props(styles.rows)}>
-                      <Row name="Project">{t.project_name}</Row>
-                      <Row name="Labels">
-                        <Editable
-                          label="Labels"
-                          value={t.labels.join(", ")}
-                          enabled={open}
-                          placeholder="backend, ui"
-                          display={
-                            t.labels.length > 0 ? (
-                              t.labels.join(", ")
-                            ) : (
-                              <span {...stylex.props(styles.third)}>None</span>
-                            )
-                          }
-                          onSave={(text) => update({ labels: parseLabels(text) })}
-                        />
+                    {features.includes("ticket_responsible") ? (
+                      <Row name="Responsible">
+                        {t.responsible_username ?? <span {...stylex.props(styles.third)}>No one</span>}
                       </Row>
-                      <Row name="Deadline">
-                        <Editable
-                          label="Deadline"
-                          value={t.deadline_ms ? deadlineInput(t.deadline_ms, -new Date().getTimezoneOffset()) : ""}
-                          enabled={open}
-                          placeholder="2026-11-04 or 2026-11-04 17:00"
-                          display={
-                            t.deadline_ms ? time(t.deadline_ms) : <span {...stylex.props(styles.third)}>None</span>
-                          }
-                          onSave={async (text) => {
-                            try {
-                              const ms = parseDeadline(text, -new Date().getTimezoneOffset());
-                              return await update(ms === null ? { clear_deadline: true } : { deadline_ms: ms });
-                            } catch (e) {
-                              toast((e as Error).message);
-                              return false;
-                            }
-                          }}
-                        />
-                      </Row>
-                      {features.includes(DESIGN_FEATURE) ? (
-                        <DesignRow
-                          url={t.design_url ?? null}
-                          enabled={open}
-                          onSave={async (text) => {
-                            const problem = artifactProblem(text);
-                            if (problem) {
-                              toast(problem);
-                              return false;
-                            }
-                            return update({ design_url: text.trim() });
-                          }}
-                        />
-                      ) : null}
-                      {features.includes("ticket_responsible") ? (
-                        <Row name="Responsible">
-                          {t.responsible_username ?? <span {...stylex.props(styles.third)}>No one</span>}
-                        </Row>
-                      ) : null}
-                      <Row name="Runs on">
-                        {t.login_user === need.me ? "Your Claude login" : `${t.login_username}'s Claude login`}
-                      </Row>
-                      <Row name="Created by">{`${t.created_by_username} · ${time(t.created_at_ms)}`}</Row>
-                      {features.includes("ticket_follow") ? <Followers id={t.id} /> : null}
-                      <Row name="Files">
-                        <span {...stylex.props(styles.files)}>
-                          <FileChips files={t.attachments} />
-                          {t.column === "done" ? null : (
-                            <Button label="Add files…" onClick={() => platform.pickFiles().then(addFiles, addFailed)} />
-                          )}
-                        </span>
-                      </Row>
+                    ) : null}
+                    <Row name="Runs on">
+                      {t.login_user === need.me ? "Your Claude login" : `${t.login_username}'s Claude login`}
+                    </Row>
+                    <Row name="Created by">{`${t.created_by_username} · ${time(t.created_at_ms)}`}</Row>
+                    {features.includes("ticket_follow") ? <Followers id={t.id} /> : null}
+                    <Row name="Files">
+                      <span {...stylex.props(styles.files)}>
+                        <FileChips files={t.attachments} />
+                        {t.column === "done" ? null : (
+                          <Button label="Add files…" onClick={() => platform.pickFiles().then(addFiles, addFailed)} />
+                        )}
+                      </span>
+                    </Row>
+                  </div>
+                  {tasks.length > 0 ? (
+                    <div {...stylex.props(styles.tasks)}>
+                      <span {...stylex.props(styles.sectionLabel)}>Tasks ({detail.data?.tasks.length})</span>
+                      {tasks.map(({ task, depth }) => {
+                        const state = taskStateLine(task);
+                        return (
+                          <button
+                            key={task.id}
+                            type="button"
+                            onClick={() => void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } })}
+                            {...stylex.props(styles.task)}
+                            style={{ paddingLeft: 4 + 16 * depth }}
+                          >
+                            <span {...stylex.props(styles.taskTitle)}>{task.title}</span>
+                            <span {...stylex.props(styles.taskState)} style={{ color: state.color }}>
+                              {state.text}
+                            </span>
+                          </button>
+                        );
+                      })}
                     </div>
-                    {tasks.length > 0 ? (
-                      <div {...stylex.props(styles.tasks)}>
-                        <span {...stylex.props(styles.sectionLabel)}>Tasks ({detail.data?.tasks.length})</span>
-                        {tasks.map(({ task, depth }) => {
-                          const state = taskStateLine(task);
-                          return (
-                            <button
-                              key={task.id}
-                              type="button"
-                              onClick={() => void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } })}
-                              {...stylex.props(styles.task)}
-                              style={{ paddingLeft: 4 + 16 * depth }}
-                            >
-                              <span {...stylex.props(styles.taskTitle)}>{task.title}</span>
-                              <span {...stylex.props(styles.taskState)} style={{ color: state.color }}>
-                                {state.text}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            )}
+                  ) : null}
+                </>
+              )}
+            </div>
           </div>
         </div>
       </LayoutPanel>

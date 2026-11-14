@@ -491,11 +491,6 @@ export function foldUpdates<M extends { id: string; system?: unknown }>(
   return { shown, earlier };
 }
 
-/** People's words, not the lines about what happened. */
-export function peopleCount(list: { id: string; system?: unknown }[]): number {
-  return list.filter((m) => !m.system).length;
-}
-
 /** A ready-made reply to a report: what the button says and what the owner is told. */
 export interface SuggestedReply {
   label: string;
