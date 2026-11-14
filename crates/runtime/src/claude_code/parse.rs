@@ -719,6 +719,16 @@ mod tests {
     }
 
     #[test]
+    fn the_report_tools_of_a_ticket_run_are_part_of_a_work_profile() {
+        let bridge = crate::ApprovalBridge { program: "x".into(), args: vec![] };
+        let p = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
+        // The bridge offers report_ready (--report, ticket #46) and report_test_result (--testing);
+        // a run offered them was stopped at init (ticket #54).
+        let init = r#"{"type":"system","subtype":"init","tools":["Bash","mcp__aurelius__approve","mcp__aurelius__report_ready","mcp__aurelius__report_test_result"],"mcp_servers":[{"name":"aurelius"}]}"#;
+        assert!(StreamState::for_profile(&p).feed(init).is_ok());
+    }
+
+    #[test]
     fn browser_is_off_unless_asked_for() {
         let bridge = || crate::ApprovalBridge { program: "ctl".into(), args: vec![] };
         let off = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge(), browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
