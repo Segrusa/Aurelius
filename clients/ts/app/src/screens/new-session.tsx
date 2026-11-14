@@ -6,7 +6,6 @@ import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { TextArea } from "@astryxdesign/core/TextArea";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -17,8 +16,7 @@ import { isMac, useAction, useKeyContext, useKeys } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { AttachRow, useAttachments } from "../ui/attach";
 import { Chip } from "../ui/chip";
-import { NewIcon } from "../ui/icons";
-import { KeyHint } from "../ui/key-hint";
+import { ArrowUpIcon, PlusIcon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
@@ -123,17 +121,76 @@ const styles = stylex.create({
     paddingInline: 16,
     paddingBlockEnd: 24,
   },
+  // The input as in a chat app: a rounded card with the text on top and its own actions under it,
+  // and a tray tucked under the card with where and by whom the work goes.
+  stack: { display: "flex", flexDirection: "column" },
   composer: {
+    position: "relative",
+    zIndex: 1,
     display: "flex",
-    alignItems: "flex-start",
-    gap: 6,
-    borderRadius: "var(--radius-container)",
+    flexDirection: "column",
+    gap: 4,
+    borderRadius: 20,
     borderWidth: 1,
     borderStyle: "solid",
-    borderColor: "var(--color-border)",
-    padding: 6,
+    borderColor: { default: "var(--color-border)", ":focus-within": "var(--color-border-emphasized)" },
+    backgroundColor: "var(--color-background-card)",
+    boxShadow: "var(--precision-card-shadow)",
+    paddingBlock: 12,
+    paddingInline: 12,
   },
-  composerField: { minWidth: 0, flexGrow: 1 },
+  textarea: {
+    display: "block",
+    width: "100%",
+    resize: "none",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    paddingBlock: 2,
+    paddingInline: 6,
+    fontFamily: "inherit",
+    fontSize: 15,
+    lineHeight: 1.45,
+    color: "var(--color-text-primary)",
+    outlineStyle: { default: "none", ":focus-visible": "none" },
+    "::placeholder": { color: "var(--precision-text3)" },
+    ":disabled": { cursor: "not-allowed" },
+  },
+  bar: { display: "flex", alignItems: "center", gap: 4 },
+  send: {
+    display: "inline-flex",
+    flexShrink: 0,
+    width: 34,
+    height: 34,
+    cursor: { default: "pointer", ":disabled": "not-allowed" },
+    alignItems: "center",
+    justifyContent: "center",
+    marginInlineStart: 4,
+    borderWidth: 0,
+    borderRadius: 999,
+    backgroundColor: { default: "var(--color-accent)", ":disabled": "var(--color-overlay-hover)" },
+    color: { default: "var(--color-on-accent)", ":disabled": "var(--precision-text3)" },
+    outline: { default: "none", ":focus-visible": "2px solid var(--focus-outline-color)" },
+    outlineOffset: 2,
+  },
+  tray: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 4,
+    // Starts under the card's rounded bottom, so the card seems to rest on it.
+    marginBlockStart: -20,
+    marginInline: 12,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderEndStartRadius: 14,
+    borderEndEndRadius: 14,
+    backgroundColor: "var(--color-background-muted)",
+    paddingInline: 8,
+    paddingBlockStart: 26,
+    paddingBlockEnd: 6,
+  },
   noteLine: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: 12 },
   note: { marginInlineEnd: "auto", color: "var(--precision-text3)" },
   textButton: {
@@ -145,8 +202,7 @@ const styles = stylex.create({
     fontSize: 12,
     color: "var(--color-text-accent)",
   },
-  chips: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 },
-  group: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 },
+  group: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 },
   right: { marginInlineStart: "auto" },
 });
 
@@ -390,45 +446,71 @@ export function NewSessionScreen() {
           {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
           {error ? <Banner status="error" role="alert" title={error} /> : null}
           {attach.files.length > 0 ? <AttachRow attach={attach} /> : null}
-          <div {...stylex.props(styles.composer)}>
-            <IconButton label="Add files" icon={<NewIcon />} variant="ghost" size="sm" onClick={attach.pick} />
-            <TextArea
-              ref={composer}
-              label="What needs doing"
-              isLabelHidden
-              placeholder={placeholderOf(kind)}
-              rows={composerRows(text)}
-              value={text}
-              onChange={write}
-              isDisabled={noProjects}
-              containerXstyle={styles.composerField}
-            />
-          </div>
-          <div {...stylex.props(styles.noteLine)}>
-            <span {...stylex.props(styles.note)}>
-              {footer.type === "no_connection" ? <NoConnectionNote /> : footer.text}
-            </span>
-            {kind === "ticket" && project ? (
-              <button
-                type="button"
-                onClick={() =>
-                  overlays.open("ticket", { projectId: project.id, title: titleOfGoal(text), description: text.trim() })
-                }
-                {...stylex.props(styles.textButton)}
-              >
-                More options
-              </button>
-            ) : null}
-          </div>
-          <div {...stylex.props(styles.chips)}>
-            <div {...stylex.props(styles.group)}>
+          <div {...stylex.props(styles.stack)}>
+            <div {...stylex.props(styles.composer)}>
+              <textarea
+                ref={composer}
+                aria-label="What needs doing"
+                placeholder={placeholderOf(kind)}
+                rows={composerRows(text)}
+                value={text}
+                onChange={(e) => write(e.target.value)}
+                disabled={noProjects}
+                {...stylex.props(styles.textarea)}
+              />
+              <div {...stylex.props(styles.bar)}>
+                <IconButton
+                  label="Add files"
+                  tooltip="Add files"
+                  icon={<PlusIcon />}
+                  variant="ghost"
+                  size="sm"
+                  onClick={attach.pick}
+                />
+                <div {...stylex.props(styles.group, styles.right)}>
+                  <Menu
+                    label="Model"
+                    value={model}
+                    options={models}
+                    onPick={setModel}
+                    trigger={
+                      <Chip name="Model" quiet>
+                        {models.find((m) => m.key === model)?.label ?? "Default"}
+                      </Chip>
+                    }
+                  />
+                  <Menu
+                    label="Effort"
+                    value={effort}
+                    options={EFFORTS.map((e) => ({ key: e, label: e === "default" ? "Default" : e }))}
+                    onPick={setEffort}
+                    trigger={
+                      <Chip name="Effort" quiet>
+                        {effort === "default" ? "Default" : effort}
+                      </Chip>
+                    }
+                  />
+                  <button
+                    type="button"
+                    aria-label={`Start (${showChord("secondary-enter", isMac)})`}
+                    title={problem ?? `Start (${showChord("secondary-enter", isMac)})`}
+                    disabled={problem !== null || busy}
+                    onClick={start}
+                    {...stylex.props(styles.send)}
+                  >
+                    <ArrowUpIcon />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div {...stylex.props(styles.tray)}>
               <Menu
                 label="Project"
                 {...(projectId ? { value: projectId } : {})}
                 options={shown.map((p) => ({ key: p.id, label: p.name }))}
                 onPick={pickProject}
                 trigger={
-                  <Chip name="Project">
+                  <Chip name="Project" quiet>
                     {project ? (
                       <>
                         <Mark letter={initial(project.name)} color={markColor(project.id)} size={14} radius={3} />
@@ -456,23 +538,11 @@ export function NewSessionScreen() {
                 {...(whoId ? { value: whoId } : {})}
                 options={whoOptions}
                 onPick={setWho}
-                trigger={<Chip name="Who">{whoLabel}</Chip>}
-              />
-            </div>
-            <div {...stylex.props(styles.group, styles.right)}>
-              <Menu
-                label="Model"
-                value={model}
-                options={models}
-                onPick={setModel}
-                trigger={<Chip name="Model">{models.find((m) => m.key === model)?.label ?? "Default"}</Chip>}
-              />
-              <Menu
-                label="Effort"
-                value={effort}
-                options={EFFORTS.map((e) => ({ key: e, label: e === "default" ? "Default" : e }))}
-                onPick={setEffort}
-                trigger={<Chip name="Effort">{effort === "default" ? "Default" : effort}</Chip>}
+                trigger={
+                  <Chip name="Who" quiet>
+                    {whoLabel}
+                  </Chip>
+                }
               />
               {kind === "ticket" ? (
                 <Menu
@@ -484,22 +554,33 @@ export function NewSessionScreen() {
                   }))}
                   onPick={setMode}
                   trigger={
-                    <Chip name="Mode">
+                    <Chip name="Mode" quiet>
                       {mode === "default" ? "Owner's default" : MODES.find((m) => m.key === mode)?.label}
                     </Chip>
                   }
                 />
               ) : null}
-              <Button
-                label="Start"
-                variant="primary"
-                isDisabled={problem !== null || busy}
-                onClick={start}
-                {...(problem ? { tooltip: problem } : {})}
-              >
-                Start <KeyHint onAccent>{showChord("secondary-enter", isMac)}</KeyHint>
-              </Button>
+              {kind === "ticket" && project ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    overlays.open("ticket", {
+                      projectId: project.id,
+                      title: titleOfGoal(text),
+                      description: text.trim(),
+                    })
+                  }
+                  {...stylex.props(styles.textButton, styles.right)}
+                >
+                  More options
+                </button>
+              ) : null}
             </div>
+          </div>
+          <div {...stylex.props(styles.noteLine)}>
+            <span {...stylex.props(styles.note)}>
+              {footer.type === "no_connection" ? <NoConnectionNote /> : footer.text}
+            </span>
           </div>
         </div>
       </div>

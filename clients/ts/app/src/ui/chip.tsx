@@ -19,18 +19,21 @@ const styles = stylex.create({
     fontSize: 12,
     color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
   },
+  // Inside a composer the chips sit on its surface like text, as in a chat app's input.
+  quiet: { borderColor: "transparent" },
   name: { color: "var(--precision-text3)" },
 });
 
 /** The design's little choices with a name in front: "Priority Normal". Opens a menu or cycles. */
 export function Chip({
   name,
+  quiet = false,
   children,
   className: _ignored,
   ...props
-}: { name?: string; children: ReactNode } & ButtonHTMLAttributes<HTMLButtonElement>) {
+}: { name?: string; quiet?: boolean; children: ReactNode } & ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button type="button" {...stylex.props(styles.chip)} {...props}>
+    <button type="button" {...stylex.props(styles.chip, quiet && styles.quiet)} {...props}>
       {name ? <span {...stylex.props(styles.name)}>{name}</span> : null}
       {children}
     </button>
