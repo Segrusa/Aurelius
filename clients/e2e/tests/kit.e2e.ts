@@ -109,13 +109,15 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
 
     // New ticket: the choices arrive, a wrong date is said, and the fields end up on the server.
     await page.getByRole("button", { name: "New ticket" }).click();
-    const title = page.getByLabel("Title");
+    // In the dialog: after a create the new ticket's chat is open behind it, with fields of its own.
+    const form = page.getByRole("dialog");
+    const title = form.getByLabel("Title");
     await expect(title).toBeFocused();
     await title.fill("Add rate limits");
     await page.keyboard.press("j");
     await expect(title).toHaveValue("Add rate limitsj");
     await title.fill("Add rate limits");
-    await page.getByLabel("Description").fill("Per **key**.");
+    await form.getByLabel("Description").fill("Per **key**.");
     await page.getByRole("button", { name: "Priority" }).click();
     await page.getByRole("menuitem", { name: "High" }).click();
     await page.getByRole("button", { name: "Owner" }).click();
@@ -139,7 +141,7 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     // A text with a vault value is held, and goes on purpose. Create and start stays Create and start.
     await page.keyboard.press("Control+t");
     await title.fill("Rotate the key");
-    await page.getByLabel("Description").fill("The key is hunter2-very-secret-value");
+    await form.getByLabel("Description").fill("The key is hunter2-very-secret-value");
     await page.keyboard.press("Control+Enter");
     await expect(page.locator('[role="alert"]:not([data-astryx-live-region])')).toContainText("Deploy key");
     expect((await tickets()).some((t) => t.title === "Rotate the key")).toBe(false);
@@ -149,7 +151,10 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
       (await tickets()).find((t) => t.title === "Rotate the key" && t.column !== "backlog"),
     );
 
-    // Give work: the top of the org chart by default, a ticket started at once.
+    // Give work: the top of the org chart by default, a ticket started at once. The create above opened
+    // the ticket's chat; n is Give work on the Inbox.
+    await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
+    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     await page.keyboard.press("n");
     const goal = page.getByLabel("What needs doing");
     await expect(goal).toBeFocused();
@@ -160,7 +165,10 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     const given = (await tickets()).find((t) => t.owner_name === "Ava");
     expect([...(given?.title ?? "")]).toHaveLength(61);
 
-    // Someone else, through the menu; the next time starts from whom it went to last.
+    // Someone else, through the menu; the next time starts from whom it went to last. Give work opened
+    // its ticket's chat too.
+    await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
+    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     await page.keyboard.press("n");
     await page.getByRole("button", { name: "Someone else" }).click();
     await page.getByRole("menuitem", { name: "Ben" }).click();
@@ -170,7 +178,8 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     expect((await tickets()).find((t) => t.title === "Fix the build")?.owner_name).toBe("Ben");
     expect(await page.evaluate(() => localStorage.getItem("aurelius.last_given_to"))).toBeTruthy();
 
-    // The screen counter kept the desktop's numbers and adds its own, on this device only.
+    // The screen counter kept the desktop's numbers and adds its own, on this device only: the seeded 3
+    // Board opens stay 3, since the tickets made here opened in the chat, not on the Board.
     await until(
       "the counter saved",
       () =>

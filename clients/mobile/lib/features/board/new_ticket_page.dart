@@ -187,13 +187,22 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
       messenger.showSnackBar(SnackBar(
         // P-36 (QA3 M-m2): a new ticket runs on the own login; without one it waits.
         content: Text(start ? '#$number created and started.${waitsForMyLogin(repository.linkState, repository.linkState.user?.id) ? ' $waitsForLoginNote' : ''}' : '#$number created in Backlog.'),
-        action: ticketId == null ? null : SnackBarAction(label: 'Open', onPressed: () => router.push('/ticket/$ticketId')),
       ));
-      if (mounted && context.canPop()) context.pop();
+      _openCreated(router, ticketId);
     } on Object catch (e) {
       if (mounted) toast(context, ticketFailure(e));
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// The new ticket's chat takes this form's place, so Back returns to where
+  /// New ticket was opened (ticket #58).
+  void _openCreated(GoRouter router, String? ticketId) {
+    if (ticketId != null) {
+      router.pushReplacement(ticketChatPlace(ticketId));
+    } else if (mounted && context.canPop()) {
+      context.pop();
     }
   }
 
@@ -233,9 +242,8 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
       final ticketId = switch (receipt.command) { CommandResultTicketCreated(:final ticketId) => ticketId, _ => null };
       messenger.showSnackBar(SnackBar(
         content: Text('Quick task #$number started with $name.${waitsForMyLogin(link, link.user?.id) ? ' $waitsForLoginNote' : ''}'),
-        action: ticketId == null ? null : SnackBarAction(label: 'Open', onPressed: () => router.push('/ticket/$ticketId')),
       ));
-      if (mounted && context.canPop()) context.pop();
+      _openCreated(router, ticketId);
     } on Object catch (e) {
       if (mounted) toast(context, ticketFailure(e));
     } finally {

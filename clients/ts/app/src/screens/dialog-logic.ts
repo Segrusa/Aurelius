@@ -1,6 +1,6 @@
 // The rules of New ticket and Give work, pure.
 
-import type { MethodParams, TaskRun, TicketPriority } from "@aurelius/protocol";
+import type { MethodParams, Receipt, TaskRun, TicketPriority } from "@aurelius/protocol";
 
 /** A normal ticket from New ticket. It never names a kind: an older server refuses a field it does not know. */
 export interface TicketForm {
@@ -39,6 +39,25 @@ export function ticketCreateParams(form: TicketForm, confirmSecret: boolean): Me
     ...(form.fromMessage ? { from_message: form.fromMessage } : {}),
     ...(form.fromIdea ? { from_idea: form.fromIdea } : {}),
   };
+}
+
+/** The new ticket in the answer to `ticket.create`, so the dialog can open its chat; null for any other answer. */
+export function createdTicketId(receipt: Receipt): string | null {
+  const { result } = receipt;
+  return result.kind === "command" && result.value.type === "ticket_created" ? result.value.ticket_id : null;
+}
+
+/**
+ * Where a new ticket opens: its channel in Chat, which is its discussion since the panel has none
+ * (ticket #56); on the Board when there is no channel to open (an older server, or the read failed).
+ */
+export function createdTicketPlace(
+  ticketId: string,
+  conversationId: string | null,
+): { to: "/chat"; search: { channel: string } } | { to: "/board"; search: { ticket: string } } {
+  return conversationId
+    ? { to: "/chat", search: { channel: conversationId } }
+    : { to: "/board", search: { ticket: ticketId } };
 }
 
 const WRONG = "Write the date as 2026-11-03, optionally with a time: 2026-11-03 17:00.";
