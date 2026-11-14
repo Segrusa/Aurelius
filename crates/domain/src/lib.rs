@@ -19,6 +19,7 @@ pub mod events;
 pub mod files;
 pub mod group_chat;
 pub mod guideline;
+pub mod history;
 pub mod idea;
 pub mod ids;
 pub mod job;

@@ -244,14 +244,21 @@ pub struct Extraction {
 /// The ticket summary is cut here (the "#n “title”" line included).
 pub const TICKET_SUMMARY_MAX_CHARS: usize = 800;
 
+/// What a ticket delivered, without its head: the model's summary, else what
+/// the extraction kept for the project; none when both are empty. The memory
+/// (`ticket_summary`) and the ticket's History row (ticket #57) share it.
+pub fn ticket_summary_body(summary: Option<&str>, kept: &[&str]) -> Option<String> {
+    let flat = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    summary.map(flat).filter(|s| !s.is_empty()).or_else(|| Some(kept.iter().map(|k| flat(k)).filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ")).filter(|s| !s.is_empty()))
+}
+
 /// The one project memory of a ticket that went to Done (MU1-18): it names the
 /// ticket by number and title. Without a usable summary from the model, what
 /// the extraction kept for the project stands in; without that, only the close.
 pub fn ticket_summary(number: u32, title: &str, summary: Option<&str>, kept: &[&str]) -> String {
     let flat = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let head = format!("Ticket #{number} “{}” is done", flat(title));
-    let body = summary.map(flat).filter(|s| !s.is_empty()).or_else(|| Some(kept.iter().map(|k| flat(k)).filter(|k| !k.is_empty()).collect::<Vec<_>>().join(" ")).filter(|s| !s.is_empty()));
-    let text = match body {
+    let text = match ticket_summary_body(summary, kept) {
         Some(body) => format!("{head}: {body}"),
         None => format!("{head}."),
     };

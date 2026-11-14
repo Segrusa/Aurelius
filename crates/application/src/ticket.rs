@@ -806,8 +806,10 @@ impl CommandService {
             if state.column != ColumnKind::Done {
                 return rejected(DomainError::Ticket("Only a ticket on Done has a summary to try again.".into()));
             }
-            if crate::memory::has_ticket_summary(tx, id)? {
-                return rejected(DomainError::Ticket("The summary is in the project's memory already.".into()));
+            // On the ticket already (ticket #57); for a ticket on Done before the History,
+            // its summary in memory counts (never a second item).
+            if aurelius_storage::history::has_summary(tx, id)? || (aurelius_storage::history::stored_state(tx, id)?.is_none() && crate::memory::has_ticket_summary(tx, id)?) {
+                return rejected(DomainError::Ticket("The ticket has its summary already.".into()));
             }
             if crate::memory::ticket_summary_pending(tx, id)? {
                 return rejected(DomainError::Ticket("The summary is being made; wait for it.".into()));
@@ -820,7 +822,10 @@ impl CommandService {
                 return rejected(DomainError::Ticket("This ticket was not accepted on the board; there is no summary to make.".into()));
             };
             crate::memory::schedule_ticket_summary(tx, root, id, source)?;
-            Ok(Ok((CommandResult::TicketChanged { ticket_id: id, column: state.column, version: state.version }, Vec::new())))
+            // An open History shows "Summarizing…" now (ticket #57).
+            let notices: Vec<EventNotice> = crate::memory::summary_changed(tx, id)?.into_iter().collect();
+            let version = store::state(tx, id)?.map_or(state.version, |s| s.version);
+            Ok(Ok((CommandResult::TicketChanged { ticket_id: id, column: state.column, version }, notices)))
         })
     }
 

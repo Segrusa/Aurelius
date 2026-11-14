@@ -316,3 +316,31 @@ fn the_quick_section_names_the_worktree_and_branch_and_forbids_main_and_push() {
     }
     assert!(crate::run::plan::quick_task_guidance(7, &dir.path().join("missing")).contains("could not be made yet"));
 }
+
+/// The History rows of the store, as (number, state).
+fn history(s: &Setup) -> Vec<(u32, aurelius_domain::history::HistorySummaryState)> {
+    let (rows, _) = s.service.store().read(|c| aurelius_storage::history::list(c, &aurelius_storage::history::Filter::default(), 50, crate::memory::EXTRACT_JOB_KIND)).unwrap();
+    rows.into_iter().map(|r| (r.number, r.summary_state)).collect()
+}
+
+#[test]
+fn a_quick_task_gets_its_summary_from_the_same_extraction_once_its_merge_put_it_on_done() {
+    let s = setup();
+    let id = quick(&s);
+    root_goes(&s, id, TaskStatus::Review);
+    accept(&s, id).unwrap();
+    // Approved but not merged: not Done, so not in the History and no extraction yet.
+    assert!(history(&s).is_empty());
+    assert_eq!(jobs(&s, crate::memory::EXTRACT_JOB_KIND), 0);
+
+    s.service.quick_merge_finished(id, s.user, MergeOutcome::Merged("0123456789abcdef".into())).unwrap();
+    // H-01 AC1: the main task's one extraction, with the ticket, as for a normal Done.
+    let ticket_jobs: u32 = s
+        .service
+        .store()
+        .read(move |c| Ok(c.query_row("SELECT COUNT(*) FROM jobs WHERE kind = ?1 AND json_extract(payload_json, '$.ticket_id') = ?2", [crate::memory::EXTRACT_JOB_KIND, &id.to_string()], |r| r.get(0))?))
+        .unwrap();
+    assert_eq!(ticket_jobs, 1);
+    let number = view(&s, id).number;
+    assert_eq!(history(&s), vec![(number, aurelius_domain::history::HistorySummaryState::Summarizing)], "on Done, its summary on the way");
+}
