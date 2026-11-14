@@ -7,9 +7,10 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { expectBody, ProtocolError } from "@aurelius/client";
-import type { AgentMode, TaskRun, TicketPriority } from "@aurelius/protocol";
+import type { AgentMode, Receipt, TaskRun, TicketPriority } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useEmployees, useMembers, useProjects } from "../data";
@@ -25,6 +26,8 @@ import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import {
+  createdTicketId,
+  createdTicketPlace,
   cycle,
   defaultAssignee,
   parseDeadline,
@@ -184,6 +187,40 @@ export function useSend(onDone: (text: string) => void) {
   };
 }
 
+/**
+ * Remembers the ticket a create made and opens it on its chat (its channel in Chat) once the dialog is done,
+ * so the board member lands where the work is discussed. Without ticket channels, or when the ticket
+ * cannot be read, it opens the ticket on the Board instead.
+ */
+function useOpenCreated() {
+  const navigate = useNavigate();
+  const connection = useConnection();
+  const { features } = useLinkState();
+  const client = useQueryClient();
+  const created = useRef<string | null>(null);
+  return {
+    remember: (receipt: Receipt) => {
+      created.current = createdTicketId(receipt);
+    },
+    open: () => {
+      const ticket = created.current;
+      created.current = null;
+      if (!ticket) return;
+      const go = (conversation: string | null) => void navigate(createdTicketPlace(ticket, conversation));
+      if (!features.includes("ticket_channels")) return go(null);
+      connection
+        .call("ticket.get", { ticket_id: ticket })
+        .then(async (body) => {
+          const conversation = expectBody(body, "ticket").value.ticket.conversation_id ?? null;
+          // Chat sends a channel it does not know back to general, and the cached list predates this one.
+          if (conversation) await client.invalidateQueries({ queryKey: ["messages", "channels"], refetchType: "all" });
+          go(conversation);
+        })
+        .catch(() => go(null));
+    },
+  };
+}
+
 export function Held({ names, onSend, busy }: { names: string[]; onSend: () => void; busy: boolean }) {
   return (
     <Banner
@@ -234,9 +271,11 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const [quickPick, setQuickPick] = useState<string | null>(null);
   const activeEmployees = (employees.data ?? []).filter((e) => e.status === "active");
   const quickWho = quickPick ?? quickAssignee(employees.data ?? [], storage.get(LAST_QUICK));
+  const created = useOpenCreated();
   const { busy, error, setError, held, send, sendAnyway } = useSend((text) => {
     toast(text);
     onClose();
+    created.open();
   });
   const project = projects.data?.find((p) => p.id === projectId) ?? projects.data?.[0];
   const ownerName = owner === "dispatcher" ? "Dispatcher" : employees.data?.find((e) => e.id === owner)?.name;
@@ -244,7 +283,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const createQuick = () => {
     if (!project || !quickWho || quickProblem({ description, employeeId: quickWho }) || busy) return;
     send(async (confirmSecret) => {
-      await connection.write(
+      const receipt = await connection.write(
         "ticket.create",
         quickCreateParams(
           {
@@ -259,6 +298,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
         ),
         { retry: false },
       );
+      created.remember(receipt);
       storage.set(LAST_QUICK, quickWho);
       const name = employees.data?.find((e) => e.id === quickWho)?.name ?? "the employee";
       return `Quick task started with ${name}.`;
@@ -283,7 +323,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
           ? null
           : responsible;
     send(async (confirmSecret) => {
-      await connection.write(
+      const receipt = await connection.write(
         "ticket.create",
         ticketCreateParams(
           {
@@ -305,6 +345,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
         ),
         { retry: false },
       );
+      created.remember(receipt);
       return start ? "Ticket created and started." : "Ticket created in Backlog.";
     });
   };
@@ -557,9 +598,11 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const quickOn = quickEnabled(features);
   const [kind, setKind] = useState<"work" | "quick">("work");
   const quick = quickOn && kind === "quick";
+  const created = useOpenCreated();
   const { busy, error, held, send, sendAnyway } = useSend((text) => {
     toast(text);
     onClose();
+    created.open();
   });
   const active = useMemo(() => (employees.data ?? []).filter((e) => e.status === "active"), [employees.data]);
   const roots = useMemo(() => rootsOf(active), [active]);
@@ -578,7 +621,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
     if (!project || !who || !ready || busy) return;
     if (quick) {
       send(async (confirmSecret) => {
-        await connection.write(
+        const receipt = await connection.write(
           "ticket.create",
           quickCreateParams(
             {
@@ -594,6 +637,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
           ),
           { retry: false },
         );
+        created.remember(receipt);
         storage.set(LAST_QUICK, who.id);
         return `Quick task started with ${who.name}.`;
       });
@@ -601,7 +645,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
     }
     send(async (confirmSecret) => {
       // A task only exists under a ticket: this one is for this employee, started at once.
-      await connection.write(
+      const receipt = await connection.write(
         "ticket.create",
         {
           project_id: project.id,
@@ -616,6 +660,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
         },
         { retry: false },
       );
+      created.remember(receipt);
       storage.set(LAST_GIVEN, who.id);
       return `Created and started with ${who.name}.`;
     });

@@ -74,6 +74,19 @@ void main() {
       expect(find.text('#52 created in Backlog.'), findsOneWidget);
     });
 
+    testWidgets('a created ticket opens on its discussion right away (ticket #58)', (tester) async {
+      final repo = boardRepository();
+      when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
+          .thenAnswer((_) async => receiptOf(const CommandResultTicketCreated(number: 52, ticketId: 'k52')));
+      final router = await pumpBoardPage(tester, repo, const NewTicketPage());
+      await tester.enterText(find.byKey(const ValueKey('new-ticket-title')), 'Columns');
+      await tester.tap(find.byKey(const ValueKey('new-ticket-create')));
+      await settleBoard(tester);
+      expect(router.state.uri.toString(), '/ticket/k52?tab=discussion');
+      expect(find.text('ticket k52'), findsOneWidget);
+      expect(find.text('#52 created in Backlog.'), findsOneWidget);
+    });
+
     testWidgets('Create and start: one deliberate click that says start (D-09)', (tester) async {
       final repo = await open(tester);
       await tester.enterText(find.byKey(const ValueKey('new-ticket-title')), 'Columns');

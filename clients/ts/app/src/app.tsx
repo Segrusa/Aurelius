@@ -67,17 +67,15 @@ const index = createRoute({
   },
 });
 const inbox = createRoute({ getParentRoute: () => root, path: "/inbox", component: InboxScreen });
-const ticketSearch = (search: Record<string, unknown>): { ticket?: string; message?: string } => ({
+const ticketSearch = (search: Record<string, unknown>): { ticket?: string } => ({
   ...(typeof search.ticket === "string" ? { ticket: search.ticket } : {}),
-  ...(typeof search.message === "string" ? { message: search.message } : {}),
 });
 const board = createRoute({
   getParentRoute: () => root,
   path: "/board",
   validateSearch: ticketSearch,
   component: function BoardRoute() {
-    const { ticket, message } = board.useSearch();
-    return <BoardScreen ticket={ticket} {...(message ? { message } : {})} />;
+    return <BoardScreen ticket={board.useSearch().ticket} />;
   },
 });
 const myTickets = createRoute({

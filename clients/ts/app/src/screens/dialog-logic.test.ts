@@ -1,5 +1,17 @@
+import type { Receipt } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import { cycle, defaultAssignee, parseDeadline, parseLabels, rootsOf, titleOfGoal } from "./dialog-logic";
+import {
+  createdTicketId,
+  createdTicketPlace,
+  cycle,
+  DIALOG_TOP,
+  defaultAssignee,
+  parseDeadline,
+  parseLabels,
+  rootsOf,
+  titleOfGoal,
+  topCentered,
+} from "./dialog-logic";
 
 describe("a deadline", () => {
   it("is empty, a date (the end of that day) or a date and time, in local time", () => {
@@ -55,5 +67,39 @@ describe("the rest", () => {
     expect(cycle(["a", "b"], "a")).toBe("b");
     expect(cycle(["a", "b"], "b")).toBe("a");
     expect(cycle(["a", "b"], "c")).toBe("a");
+  });
+});
+
+describe("a dialog pinned near the top", () => {
+  it("keeps its top and is centred by its width, never off the left edge", () => {
+    expect(topCentered(640)).toEqual({ top: DIALOG_TOP, start: "max(0px, calc((100vw - 640px) / 2))" });
+  });
+});
+
+describe("the ticket a create made", () => {
+  const receipt = (result: Receipt["result"]): Receipt => ({
+    committed_seq: 1,
+    idempotency_key: "k",
+    replayed: false,
+    result,
+  });
+
+  it("is the id in the answer to ticket.create, so the dialog can open its chat", () => {
+    expect(
+      createdTicketId(receipt({ kind: "command", value: { type: "ticket_created", number: 58, ticket_id: "t-58" } })),
+    ).toBe("t-58");
+  });
+
+  it("is none for any other answer", () => {
+    expect(
+      createdTicketId(
+        receipt({ kind: "command", value: { type: "ticket_changed", column: "doing", ticket_id: "t-1", version: 2 } }),
+      ),
+    ).toBeNull();
+  });
+
+  it("opens on its channel in Chat, or on the Board when there is no channel", () => {
+    expect(createdTicketPlace("t-58", "c-58")).toEqual({ to: "/chat", search: { channel: "c-58" } });
+    expect(createdTicketPlace("t-58", null)).toEqual({ to: "/board", search: { ticket: "t-58" } });
   });
 });
