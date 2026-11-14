@@ -339,7 +339,24 @@ const Message = memo(function Message({
   );
 });
 
-/** Only this re-renders while a run streams; the messages above it stay put. */
+/** The latest stream update of a conversation, or of one message in it when `messageId` is given. */
+function useStreamUpdate(conversationId: string, messageId?: string): StreamUpdate | null {
+  const connection = useConnection();
+  const [update, setUpdate] = useState<StreamUpdate | null>(null);
+  useEffect(
+    () =>
+      connection.streams.on(
+        (u) =>
+          u.conversation_id === conversationId &&
+          (messageId === undefined || u.message_id === messageId) &&
+          setUpdate(u),
+      ),
+    [connection, conversationId, messageId],
+  );
+  return update;
+}
+
+/** A new answer the list does not have yet: only this re-renders while it streams. */
 function Streaming({
   conversationId,
   name,
@@ -351,13 +368,32 @@ function Streaming({
   employeeId: string;
   known: Set<string>;
 }) {
-  const connection = useConnection();
-  const [update, setUpdate] = useState<StreamUpdate | null>(null);
-  useEffect(
-    () => connection.streams.on((u) => u.conversation_id === conversationId && setUpdate(u)),
-    [connection, conversationId],
-  );
+  const update = useStreamUpdate(conversationId);
   if (!update || known.has(update.message_id)) return null;
+  return <LiveAnswer update={update} name={name} employeeId={employeeId} />;
+}
+
+/**
+ * An answer the server saved halfway: it follows its own stream, so the saved half and the
+ * live answer are never shown both, one below the other.
+ */
+function PartialMessage({
+  m,
+  name,
+  employeeId,
+  conversationId,
+}: {
+  m: MessageView;
+  name: string;
+  employeeId: string;
+  conversationId: string;
+}) {
+  const update = useStreamUpdate(conversationId, m.id);
+  if (!update) return <Message m={m} name={name} employeeId={employeeId} conversationId={conversationId} />;
+  return <LiveAnswer update={update} name={name} employeeId={employeeId} />;
+}
+
+function LiveAnswer({ update, name, employeeId }: { update: StreamUpdate; name: string; employeeId: string }) {
   return (
     <div {...stylex.props(styles.message)}>
       <Mark letter={initial(name)} color={markColor(employeeId)} size={22} radius={6} />
@@ -494,7 +530,7 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
   const task = tasks.data?.find((t) => t.id === taskId);
   const messages = useMessages(task?.conversation_id);
   const list = useMemo(() => messages.data?.messages ?? [], [messages.data]);
-  const known = useMemo(() => new Set(list.filter((m) => m.status !== "partial").map((m) => m.id)), [list]);
+  const known = useMemo(() => new Set(list.map((m) => m.id)), [list]);
   const lastRun = [...list].reverse().find((m) => m.run_id)?.run_id;
   const guidelines = useRunGuidelines(lastRun);
   const files = useMemo(() => filesWritten(list), [list]);
@@ -655,9 +691,19 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
                 <p {...stylex.props(styles.goal)}>{task.goal}</p>
               </div>
               {messages.error ? <Problem>{messages.error.message}</Problem> : null}
-              {list.map((m) => (
-                <Message key={m.id} m={m} name={name} employeeId={employeeId} conversationId={task.conversation_id} />
-              ))}
+              {list.map((m) =>
+                m.status === "partial" && task.conversation_id ? (
+                  <PartialMessage
+                    key={m.id}
+                    m={m}
+                    name={name}
+                    employeeId={employeeId}
+                    conversationId={task.conversation_id}
+                  />
+                ) : (
+                  <Message key={m.id} m={m} name={name} employeeId={employeeId} conversationId={task.conversation_id} />
+                ),
+              )}
               {task.conversation_id ? (
                 <Streaming conversationId={task.conversation_id} name={name} employeeId={employeeId} known={known} />
               ) : null}
