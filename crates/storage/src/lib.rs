@@ -53,6 +53,7 @@ pub mod tickets;
 pub mod followers;
 pub mod vault;
 pub mod guidelines;
+pub mod history;
 pub mod server_name;
 
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
@@ -265,6 +266,10 @@ mod schema39_tests;
 mod schema40_tests;
 #[cfg(test)]
 mod schema41_tests;
+#[cfg(test)]
+mod schema42_tests;
+#[cfg(test)]
+mod history_tests;
 #[cfg(test)]
 mod schema29_tests;
 #[cfg(test)]

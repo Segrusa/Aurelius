@@ -311,10 +311,15 @@ impl CommandService {
     /// `ticket_summary`: the model's summary of the ticket, if it gave one (only with `input.ticket`).
     pub fn record_extraction(&self, job_id: &str, epoch: i64, input: &ExtractionInput, verdicts: Vec<Verdict>, lessons: Vec<memory::LessonVerdict>, ticket_summary: Option<&str>) -> Result<Vec<EventNotice>, AppError> {
         let kept: Vec<Accepted> = verdicts.iter().filter_map(|v| if let Verdict::Keep(a) = v { Some(a.clone()) } else { None }).collect();
-        let ticket_text = input.ticket.as_ref().map(|t| {
-            let for_project: Vec<&str> = kept.iter().filter(|a| !a.employee_scope).map(|a| a.content.as_str()).collect();
-            memory::ticket_summary(t.number, &t.title, ticket_summary, &for_project)
-        });
+        let for_project: Vec<&str> = kept.iter().filter(|a| !a.employee_scope).map(|a| a.content.as_str()).collect();
+        let ticket_text = input.ticket.as_ref().map(|t| memory::ticket_summary(t.number, &t.title, ticket_summary, &for_project));
+        // The same text on the ticket for the History (ticket #57), without its head and
+        // through the vault redactor: no second model call. None: it gave no summary.
+        let history_text = input
+            .ticket
+            .as_ref()
+            .and_then(|_| memory::ticket_summary_body(ticket_summary, &for_project))
+            .and_then(|body| aurelius_domain::history::history_summary(&aurelius_runtime::redact::string(body)));
         let ticket_blob = match &ticket_text {
             Some(text) => Some(self.store.blobs().put(text.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?),
             None => None,
@@ -505,6 +510,15 @@ impl CommandService {
                         }
                     }
                 }
+                if let Some(ticket) = &input.ticket {
+                    let written = match &history_text {
+                        Some(text) => aurelius_storage::history::set_summary(tx, ticket.id, text)?,
+                        None => aurelius_storage::history::set_failed(tx, ticket.id)?,
+                    };
+                    if written {
+                        notices.extend(summary_changed(tx, ticket.id)?);
+                    }
+                }
                 for (scope, event) in last_event {
                     schedule_consolidation(tx, &scope, event, false)?;
                 }
@@ -528,11 +542,20 @@ impl CommandService {
         let job = job_id.to_owned();
         self.store
             .write(move |tx| {
-                if !queries::kill_job(tx, &job, epoch, "memory_failed")? || has_ticket_summary(tx, ticket)? {
+                if !queries::kill_job(tx, &job, epoch, "memory_failed")? {
                     return Ok(Vec::new());
                 }
+                // The History shows "Summary not available" with Try again (ticket #57).
+                let mut notices = Vec::new();
+                if aurelius_storage::history::set_failed(tx, ticket)? {
+                    notices.extend(summary_changed(tx, ticket)?);
+                }
+                if has_ticket_summary(tx, ticket)? {
+                    return Ok(notices);
+                }
                 let line = aurelius_domain::views::SystemLine::new(aurelius_domain::views::SystemLineKind::SummaryFailed);
-                crate::conversation::discussion::ticket_line(tx, ticket, line, SUMMARY_FAILED)
+                notices.extend(crate::conversation::discussion::ticket_line(tx, ticket, line, SUMMARY_FAILED)?);
+                Ok(notices)
             })
             .map_err(storage_error)
     }
@@ -1062,6 +1085,15 @@ fn ticket_sources(conn: &rusqlite::Connection, ticket: TicketId, root: TaskId, r
         out.push((event, what));
     }
     Ok(out)
+}
+
+/// The ticket's History row changed (its summary came, failed or is made again,
+/// ticket #57): `ticket.updated { changed: ["summary"] }`, so a History that is open
+/// shows it without a reload. None when the ticket is gone.
+pub(crate) fn summary_changed(tx: &Tx<'_>, ticket: TicketId) -> Result<Option<EventNotice>, StorageError> {
+    let Some(state) = aurelius_storage::tickets::state(tx, ticket)? else { return Ok(None) };
+    let notice = crate::task::ticket_line::ticket_event(tx, ticket, state.project_id, aurelius_domain::EventKind::TicketUpdated, None, serde_json::json!({ "changed": ["summary"] }))?;
+    Ok(Some(notice))
 }
 
 /// The line in a ticket's discussion when its summary failed: never the error itself.

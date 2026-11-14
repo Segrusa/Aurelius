@@ -20,7 +20,7 @@ import {
   useSubscription,
   useTickets,
 } from "../data";
-import { type Feature, shown } from "../hidden";
+import { type Feature, offered, shown } from "../hidden";
 import { useAction, useFallbackAction, useKeys } from "../keys/provider";
 import { usePlatform } from "../platform";
 import {
@@ -132,8 +132,10 @@ const NAV_MAIN: { to: string; label: string; icon: NavIcon }[] = [
   { to: "/inbox", label: "Inbox", icon: "inbox" },
   { to: "/my-tickets", label: "My tickets", icon: "mine" },
 ];
-const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Feature }[] = [
+// `server`: the row shows only when the server has that feature.
+const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Feature; server?: string }[] = [
   { to: "/board", label: "Board", icon: "board" },
+  { to: "/history", label: "History", icon: "history", server: "ticket_history" },
   { to: "/tasks", label: "Tasks", icon: "tasks", feature: "TasksInSidebar" },
   { to: "/scheduled", label: "Scheduled", icon: "clock", feature: "ScheduledInSidebar" },
   { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
@@ -430,7 +432,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
   const chat = useMemo(() => chatBadge(narrow(channels.data ?? [], workspace)), [channels.data, workspace]);
   const { open } = overlays;
   const { groups } = useInbox();
-  const { hostName, status } = useLinkState();
+  const { hostName, status, features } = useLinkState();
   const employees = useEmployees();
   const [employeePins] = usePins(pinKey(hostName, "pinned_employees"));
   const pinnedEmployees = employeePins.flatMap(
@@ -489,7 +491,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
         />
       ))}
       <SideNavSection title="Workspace">
-        {shown(NAV_WORKSPACE).map((n) => (
+        {offered(shown(NAV_WORKSPACE), features).map((n) => (
           <NavRow
             key={n.to}
             to={n.to}

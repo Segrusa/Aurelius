@@ -162,6 +162,32 @@ pub enum Method {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         query: Option<String>,
     },
+    /// The History (feature `ticket_history`, ticket #57): tickets on Done, the newest
+    /// Done first, each with the summary of what it delivered. Every given filter
+    /// applies: `employee_id` is the ticket's owner, `from_ms`/`to_ms` the period of its
+    /// Done (`to_ms` excluded), `query` looks in the title and the summary. Keyset
+    /// paging: the next page passes the last row's `done_at_ms` and `number` as
+    /// `before_done_at_ms`/`before_number`. `limit`: at most 100, default 50. The same
+    /// rights as `board.get` (B3); an archived ticket or project stays in it.
+    #[serde(rename = "ticket.history")]
+    TicketHistory {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        employee_id: Option<EmployeeId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_ms: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to_ms: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before_done_at_ms: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before_number: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
     /// Who follows a ticket (feature `ticket_follow`). Not for apps.
     #[serde(rename = "ticket.followers")]
     TicketFollowers { ticket_id: aurelius_domain::TicketId },

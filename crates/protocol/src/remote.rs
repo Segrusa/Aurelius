@@ -115,6 +115,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::TicketList { .. }
         | Method::TicketFollowers { .. }
         | Method::TicketMyTickets { .. }
+        // The History: what the board shows, so the board's right (B3).
+        | Method::TicketHistory { .. }
         // The vault: every own device of a board member lists it and its audit log
         // (one role, MU4-10); the session decides who.
         | Method::VaultList { .. }

@@ -203,6 +203,7 @@ export const METHODS = {
   "ticket.follow": "command",
   "ticket.followers": "read",
   "ticket.get": "read",
+  "ticket.history": "read",
   "ticket.list": "read",
   "ticket.move": "command",
   "ticket.my_tickets": "read",
@@ -812,6 +813,16 @@ export interface MethodParams {
    * One ticket with its main task and every task linked to it.
    */
   "ticket.get": { ticket_id: string };
+  /**
+   * The History (feature `ticket_history`, ticket #57): tickets on Done, the newest
+   * Done first, each with the summary of what it delivered. Every given filter
+   * applies: `employee_id` is the ticket's owner, `from_ms`/`to_ms` the period of its
+   * Done (`to_ms` excluded), `query` looks in the title and the summary. Keyset
+   * paging: the next page passes the last row's `done_at_ms` and `number` as
+   * `before_done_at_ms`/`before_number`. `limit`: at most 100, default 50. The same
+   * rights as `board.get` (B3); an archived ticket or project stays in it.
+   */
+  "ticket.history": { before_done_at_ms?: number | null; before_number?: number | null; employee_id?: string | null; from_ms?: number | null; limit?: number | null; project_id?: string | null; query?: string | null; to_ms?: number | null };
   /**
    * Tickets in board order (not archived); every given filter applies. `query`
    * searches title, description and `#number`.

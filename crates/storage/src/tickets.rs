@@ -309,9 +309,10 @@ pub fn mark_started(tx: &Transaction<'_>, id: TicketId) -> Result<(), StorageErr
     Ok(())
 }
 
+/// The ticket went to Done now: a new moment, and a new summary to come for the History (B2).
 pub fn mark_done(tx: &Transaction<'_>, id: TicketId) -> Result<(), StorageError> {
     tx.execute("UPDATE tickets SET done_at_ms = ?2 WHERE id = ?1", params![id.to_string(), now_ms()])?;
-    Ok(())
+    crate::history::mark_pending(tx, id)
 }
 
 pub fn mark_archived(tx: &Transaction<'_>, id: TicketId) -> Result<(), StorageError> {

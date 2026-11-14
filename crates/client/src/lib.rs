@@ -985,6 +985,12 @@ impl Client {
         self.read(Method::BoardGet { project_id }, body!(Board)).await
     }
 
+    /// `ticket.history` (feature `ticket_history`): one page of the tickets on Done,
+    /// narrowed by `method`'s filters (a `Method::TicketHistory`).
+    pub async fn history(&self, method: Method) -> Result<aurelius_domain::history::HistoryPage, ClientError> {
+        self.read(method, body!(History)).await
+    }
+
     /// One ticket with its main task and linked tasks.
     pub async fn ticket(&self, ticket_id: aurelius_domain::TicketId) -> Result<aurelius_domain::ticket::TicketDetail, ClientError> {
         self.read(Method::TicketGet { ticket_id }, body!(Ticket)).await

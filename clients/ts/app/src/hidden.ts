@@ -40,3 +40,9 @@ export function hidden(feature: Feature): boolean {
 export function shown<T extends { feature?: Feature }>(items: readonly T[]): T[] {
   return items.filter((item) => !(item.feature && hidden(item.feature)));
 }
+
+/** What is left of a list whose entries may need a feature of the server (`server`): a row for a
+ * read an older server lacks would only fail, so it does not show. */
+export function offered<T extends { server?: string }>(items: readonly T[], features: readonly string[]): T[] {
+  return items.filter((item) => !item.server || features.includes(item.server));
+}
