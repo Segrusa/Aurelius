@@ -9,6 +9,7 @@ import { _electron, expect, type Locator, test } from "@playwright/test";
 import { daemonEndpoint, openPipe } from "../../electron/src/main/pipe";
 import { hidden } from "../../ts/app/src/hidden";
 import { REPO, TestDaemon, until } from "./daemon";
+import { expectNewSession, openGiveWork } from "./new-session";
 
 const PASSWORD = "a-long-enough-password";
 const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -161,9 +162,15 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await page.keyboard.press("Control+Enter");
     await expect(page.getByRole("dialog")).toBeHidden();
 
-    // Give work: an effort and a pasted picture, for an employee.
-    await server.write("employee.create", { name: "Ava", role: "CEO" }, { retry: false });
+    // Ctrl+N from anywhere is New session now (ticket #60), not Give work. First the ticket's chat must
+    // have opened, or that navigation lands after /new.
+    await expect(page).toHaveURL(/\/chat\?channel=/);
     await page.keyboard.press("Control+n");
+    await expectNewSession(page);
+
+    // Give work: an effort and a pasted picture, for an employee. Its own way in is the Tasks screen.
+    await server.write("employee.create", { name: "Ava", role: "CEO" }, { retry: false });
+    await openGiveWork(page);
     const goal = page.getByLabel("What needs doing");
     await goal.fill("Compare hosting");
     await expect(page.getByRole("button", { name: "Ava" })).toBeVisible();

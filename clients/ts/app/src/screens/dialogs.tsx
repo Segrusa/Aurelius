@@ -7,7 +7,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { expectBody, ProtocolError } from "@aurelius/client";
-import type { AgentMode, Receipt, TaskRun, TicketPriority } from "@aurelius/protocol";
+import type { Receipt, TicketPriority } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -30,14 +30,19 @@ import {
   createdTicketPlace,
   cycle,
   defaultAssignee,
+  EFFORTS,
+  giveWorkParams,
+  LAST_GIVEN,
+  MODES,
   parseDeadline,
   parseLabels,
   rootsOf,
+  taskRun,
   ticketCreateParams,
   titleOfGoal,
 } from "./dialog-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
-import { LAST_QUICK, quickAssignee, quickCreateParams, quickEnabled, quickProblem } from "./quick-logic";
+import { LAST_QUICK, QUICK_NOTE, quickAssignee, quickCreateParams, quickEnabled, quickProblem } from "./quick-logic";
 import { modelName, useSetting } from "./settings-kit";
 import { NoConnectionNote, useNoConnection } from "./tickets-kit";
 
@@ -46,14 +51,6 @@ const PRIORITIES: { key: TicketPriority; label: string }[] = [
   { key: "normal", label: "Normal" },
   { key: "high", label: "High" },
   { key: "urgent", label: "Urgent" },
-];
-
-const MODES: { key: AgentMode | "default"; label: string }[] = [
-  { key: "default", label: "Default" },
-  { key: "ask", label: "Ask" },
-  { key: "accept_edits", label: "Accept edits" },
-  { key: "auto", label: "Auto" },
-  { key: "plan", label: "Plan" },
 ];
 
 const styles = stylex.create({
@@ -93,9 +90,6 @@ const styles = stylex.create({
   },
 });
 
-/** What a quick task does, said where it is made. */
-const QUICK_NOTE = "Starts at once in Doing, on its own branch. In Review, Approve and merge puts it in main.";
-
 /** The Menu next to the pressed buttons reads as one of them when it holds the choice. */
 const PICKED = {
   borderColor: "var(--color-text-accent)",
@@ -130,10 +124,6 @@ function FormDialog({
       {children}
     </Dialog>
   );
-}
-
-function runOf(mode: string, model: string): TaskRun {
-  return { ...(mode === "default" ? {} : { mode: mode as AgentMode }), ...(model === "default" ? {} : { model }) };
 }
 
 export function useModels() {
@@ -192,7 +182,7 @@ export function useSend(onDone: (text: string) => void) {
  * so the board member lands where the work is discussed. Without ticket channels, or when the ticket
  * cannot be read, it opens the ticket on the Board instead.
  */
-function useOpenCreated() {
+export function useOpenCreated() {
   const navigate = useNavigate();
   const connection = useConnection();
   const { features } = useLinkState();
@@ -335,7 +325,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
             deadlineMs,
             files: attach.paths,
             start,
-            run: runOf(mode, model),
+            run: taskRun(mode, model),
             responsibleUserId,
             ownerEmployeeId: owner === "dispatcher" ? null : owner,
             fromMessage: seed?.fromMessage,
@@ -576,8 +566,6 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
 
 const CYCLE_MODES = MODES.map((m) => m.key as string);
 
-const LAST_GIVEN = "last_given_to";
-
 function GiveWorkBody({ onClose }: { onClose: () => void }) {
   useKeyContext("GiveWork", true);
   const noConnection = useNoConnection();
@@ -647,17 +635,17 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
       // A task only exists under a ticket: this one is for this employee, started at once.
       const receipt = await connection.write(
         "ticket.create",
-        {
-          project_id: project.id,
-          title: titleOfGoal(goal),
-          description: goal.trim(),
-          owner_employee_id: who.id,
-          start: true,
-          run: { ...runOf(mode, model), ...(effort === "default" ? {} : { effort }) },
-          ...(attach.paths.length > 0 ? { files: attach.paths } : {}),
-          confirm_secret: confirmSecret,
-          ...(features.includes("ticket_responsible") && user ? { responsible_user_id: user.id } : {}),
-        },
+        giveWorkParams(
+          {
+            projectId: project.id,
+            goal,
+            employeeId: who.id,
+            run: taskRun(mode, model, effort),
+            files: attach.paths,
+            responsibleUserId: features.includes("ticket_responsible") ? (user?.id ?? null) : null,
+          },
+          confirmSecret,
+        ),
         { retry: false },
       );
       created.remember(receipt);
@@ -666,7 +654,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
     });
   };
   useAction("SubmitGiveWork", submit);
-  useAction("CycleTaskEffort", () => setEffort(cycle(["default", "low", "medium", "high", "xhigh", "max"], effort)));
+  useAction("CycleTaskEffort", () => setEffort(cycle(EFFORTS, effort)));
   useAction(
     "CycleTaskManager",
     () =>
@@ -820,10 +808,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
           />
           <Menu
             label="Effort"
-            options={[
-              { key: "default", label: "Default" },
-              ...["low", "medium", "high", "xhigh", "max"].map((e) => ({ key: e, label: e })),
-            ]}
+            options={EFFORTS.map((e) => ({ key: e, label: e === "default" ? "Default" : e }))}
             onPick={setEffort}
             trigger={<Chip name="Effort">{effort === "default" ? "Default" : effort}</Chip>}
           />

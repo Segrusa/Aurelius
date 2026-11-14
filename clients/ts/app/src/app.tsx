@@ -35,6 +35,7 @@ import { InboxScreen } from "./screens/inbox";
 import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
 import { MyTicketsScreen } from "./screens/my-tickets";
+import { NewSessionScreen } from "./screens/new-session";
 import { ProjectPage, ProjectsScreen, projectTabShown } from "./screens/projects";
 import { ScheduledScreen } from "./screens/scheduled";
 import { SettingsScreen } from "./screens/settings";
@@ -67,6 +68,7 @@ const index = createRoute({
   },
 });
 const inbox = createRoute({ getParentRoute: () => root, path: "/inbox", component: InboxScreen });
+const newSession = createRoute({ getParentRoute: () => root, path: "/new", component: NewSessionScreen });
 const ticketSearch = (search: Record<string, unknown>): { ticket?: string } => ({
   ...(typeof search.ticket === "string" ? { ticket: search.ticket } : {}),
 });
@@ -227,6 +229,7 @@ function ScreenFailed({ reset }: { reset: () => void }) {
 const router = createRouter({
   routeTree: root.addChildren([
     index,
+    newSession,
     inbox,
     board,
     myTickets,

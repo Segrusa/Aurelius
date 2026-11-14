@@ -9,6 +9,7 @@ import { _electron, expect, type Page, test } from "@playwright/test";
 import { openPipe } from "../../electron/src/main/pipe";
 import { REPO, serveStatic, TestDaemon, until, WEB_DIST } from "./daemon";
 import { channel, message, messages, scriptServer } from "./fake-server";
+import { expectNewSession } from "./new-session";
 
 const SOURCE = readFileSync(join(REPO, "crates/remote-gateway/src/web.rs"), "utf8");
 const POLICY = /"content-security-policy",\s*"([^"]+)"/.exec(SOURCE)?.[1] as string;
@@ -31,10 +32,13 @@ const script = {
 };
 
 /** What makes Astryx put a <style> in the page: a code block, a dialog and a tooltip. */
-async function drawEverything(page: Page) {
+async function drawEverything(page: Page, newTicketKey = "Alt+t") {
   await expect(page.locator(".astryx-code-block code").first()).toBeVisible();
   await expect(page.locator("style:not([data-astryx-highlight-dynamic])").first()).toBeAttached();
-  await page.getByRole("button", { name: "New ticket" }).first().click();
+  // The sidebar's + opens New session (ticket #60); New ticket is a dialog on its key (Alt+T on the web).
+  await page.getByRole("button", { name: "New session" }).first().click();
+  await expectNewSession(page);
+  await page.keyboard.press(newTicketKey);
   await expect(page.getByLabel("Title")).toBeVisible();
   await page.keyboard.press("Escape");
   await page.getByRole("navigation", { name: "Main" }).getByRole("link").first().hover();
@@ -121,7 +125,7 @@ test("nothing is refused in the built Electron app", async () => {
     const box = page.getByRole("textbox", { name: /^Message/ });
     await box.fill("```ts\nconst answer: number = 42;\n```");
     await box.press("Enter");
-    await drawEverything(page);
+    await drawEverything(page, "Control+t");
     expect(await violations(page)).toEqual([]);
   } finally {
     await app.close();

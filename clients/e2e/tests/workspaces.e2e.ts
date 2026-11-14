@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
 import { boardOf, channel, messages, notification, scriptServer, task, ticket } from "./fake-server";
+import { expectNewSession } from "./new-session";
 
 const SHOTS = process.env.AURELIUS_WORKSPACE_SHOTS;
 
@@ -178,9 +179,16 @@ test("new work starts in the workspace", async ({ page }) => {
   const site = await open(page, "/board");
   try {
     await choose(page, "Zephyr");
-    await page.getByRole("button", { name: "New ticket" }).first().click();
+    // The Board's own New ticket.
+    await page.getByRole("main").getByRole("button", { name: "New ticket" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByRole("button", { name: "Project" })).toContainText("Zephyr");
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    // The sidebar's +: New session (ticket #60), in the same workspace.
+    await page.getByRole("button", { name: "New session" }).first().click();
+    await expectNewSession(page);
+    await expect(page.getByRole("button", { name: /^Project/ })).toContainText("Zephyr");
   } finally {
     site.close();
   }

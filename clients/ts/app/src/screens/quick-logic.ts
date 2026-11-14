@@ -6,6 +6,9 @@ import type { MethodParams } from "@aurelius/protocol";
 /** The server feature; without it nothing of quick tasks shows (ST-07 AC3). */
 export const QUICK_FEATURE = "quick_task";
 
+/** What a quick task does, said where it is made. */
+export const QUICK_NOTE = "Starts at once in Doing, on its own branch. In Review, Approve and merge puts it in main.";
+
 /** Where the employee last chosen for a quick task is remembered, like the other desktop prefs. */
 export const LAST_QUICK = "last_quick_to";
 

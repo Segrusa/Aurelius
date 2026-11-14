@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
 import { REPO, TestDaemon } from "./daemon";
+import { expectNewSession } from "./new-session";
 
 const PASSWORD = "correct horse battery";
 const SHOTS = process.env.AURELIUS_JOURNEY_SHOTS;
@@ -157,11 +158,17 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
       });
     });
 
-    await step("give work with the keyboard", async () => {
+    await step("a new session with the keyboard", async () => {
+      // Ctrl+N is New session (ticket #60): the composer is ready, Alt+M goes from the Dispatcher to Builder.
       await act(() => p.keyboard.press("Control+n"));
+      await expectNewSession(p);
       await act(() => p.keyboard.type("Compare three hosting options"));
+      await act(() => p.keyboard.press("Alt+m"));
+      await expect(p.getByRole("button", { name: /^Who/ })).toContainText("Builder");
       await act(() => p.keyboard.press("Control+Enter"));
-      await expect(p.getByRole("dialog")).toHaveCount(0);
+      // The new ticket's chat opens, as after New ticket and Give work (#58); its plan shows on the Board.
+      await expect(p).toHaveURL(/\/chat\?channel=/);
+      await act(() => nav("Board").click());
       // The first employee is management, which starts in Plan: this stops at a plan first.
       await expect(
         p.getByRole("region", { name: "Plan review", exact: true }).getByText(/hosting options/),
