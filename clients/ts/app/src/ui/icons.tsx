@@ -9,7 +9,6 @@ const styles = stylex.create({
 
 const NAV_PATHS = {
   inbox: "M2.5 9.5h3l1 2h3l1-2h3M4 3.5h8l1.5 6V13h-11V9.5z",
-  mine: "M8 2.5a5.5 5.5 0 1 0 0 11a5.5 5.5 0 1 0 0-11zM8 5.5V8l1.8 1.2",
   board: "M2.5 3.5h3v9h-3zM6.5 3.5h3v6h-3zM10.5 3.5h3v7.5h-3z",
   tasks: "M3 3h10a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM5 6.5l2 1.5-2 1.5M8.5 10h2.5",
   chat: "M2.5 3.5h11v7.5H7l-3 2.5V11H2.5z",

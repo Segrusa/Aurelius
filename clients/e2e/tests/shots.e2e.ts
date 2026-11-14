@@ -70,7 +70,6 @@ for (const theme of ["dark", "light"] as const) {
 
 const ROUTES = [
   "inbox",
-  "my-tickets",
   "board",
   "tasks",
   "scheduled",

@@ -34,7 +34,6 @@ import { IdeasBody } from "./screens/ideas";
 import { InboxScreen } from "./screens/inbox";
 import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
-import { MyTicketsScreen } from "./screens/my-tickets";
 import { NewSessionScreen } from "./screens/new-session";
 import { ProjectPage, ProjectsScreen, projectTabShown } from "./screens/projects";
 import { ScheduledScreen } from "./screens/scheduled";
@@ -80,12 +79,13 @@ const board = createRoute({
     return <BoardScreen ticket={board.useSearch().ticket} />;
   },
 });
+// My tickets is gone (ticket #65); an old link opens its ticket on the Board.
 const myTickets = createRoute({
   getParentRoute: () => root,
   path: "/my-tickets",
   validateSearch: ticketSearch,
-  component: function MyTicketsRoute() {
-    return <MyTicketsScreen ticket={myTickets.useSearch().ticket} />;
+  beforeLoad: ({ search }) => {
+    throw redirect({ to: "/board", search });
   },
 });
 const tasks = createRoute({ getParentRoute: () => root, path: "/tasks", component: () => <TasksScreen /> });

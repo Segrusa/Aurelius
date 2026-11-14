@@ -132,7 +132,6 @@ const styles = stylex.create({
 const NAV_MAIN: { to: string; label: string; icon: IconType }[] = [
   { to: "/new", label: "New session", icon: NewIcon },
   { to: "/inbox", label: "Inbox", icon: NAV_ICONS.inbox },
-  { to: "/my-tickets", label: "My tickets", icon: NAV_ICONS.mine },
 ];
 // `server`: the row shows only when the server has that feature.
 const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Feature; server?: string }[] = [
@@ -261,7 +260,6 @@ const SIDEBAR_KEY = "sidebar";
 
 const GO_TO: Record<string, string> = {
   GoDashboard: "/inbox",
-  GoMyTickets: "/my-tickets",
   GoBoard: "/board",
   GoTasks: "/tasks",
   GoTeamChat: "/chat",

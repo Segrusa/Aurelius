@@ -106,7 +106,6 @@ describe("the guidelines of a workspace", () => {
 describe("following a link", () => {
   it("reads what a location points at", () => {
     expect(targetOf("/board", { ticket: "t1" })).toEqual({ kind: "ticket", id: "t1" });
-    expect(targetOf("/my-tickets", { ticket: "t1" })).toEqual({ kind: "ticket", id: "t1" });
     expect(targetOf("/tasks/k1", {})).toEqual({ kind: "task", id: "k1" });
     expect(targetOf("/chat", { channel: "c1" })).toEqual({ kind: "channel", id: "c1" });
     expect(targetOf("/knowledge/memory", { project: "atlas" })).toEqual({ kind: "project", id: "atlas" });

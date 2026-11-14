@@ -82,7 +82,7 @@ export type OpenTarget = { kind: "ticket" | "task" | "channel"; id: string } | {
 export function targetOf(pathname: string, search: Record<string, unknown>): OpenTarget | null {
   const text = (key: string) =>
     typeof search[key] === "string" && search[key] !== "" ? (search[key] as string) : null;
-  if (pathname === "/board" || pathname === "/my-tickets") {
+  if (pathname === "/board") {
     const id = text("ticket");
     return id ? { kind: "ticket", id } : null;
   }
@@ -110,7 +110,7 @@ export function workspaceAfterOpening(current: Workspace, owner: string | null, 
 
 /** Where to go when the workspace changes under a screen that shows one thing of the old one. */
 export function pathAfterSwitch(pathname: string, next: Workspace): string | null {
-  if (pathname === "/board" || pathname === "/my-tickets" || pathname === "/chat") return pathname;
+  if (pathname === "/board" || pathname === "/chat") return pathname;
   if (/^\/tasks\/[^/]+$/.test(pathname)) return "/tasks";
   if (/^\/projects\/[^/]+$/.test(pathname)) return next === null ? "/projects" : `/projects/${next}`;
   return null;

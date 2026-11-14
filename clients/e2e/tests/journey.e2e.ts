@@ -238,7 +238,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
       await expect(nav("Inbox")).toBeVisible();
     });
 
-    for (const screen of ["Inbox", "My tickets", "Board", "Team chat", "Employees", "Knowledge"]) {
+    for (const screen of ["Inbox", "Board", "Team chat", "Employees", "Knowledge"]) {
       await step(`dark ${screen}`, async () => {
         await act(() => nav(screen).click());
         await p.waitForTimeout(300);

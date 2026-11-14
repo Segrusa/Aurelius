@@ -119,15 +119,6 @@ export const SHORTCUTS: Shortcut[] = [
     feature: "Vault",
   },
   {
-    keys: ["secondary-shift-i"],
-    context: "Aurelius",
-    navKeys: [],
-    label: "Go to My tickets (tickets that are yours)",
-    section: "General",
-    inPalette: false,
-    action: "GoMyTickets",
-  },
-  {
     keys: [],
     context: "Aurelius",
     navKeys: [],
@@ -712,7 +703,6 @@ export const CONTEXT_BINDINGS: { key: string; action: string; context: string }[
   { key: "s", action: "SettingsKey", context: "Settings" },
   { key: "n", action: "SettingsNew", context: "Settings" },
   { key: "n", action: "MakeTicket", context: "Board" },
-  { key: "n", action: "MakeTicket", context: "MyTickets" },
   { key: "secondary-enter", action: "DecideYes", context: "Decision" },
   { key: "delete", action: "SettingsRemove", context: "Settings" },
   { key: "c", action: "SettingsCheckUpdate", context: "Settings" },

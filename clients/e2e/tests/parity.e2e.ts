@@ -138,8 +138,8 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await expect(page.getByRole("button", { name: /^Move .* right$/ }).first()).toBeVisible();
     await page.keyboard.press("Escape");
 
-    // One project at a time: the workspace, on My tickets as everywhere.
-    await page.getByRole("navigation").getByRole("link", { name: "My tickets" }).first().click();
+    // One project at a time: the workspace, on the Board as everywhere.
+    await page.getByRole("navigation").getByRole("link", { name: "Board" }).first().click();
     await page.getByRole("button", { name: "Workspace: All projects" }).click();
     await page.getByRole("menuitem", { name: "Northwind API" }).click();
     await page.getByRole("button", { name: "Workspace: Northwind API" }).click();
