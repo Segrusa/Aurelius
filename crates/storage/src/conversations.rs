@@ -31,6 +31,14 @@ pub fn project_of_conversation(conn: &rusqlite::Connection, id: ConversationId) 
     Ok(project.and_then(|p| aurelius_domain::ProjectId::parse(&p).ok()))
 }
 
+/// The project any conversation belongs to (a ticket's discussion, a group
+/// channel, a project conversation), so its files can be read from the
+/// project's folder. `None` when it has no project.
+pub fn project_id_of(conn: &rusqlite::Connection, id: ConversationId) -> Result<Option<aurelius_domain::ProjectId>, StorageError> {
+    let project: Option<String> = conn.query_row("SELECT project_id FROM conversations WHERE id = ?1", [id.to_string()], |r| r.get(0)).optional()?.flatten();
+    Ok(project.and_then(|p| aurelius_domain::ProjectId::parse(&p).ok()))
+}
+
 pub fn insert_project_conversation(tx: &Transaction<'_>, id: ConversationId, project: aurelius_domain::ProjectId, title: &str) -> Result<(), StorageError> {
     tx.execute(
         "INSERT INTO conversations(id, kind, project_id, title, version, created_at_ms) VALUES (?1, 'project', ?2, ?3, 1, ?4)",

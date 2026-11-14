@@ -95,6 +95,15 @@ fn the_board_has_seven_fixed_columns_and_one_company() {
 }
 
 #[test]
+fn a_tickets_discussion_belongs_to_the_tickets_project() {
+    let f = fixture();
+    let (id, _) = add(&f, f.hermes, "Files");
+    let discussion = f.store.read(|c| crate::discussions::ticket_conversation(c, id)).unwrap().expect("a ticket has a discussion");
+    assert_eq!(f.store.read(|c| crate::conversations::project_id_of(c, discussion)).unwrap(), Some(f.hermes));
+    assert_eq!(f.store.read(|c| crate::conversations::work_folders(c, discussion)).unwrap(), Vec::<String>::new(), "no folder of its own");
+}
+
+#[test]
 fn tickets_are_numbered_per_company_and_start_in_backlog() {
     let f = fixture();
     let (first, one) = add(&f, f.atlas, "First");
