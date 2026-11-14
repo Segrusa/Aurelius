@@ -40,7 +40,14 @@ async fn roots_of(shared: &Arc<Shared>, scope: FileScope) -> Result<Vec<PathBuf>
                 use aurelius_storage::{conversations, tasks};
                 Ok(match scope {
                     FileScope::Project { project_id } => tasks::work_folders(c, project_id, None)?,
-                    FileScope::Conversation { conversation_id } => conversations::work_folders(c, conversation_id)?,
+                    // A ticket's discussion or a channel has no employee: it reads from its project's folder.
+                    FileScope::Conversation { conversation_id } => match conversations::work_folders(c, conversation_id)? {
+                        folders if folders.is_empty() => match conversations::project_id_of(c, conversation_id)? {
+                            Some(project) => tasks::work_folders(c, project, None)?,
+                            None => folders,
+                        },
+                        folders => folders,
+                    },
                     FileScope::Task { task_id } => match tasks::task_conversation(c, task_id)? {
                         Some((id, _)) => conversations::work_folders(c, id)?,
                         None => vec![],
@@ -164,8 +171,47 @@ fn resolve(roots: &[PathBuf], input: &str) -> Result<(PathBuf, String), Protocol
     }
 }
 
+/// The git worktrees registered in the roots' repositories (`.git/worktrees/*/gitdir`),
+/// real paths that exist. Employees write in a worktree, so a file they name
+/// often lives only there until their branch is merged.
+fn worktrees_of(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = Vec::new();
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root.join(".git").join("worktrees")) else { continue };
+        for entry in entries.flatten() {
+            let Ok(gitdir) = std::fs::read_to_string(entry.path().join("gitdir")) else { continue };
+            // gitdir names the worktree's `.git` file; the worktree is its folder.
+            let Some(tree) = Path::new(gitdir.trim()).parent() else { continue };
+            if let Ok(real) = std::fs::canonicalize(tree)
+                && real.is_dir()
+                && !roots.contains(&real)
+                && !found.contains(&real)
+            {
+                found.push(real);
+            }
+        }
+    }
+    found
+}
+
+/// Like `resolve`, but a file that is not in the roots is looked up in their
+/// worktrees; when several have it, the most recently changed one wins.
+fn resolve_with_worktrees(roots: &[PathBuf], input: &str) -> Result<(PathBuf, String), ProtocolError> {
+    let first = resolve(roots, input);
+    // Forbidden too: an absolute path into a worktree outside the root; each worktree checks it again.
+    let missing = matches!(&first, Err(e) if matches!(e.code, ErrorCode::NotFound | ErrorCode::Forbidden)) && !roots.is_empty();
+    if !missing {
+        return first;
+    }
+    let newest = worktrees_of(roots)
+        .into_iter()
+        .filter_map(|tree| resolve(std::slice::from_ref(&tree), input).ok())
+        .max_by_key(|(real, _)| std::fs::metadata(real).ok().and_then(|m| m.modified().ok()));
+    newest.map_or(first, Ok)
+}
+
 fn read_in(roots: &[PathBuf], input: &str) -> Result<MarkdownFileContent, ProtocolError> {
-    let (real, rel) = resolve(roots, input)?;
+    let (real, rel) = resolve_with_worktrees(roots, input)?;
     if !is_markdown(&real) {
         return Err(refuse(ErrorCode::Validation, "Only Markdown files (.md, .markdown) can be shown."));
     }
@@ -270,6 +316,44 @@ mod tests {
         assert_eq!(read_in(&roots, &outside.to_string_lossy()).unwrap_err().code, ErrorCode::Forbidden);
         assert_eq!(read_in(&roots, "missing.md").unwrap_err().code, ErrorCode::NotFound);
         assert_eq!(read_in(&[], "ok.md").unwrap_err().code, ErrorCode::NotFound);
+    }
+
+    /// Registers `tree` as a git worktree of `repo`, the way git does.
+    fn add_worktree(repo: &tempfile::TempDir, name: &str, tree: &Path) {
+        write(repo, &format!(".git/worktrees/{name}/gitdir"), format!("{}\n", tree.join(".git").display()).as_bytes());
+        std::fs::write(tree.join(".git"), b"gitdir: elsewhere").unwrap();
+    }
+
+    #[test]
+    fn a_file_only_in_a_worktree_is_read_from_the_newest_worktree() {
+        let d = tempfile::tempdir().unwrap();
+        let away = tempfile::tempdir().unwrap();
+        write(&d, "target/wt-a/docs/design.md", b"old");
+        add_worktree(&d, "wt-a", &d.path().join("target/wt-a"));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write(&away, "docs/design.md", b"new");
+        add_worktree(&d, "away", away.path());
+        let roots = root(&d);
+        let got = read_in(&roots, "docs/design.md").unwrap();
+        assert_eq!((got.text.as_str(), got.path.as_str()), ("new", "docs/design.md"));
+        let abs = away.path().join("docs/design.md");
+        assert_eq!(read_in(&roots, &abs.to_string_lossy()).unwrap().text, "new");
+    }
+
+    #[test]
+    fn the_root_wins_over_a_worktree_and_worktrees_stay_confined() {
+        let d = tempfile::tempdir().unwrap();
+        let away = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        write(&d, "docs/design.md", b"main");
+        write(&away, "docs/design.md", b"branch");
+        write(&other, "out.md", b"out");
+        add_worktree(&d, "away", away.path());
+        let roots = root(&d);
+        assert_eq!(read_in(&roots, "docs/design.md").unwrap().text, "main");
+        assert_eq!(read_in(&roots, "../x.md").unwrap_err().code, ErrorCode::Forbidden);
+        assert_eq!(read_in(&roots, &other.path().join("out.md").to_string_lossy()).unwrap_err().code, ErrorCode::Forbidden);
+        assert_eq!(read_in(&roots, "nowhere.md").unwrap_err().code, ErrorCode::NotFound);
     }
 
     #[cfg(unix)]
