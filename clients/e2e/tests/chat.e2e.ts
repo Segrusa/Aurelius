@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
-import { approval, channel, message, messages, scriptServer } from "./fake-server";
+import { approval, channel, message, messages, scriptServer, task, ticket } from "./fake-server";
 
 const FEATURES = [
   "ticket_channels",
@@ -263,6 +263,78 @@ test.describe("scripted", () => {
       await expect(page.getByText(/tokens in/)).toHaveCount(0);
       await expect(page.getByText("Bo wants to run a command")).toBeVisible();
       await expect(page.getByText("Cy wants to run a command")).toHaveCount(0);
+    } finally {
+      await stop();
+    }
+  });
+
+  test("a ticket's chat keeps the todo list, open tasks and an overview beside the talk", async ({ page }) => {
+    const todos = [
+      { content: "Find the causes", activeForm: "Finding the causes", status: "completed" },
+      { content: "Fix the prompt", activeForm: "Fixing the prompt", status: "in_progress" },
+      { content: "Run the suites", activeForm: "Running the suites", status: "pending" },
+    ];
+    const { stop } = await open(
+      page,
+      {
+        channels: [general, channel("t", "#21-screens", { kind: "ticket", ticket_number: 21, ticket_id: "t1" })],
+        feeds: { general: feed("g", []), t: feed("t", [message("m1", "user", "How far are we?")]) },
+        details: {
+          t1: {
+            as_of_seq: 1,
+            ticket: ticket("t1", 21, "doing", {
+              kind: "quick",
+              conversation_id: "t",
+              root_task_id: "root",
+              owner_name: "Flux",
+            }),
+            root_task: task("root", { conversation_id: "rc" }),
+            tasks: [
+              task("root", { conversation_id: "rc" }),
+              task("sub", { title: "Write the tests", parent_task_id: "root", employee_name: "Fiona" }),
+              task("old", { title: "Read the code", parent_task_id: "root", status: "succeeded" }),
+            ],
+          },
+        },
+        conversations: {
+          rc: messages("rc", [
+            message("p1", "assistant", "On it.", {
+              activity: [{ call_id: "c1", tool: "TodoWrite", input: { todos }, offset: 0, ok: true }],
+            }),
+          ]),
+        },
+      },
+      "/chat?channel=t",
+    );
+    try {
+      await expect(page.getByText("How far are we?")).toBeVisible();
+      const card = page.getByRole("region", { name: "Progress" });
+      await expect(card.getByRole("list", { name: "Todo list" }).getByRole("listitem")).toHaveText([
+        "Find the causes",
+        "Fixing the prompt",
+        "Run the suites",
+      ]);
+      await expect(card).toContainText("1 of 3");
+      await expect(card).toContainText("Open tasks · 1 of 2 done");
+      const sub = card.getByRole("link", { name: /Write the tests/ });
+      await expect(sub).toHaveAttribute("href", /\/tasks\/sub$/);
+      await expect(card.getByRole("link", { name: /Read the code/ })).toHaveCount(0);
+      // The posts stay words only.
+      await expect(page.getByRole("article").getByText("Fixing the prompt")).toHaveCount(0);
+
+      const panel = page.getByRole("complementary", { name: "Ticket overview" });
+      await expect(panel).toContainText("quick/ticket-21");
+      await expect(panel.getByRole("link", { name: /Read the code/ })).toBeVisible();
+      await panel.getByRole("button", { name: "Close overview" }).click();
+      await expect(panel).toHaveCount(0);
+      await page.getByRole("button", { name: "Overview" }).click();
+      await expect(panel).toBeVisible();
+
+      await expect(card.getByRole("button", { name: /Working: Flux, Fiona/ })).toBeVisible();
+      await expect(panel).toContainText("Working: Flux, Fiona");
+      await card.getByRole("button", { name: /Working/ }).click();
+      await expect(card.getByRole("list", { name: "Todo list" })).toHaveCount(0);
+      await expect(card).toContainText("Fixing the prompt");
     } finally {
       await stop();
     }

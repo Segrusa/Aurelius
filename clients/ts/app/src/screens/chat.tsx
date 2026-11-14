@@ -17,6 +17,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
 import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
+import { usePlatform } from "../platform";
 import { AttachedImages, useImagePaste } from "../ui/attach";
 import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
@@ -68,6 +69,7 @@ import { Held } from "./dialogs";
 import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
+import { OVERVIEW_KEY, OverviewPanel, ProgressCard, useTicketProgress } from "./ticket-overview";
 import { ColumnGlyph } from "./tickets-kit";
 import { homeChannel, narrow } from "./workspace-logic";
 
@@ -345,6 +347,7 @@ const styles = stylex.create({
     color: "var(--color-text-primary)",
     textDecoration: "none",
   },
+  pointer: { cursor: "pointer" },
   feedBox: { minHeight: 0, flexGrow: 1, flexBasis: 0 },
   loading: { display: "flex", flexDirection: "column", gap: 8, padding: 24 },
   waiting: { margin: 0, padding: 24, color: "var(--precision-text3)" },
@@ -1016,6 +1019,14 @@ function ChannelBody({
   const store = useLiveStore(feed.data?.conversation_id);
   const live = useLiveAll(store);
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
+  // What runs and what is still open stays beside the talk, never as posts in it.
+  const progress = useTicketProgress(isTicket ? (ticketId ?? c?.ticket_id ?? null) : null, isTicket ? live : []);
+  const { storage } = usePlatform();
+  const [overviewOpen, setOverviewOpen] = useState(() => storage.get(OVERVIEW_KEY) !== "0");
+  const showOverview = (on: boolean) => {
+    storage.set(OVERVIEW_KEY, on ? "1" : "0");
+    setOverviewOpen(on);
+  };
   const talk = useMemo(() => list.filter((m) => !m.thread_parent), [list]);
   // On a ticket a row of "moved to Doing" lines folds, so what people said stays in view.
   const [unfolded, setUnfolded] = useState(message !== null);
@@ -1236,6 +1247,15 @@ function ChannelBody({
                 Open ticket ↗
               </Link>
             ) : null}
+            {isTicket && !overviewOpen ? (
+              <button
+                type="button"
+                onClick={() => showOverview(true)}
+                {...stylex.props(styles.openTicket, styles.pointer)}
+              >
+                Overview
+              </button>
+            ) : null}
           </header>
         )}
         <ThreadWaiting conversationId={openId} />
@@ -1325,6 +1345,7 @@ function ChannelBody({
               )}
             </div>
           </FeedIdsProvider>
+          {isTicket && !readOnly ? <ProgressCard p={progress} narrow={embedded} /> : null}
           {readOnly ? (
             <div {...stylex.props(styles.readOnlyRow)}>
               <div {...stylex.props(styles.readOnlyBar)}>
@@ -1377,6 +1398,8 @@ function ChannelBody({
             full={embedded}
           />
         </ChatProvider>
+      ) : isTicket && !embedded && overviewOpen ? (
+        <OverviewPanel p={progress} onClose={() => showOverview(false)} />
       ) : null}
     </section>
   );
