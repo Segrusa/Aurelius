@@ -5,7 +5,7 @@ import { Connection, expectBody } from "@aurelius/client";
 import { _electron, expect, type Locator, type Page, test } from "@playwright/test";
 import { daemonEndpoint, openPipe } from "../../electron/src/main/pipe";
 import { REPO, serveStatic, TestDaemon, until, WEB_DIST } from "./daemon";
-import { approval, boardOf, message, messages, notification, scriptServer, task, ticket } from "./fake-server";
+import { approval, boardOf, channel, message, messages, notification, scriptServer, task, ticket } from "./fake-server";
 
 const PASSWORD = "a-long-enough-password";
 
@@ -110,11 +110,8 @@ test("the board, the ticket panel and My tickets against a real daemon", async (
     await page.keyboard.press("Enter");
     await until("renamed", async () => ((await read()).todo as string[]).includes("Second ticket, renamed"));
 
-    // The discussion, and what the activity says of it.
-    await panel.getByRole("tab", { name: /Discussion/ }).click();
-    await panel.getByRole("textbox", { name: /^Message/ }).fill("Does this need a migration?");
-    await page.keyboard.press("Enter");
-    await expect(panel.getByText("Does this need a migration?")).toBeVisible();
+    // The discussion lives in the chat, not in the panel; the activity tells what happened.
+    await expect(panel.getByRole("tab", { name: /Discussion/ })).toHaveCount(0);
     await panel.getByRole("tab", { name: "Activity" }).click();
     await expect(panel.getByText("Nothing happened yet.")).toHaveCount(0);
 
@@ -409,7 +406,8 @@ test.describe("states a test daemon cannot produce", () => {
     });
     const { writes } = await scriptServer(page, {
       ...script,
-      features: ["ticket_discussion", "run_cards"],
+      features: ["ticket_discussion", "ticket_channels", "run_cards"],
+      channels: [channel("d3", "#23-export", { kind: "ticket", ticket_id: "t3", ticket_number: 23 })],
       feeds: {
         d3: messages("d3", [
           message("m1", "assistant", "Started on it.", {
@@ -481,23 +479,26 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(panel.getByText("9k", { exact: true })).toBeVisible();
     await expect(panel.getByText("$0.12", { exact: true })).toBeVisible();
 
-    await panel.getByRole("tab", { name: /Discussion/ }).click();
+    // The panel has no discussion: it is the ticket's channel in the chat.
+    await expect(panel.getByRole("tab", { name: /Discussion/ })).toHaveCount(0);
+    await page.goto(`${site.origin}/chat?channel=d3`);
+    const chat = page.getByRole("main");
     // A discussion is a chat: that someone is at work, and how to stop it, but not what they ran.
-    const note = panel.locator("[data-run-note]").first();
+    const note = chat.locator("[data-run-note]").first();
     await expect(note.getByText("Working", { exact: true })).toBeVisible();
-    await expect(panel.getByText(/tool calls/)).toHaveCount(0);
+    await expect(chat.getByText(/tool calls/)).toHaveCount(0);
     await note.getByRole("button", { name: "Stop" }).click();
     await expect.poll(() => writes.find((w) => w.method === "run.stop")?.params).toMatchObject({ run_id: "r1" });
 
-    await expect(panel.getByRole("radio", { name: "Green" })).toBeVisible();
-    await panel.getByLabel("Your answer to Bo").fill("Yes, please");
-    await panel.getByRole("button", { name: "Send answer" }).first().click();
+    await expect(chat.getByRole("radio", { name: "Green" })).toBeVisible();
+    await chat.getByLabel("Your answer to Bo").fill("Yes, please");
+    await chat.getByRole("button", { name: "Send answer" }).first().click();
     await expect
       .poll(() => writes.find((w) => w.method === "group_chat.send")?.params)
       .toMatchObject({ channel: "d3", text: "Yes, please" });
 
-    await panel.getByRole("radio", { name: "Green" }).check();
-    await panel.getByRole("button", { name: "Send answer" }).last().click();
+    await chat.getByRole("radio", { name: "Green" }).check();
+    await chat.getByRole("button", { name: "Send answer" }).last().click();
     await expect
       .poll(() => writes.find((w) => w.method === "approval.answer")?.params)
       .toMatchObject({ approval_id: "q9", answers: { "Which colour?": "Green" } });

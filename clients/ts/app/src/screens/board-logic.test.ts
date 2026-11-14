@@ -23,7 +23,6 @@ import {
   needsMe,
   needsYou,
   ownerChoosable,
-  peopleCount,
   scrollToShow,
   shownCards,
   suggestedReplies,
@@ -326,10 +325,9 @@ describe("a discussion", () => {
     expect(earlier.has("e")).toBe(false);
   });
 
-  it("shows everything once unfolded, and counts only people", () => {
+  it("shows everything once unfolded", () => {
     const list = [line("a"), line("b"), said("c")];
     expect(foldUpdates(list, true).shown).toHaveLength(3);
-    expect(peopleCount(list)).toBe(1);
   });
 });
 

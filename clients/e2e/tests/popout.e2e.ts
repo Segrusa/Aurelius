@@ -115,7 +115,7 @@ test("the popout lists the chats, opens one, sends and keeps out of the way", as
   }
 });
 
-test("a ticket reads as a chat: in its panel and in the popout", async ({ page }) => {
+test("a ticket reads as a chat: in the chat and in the popout, not in its panel", async ({ page }) => {
   const site = await serveStatic(WEB_DIST);
   try {
     const open = ticket("t1", 35, "doing", { title: "Trim the texts", conversation_id: "d1", owner_name: "Pixel" });
@@ -144,11 +144,16 @@ test("a ticket reads as a chat: in its panel and in the popout", async ({ page }
     });
     await page.goto(`${site.origin}/board?ticket=t1`);
     const panel = page.getByRole("complementary", { name: /Trim the texts/ });
-    await panel.getByRole("tab", { name: /Discussion/ }).click();
-    await panel.getByText("Which group may I remove first?").hover();
-    await expect(panel.locator("[data-row-bar]")).toBeVisible();
-    await shot(page, "ticket-panel");
-    await panel.getByRole("textbox", { name: /^Message/ }).fill("The first one");
+    await expect(panel.getByText("No description.")).toBeVisible();
+    await expect(panel.getByRole("tab", { name: /Discussion/ })).toHaveCount(0);
+    await expect(panel.getByText("Which group may I remove first?")).toHaveCount(0);
+
+    await page.goto(`${site.origin}/chat?channel=d1`);
+    const chat = page.getByRole("main");
+    await chat.getByText("Which group may I remove first?").hover();
+    await expect(chat.locator("[data-row-bar]")).toBeVisible();
+    await shot(page, "ticket-chat");
+    await chat.getByRole("textbox", { name: /^Message/ }).fill("The first one");
     await page.keyboard.press("Enter");
     await expect
       .poll(() => writes.find((w) => w.method === "group_chat.send")?.params)

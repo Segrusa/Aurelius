@@ -561,15 +561,7 @@ function SendBackDialog({ t, onClose }: { t: TicketView; onClose: () => void }) 
 
 type Pending = { kind: "send_back" | "mark_done" | "back_to_backlog" | "reject"; ticket: TicketView } | null;
 
-export function BoardScreen({
-  ticket,
-  projectId,
-  message,
-}: {
-  ticket: string | undefined;
-  message?: string;
-  projectId?: string;
-}) {
+export function BoardScreen({ ticket, projectId }: { ticket: string | undefined; projectId?: string }) {
   useKeyContext("Board");
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -981,9 +973,7 @@ export function BoardScreen({
         <div {...stylex.props(styles.fill)}>
           <Layout
             height="fill"
-            end={
-              ticket ? <TicketPanel key={ticket} id={ticket} onClose={close} {...(message ? { message } : {})} /> : null
-            }
+            end={ticket ? <TicketPanel key={ticket} id={ticket} onClose={close} /> : null}
             content={
               <LayoutContent isScrollable={false} padding={0}>
                 {board.error ? (
