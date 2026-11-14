@@ -531,7 +531,10 @@ export function replyLabel(reply: string): string {
         .trimEnd()}…`;
 }
 
-export const isProgressTool = (tool: string) => tool === TODO_TOOL || tool === SUGGEST_TOOL;
+/** Claude Code's own todo list: `TodoWrite` before CLI 2.1.318, the Task* tools since. */
+const TODO_TOOLS = new Set([TODO_TOOL, "TaskCreate", "TaskUpdate", "TaskList", "TaskGet"]);
+
+export const isProgressTool = (tool: string) => TODO_TOOLS.has(tool) || tool === SUGGEST_TOOL;
 
 function kind(tool: string): [string, string, string] {
   switch (tool) {

@@ -58,6 +58,7 @@ impl StreamState {
         if matches!(profile, ToolProfile::Work { .. }) {
             allowed_tools.push(super::APPROVAL_TOOL.into());
             allowed_tools.push(super::TOOL_SEARCH_TOOL.into());
+            allowed_tools.extend(super::TODO_TOOLS.iter().map(|t| t.to_string()));
             allowed_tools.extend(super::SCREEN_TOOLS.iter().map(|t| t.to_string()));
         }
         if matches!(profile, ToolProfile::Work { artifact: true, .. }) {
@@ -675,7 +676,7 @@ mod tests {
         let p = ToolProfile::Work { artifact: false, access: Default::default(), tool_policy: policy, folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: crate::ApprovalBridge { program: "x".into(), args: vec![] }, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
         let args = crate::claude_code::profile_arguments(&p, None, None, None);
         let value = |flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
-        assert_eq!(value("--tools"), "Read,AskUserQuestion,ExitPlanMode,Task,ToolSearch".replace("Read,AskUserQuestion,ExitPlanMode,Task", &crate::claude_code::work_tools(Default::default(), &ToolPolicy { tools: Some(vec!["Read".into(), "Task".into()]), ..Default::default() }).join(",")));
+        assert_eq!(value("--tools"), "Read,AskUserQuestion,ExitPlanMode,Task,ToolSearch,TaskCreate,TaskUpdate,TaskList,TaskGet,TodoWrite".replace("Read,AskUserQuestion,ExitPlanMode,Task", &crate::claude_code::work_tools(Default::default(), &ToolPolicy { tools: Some(vec!["Read".into(), "Task".into()]), ..Default::default() }).join(",")));
         assert!(!value("--tools").contains("Bash") && !value("--tools").contains("Edit"));
         let allowed = value("--allowedTools");
         assert!(allowed.contains("mcp__aurelius__remember"), "what cannot be switched stays allowed");
@@ -791,6 +792,27 @@ mod tests {
         assert!(StreamState::for_profile(&p).feed(init).is_ok());
         let text_only = crate::claude_code::profile_arguments(&ToolProfile::TextOnly, None, None, None);
         assert!(!text_only.join(" ").contains("ToolSearch"));
+    }
+
+    #[test]
+    fn every_level_keeps_a_todo_list_without_asking() {
+        // A ticket's chat shows the owner's plan from its TodoWrite calls; without the tool there is none.
+        use aurelius_domain::employee::AccessLevel::*;
+        for access in [Inherit, ReadEdit, ReadOnly] {
+            let bridge = crate::ApprovalBridge { program: "ctl".into(), args: vec![] };
+            let p = ToolProfile::Work { artifact: false, access, tool_policy: Default::default(), folders: vec!["C:/p".into()], permission_mode: "manual".into(), approval_bridge: bridge, browser: false, browser_session: None, playwright: None, mcp_servers: Default::default() };
+            let args = crate::claude_code::profile_arguments(&p, None, None, None);
+            let value = |flag: &str| args[args.iter().position(|a| a == flag).unwrap() + 1].clone();
+            for todo in ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TodoWrite"] {
+                assert!(value("--tools").split(',').any(|t| t == todo), "{access:?}: {todo}");
+                assert!(value("--allowedTools").split(',').any(|t| t == todo), "{access:?}: {todo} only touches the list");
+            }
+            // CLI 2.1.318 offers the Task* tools and drops TodoWrite.
+            let init = r#"{"type":"system","subtype":"init","tools":["Read","TaskCreate","TaskGet","TaskList","TaskUpdate"],"mcp_servers":[{"name":"aurelius"}]}"#;
+            assert!(StreamState::for_profile(&p).feed(init).is_ok(), "{access:?}");
+        }
+        let text_only = crate::claude_code::profile_arguments(&ToolProfile::TextOnly, None, None, None);
+        assert!(!text_only.join(" ").contains("TodoWrite") && !text_only.join(" ").contains("TaskCreate"));
     }
 
     #[test]
