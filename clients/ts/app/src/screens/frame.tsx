@@ -76,6 +76,15 @@ const styles = stylex.create({
   settingsSidebar: { display: "flex", height: "100%" },
   head: { display: "flex", height: 32, alignItems: "center", gap: 8, paddingInline: 8 },
   logo: { display: "flex" },
+  brand: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: "var(--color-text-primary)",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    userSelect: "none",
+  },
   headActions: { marginInlineStart: "auto", display: "flex", gap: 2 },
   section: {
     display: "flex",
@@ -453,6 +462,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
           <span title={hostName ?? "Aurelius"} {...stylex.props(styles.logo)}>
             <Logo />
           </span>
+          {collapsed ? null : <span {...stylex.props(styles.brand)}>Aurelius</span>}
           {collapsed ? null : (
             <div {...stylex.props(styles.headActions)}>
               <Tooltip content="Search and commands" delay={400} hasHoverIndication={false}>
