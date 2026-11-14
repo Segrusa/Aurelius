@@ -17,6 +17,7 @@ import { type Feature, shown } from "../hidden";
 import { KeysContext } from "../keys/provider";
 import { DialogHead } from "../ui/dialog-head";
 import { useDelayed } from "../ui/use-delayed";
+import { topCentered } from "./dialog-logic";
 
 const styles = stylex.create({
   page: { display: "flex", minHeight: 0, flex: 1, flexDirection: "column" },
@@ -178,7 +179,7 @@ export function FormDialog({
       maxHeight="calc(100vh - 48px)"
       purpose="form"
       padding={0}
-      {...(top ? { position: { top: "14vh" } } : {})}
+      {...(top ? { position: topCentered(width) } : {})}
     >
       <Layout
         header={<DialogHead title={title} {...(start ? { startContent: start } : {})} />}

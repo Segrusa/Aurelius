@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { cycle, defaultAssignee, parseDeadline, parseLabels, rootsOf, titleOfGoal } from "./dialog-logic";
+import {
+  cycle,
+  DIALOG_TOP,
+  defaultAssignee,
+  parseDeadline,
+  parseLabels,
+  rootsOf,
+  titleOfGoal,
+  topCentered,
+} from "./dialog-logic";
 
 describe("a deadline", () => {
   it("is empty, a date (the end of that day) or a date and time, in local time", () => {
@@ -55,5 +64,11 @@ describe("the rest", () => {
     expect(cycle(["a", "b"], "a")).toBe("b");
     expect(cycle(["a", "b"], "b")).toBe("a");
     expect(cycle(["a", "b"], "c")).toBe("a");
+  });
+});
+
+describe("a dialog pinned near the top", () => {
+  it("keeps its top and is centred by its width, never off the left edge", () => {
+    expect(topCentered(640)).toEqual({ top: DIALOG_TOP, start: "max(0px, calc((100vw - 640px) / 2))" });
   });
 });

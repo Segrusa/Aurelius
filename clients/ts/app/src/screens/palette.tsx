@@ -19,10 +19,14 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { useWorkspace } from "../workspace";
 import { bareName } from "./chat-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
+import { topCentered } from "./dialog-logic";
 import { filterGroups, type PaletteGroup, quickTaskCommands } from "./palette-logic";
 import { quickEnabled } from "./quick-logic";
 import { useSwitchWorkspace } from "./workspace-kit";
 import { guidelinesIn, narrow, openProjects } from "./workspace-logic";
+
+// The CommandPalette's own default width; the centring of its pinned Dialog needs it.
+const PALETTE_WIDTH = 640;
 
 // The table's label says what the key does on every page; here it is one command.
 const PALETTE_LABEL: Record<string, string> = { NewItem: "Give work" };
@@ -322,7 +326,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         </CommandPaletteFooter>
       }
       // Forwarded to its Dialog: results that come and go must not make the palette jump around.
-      {...({ position: { top: "14vh" } } as object)}
+      {...({ position: topCentered(PALETTE_WIDTH) } as object)}
     />
   );
 }
