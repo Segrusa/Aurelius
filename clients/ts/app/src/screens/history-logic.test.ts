@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { areasOf } from "../data";
 import {
+  ALL_PROJECTS,
   dayLabel,
   groupByDay,
   historyFilters,
+  historyProject,
   narrowed,
   nextPage,
   ownerName,
   periodRange,
+  projectInUrl,
   summaryShown,
 } from "./history-logic";
 
@@ -37,6 +40,20 @@ describe("the History's filters in the URL", () => {
     });
     expect(historyFilters({ period: "7d", from: "2026-11-01" })).toEqual({ period: "7d" });
     expect(historyFilters({ period: "custom", from: "1 Nov", to: "2026-13-45" })).toEqual({ period: "custom" });
+  });
+
+  it("lets All projects win over the workspace's project", () => {
+    // No project in the URL: the workspace's project, if one is chosen.
+    expect(historyProject({}, "w1")).toBe("w1");
+    expect(historyProject({}, null)).toBeNull();
+    // A project in the URL wins; "all" means every project, also inside a workspace.
+    expect(historyProject({ project: "p1" }, "w1")).toBe("p1");
+    expect(historyProject({ project: ALL_PROJECTS }, "w1")).toBeNull();
+    // Choosing All projects writes "all" only when a workspace would otherwise narrow it.
+    expect(projectInUrl(ALL_PROJECTS, "w1")).toBe(ALL_PROJECTS);
+    expect(projectInUrl(ALL_PROJECTS, null)).toBeUndefined();
+    expect(projectInUrl("p1", "w1")).toBe("p1");
+    expect(narrowed({ project: ALL_PROJECTS })).toBe(false);
   });
 
   it("knows when something narrows the list", () => {

@@ -19,14 +19,17 @@ import { useConnection, useLinkState } from "../connection";
 import { useEmployees, useProjects } from "../data";
 import { useWorkspace } from "../workspace";
 import {
+  ALL_PROJECTS,
   groupByDay,
   HISTORY_PERIODS,
   type HistoryFilters,
   type HistoryPeriod,
+  historyProject,
   narrowed,
   nextPage,
   ownerName,
   periodRange,
+  projectInUrl,
   summaryShown,
 } from "./history-logic";
 import { failureOf, Hint, Loading, Page, Problem } from "./org-kit";
@@ -186,8 +189,8 @@ export function HistoryScreen({ filters }: { filters: HistoryFilters }) {
   const { features } = useLinkState();
   const supported = features.includes("ticket_history");
   const workspace = useWorkspace();
-  // The project in the URL, else the workspace's.
-  const project = filters.project ?? workspace.id;
+  // The project in the URL, else the workspace's; "all" in the URL wins over the workspace.
+  const project = historyProject(filters, workspace.id);
   const history = useHistory(filters, project, supported);
   const projects = useProjects();
   const employees = useEmployees();
@@ -243,10 +246,10 @@ export function HistoryScreen({ filters }: { filters: HistoryFilters }) {
                           <Selector
                             label="Project"
                             size="sm"
-                            value={project ?? ALL}
-                            onChange={(v) => change({ project: v === ALL ? undefined : v })}
+                            value={project ?? ALL_PROJECTS}
+                            onChange={(v) => change({ project: projectInUrl(v, workspace.id) })}
                             options={[
-                              { value: ALL, label: "All projects" },
+                              { value: ALL_PROJECTS, label: "All projects" },
                               ...(projects.data ?? []).map((p) => ({ value: p.id, label: p.name })),
                             ]}
                           />

@@ -57,9 +57,27 @@ export function historyFilters(search: Record<string, unknown>): HistoryFilters 
   };
 }
 
+/** `project` in the URL for every project: it wins over the workspace's project. */
+export const ALL_PROJECTS = "all";
+
+/** The project the History asks for: the URL's, else the workspace's; none for all projects. */
+export function historyProject(f: HistoryFilters, workspaceId: string | null): string | null {
+  if (f.project === ALL_PROJECTS) return null;
+  return f.project ?? workspaceId;
+}
+
+/**
+ * What choosing `value` in the Project filter writes in the URL. All projects is
+ * written only inside a workspace, where leaving it out would mean the workspace's project.
+ */
+export function projectInUrl(value: string, workspaceId: string | null): string | undefined {
+  if (value !== ALL_PROJECTS) return value;
+  return workspaceId ? ALL_PROJECTS : undefined;
+}
+
 /** Whether anything narrows the list (the open ticket does not). */
 export const narrowed = (f: HistoryFilters): boolean =>
-  Boolean(f.project || f.employee || (f.period && f.period !== "all") || f.q);
+  Boolean((f.project && f.project !== ALL_PROJECTS) || f.employee || (f.period && f.period !== "all") || f.q);
 
 /** Local midnight of `date`, `days` later. */
 function midnight(date: Date, days = 0): number {
