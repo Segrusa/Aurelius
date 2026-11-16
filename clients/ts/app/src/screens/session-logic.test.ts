@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { runChange, runChipLabel, SIDEBAR_SESSIONS, sessionPlace, sidebarSessions } from "./session-logic";
+import {
+  chooserText,
+  runChange,
+  runChipLabel,
+  SIDEBAR_SESSIONS,
+  sessionFolder,
+  sessionPlace,
+  sessionStatus,
+  sessionWho,
+  sidebarSessions,
+} from "./session-logic";
+
+describe("the session's side panel", () => {
+  it("says it works while a run is queued or under way, else that it waits for you", () => {
+    expect(sessionStatus(true)).toBe("Working");
+    expect(sessionStatus(false)).toBe("Waiting for you");
+    expect(sessionStatus(true, "choosing")).toBe("Dispatcher is choosing");
+    expect(sessionStatus(false, "nobody")).toBe("Waiting for your choice");
+  });
+
+  it("shows the worktree, or the project folder when it has none", () => {
+    expect(sessionFolder({ worktree: "/data/worktrees/session-ab12" })).toBe("/data/worktrees/session-ab12");
+    expect(sessionFolder({ worktree: null })).toBe("Project folder");
+    expect(sessionFolder({})).toBe("Project folder");
+  });
+});
 
 describe("sessionPlace", () => {
   it("names the employee, the project and the folder it works in", () => {
@@ -9,6 +34,25 @@ describe("sessionPlace", () => {
     expect(sessionPlace({ employee_name: "Orion", project_name: "Planora", branch: "session/1a2b3c4d" })).toBe(
       "Orion · Planora · own worktree on session/1a2b3c4d",
     );
+  });
+});
+
+describe("a session the dispatcher gives to someone", () => {
+  it("names the dispatcher while it chooses, nobody after it chose nobody, else the employee", () => {
+    expect(sessionWho({ employee_name: "Orion", dispatch: "choosing" })).toBe("Orion is choosing who takes it");
+    expect(sessionWho({ employee_name: "Orion", dispatch: "nobody" })).toBe("Nobody yet");
+    expect(sessionWho({ employee_name: "Flux" })).toBe("Flux");
+    expect(sessionPlace({ employee_name: "Orion", project_name: "Planora", branch: null, dispatch: "choosing" })).toBe(
+      "Orion is choosing who takes it · Planora · project folder",
+    );
+  });
+
+  it("puts a chooser where the composer is until somebody takes it", () => {
+    expect(chooserText({ employee_name: "Orion", dispatch: "choosing" })).toContain("You can also choose yourself");
+    expect(chooserText({ employee_name: "Orion", dispatch: "nobody" })).toBe(
+      "The dispatcher chose nobody. Choose who takes this session.",
+    );
+    expect(chooserText({ employee_name: "Flux" })).toBeNull();
   });
 });
 

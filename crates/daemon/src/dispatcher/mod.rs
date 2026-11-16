@@ -117,6 +117,9 @@ pub async fn run(shared: Arc<Shared>) {
             Ok(Ok(Some(job))) if job.kind == aurelius_application::task::triage::TRIAGE_JOB_KIND => {
                 tokio::spawn(crate::triage::run_triage(shared.clone(), job));
             }
+            Ok(Ok(Some(job))) if job.kind == aurelius_application::conversation::session_dispatch::SESSION_DISPATCH_JOB_KIND => {
+                tokio::spawn(crate::session_dispatch::run_session_dispatch(shared.clone(), job));
+            }
             Ok(Ok(Some(job))) if job.kind == aurelius_application::ticket::quick::QUICK_MERGE_JOB_KIND => {
                 tokio::spawn(crate::quick::run_merge(shared.clone(), job));
             }

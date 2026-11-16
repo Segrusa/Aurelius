@@ -572,6 +572,152 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(page.getByRole("complementary", { name: /Still at work/ })).toBeVisible();
   });
 
+  test("a session shows the same properties as a task's run", async ({ page }) => {
+    const session = {
+      conversation_id: "s1",
+      title: "Fix the login page",
+      employee_id: "e1",
+      employee_name: "Flux",
+      project_id: "p",
+      project_name: "Northwind API",
+      branch: "session/ab12",
+      worktree: "/data/worktrees/session-ab12",
+      running: false,
+      created_at_ms: Date.now() - 600_000,
+      last_activity_ms: Date.now() - 60_000,
+    };
+    await scriptServer(page, {
+      ...script,
+      features: ["work_sessions"],
+      conversations: {
+        s1: {
+          ...messages("s1", [
+            message("m1", "user", "Fix the login page."),
+            message("m2", "assistant", "The login page works again.", {
+              run_id: "r9",
+              activity: [{ call_id: "a", offset: 0, tool: "Edit", input: { file_path: "src/login.tsx" }, ok: true }],
+              usage: {
+                input_tokens: 12,
+                output_tokens: 2100,
+                cached_tokens: 50000,
+                cache_creation_tokens: 3000,
+                cost_micro_usd: 120000,
+              },
+            }),
+          ]),
+          agent_mode: "plan",
+          run: { model: "claude-opus-5-5", effort: "high" },
+        },
+      },
+      reads: {
+        "work_session.list": () => ({ type: "work_sessions", value: { sessions: [session], as_of_seq: 1 } }),
+        "run.guidelines": (request) => ({
+          type: "run_guidelines",
+          value: {
+            run_id: (request.params as { run_id: string }).run_id,
+            guidelines:
+              (request.params as { run_id: string }).run_id === "r9"
+                ? [{ guideline_id: "g1", title: "Rust style", version: 3 }]
+                : [],
+          },
+        }),
+      },
+    });
+    await page.goto(site.origin);
+    await page.goto(`${site.origin}/session/s1`);
+    const properties = page.getByRole("complementary", { name: "Session properties" });
+    await expect(properties.getByText("Flux", { exact: true })).toBeVisible();
+    await expect(properties.getByText("Waiting for you")).toBeVisible();
+    await expect(properties.getByText("session/ab12")).toBeVisible();
+    await expect(properties.getByText("Opus")).toBeVisible();
+    await expect(properties.getByText("high", { exact: true })).toBeVisible();
+    await expect(properties.getByText("src/login.tsx")).toBeVisible();
+    await expect(properties.getByText("Rust style")).toBeVisible();
+    await expect(properties.getByText("v3")).toBeVisible();
+    await expect(properties.getByText(/2\.1k out/)).toBeVisible();
+    await expect(page.getByText("The login page works again.")).toBeVisible();
+    await page.screenshot({ path: `${REPO}/target/session-details/session-panel.png` });
+  });
+
+  test("a new session goes to the dispatcher, which chooses who takes it", async ({ page }) => {
+    const choosing = {
+      conversation_id: "s2",
+      title: "The login page is blank",
+      employee_id: "e0",
+      employee_name: "Orion",
+      project_id: "p",
+      project_name: "Northwind API",
+      running: true,
+      dispatch: "choosing",
+      created_at_ms: Date.now() - 1_000,
+      last_activity_ms: Date.now() - 1_000,
+    };
+    let sessions: unknown[] = [];
+    const { writes } = await scriptServer(page, {
+      ...script,
+      features: ["work_sessions", "session_dispatch"],
+      employees: [
+        { id: "e0", name: "Orion", role: "Project Manager", status: "active" },
+        { id: "e1", name: "Flux", role: "Engineer", status: "active" },
+      ],
+      conversations: {
+        s2: {
+          ...messages("s2", [
+            message("m1", "user", "The login page is blank."),
+            message("m2", "assistant", "Orion is choosing who takes this…", { update: "system" }),
+          ]),
+          employee_id: "e0",
+        },
+      },
+      reads: {
+        "work_session.list": () => ({ type: "work_sessions", value: { sessions, as_of_seq: 1 } }),
+        // A connection is set up, so Start can go.
+        "connection.list": () => ({
+          type: "connections",
+          value: {
+            connections: [{ id: "c1", display_name: "Claude", provider: "claude_code", status: "ready", models: [] }],
+            defaults: [],
+          },
+        }),
+      },
+      results: {
+        "work_session.dispatch": () => {
+          sessions = [choosing];
+          return {
+            kind: "command",
+            value: { type: "work_session_dispatching", conversation_id: "s2", project_id: "p", message_id: "m1" },
+          };
+        },
+      },
+    });
+    await page.goto(`${site.origin}/new`);
+    await page.getByRole("radio", { name: "Session" }).click();
+    await expect(page.getByRole("button", { name: "Who" })).toHaveText(/Dispatcher/);
+    await expect(page.getByText("The dispatcher chooses who takes it")).toBeVisible();
+    await page.getByRole("textbox", { name: "What needs doing" }).fill("The login page is blank.");
+    await page.getByRole("button", { name: /^Start/ }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "work_session.dispatch")?.params)
+      .toMatchObject({
+        project_id: "p",
+        text: "The login page is blank.",
+      });
+    expect(writes.some((w) => w.method === "work_session.start")).toBe(false);
+
+    // The session opens: the dispatcher is at it, and the board member can choose instead.
+    await expect(page).toHaveURL(/\/session\/s2$/);
+    await expect(page.getByText("Orion is choosing who takes this…")).toBeVisible();
+    const properties = page.getByRole("complementary", { name: "Session properties" });
+    await expect(properties.getByText("Dispatcher is choosing")).toBeVisible();
+    await expect(page.getByText(/You can also choose yourself/)).toBeVisible();
+    await page.screenshot({ path: `${REPO}/target/session-dispatch/session-choosing.png` });
+    await page.getByRole("button", { name: "Who takes this session" }).click();
+    await page.getByRole("menuitem", { name: /Flux/ }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "work_session.assign")?.params)
+      .toEqual({ conversation_id: "s2", employee_id: "e1" });
+  });
+
   test("the Inbox says what each row is, and acts on it", async ({ page }) => {
     const { writes } = await scriptServer(page, script);
     await page.goto(site.origin);

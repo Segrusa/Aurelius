@@ -10,6 +10,7 @@ mod uploads;
 mod dispatcher;
 mod runtimes;
 mod tasks;
+mod session_dispatch;
 mod triage;
 mod quick;
 mod memory;
@@ -355,6 +356,11 @@ async fn run_inner(
     {
         let store = store.clone();
         tokio::task::spawn_blocking(move || store.write(|tx| queries::release_leases(tx, aurelius_application::task::triage::TRIAGE_JOB_KIND, i64::MAX))).await??;
+    }
+    // So is a work session's dispatcher job (`session_dispatch_claimed`), on the same assumption.
+    {
+        let store = store.clone();
+        tokio::task::spawn_blocking(move || store.write(|tx| queries::release_leases(tx, aurelius_application::conversation::session_dispatch::SESSION_DISPATCH_JOB_KIND, i64::MAX))).await??;
     }
     // So are the quick tasks' merge and cleanup: each checks the repository again before it acts.
     for kind in [aurelius_application::ticket::quick::QUICK_MERGE_JOB_KIND, aurelius_application::ticket::quick::QUICK_CLEANUP_JOB_KIND] {

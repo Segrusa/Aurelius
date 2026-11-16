@@ -214,6 +214,7 @@ fn command_needs(command: &Command) -> Needs {
         Command::SendProjectMessage(m) if m.conversation_id.is_none() && m.start.needs_approve() => Needs::Cap(Approve),
         Command::StartProjectConversation(m) if m.start.needs_approve() => Needs::Cap(Approve),
         Command::StartWorkSession(m) if m.run.needs_approve() => Needs::Cap(Approve),
+        Command::DispatchWorkSession(m) if m.run.needs_approve() => Needs::Cap(Approve),
         Command::SendChatMessage(_)
         | Command::RetryReply(_)
         | Command::StopRun(_)
@@ -231,6 +232,8 @@ fn command_needs(command: &Command) -> Needs {
         | Command::DeleteMessage(_)
         | Command::StartProjectConversation(_)
         | Command::StartWorkSession(_)
+        | Command::DispatchWorkSession(_)
+        | Command::AssignWorkSession(_)
         | Command::SendProjectMessage(_) => Needs::Cap(Chat),
         Command::SetAgentMode(m) if m.mode == AgentMode::Auto => Needs::Cap(Approve),
         Command::SetAgentMode(_) => Needs::Cap(Chat),

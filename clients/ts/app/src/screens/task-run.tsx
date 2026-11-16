@@ -11,7 +11,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useAllTasks, useApprovals, useEmployees, useMessages, useProjects, useRunGuidelines } from "../data";
+import { useAllTasks, useApprovals, useEmployees, useMessages, useProjects } from "../data";
 import { hidden } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { AttachedImages, useImagePaste } from "../ui/attach";
@@ -24,7 +24,16 @@ import { ActivityOutput, ContextDialog } from "./chat-message";
 import { Held, useModels, useSend } from "./dialogs";
 import { nextMode } from "./employee-logic";
 import { Confirm, Page, Problem } from "./org-kit";
-import { boardOnlyReason } from "./run-logic";
+import { boardOnlyReason, lastRunOf, usageTotals } from "./run-logic";
+import {
+  FilesWritten,
+  RunAside,
+  RunGuidelines,
+  SideProperties,
+  SideRow,
+  SideSection,
+  UsageTotalsLine,
+} from "./run-side";
 import {
   FileChips,
   KeptFiles,
@@ -38,7 +47,6 @@ import {
 } from "./run-tools";
 import { modelName } from "./settings-kit";
 import { filesWritten, isActive, stepLine, stepsOf, subtasksOf, taskStateLine } from "./tasks-logic";
-import { tokensShort } from "./usage-logic";
 
 const styles = stylex.create({
   steps: { display: "flex", flexDirection: "column" },
@@ -116,9 +124,6 @@ const styles = stylex.create({
   },
   composerBar: { display: "flex", alignItems: "center", gap: 6, paddingInline: 8, paddingBottom: 8 },
   queued: { marginInlineStart: "auto", fontSize: 12, color: "var(--precision-text3)" },
-  row: { display: "grid", minHeight: 30, gridTemplateColumns: "100px minmax(0,1fr)", alignItems: "center" },
-  rowName: { color: "var(--precision-text3)" },
-  rowValue: { minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
   head: {
     display: "flex",
     minHeight: 44,
@@ -185,27 +190,6 @@ const styles = stylex.create({
     whiteSpace: "pre-wrap",
     color: "var(--color-text-secondary)",
   },
-  aside: {
-    display: { default: "flex", "@media (max-width: 900px)": "none" },
-    width: "clamp(240px, 24%, 340px)",
-    flexShrink: 0,
-    boxSizing: "border-box",
-    flexDirection: "column",
-    gap: 20,
-    overflowY: "auto",
-    borderLeftWidth: 1,
-    borderLeftStyle: "solid",
-    borderLeftColor: "var(--color-border)",
-    backgroundColor: "var(--precision-sunk)",
-    padding: 18,
-  },
-  sideTitle: { marginTop: 0, marginBottom: 8, fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
-  section: {
-    borderTopWidth: 1,
-    borderTopStyle: "solid",
-    borderTopColor: "var(--precision-line2)",
-    paddingTop: 16,
-  },
   subtask: {
     display: "flex",
     alignItems: "center",
@@ -223,18 +207,6 @@ const styles = stylex.create({
     textOverflow: "ellipsis",
   },
   subtaskState: { flexShrink: 0, fontSize: 12 },
-  file: {
-    overflow: "hidden",
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-    paddingBlock: 4,
-    fontFamily: "var(--font-family-code)",
-    fontSize: 12,
-    color: "var(--color-text-secondary)",
-  },
-  guideline: { display: "flex", justifyContent: "space-between", gap: 8, paddingBlock: 4 },
-  version: { flexShrink: 0, color: "var(--precision-text3)" },
-  usage: { fontSize: 12, lineHeight: 1.7, color: "var(--precision-text3)" },
   loading: { margin: 0, padding: 18, color: "var(--precision-text3)" },
 });
 
@@ -509,15 +481,6 @@ function Composer({
   );
 }
 
-function Row({ name, children }: { name: string; children: React.ReactNode }) {
-  return (
-    <div {...stylex.props(styles.row)}>
-      <span {...stylex.props(styles.rowName)}>{name}</span>
-      <span {...stylex.props(styles.rowValue)}>{children}</span>
-    </div>
-  );
-}
-
 export function TaskRunScreen({ taskId }: { taskId: string }) {
   useKeyContext("TaskRun");
   const navigate = useNavigate();
@@ -531,20 +494,9 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
   const messages = useMessages(task?.conversation_id);
   const list = useMemo(() => messages.data?.messages ?? [], [messages.data]);
   const known = useMemo(() => new Set(list.map((m) => m.id)), [list]);
-  const lastRun = [...list].reverse().find((m) => m.run_id)?.run_id;
-  const guidelines = useRunGuidelines(lastRun);
+  const lastRun = lastRunOf(list);
   const files = useMemo(() => filesWritten(list), [list]);
-  const usage = useMemo(() => {
-    const totals = { input: 0, output: 0, cached: 0, written: 0, micro: 0 };
-    for (const m of list) {
-      totals.input += m.usage?.input_tokens ?? 0;
-      totals.output += m.usage?.output_tokens ?? 0;
-      totals.cached += m.usage?.cached_tokens ?? 0;
-      totals.written += m.usage?.cache_creation_tokens ?? 0;
-      totals.micro += m.usage?.cost_micro_usd ?? 0;
-    }
-    return totals;
-  }, [list]);
+  const usage = useMemo(() => usageTotals(list), [list]);
   const subtasks = useMemo(() => subtasksOf(tasks.data ?? [], taskId), [tasks.data, taskId]);
   const end = useRef<HTMLDivElement>(null);
   const count = list.length;
@@ -725,30 +677,28 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
             />
           ) : null}
         </section>
-        <aside aria-label="Run properties" {...stylex.props(styles.aside)}>
-          <div>
-            <p {...stylex.props(styles.sideTitle)}>Properties</p>
-            <Row name="Employee">{name}</Row>
-            <Row name="Status">{state.text}</Row>
-            {project ? <Row name="Project">{project.name}</Row> : null}
-            <Row name="Model">
+        <RunAside label="Run properties">
+          <SideProperties>
+            <SideRow name="Employee">{name}</SideRow>
+            <SideRow name="Status">{state.text}</SideRow>
+            {project ? <SideRow name="Project">{project.name}</SideRow> : null}
+            <SideRow name="Model">
               {(task.run.model ?? messages.data?.run.model)
                 ? modelName((task.run.model ?? messages.data?.run.model) as string)
                 : "Default"}
-            </Row>
-            <Row name="Mode">{task.run.mode ?? messages.data?.agent_mode ?? "Default"}</Row>
+            </SideRow>
+            <SideRow name="Mode">{task.run.mode ?? messages.data?.agent_mode ?? "Default"}</SideRow>
             {task.schedule_id ? (
-              <Row name="From schedule">
+              <SideRow name="From schedule">
                 {hidden("RecurringTasks") ? "Recurring task" : <Link href="/settings/schedules">Recurring task</Link>}
-              </Row>
+              </SideRow>
             ) : null}
-            <Row name="Created">
+            <SideRow name="Created">
               {new Date(task.created_at_ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
-            </Row>
-          </div>
+            </SideRow>
+          </SideProperties>
           {subtasks.length > 0 ? (
-            <div {...stylex.props(styles.section)}>
-              <p {...stylex.props(styles.sideTitle)}>Subtasks ({subtasks.length})</p>
+            <SideSection title={`Subtasks (${subtasks.length})`}>
               {subtasks.map(({ task: sub, depth }) => {
                 const line = taskStateLine(sub);
                 return (
@@ -766,43 +716,13 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
                   </Link>
                 );
               })}
-            </div>
+            </SideSection>
           ) : null}
           {task.conversation_id ? <SubagentsAtWork conversationId={task.conversation_id} live={live} /> : null}
-          {files.length > 0 ? (
-            <div {...stylex.props(styles.section)}>
-              <p {...stylex.props(styles.sideTitle)}>Files written</p>
-              {files.map((f) => (
-                <div key={f} title={f} {...stylex.props(styles.file)}>
-                  {f}
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {(guidelines.data?.guidelines ?? []).length > 0 ? (
-            <div {...stylex.props(styles.section)}>
-              <p {...stylex.props(styles.sideTitle)}>Guidelines in this run</p>
-              {guidelines.data?.guidelines.map((g) => (
-                <div key={g.guideline_id} {...stylex.props(styles.guideline)}>
-                  <span {...stylex.props(styles.truncate)}>{g.title}</span>
-                  <span {...stylex.props(styles.version)}>v{g.version}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {usage.input + usage.output > 0 ? (
-            <div {...stylex.props(styles.section, styles.usage)}>
-              {tokensShort(usage.input)} in · {tokensShort(usage.output)} out
-              <br />
-              {tokensShort(usage.cached)} cache read · {tokensShort(usage.written)} write
-              {usage.micro > 0 ? (
-                <>
-                  <br />≈ ${(usage.micro / 1_000_000).toFixed(2)} API-equivalent
-                </>
-              ) : null}
-            </div>
-          ) : null}
-        </aside>
+          <FilesWritten files={files} />
+          <RunGuidelines runId={lastRun} />
+          <UsageTotalsLine usage={usage} />
+        </RunAside>
       </div>
     </Page>
   );

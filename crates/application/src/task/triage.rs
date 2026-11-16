@@ -90,7 +90,7 @@ fn runs_so_far(conn: &rusqlite::Connection, root: TaskId) -> Result<u32, Storage
 }
 
 /// Each active colleague with its role, focus and the number of open tasks.
-fn candidates(tx: &Tx<'_>, st: &Store, dispatcher: EmployeeId) -> Result<String, StorageError> {
+pub(crate) fn candidates(tx: &Tx<'_>, st: &Store, dispatcher: EmployeeId) -> Result<String, StorageError> {
     let read = |key: &str| st.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
     let colleagues = crate::task::tasks::colleagues(tx, &read)?;
     let mut lines = Vec::new();

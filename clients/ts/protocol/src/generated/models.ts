@@ -370,6 +370,16 @@ export interface AssignTask {
 }
 
 /**
+ * The board member who started a session chooses who takes it, while the
+ * dispatcher still chooses or after it chose nobody (feature `session_dispatch`).
+ * The chosen employee answers the first message at once.
+ */
+export interface AssignWorkSession {
+  conversation_id: string;
+  employee_id: string;
+}
+
+/**
  * Snapshot a user-picked file into a conversation.
  */
 export interface AttachFile {
@@ -781,6 +791,7 @@ export type Command =
    * `changed: ["owner"]`, not `ticket.dispatched` (nobody was chosen).
    */
   | ({ type: "assign_ticket"; employee_id?: string | null; reason?: string | null; ticket_id: string })
+  | ({ type: "assign_work_session" } & AssignWorkSession)
   | ({ type: "attach_file" } & AttachFile)
   | ({ type: "cancel_scheduled_message" } & CancelScheduledMessage)
   | ({ type: "cancel_task" } & CancelTask)
@@ -817,6 +828,7 @@ export type Command =
   | ({ type: "delete_message" } & DeleteMessage)
   | ({ type: "delete_queued_message" } & DeleteQueuedMessage)
   | ({ type: "delete_task_schedule" } & DeleteTaskSchedule)
+  | ({ type: "dispatch_work_session" } & DispatchWorkSession)
   | ({ type: "edit_message" } & EditMessage)
   | ({ type: "follow_ticket" } & FollowTicket)
   | ({ type: "forget_memory" } & ForgetMemory)
@@ -1094,6 +1106,10 @@ export type CommandResult =
    */
   | ({ type: "user_created"; user_id: string })
   | ({ type: "verification_started"; connection_id: string })
+  /**
+   * A work session was made; the dispatcher chooses who answers its first message.
+   */
+  | ({ type: "work_session_dispatching"; conversation_id: string; message_id: string; project_id: string })
   /**
    * A work session was made and its first message is being answered.
    */
@@ -1489,6 +1505,37 @@ export interface DiscussionAudience {
    * Their names.
    */
   paused_names: string[];
+}
+
+/**
+ * Start a work session and let the dispatcher choose who takes it (feature
+ * `session_dispatch`), as it chooses the owner of a ticket: the same as
+ * `StartWorkSession` without an employee. Until it has chosen, the session's
+ * employee is the dispatcher and nothing more can be written in it.
+ */
+export interface DispatchWorkSession {
+  /**
+   * See `StartWorkSession::confirm_secret`.
+   */
+  confirm_secret?: boolean;
+  /**
+   * See `StartWorkSession::files`.
+   */
+  files?: string[];
+  /**
+   * See `StartWorkSession::images`.
+   */
+  images?: string[];
+  project_id: string;
+  /**
+   * See `StartWorkSession::run`; it applies to the chosen employee's runs.
+   */
+  run?: TaskRun;
+  text: string;
+  /**
+   * See `StartWorkSession::worktree`.
+   */
+  worktree?: boolean;
 }
 
 /**
@@ -5040,6 +5087,20 @@ export interface ServerNameView {
 }
 
 /**
+ * Where the dispatcher is with a session (`WorkSessionView::dispatch`).
+ */
+export type SessionDispatch =
+  /**
+   * Its job runs: the session waits for its choice.
+   */
+  | "choosing"
+  /**
+   * It chose nobody (or could not): the board member chooses.
+   */
+  | "nobody"
+;
+
+/**
  * One signed-in device of a board member (`session.list`).
  */
 export interface SessionView {
@@ -6781,6 +6842,12 @@ export interface WorkSessionView {
   branch?: string | null;
   conversation_id: string;
   created_at_ms: number;
+  /**
+   * The dispatcher still chooses who takes it, or chose nobody (feature
+   * `session_dispatch`); none: `employee_id` works in it. While it chooses,
+   * `employee_id` is the dispatcher.
+   */
+  dispatch?: SessionDispatch | null;
   employee_id: string;
   employee_name: string;
   last_activity_ms: number;

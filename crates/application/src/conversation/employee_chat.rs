@@ -44,6 +44,10 @@ pub(crate) fn write_refusal(tx: &Tx<'_>, conversation: ConversationId, user: Opt
         if user != Some(session.started_by) {
             return Ok(Some(not_found()));
         }
+        // The dispatcher still chooses, or chose nobody: the employee who answers comes first.
+        if session.dispatch.is_some() {
+            return Ok(Some(domain_error(DomainError::OutOfRange { field: "conversation_id".into(), detail: crate::conversation::session_dispatch::NOBODY_YET.into() })));
+        }
         let Some(employee) = conv::owner_of(tx, conversation)?.0 else { return Ok(Some(not_found())) };
         let Some(employee) = employees::load_employee(tx, employee)? else { return Ok(Some(not_found())) };
         return Ok(match employee.status {

@@ -21,6 +21,7 @@ import {
   projectRows,
   remembered,
   type SessionStart,
+  sessionDispatchParams,
   sessionKey,
   sessionRequest,
   sessionStartParams,
@@ -394,5 +395,52 @@ describe("work sessions", () => {
       ),
     ).toBe("c");
     expect(startedSession(receipt({ type: "ticket_created", ticket_id: "t" }))).toBeNull();
+  });
+});
+
+describe("a session the dispatcher gives to someone (session_dispatch)", () => {
+  const team = [employee("e1"), employee("e2", "paused")];
+
+  it("goes to the dispatcher by default, or to the employee chosen last while still active", () => {
+    expect(defaultWho("session", null, team, null, true)).toBe(DISPATCHER);
+    expect(defaultWho("session", null, team, DISPATCHER, true)).toBe(DISPATCHER);
+    expect(defaultWho("session", null, team, "e2", true)).toBe(DISPATCHER);
+    expect(defaultWho("session", null, team, "e1", true)).toBe("e1");
+    // A server without it: the board member chooses, as before.
+    expect(defaultWho("session", null, team, null, false)).toBeNull();
+  });
+
+  it("may start with the dispatcher only where the server has it", () => {
+    const ready = { projectId: "p", text: "fix the login", kind: "session" as const, who: DISPATCHER, offline: false };
+    expect(startProblem({ ...ready, sessionDispatch: true })).toBeNull();
+    expect(startProblem({ ...ready, sessionDispatch: false })).toBe("Choose who does it.");
+    expect(startProblem({ ...ready, kind: "quick", sessionDispatch: true })).toBe("Choose who does it.");
+  });
+
+  it("says the dispatcher chooses, and where they work", () => {
+    const line = (worktree: boolean) =>
+      footerLine({
+        kind: "session",
+        whoName: null,
+        responsible: false,
+        noConnection: false,
+        worktree,
+        dispatcher: true,
+      });
+    expect(line(false)).toEqual({ type: "text", text: expect.stringContaining("The dispatcher chooses who takes it") });
+    expect(line(true)).toEqual({ type: "text", text: expect.stringContaining("worktree of its own") });
+  });
+
+  it("sends a session start without an employee, and reads the session from its receipt", () => {
+    const start = { projectId: "p", text: " fix it ", model: "sonnet", effort: "default", mode: "default" };
+    expect(sessionDispatchParams(start, false, false)).toEqual({
+      project_id: "p",
+      text: "fix it",
+      worktree: false,
+      run: { model: "sonnet", effort: null },
+      confirm_secret: false,
+    });
+    const receipt = { result: { kind: "command", value: { type: "work_session_dispatching", conversation_id: "c" } } };
+    expect(startedSession(receipt as unknown as Receipt)).toBe("c");
   });
 });

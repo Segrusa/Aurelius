@@ -719,6 +719,29 @@ final class AssignTask {
   };
 }
 
+/// The board member who started a session chooses who takes it, while the
+/// dispatcher still chooses or after it chose nobody (feature `session_dispatch`).
+/// The chosen employee answers the first message at once.
+final class AssignWorkSession {
+  const AssignWorkSession({
+    required this.conversationId,
+    required this.employeeId,
+  });
+
+  final String conversationId;
+  final String employeeId;
+
+  factory AssignWorkSession.fromJson(Map<String, dynamic> json) => AssignWorkSession(
+    conversationId: (json['conversation_id'] as String),
+    employeeId: (json['employee_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'conversation_id': conversationId,
+    'employee_id': employeeId,
+  };
+}
+
 /// Snapshot a user-picked file into a conversation.
 final class AttachFile {
   const AttachFile({
@@ -1433,6 +1456,8 @@ sealed class Command {
           reason: (json['reason'] == null ? null : (json['reason'] as String)),
           ticketId: (json['ticket_id'] as String),
         );
+      case 'assign_work_session':
+        return CommandAssignWorkSession(value: AssignWorkSession.fromJson(json as Map<String, dynamic>));
       case 'attach_file':
         return CommandAttachFile(value: AttachFile.fromJson(json as Map<String, dynamic>));
       case 'cancel_scheduled_message':
@@ -1504,6 +1529,8 @@ sealed class Command {
         return CommandDeleteQueuedMessage(value: DeleteQueuedMessage.fromJson(json as Map<String, dynamic>));
       case 'delete_task_schedule':
         return CommandDeleteTaskSchedule(value: DeleteTaskSchedule.fromJson(json as Map<String, dynamic>));
+      case 'dispatch_work_session':
+        return CommandDispatchWorkSession(value: DispatchWorkSession.fromJson(json as Map<String, dynamic>));
       case 'edit_message':
         return CommandEditMessage(value: EditMessage.fromJson(json as Map<String, dynamic>));
       case 'follow_ticket':
@@ -1863,6 +1890,20 @@ final class CommandAssignTicket extends Command {
       if (employeeId != null) 'employee_id': employeeId,
       if (reason != null) 'reason': reason,
       'ticket_id': ticketId,
+    };
+}
+
+final class CommandAssignWorkSession extends Command {
+  const CommandAssignWorkSession({
+    required this.value,
+  });
+
+  final AssignWorkSession value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'assign_work_session',
+      ...value.toJson(),
     };
 }
 
@@ -2242,6 +2283,20 @@ final class CommandDeleteTaskSchedule extends Command {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'delete_task_schedule',
+      ...value.toJson(),
+    };
+}
+
+final class CommandDispatchWorkSession extends Command {
+  const CommandDispatchWorkSession({
+    required this.value,
+  });
+
+  final DispatchWorkSession value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'dispatch_work_session',
       ...value.toJson(),
     };
 }
@@ -3571,6 +3626,12 @@ sealed class CommandResult {
         return CommandResultVerificationStarted(
           connectionId: (json['connection_id'] as String),
         );
+      case 'work_session_dispatching':
+        return CommandResultWorkSessionDispatching(
+          conversationId: (json['conversation_id'] as String),
+          messageId: (json['message_id'] as String),
+          projectId: (json['project_id'] as String),
+        );
       case 'work_session_started':
         return CommandResultWorkSessionStarted(
           conversationId: (json['conversation_id'] as String),
@@ -4715,6 +4776,27 @@ final class CommandResultVerificationStarted extends CommandResult {
     };
 }
 
+/// A work session was made; the dispatcher chooses who answers its first message.
+final class CommandResultWorkSessionDispatching extends CommandResult {
+  const CommandResultWorkSessionDispatching({
+    required this.conversationId,
+    required this.messageId,
+    required this.projectId,
+  });
+
+  final String conversationId;
+  final String messageId;
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'work_session_dispatching',
+      'conversation_id': conversationId,
+      'message_id': messageId,
+      'project_id': projectId,
+    };
+}
+
 /// A work session was made and its first message is being answered.
 final class CommandResultWorkSessionStarted extends CommandResult {
   const CommandResultWorkSessionStarted({
@@ -5644,6 +5726,55 @@ final class DiscussionAudience {
     'employees': employees,
     'paused': paused,
     'paused_names': pausedNames,
+  };
+}
+
+/// Start a work session and let the dispatcher choose who takes it (feature
+/// `session_dispatch`), as it chooses the owner of a ticket: the same as
+/// `StartWorkSession` without an employee. Until it has chosen, the session's
+/// employee is the dispatcher and nothing more can be written in it.
+final class DispatchWorkSession {
+  const DispatchWorkSession({
+    this.confirmSecret,
+    this.files = const [],
+    this.images = const [],
+    required this.projectId,
+    this.run,
+    required this.text,
+    this.worktree,
+  });
+
+  /// See `StartWorkSession::confirm_secret`.
+  final bool? confirmSecret;
+  /// See `StartWorkSession::files`.
+  final List<String> files;
+  /// See `StartWorkSession::images`.
+  final List<String> images;
+  final String projectId;
+  /// See `StartWorkSession::run`; it applies to the chosen employee's runs.
+  final TaskRun? run;
+  final String text;
+  /// See `StartWorkSession::worktree`.
+  final bool? worktree;
+
+  factory DispatchWorkSession.fromJson(Map<String, dynamic> json) => DispatchWorkSession(
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
+    files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    projectId: (json['project_id'] as String),
+    run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
+    text: (json['text'] as String),
+    worktree: (json['worktree'] == null ? null : (json['worktree'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
+    'files': files,
+    'images': images,
+    'project_id': projectId,
+    if (run != null) 'run': run?.toJson(),
+    'text': text,
+    if (worktree != null) 'worktree': worktree,
   };
 }
 
@@ -16094,6 +16225,25 @@ final class ServerNameView {
   };
 }
 
+/// Where the dispatcher is with a session (`WorkSessionView::dispatch`).
+enum SessionDispatch {
+  /// Its job runs: the session waits for its choice.
+  choosing('choosing'),
+  /// It chose nobody (or could not): the board member chooses.
+  nobody('nobody');
+
+  const SessionDispatch(this.wire);
+
+  final String wire;
+
+  static SessionDispatch fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown SessionDispatch value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
 /// One signed-in device of a board member (`session.list`).
 final class SessionView {
   const SessionView({
@@ -19722,6 +19872,7 @@ final class WorkSessionView {
     this.branch,
     required this.conversationId,
     required this.createdAtMs,
+    this.dispatch,
     required this.employeeId,
     required this.employeeName,
     required this.lastActivityMs,
@@ -19735,6 +19886,10 @@ final class WorkSessionView {
   final String? branch;
   final String conversationId;
   final int createdAtMs;
+  /// The dispatcher still chooses who takes it, or chose nobody (feature
+  /// `session_dispatch`); none: `employee_id` works in it. While it chooses,
+  /// `employee_id` is the dispatcher.
+  final SessionDispatch? dispatch;
   final String employeeId;
   final String employeeName;
   final int lastActivityMs;
@@ -19751,6 +19906,7 @@ final class WorkSessionView {
     branch: (json['branch'] == null ? null : (json['branch'] as String)),
     conversationId: (json['conversation_id'] as String),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
+    dispatch: (json['dispatch'] == null ? null : SessionDispatch.fromJson(json['dispatch'] as String)),
     employeeId: (json['employee_id'] as String),
     employeeName: (json['employee_name'] as String),
     lastActivityMs: (json['last_activity_ms'] as num).toInt(),
@@ -19765,6 +19921,7 @@ final class WorkSessionView {
     if (branch != null) 'branch': branch,
     'conversation_id': conversationId,
     'created_at_ms': createdAtMs,
+    if (dispatch != null) 'dispatch': dispatch?.toJson(),
     'employee_id': employeeId,
     'employee_name': employeeName,
     'last_activity_ms': lastActivityMs,

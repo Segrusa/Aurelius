@@ -5,10 +5,12 @@ import {
   composePlanFeedback,
   elapsedText,
   lastFailure,
+  lastRunOf,
   lastSummaryFailed,
   markdownPaths,
   screenshotId,
   usageLine,
+  usageTotals,
   waitingText,
 } from "./run-logic";
 
@@ -95,5 +97,33 @@ describe("lastFailure", () => {
   it("is nothing once a later answer came", () => {
     expect(lastFailure([m("assistant", "failed", "x"), m("assistant", "complete", "ok")])).toBeNull();
     expect(lastFailure([])).toBeNull();
+  });
+});
+
+describe("usageTotals", () => {
+  it("adds up the answers that used tokens and skips the rest", () => {
+    const u = (input: number, micro: number | null) => ({
+      input_tokens: input,
+      output_tokens: 2,
+      cached_tokens: 3,
+      cache_creation_tokens: 4,
+      cost_micro_usd: micro,
+      estimate: true,
+      runs: 1,
+    });
+    expect(usageTotals([{ usage: u(10, 500) }, { usage: null }, {}, { usage: u(5, null) }])).toEqual({
+      input: 15,
+      output: 4,
+      cached: 6,
+      written: 8,
+      micro: 500,
+    });
+  });
+});
+
+describe("lastRunOf", () => {
+  it("is the latest message that came from a run", () => {
+    expect(lastRunOf([{ run_id: "r1" }, { run_id: null }, { run_id: "r2" }, {}])).toBe("r2");
+    expect(lastRunOf([{}, { run_id: null }])).toBeNull();
   });
 });

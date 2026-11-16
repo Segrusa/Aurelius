@@ -11,7 +11,7 @@ use aurelius_domain::{
     ActorKind, AppError, CommandEnvelope, CommandResult, ConversationId, DomainError, MessageId,
     conversation::{MessageRole, MessageStatus},
     employee::LifecycleStatus,
-    work_session::{StartWorkSession, branch_of},
+    work_session::{DispatchWorkSession, SessionDispatch, StartWorkSession, branch_of},
 };
 use aurelius_storage::{
     blobs,
@@ -35,43 +35,76 @@ pub fn worktree_path(data_root: &Path, conversation: ConversationId) -> PathBuf 
     data_root.join("worktrees").join(branch.replace('/', "-"))
 }
 
+/// What `work_session.start` and `work_session.dispatch` both take; `employee`:
+/// none when the dispatcher chooses.
+struct Start<'a> {
+    project_id: aurelius_domain::ProjectId,
+    employee: Option<aurelius_domain::EmployeeId>,
+    text: &'a str,
+    images: &'a [String],
+    files: &'a [String],
+    worktree: bool,
+    run: &'a aurelius_domain::task::RunSettings,
+}
+
 impl CommandService {
     pub(crate) fn start_work_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &StartWorkSession) -> Result<Committed, AppError> {
+        let start = Start { project_id: cmd.project_id, employee: Some(cmd.employee_id), text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, run: &cmd.run };
+        self.start_session(ctx, envelope, hash, start)
+    }
+
+    /// `work_session.dispatch`: as `work_session.start`, and the dispatcher chooses who takes it (`session_dispatch`).
+    pub(crate) fn dispatch_work_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &DispatchWorkSession) -> Result<Committed, AppError> {
+        let start = Start { project_id: cmd.project_id, employee: None, text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, run: &cmd.run };
+        self.start_session(ctx, envelope, hash, start)
+    }
+
+    fn start_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: Start<'_>) -> Result<Committed, AppError> {
         let Some(user) = ctx.user_id else {
             return Err(domain_error(DomainError::BoardMemberRequired));
         };
-        let text = aurelius_domain::conversation::validate_employee_message(&cmd.text, &cmd.images, &cmd.files).map_err(domain_error)?;
+        let text = aurelius_domain::conversation::validate_employee_message(cmd.text, cmd.images, cmd.files).map_err(domain_error)?;
         let run = cmd.run.validated().map_err(domain_error)?;
         if cmd.worktree && !cmd.files.is_empty() {
             return Err(domain_error(DomainError::OutOfRange { field: "files".into(), detail: FILES_NEED_FOLDER.into() }));
         }
-        let sources = crate::conversation::message_uploads::check(&cmd.files)?;
-        let images = crate::conversation::message_images::prepare(&self.store, &cmd.images)?;
+        let sources = crate::conversation::message_uploads::check(cmd.files)?;
+        let images = crate::conversation::message_images::prepare(&self.store, cmd.images)?;
         // Files go into the project's folder before the commit; a failed or replayed
         // command removes them again (as a chat message does).
         let uploaded = if sources.is_empty() {
             None
         } else {
-            let folders = self.store.read(|c| aurelius_storage::tasks::work_folders(c, cmd.project_id, Some(cmd.employee_id))).map_err(storage_error)?;
+            let folders = self.store.read(|c| aurelius_storage::tasks::work_folders(c, cmd.project_id, cmd.employee)).map_err(storage_error)?;
             let folder = crate::conversation::message_uploads::work_folder(&folders)?;
             let uploads = crate::conversation::message_uploads::copy(&folder, &sources)?;
             Some((folder, uploads))
         };
         let uploads = uploaded.as_ref().map(|(_, u)| u.clone()).unwrap_or_default();
         let text_blob = self.store.blobs().put(text.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?;
-        let (project_id, employee_id, worktree) = (cmd.project_id, cmd.employee_id, cmd.worktree);
+        let (project_id, asked, worktree) = (cmd.project_id, cmd.employee, cmd.worktree);
         let conversation_id = ConversationId::new();
         let worktree_folder = worktree.then(|| worktree_path(self.store.root(), conversation_id));
         let message_id = MessageId::new();
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
         let actor = ctx.principal_id.to_string();
+        let st = self.store.clone();
         let committed = self.commit(command_id, hash, move |tx| {
             match employees::project_scope(tx, project_id)? {
                 None => return Ok(Err(domain_error(DomainError::ProjectNotFound(project_id)))),
                 Some((_, LifecycleStatus::Archived)) => return Ok(Err(domain_error(DomainError::ProjectArchived))),
                 Some(_) => {}
             }
+            // Without an employee, the dispatcher holds the session until it has chosen.
+            let employee_id = match asked {
+                Some(employee) => employee,
+                None => match aurelius_storage::company::dispatcher_for(tx, project_id)? {
+                    Some(dispatcher) => dispatcher,
+                    None => return Ok(Err(domain_error(DomainError::OutOfRange { field: "employee_id".into(), detail: crate::conversation::session_dispatch::NO_DISPATCHER.into() }))),
+                },
+            };
+            let dispatch = asked.is_none().then_some(SessionDispatch::Choosing);
             let Some(employee) = employees::load_employee(tx, employee_id)? else {
                 return Ok(Err(domain_error(DomainError::EmployeeNotFound(employee_id))));
             };
@@ -91,7 +124,7 @@ impl CommandService {
                 }
             };
             let title = aurelius_domain::conversation::derive_title(&text);
-            aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str())))?;
+            aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str())), dispatch)?;
             if let Some(mode) = run.mode {
                 conv::set_agent_mode(tx, conversation_id, mode)?;
             }
@@ -106,6 +139,9 @@ impl CommandService {
                 conv::set_conversation_run(tx, conversation_id, &only)?;
             }
             let mut started = serde_json::json!({ "project_id": project_id, "employee_id": employee_id, "work_session": true, "ctx": meta });
+            if dispatch.is_some() {
+                started["dispatch"] = true.into();
+            }
             if let Some((folder, branch)) = &worktree {
                 started["worktree"] = folder.clone().into();
                 started["branch"] = branch.clone().into();
@@ -153,6 +189,10 @@ impl CommandService {
             )?;
             crate::conversation::message_images::keep(tx, message_id, &images)?;
             conv::set_message_uploads(tx, message_id, &uploads)?;
+            if dispatch.is_some() {
+                notices.extend(crate::conversation::session_dispatch::request(tx, &st, conversation_id, employee_id, event_id)?);
+                return Ok(Ok((CommandResult::WorkSessionDispatching { project_id, conversation_id, message_id }, notices)));
+            }
             let (run_id, run_notice) = queue_run(tx, &meta, &command_id.to_string(), conversation_id, message_id)?;
             notices.extend(run_notice);
             Ok(Ok((CommandResult::WorkSessionStarted { project_id, conversation_id, message_id, run_id }, notices)))

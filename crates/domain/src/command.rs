@@ -199,6 +199,12 @@ pub enum CommandResult {
         message_id: MessageId,
         run_id: RunId,
     },
+    /// A work session was made; the dispatcher chooses who answers its first message.
+    WorkSessionDispatching {
+        project_id: ProjectId,
+        conversation_id: ConversationId,
+        message_id: MessageId,
+    },
     /// A message in a project conversation was accepted and is being answered.
     ProjectMessageSent {
         project_id: ProjectId,
