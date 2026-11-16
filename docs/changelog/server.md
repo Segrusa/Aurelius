@@ -9,7 +9,7 @@ The server and the desktop app are released separately. They work together
 as long as their protocol major matches. Releases up to v0.6.0 were combined:
 see [CHANGELOG.md](../../CHANGELOG.md).
 
-## v0.9.2
+## v0.9.3
 
 Protocol 5.
 
