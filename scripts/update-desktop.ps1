@@ -4,11 +4,14 @@
 #
 #   scripts/update-desktop.ps1          pull main, rebuild and replace the app if there is something new
 #   scripts/update-desktop.ps1 -Force   rebuild and replace even when it's up to date
+#   scripts/update-desktop.ps1 -InstallDeps   first install missing build tools with winget
 #
 # The app is started again if it was running. Your data and the pairing stay.
-param([switch]$Force)
+param([switch]$Force, [switch]$InstallDeps)
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
+& ./scripts/windows-deps.ps1 -Install:$InstallDeps
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $dest = Join-Path $env:LOCALAPPDATA "Programs\Aurelius"
 $appDir = Join-Path $dest "app"
