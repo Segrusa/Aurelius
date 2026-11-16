@@ -1,11 +1,23 @@
 // The rules of the New session view (ticket #60), pure: what it shows, what it picks unless told, and
 // what Start sends. Every start is a `ticket.create` the dialogs already send, built by their own code.
 
-import type { MethodParams } from "@aurelius/protocol";
+import type { AgentMode, MethodParams, Receipt } from "@aurelius/protocol";
 import { giveWorkParams, LAST_GIVEN, taskRun, ticketCreateParams, titleOfGoal } from "./dialog-logic";
 import { LAST_QUICK, QUICK_NOTE, quickAssignee, quickCreateParams } from "./quick-logic";
 
-export type SessionKind = "ticket" | "quick";
+/** `session`: a work session (server feature `work_sessions`), which replaces the quick task there. */
+export type SessionKind = "ticket" | "quick" | "session";
+
+/** The server feature of work sessions. */
+export const SESSIONS_FEATURE = "work_sessions";
+
+/** What a session start says under the composer. */
+export function sessionNote(whoName: string | null, worktree: boolean): string {
+  const who = whoName ?? "The employee";
+  return worktree
+    ? `${who} works in a worktree of its own, on its own branch. No ticket: you talk with them in the session.`
+    : `${who} works in the project's folder itself. No ticket: you talk with them in the session.`;
+}
 
 /** The Who of a ticket nobody was chosen for: the dispatcher picks the owner. */
 export const DISPATCHER = "dispatcher";
@@ -84,9 +96,19 @@ export function noteRecent(recent: string[], id: string): string[] {
   return [id, ...recent.filter((r) => r !== id)].slice(0, RECENT_MAX);
 }
 
-/** §4.4: Ticket, or Quick task when that was used last and the server has it. */
-export function defaultKind(stored: string | null, quickOn: boolean): SessionKind {
+/**
+ * §4.4: Ticket, or what was used last when the server has it: a Session on a server with
+ * sessions (a quick task chosen before counts as one), else a Quick task.
+ */
+export function defaultKind(stored: string | null, quickOn: boolean, sessionsOn = false): SessionKind {
+  if (sessionsOn) return stored === "session" || stored === "quick" ? "session" : "ticket";
   return quickOn && stored === "quick" ? "quick" : "ticket";
+}
+
+/** The kinds a server offers next to Ticket: Session where it has them, else Quick task, else none. */
+export function offeredKind(features: readonly string[], quickOn: boolean): SessionKind | null {
+  if (features.includes(SESSIONS_FEATURE)) return "session";
+  return quickOn ? "quick" : null;
 }
 
 /**
@@ -99,7 +121,7 @@ export function defaultWho(
   employees: Listed[],
   lastQuick: string | null,
 ): string | null {
-  if (kind === "quick") return quickAssignee(employees, lastQuick);
+  if (kind !== "ticket") return quickAssignee(employees, lastQuick);
   const active = employees.some((e) => e.id === stored && e.status === "active");
   return active ? stored : DISPATCHER;
 }
@@ -115,7 +137,7 @@ export function remembered(
     [sessionKey("recent", hostId), JSON.stringify(noteRecent(recent, start.projectId))],
     [sessionKey("kind", hostId), start.kind],
   ];
-  if (start.kind === "quick") return [...writes, [LAST_QUICK, start.who]];
+  if (start.kind !== "ticket") return [...writes, [LAST_QUICK, start.who]];
   writes.push([sessionKey("who", hostId), start.who]);
   return start.who === DISPATCHER ? writes : [...writes, [LAST_GIVEN, start.who]];
 }
@@ -207,11 +229,14 @@ export function startProblem(state: {
   kind: SessionKind;
   who: string | null;
   offline: boolean;
+  /** Files added to the composer: a session takes them only once it has started. */
+  files?: number;
 }): string | null {
   if (state.offline) return "Not connected to the server.";
   if (!state.projectId) return "Choose a project.";
   if (state.text.trim() === "") return "Describe what needs doing.";
-  if (state.kind === "quick" && (!state.who || state.who === DISPATCHER)) return "Choose who does it.";
+  if (state.kind !== "ticket" && (!state.who || state.who === DISPATCHER)) return "Choose who does it.";
+  if (state.kind === "session" && (state.files ?? 0) > 0) return "Add files in the session once it has started.";
   return null;
 }
 
@@ -225,9 +250,12 @@ export function footerLine(state: {
   /** The server knows a responsible board member (`ticket_responsible`). */
   responsible: boolean;
   noConnection: boolean;
+  /** A session in a worktree of its own. */
+  worktree?: boolean;
 }): FooterLine {
   if (state.noConnection) return { type: "no_connection" };
   if (state.kind === "quick") return { type: "text", text: QUICK_NOTE };
+  if (state.kind === "session") return { type: "text", text: sessionNote(state.whoName, state.worktree ?? false) };
   if (state.whoName) return { type: "text", text: `${state.whoName} reports back to you when it is done.` };
   const text = state.responsible
     ? "The dispatcher picks the owner. You are responsible."
@@ -236,6 +264,7 @@ export function footerLine(state: {
 }
 
 export function placeholderOf(kind: SessionKind): string {
+  if (kind === "session") return "What do you want to work on? Starts right away, without a ticket";
   return kind === "quick" ? "What needs doing? Starts right away on its own branch" : "Describe a ticket or give work…";
 }
 
@@ -265,4 +294,34 @@ export function createDrafts() {
     set: (hostId: string | null, text: string) => void texts.set(key(hostId), text),
     clear: (hostId: string | null) => void texts.delete(key(hostId)),
   };
+}
+
+/** The request of a session start: the employee, the project and the first message. */
+export function sessionStartParams(
+  start: { projectId: string; employeeId: string; text: string; model: string; effort: string; mode: string },
+  worktree: boolean,
+  confirmSecret: boolean,
+): MethodParams["work_session.start"] {
+  const pick = (value: string) => (value === "default" ? null : value);
+  const mode = pick(start.mode);
+  return {
+    project_id: start.projectId,
+    employee_id: start.employeeId,
+    text: start.text.trim(),
+    worktree,
+    run: {
+      ...(mode ? { mode: mode as AgentMode } : {}),
+      model: pick(start.model),
+      effort: pick(start.effort),
+    },
+    confirm_secret: confirmSecret,
+  };
+}
+
+/** The session a start made, from its receipt. */
+export function startedSession(receipt: Receipt): string | null {
+  const { result } = receipt;
+  return result.kind === "command" && result.value.type === "work_session_started"
+    ? result.value.conversation_id
+    : null;
 }

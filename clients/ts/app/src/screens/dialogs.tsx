@@ -42,7 +42,7 @@ import {
   titleOfGoal,
 } from "./dialog-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
-import { LAST_QUICK, QUICK_NOTE, quickAssignee, quickCreateParams, quickEnabled, quickProblem } from "./quick-logic";
+import { LAST_QUICK, QUICK_NOTE, quickAssignee, quickCreatable, quickCreateParams, quickProblem } from "./quick-logic";
 import { modelName, useSetting } from "./settings-kit";
 import { NoConnectionNote, useNoConnection } from "./tickets-kit";
 
@@ -255,7 +255,7 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const [deadline, setDeadline] = useState("");
   const attach = useAttachments();
   const { storage } = usePlatform();
-  const quickOn = quickEnabled(features);
+  const quickOn = quickCreatable(features);
   const [kind, setKind] = useState<"ticket" | "quick">(seed?.quick && quickOn ? "quick" : "ticket");
   const quick = quickOn && kind === "quick";
   const [quickPick, setQuickPick] = useState<string | null>(null);
@@ -583,7 +583,7 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const [projectId, setProjectId] = useState<string | null>(workspace.id);
   const [mode, setMode] = useState("default");
   const [model, setModel] = useState("default");
-  const quickOn = quickEnabled(features);
+  const quickOn = quickCreatable(features);
   const [kind, setKind] = useState<"work" | "quick">("work");
   const quick = quickOn && kind === "quick";
   const created = useOpenCreated();

@@ -98,6 +98,13 @@ pub enum Method {
     /// The reader's lasting chats with employees, the latest first (feature `employee_chats`).
     #[serde(rename = "employee.chats")]
     EmployeeChats,
+    /// The reader's work sessions, the latest activity first (feature `work_sessions`);
+    /// `project_id`: only those of that project.
+    #[serde(rename = "work_session.list")]
+    WorkSessionList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<aurelius_domain::ProjectId>,
+    },
     /// The company's group chat (Team chat): the user and every employee. Its
     /// messages and settings, as `conversation.get` answers them; an employee's
     /// messages carry its name as `author`. Write with `group_chat.send`.

@@ -27,6 +27,7 @@ pub mod memory;
 pub mod org;
 pub mod project;
 pub mod project_conversation;
+pub mod work_session;
 pub mod proposal;
 pub mod remote;
 pub mod schedule;
@@ -96,6 +97,7 @@ pub enum Command {
     RemoveAttachment(files::RemoveAttachment),
     StartProjectConversation(project_conversation::StartProjectConversation),
     SendProjectMessage(project_conversation::SendProjectMessage),
+    StartWorkSession(work_session::StartWorkSession),
     CreateEmployee(employee::CreateEmployee),
     UpdateEmployee(employee::UpdateEmployee),
     SetEmployeeStatus(employee::SetEmployeeStatus),
@@ -195,6 +197,7 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("remove_attachment", "attachment.remove"),
     ("start_project_conversation", "project_conversation.start"),
     ("send_project_message", "project_conversation.send"),
+    ("start_work_session", "work_session.start"),
     ("create_employee", "employee.create"),
     ("update_employee", "employee.update"),
     ("set_employee_status", "employee.set_status"),

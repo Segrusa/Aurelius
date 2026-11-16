@@ -68,6 +68,25 @@ pub fn main_branch(repo: &Path) -> Option<&'static str> {
     MAIN_BRANCHES.into_iter().find(|b| branch_exists(repo, b))
 }
 
+/// Why `repo` has no main branch to start from, in words a board member can act on:
+/// git missing, not a repository git will use (also "dubious ownership"), no commit
+/// yet, or the branches it has instead of main and master.
+pub fn no_main_reason(repo: &Path) -> String {
+    match git(repo, &["rev-parse", "--is-inside-work-tree"]) {
+        Err(e) => format!("git could not run ({e}); is Git installed and on the PATH of Aurelius?"),
+        Ok(out) if !out.status.success() => format!("{} is not a git repository git will use: {}", repo.display(), why(&out)),
+        Ok(_) => {
+            let heads = git(repo, &["for-each-ref", "--format=%(refname:short)", "refs/heads"]).map(|o| text(&o)).unwrap_or_default();
+            let branches: Vec<&str> = heads.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+            if branches.is_empty() {
+                format!("the repository in {} has no commit yet; make a first commit on main", repo.display())
+            } else {
+                format!("the repository in {} has no main or master branch (it has: {})", repo.display(), branches.join(", "))
+            }
+        }
+    }
+}
+
 /// Make the worktree of a quick task, on its branch: a new branch from the project's
 /// current main, or the branch as it is when it exists already (after a restart or a
 /// cancel and a new start). Nothing happens when the worktree is there.
@@ -76,7 +95,7 @@ pub fn ensure_worktree(repo: &Path, branch: &str, worktree: &Path) -> Result<(),
     if worktree.join(".git").exists() {
         return Ok(());
     }
-    let main = main_branch(repo).ok_or("the project's folder has no main branch")?;
+    let main = main_branch(repo).ok_or_else(|| no_main_reason(repo))?;
     if let Some(parent) = worktree.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("could not make {}: {e}", parent.display()))?;
     }
@@ -95,7 +114,7 @@ pub fn ensure_worktree(repo: &Path, branch: &str, worktree: &Path) -> Result<(),
 pub fn merge(repo: &Path, branch: &str, message: &str) -> MergeOutcome {
     let _one = GIT.lock().unwrap_or_else(|e| e.into_inner());
     let failed = |reason: String, files: Vec<String>| MergeOutcome::Failed { reason, files };
-    let Some(main) = main_branch(repo) else { return failed("the project's folder has no main branch".into(), vec![]) };
+    let Some(main) = main_branch(repo) else { return failed(no_main_reason(repo), vec![]) };
     match ok(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]) {
         Ok(head) if head == main => {}
         Ok(head) => return failed(format!("the project's folder is on the branch {head}, not on {main}"), vec![]),
@@ -171,18 +190,50 @@ pub fn merge_message(repo: &QuickRepo) -> String {
     format!("Merge {}: {} (ticket #{})", repo.branch, repo.title, repo.number)
 }
 
-/// Before a run of a quick task: its worktree, when its employee works on it. A failure
-/// is logged; the run then works without the project's folder (`run::plan`) and says so.
-pub(crate) async fn prepare_run(shared: &Arc<Shared>, conversation: Option<aurelius_domain::ConversationId>) {
-    let Some(conversation) = conversation else { return };
+/// Before a run: the worktree of a quick task (when its employee works on it) or of a
+/// work session that asked for one. `Err` says why it could not be made; the run then
+/// fails with that reason and never starts without its folder (and so without tools).
+pub(crate) async fn prepare_run(shared: &Arc<Shared>, conversation: Option<aurelius_domain::ConversationId>) -> Result<(), String> {
+    let Some(conversation) = conversation else { return Ok(()) };
+    let store = shared.store().clone();
+    let session = blocking(move || {
+        store.read(|c| {
+            let Some(session) = aurelius_storage::work_sessions::of_conversation(c, conversation)? else { return Ok(None) };
+            let folder = aurelius_storage::files::project_folder(c, session.project)?;
+            Ok(Some((session, folder)))
+        })
+    })
+    .await;
+    match session {
+        Some(Ok(Some((session, folder)))) => {
+            let Some((worktree, branch)) = session.worktree else { return Ok(()) };
+            let worktree = std::path::PathBuf::from(worktree);
+            if worktree.join(".git").exists() {
+                return Ok(());
+            }
+            let Some(folder) = folder else { return Err("Aurelius could not make this session's worktree: the project has no folder".into()) };
+            let made = blocking(move || ensure_worktree(Path::new(&folder), &branch, &worktree)).await.unwrap_or_else(|| Err("the git work stopped".into()));
+            return made.map_err(|e| {
+                tracing::warn!(%conversation, error = %e, "could not make the work session's worktree");
+                format!("Aurelius could not make this session's worktree: {e}")
+            });
+        }
+        Some(Err(e)) => return Err(format!("Aurelius could not read this session: {e}")),
+        _ => {}
+    }
     let s = shared.clone();
-    let Some(Ok(Some(repo))) = blocking(move || s.service.quick_repo_of_conversation(conversation)).await else { return };
+    let Some(Ok(Some(repo))) = blocking(move || s.service.quick_repo_of_conversation(conversation)).await else { return Ok(()) };
     if !repo.working || repo.worktree.join(".git").exists() {
-        return;
+        return Ok(());
     }
     let (folder, branch, worktree) = (repo.folder.clone(), repo.branch.clone(), repo.worktree.clone());
-    if let Some(Err(e)) = blocking(move || ensure_worktree(&folder, &branch, &worktree)).await {
-        tracing::warn!(ticket = %repo.ticket, error = %e, "could not make the quick task's worktree");
+    match blocking(move || ensure_worktree(&folder, &branch, &worktree)).await {
+        Some(Ok(())) => Ok(()),
+        Some(Err(e)) => {
+            tracing::warn!(ticket = %repo.ticket, error = %e, "could not make the quick task's worktree");
+            Err(format!("Aurelius could not make the quick task's worktree: {e}"))
+        }
+        None => Err("Aurelius could not make the quick task's worktree: the git work stopped".into()),
     }
 }
 

@@ -37,6 +37,9 @@ pub enum ConversationKind {
     Group,
     /// A ticket's discussion (its project, no employee): one per ticket.
     Ticket,
+    /// A work session (feature `work_sessions`): one employee in one project's folder,
+    /// started by a board member, without a ticket.
+    Session,
 }
 
 impl ConversationKind {
@@ -47,6 +50,7 @@ impl ConversationKind {
             ConversationKind::Employee => "employee",
             ConversationKind::Group => "group",
             ConversationKind::Ticket => "ticket",
+            ConversationKind::Session => "session",
         }
     }
 
@@ -57,6 +61,7 @@ impl ConversationKind {
             "employee" => Some(Self::Employee),
             "group" => Some(Self::Group),
             "ticket" => Some(Self::Ticket),
+            "session" => Some(Self::Session),
             _ => None,
         }
     }

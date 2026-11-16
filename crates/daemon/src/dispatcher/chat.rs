@@ -6,6 +6,10 @@ const CHECKPOINT_EVERY: Duration = Duration::from_millis(1500);
 /// While a tool call is open the run may be silent this many times the idle limit
 /// (a long build or test run says nothing until it ends).
 const TOOL_IDLE_FACTOR: u32 = 3;
+/// The failure of a run whose worktree could not be made (`quick::prepare_run`).
+pub(crate) const WORKTREE_FAILED: &str = "worktree_failed";
+/// The failure of a run whose answer wrote tool calls out as text (`aurelius_runtime::written_calls`).
+pub(crate) const WRITTEN_CALLS: &str = "written_tool_calls";
 /// How long a stopped runtime gets to end its stream before the run ends anyway.
 const STOP_GRACE: Duration = Duration::from_secs(10);
 
@@ -17,8 +21,9 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     let mut driver = super::Driver::new(&shared, &job.id, epoch);
     let s = shared.clone();
     let payload = job.payload.clone();
-    // A quick task's run works in its own worktree: made here before its first run (ticket #53).
-    crate::quick::prepare_run(&shared, payload["conversation_id"].as_str().and_then(|c| aurelius_domain::ConversationId::parse(c).ok())).await;
+    // A quick task's run, and a work session that asked for one, works in its own worktree:
+    // made here before its first run. Without it the run fails and says why (below).
+    let worktree_error = crate::quick::prepare_run(&shared, payload["conversation_id"].as_str().and_then(|c| aurelius_domain::ConversationId::parse(c).ok())).await.err();
     let mut plan: ChatRunPlan = match blocking(move || s.service.prepare_chat_run(&payload)).await {
         Some(Ok(Some(plan))) => plan,
         Some(Ok(None)) => {
@@ -43,6 +48,18 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     driver.run = Some(plan.run_id);
     let idle = idle_limit(&shared).await;
 
+    if let Some(explanation) = worktree_error {
+        // Never a run without its folder: it would have no tools while its text names them.
+        let (s, p) = (shared.clone(), plan.clone());
+        if let Some(Ok(Some(notices))) = blocking(move || s.service.start_chat_run(&p, epoch)).await {
+            shared.publish(notices);
+        }
+        let (s, p) = (shared.clone(), plan.clone());
+        if let Some(Ok(notices)) = blocking(move || s.service.finish_chat_run(&p, RunOutcome::Failed(WORKTREE_FAILED.into()), &explanation, epoch)).await {
+            shared.publish(notices);
+        }
+        return;
+    }
     if let Some(explanation) = plan.context_error.clone() {
         // Mandatory context does not fit: fail explicitly, never truncate silently.
         let (s, p) = (shared.clone(), plan.clone());
@@ -449,6 +466,14 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     } else if login_lost {
         park_for_login(&shared, &plan, epoch).await;
     } else {
+        // Tool calls written out as text did nothing: never posted as an answer.
+        let (outcome, text) = match outcome {
+            RunOutcome::Completed if aurelius_runtime::written_calls::has_written_calls(&text) => {
+                tracing::warn!(run = %plan.run_id, "the answer wrote tool calls out as text; it is not posted");
+                (RunOutcome::Failed(WRITTEN_CALLS.into()), aurelius_runtime::written_calls::WRITTEN_CALLS_EXPLANATION.to_owned())
+            }
+            outcome => (outcome, text),
+        };
         finish(&shared, &plan, outcome, text, epoch).await;
         // A conversation deleted during this answer keeps no session.
         if plan.session.claimed.is_some() {

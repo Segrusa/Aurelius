@@ -878,6 +878,11 @@ pub fn work_folders(conn: &rusqlite::Connection, conversation: ConversationId) -
         )
         .optional()?;
     if let Some((p, m)) = found {
+        // A work session with a worktree of its own works there instead of in the project's folder.
+        let p = match crate::work_sessions::of_conversation(conn, conversation)?.and_then(|s| s.worktree) {
+            Some((worktree, _)) => Some(worktree),
+            None => p,
+        };
         return Ok([p, m].into_iter().flatten().collect());
     }
     // A project conversation works in the project's folder alone.

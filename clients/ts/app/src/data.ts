@@ -17,6 +17,7 @@ import type {
   SubscriptionUsage,
   TaskView,
   TicketView,
+  WorkSessionView,
 } from "@aurelius/protocol";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
@@ -349,6 +350,21 @@ export function useEmployeeChats() {
     ["messages", "employee_chats"],
     async () => expectBody(await connection.call("employee.chats"), "employee_chats").value.chats,
     features.includes("employee_chats"),
+  );
+}
+
+/** The reader's work sessions (server feature `work_sessions`), the latest activity first; `projectId`: one project's. */
+export function useWorkSessions(projectId: string | null = null) {
+  const connection = useConnection();
+  const { features } = useLinkState();
+  return useKeyed<WorkSessionView[]>(
+    ["messages", "work_sessions", projectId],
+    async () =>
+      expectBody(
+        await connection.call("work_session.list", projectId ? { project_id: projectId } : {}),
+        "work_sessions",
+      ).value.sessions,
+    features.includes("work_sessions"),
   );
 }
 

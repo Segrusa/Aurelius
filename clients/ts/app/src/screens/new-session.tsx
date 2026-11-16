@@ -1,5 +1,5 @@
 // New session (ticket #60): one page to start work by typing. The rules are in new-session-logic.ts;
-// every start is the `ticket.create` New ticket, Give work or their quick task sends.
+// every start is the `ticket.create` New ticket, Give work or their quick task sends, or a `work_session.start`.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -33,6 +33,7 @@ import {
   defaultProject,
   defaultWho,
   footerLine,
+  offeredKind,
   parseRecent,
   placeholderOf,
   projectRows,
@@ -40,7 +41,9 @@ import {
   type SessionKind,
   sessionKey,
   sessionRequest,
+  sessionStartParams,
   shownProjects,
+  startedSession,
   startProblem,
 } from "./new-session-logic";
 import { Empty, Loading, Page, PageHead } from "./org-kit";
@@ -252,8 +255,13 @@ export function NewSessionScreen() {
     drafts.set(hostId, next);
   };
   const attach = useAttachments();
-  const [chosenKind, setKind] = useState<SessionKind>(() => defaultKind(storage.get(sessionKey("kind", hostId)), true));
-  const kind: SessionKind = quickOn ? chosenKind : "ticket";
+  // Next to Ticket: a Session where the server has them (it replaces the quick task), else a Quick task.
+  const other = offeredKind(features, quickOn);
+  const [chosenKind, setKind] = useState<SessionKind>(() =>
+    defaultKind(storage.get(sessionKey("kind", hostId)), true, other === "session"),
+  );
+  const kind: SessionKind = other && (chosenKind === "ticket" || chosenKind === other) ? chosenKind : "ticket";
+  const [worktree, setWorktree] = useState(false);
   const [pickedProject, setProject] = useState<string | null>(null);
   const [pickedWho, setWho] = useState<string | null>(null);
   const [model, setModel] = useState("default");
@@ -283,21 +291,39 @@ export function NewSessionScreen() {
       ? "Dispatcher"
       : (who?.name ?? (active.length === 0 ? "No employee yet" : "Choose who does it"));
 
-  const problem = startProblem({ projectId, text, kind, who: whoId, offline });
+  const problem = startProblem({ projectId, text, kind, who: whoId, offline, files: attach.files.length });
   // Lands where the dialogs land since #58: the new ticket's chat, else its panel on the Board.
   const created = useOpenCreated();
+  // A started session opens itself; a ticket where the dialogs open one.
+  const startedTo = useRef<string | null>(null);
   const { busy, error, held, send, sendAnyway } = useSend((done) => {
     toast(done);
     drafts.clear(hostId);
     setText("");
     attach.clear();
-    created.open();
+    const session = startedTo.current;
+    startedTo.current = null;
+    if (session) void navigate({ to: "/session/$conversationId", params: { conversationId: session } });
+    else created.open();
   });
 
   const start = () => {
     if (problem || busy || !project || !whoId) return;
     const startWho = { id: whoId, name: whoId === DISPATCHER ? "Dispatcher" : (who?.name ?? "the employee") };
     send(async (confirmSecret) => {
+      if (kind === "session") {
+        const params = sessionStartParams(
+          { projectId: project.id, employeeId: whoId, text, model, effort, mode },
+          worktree,
+          confirmSecret,
+        );
+        const receipt = await connection.write("work_session.start", params, { retry: false });
+        startedTo.current = startedSession(receipt);
+        for (const [key, value] of remembered(hostId, { kind, projectId: project.id, who: whoId }, recent)) {
+          storage.set(key, value);
+        }
+        return `Session started with ${startWho.name}.`;
+      }
       const { params, done } = sessionRequest(
         {
           kind,
@@ -352,7 +378,7 @@ export function NewSessionScreen() {
   useAction(
     "CycleTaskMode",
     () =>
-      kind === "ticket" &&
+      kind !== "quick" &&
       setMode(
         cycle(
           MODES.map((m) => m.key as string),
@@ -370,6 +396,7 @@ export function NewSessionScreen() {
     whoName: whoId === DISPATCHER ? null : (who?.name ?? null),
     responsible,
     noConnection,
+    worktree,
   });
   const noProjects = projects.isSuccess && shown.length === 0;
   const continuing = continueTickets(mine.data?.tickets ?? []);
@@ -522,15 +549,15 @@ export function NewSessionScreen() {
                   </Chip>
                 }
               />
-              {quickOn ? (
+              {other ? (
                 <SegmentedControl
                   label="Kind"
                   size="sm"
                   value={kind}
-                  onChange={(next) => setKind(next === "quick" ? "quick" : "ticket")}
+                  onChange={(next) => setKind(next === other ? other : "ticket")}
                 >
                   <SegmentedControlItem value="ticket" label="Ticket" />
-                  <SegmentedControlItem value="quick" label="Quick task" />
+                  <SegmentedControlItem value={other} label={other === "session" ? "Session" : "Quick task"} />
                 </SegmentedControl>
               ) : null}
               <Menu
@@ -544,18 +571,39 @@ export function NewSessionScreen() {
                   </Chip>
                 }
               />
-              {kind === "ticket" ? (
+              {kind === "session" ? (
+                <Menu
+                  label="Where"
+                  value={worktree ? "worktree" : "folder"}
+                  options={[
+                    { key: "folder", label: "Project folder", description: "Works in the project's folder itself" },
+                    { key: "worktree", label: "Own worktree", description: "A worktree and branch of its own" },
+                  ]}
+                  onPick={(key) => setWorktree(key === "worktree")}
+                  trigger={
+                    <Chip name="Where" quiet>
+                      {worktree ? "Own worktree" : "Project folder"}
+                    </Chip>
+                  }
+                />
+              ) : null}
+              {kind !== "quick" ? (
                 <Menu
                   label="Mode"
                   value={mode}
                   options={MODES.map((m) => ({
                     key: m.key as string,
-                    label: m.key === "default" ? "Owner's default" : m.label,
+                    label:
+                      m.key === "default" ? (kind === "session" ? "Employee's default" : "Owner's default") : m.label,
                   }))}
                   onPick={setMode}
                   trigger={
                     <Chip name="Mode" quiet>
-                      {mode === "default" ? "Owner's default" : MODES.find((m) => m.key === mode)?.label}
+                      {mode === "default"
+                        ? kind === "session"
+                          ? "Employee's default"
+                          : "Owner's default"
+                        : MODES.find((m) => m.key === mode)?.label}
                     </Chip>
                   }
                 />

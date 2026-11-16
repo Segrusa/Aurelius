@@ -19,6 +19,7 @@ import {
   useOpenTasks,
   useSubscription,
   useTickets,
+  useWorkSessions,
 } from "../data";
 import { type Feature, offered, shown } from "../hidden";
 import { useAction, useFallbackAction, useKeys } from "../keys/provider";
@@ -47,6 +48,7 @@ import { needsYouCount, newNotes, notificationHeading, ticketPlace } from "./inb
 import { useOpenNewSession } from "./new-session";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
+import { sidebarSessions } from "./session-logic";
 import { SettingsSidebar } from "./settings";
 import { useTicketNeeds } from "./tickets-kit";
 import { subscriptionFor } from "./usage-logic";
@@ -220,6 +222,31 @@ function Live() {
 }
 
 /** The board member's latest chats with employees. */
+/** The board member's latest work sessions (server feature `work_sessions`), the workspace's when one is chosen. */
+function RecentSessions() {
+  const workspace = useWorkspace().id;
+  const sessions = sidebarSessions(useWorkSessions().data ?? [], workspace);
+  if (sessions.length === 0) return null;
+  return (
+    <div {...stylex.props(styles.group)}>
+      <SectionLabel>Sessions</SectionLabel>
+      {sessions.map((s) => (
+        <NavRow
+          key={s.conversation_id}
+          to={`/session/${s.conversation_id}`}
+          label={s.title || "Session"}
+          icon={markIcon(initial(s.employee_name), markColor(s.employee_id), 15, 4)}
+          end={
+            s.running ? (
+              <span role="img" aria-label="Working" {...stylex.props(styles.dot, styles.dotLive)} />
+            ) : undefined
+          }
+        />
+      ))}
+    </div>
+  );
+}
+
 function RecentChats() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const chats = recentChats(useEmployeeChats().data ?? []);
@@ -532,6 +559,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
               ))}
             </div>
           ) : null}
+          <RecentSessions />
           <RecentChats />
           <Live />
         </>

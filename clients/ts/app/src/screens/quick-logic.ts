@@ -16,6 +16,14 @@ export function quickEnabled(features: readonly string[]): boolean {
   return features.includes(QUICK_FEATURE);
 }
 
+/**
+ * Whether a new quick task may be made: on a server with work sessions (`work_sessions`) a session
+ * replaces it, and the quick tickets made before only stay readable and mergeable.
+ */
+export function quickCreatable(features: readonly string[]): boolean {
+  return quickEnabled(features) && !features.includes("work_sessions");
+}
+
 /** A view says "quick" only for a quick task; a normal ticket has no kind. */
 export function isQuick(t: { kind?: string | null }): boolean {
   return t.kind === "quick";

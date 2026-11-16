@@ -1,3 +1,4 @@
+import type { Receipt } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import { giveWorkParams, LAST_GIVEN, ticketCreateParams } from "./dialog-logic";
 import {
@@ -13,6 +14,7 @@ import {
   defaultWho,
   footerLine,
   noteRecent,
+  offeredKind,
   PROJECT_ROWS,
   parseRecent,
   placeholderOf,
@@ -21,7 +23,9 @@ import {
   type SessionStart,
   sessionKey,
   sessionRequest,
+  sessionStartParams,
   shownProjects,
+  startedSession,
   startProblem,
 } from "./new-session-logic";
 import { LAST_QUICK, QUICK_NOTE, quickCreateParams } from "./quick-logic";
@@ -308,5 +312,65 @@ describe("the tickets to continue (§4.2)", () => {
 
   it("show their column in words", () => {
     expect(["doing", "testing", "review"].map(columnLabel)).toEqual(["Doing", "Testing", "Review"]);
+  });
+});
+
+describe("work sessions", () => {
+  it("offers Session next to Ticket where the server has them, else Quick task", () => {
+    expect(offeredKind(["quick_task", "work_sessions"], true)).toBe("session");
+    expect(offeredKind(["quick_task"], true)).toBe("quick");
+    expect(offeredKind([], false)).toBeNull();
+  });
+
+  it("starts as a Session when a session or a quick task was used last", () => {
+    expect(defaultKind("session", true, true)).toBe("session");
+    expect(defaultKind("quick", true, true)).toBe("session");
+    expect(defaultKind("ticket", true, true)).toBe("ticket");
+    expect(defaultKind(null, true, true)).toBe("ticket");
+  });
+
+  it("needs an employee and takes files only once it has started", () => {
+    const ready = { projectId: "p", text: "fix the login", kind: "session" as const, who: "e", offline: false };
+    expect(startProblem(ready)).toBeNull();
+    expect(startProblem({ ...ready, who: DISPATCHER })).toBe("Choose who does it.");
+    expect(startProblem({ ...ready, files: 1 })).toBe("Add files in the session once it has started.");
+  });
+
+  it("says where the employee works", () => {
+    const line = (worktree: boolean) =>
+      footerLine({ kind: "session", whoName: "Orion", responsible: false, noConnection: false, worktree });
+    expect(line(false)).toEqual({ type: "text", text: expect.stringContaining("project's folder itself") });
+    expect(line(true)).toEqual({ type: "text", text: expect.stringContaining("worktree of its own") });
+    expect(placeholderOf("session")).toContain("without a ticket");
+  });
+
+  it("sends the employee, the project, the worktree choice and only the chosen run settings", () => {
+    const start = {
+      projectId: "p",
+      employeeId: "e",
+      text: "  fix it  ",
+      model: "default",
+      effort: "high",
+      mode: "auto",
+    };
+    expect(sessionStartParams(start, true, false)).toEqual({
+      project_id: "p",
+      employee_id: "e",
+      text: "fix it",
+      worktree: true,
+      run: { mode: "auto", model: null, effort: "high" },
+      confirm_secret: false,
+    });
+    expect(sessionStartParams({ ...start, mode: "default" }, false, true).run).toEqual({ model: null, effort: "high" });
+  });
+
+  it("reads the started session from the receipt", () => {
+    const receipt = (value: object) => ({ result: { kind: "command", value } }) as unknown as Receipt;
+    expect(
+      startedSession(
+        receipt({ type: "work_session_started", conversation_id: "c", project_id: "p", message_id: "m", run_id: "r" }),
+      ),
+    ).toBe("c");
+    expect(startedSession(receipt({ type: "ticket_created", ticket_id: "t" }))).toBeNull();
   });
 });
