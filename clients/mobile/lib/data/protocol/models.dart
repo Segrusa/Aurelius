@@ -15678,6 +15678,7 @@ final class SendChatMessage {
   const SendChatMessage({
     this.confirmSecret,
     required this.conversationId,
+    this.files = const [],
     this.images = const [],
     this.interrupt,
     required this.text,
@@ -15687,6 +15688,9 @@ final class SendChatMessage {
   /// (after `looks_like_secret`, B10): it is stored with the value redacted.
   final bool? confirmSecret;
   final String conversationId;
+  /// Files of any type that belong to this message (feature `chat_files`): files on
+  /// the server, copied into the conversation's work folder as with an employee message.
+  final List<String> files;
   /// Images that belong to this message: files on the server (a remote
   /// device's own uploads), kept with the message.
   final List<String> images;
@@ -15698,6 +15702,7 @@ final class SendChatMessage {
   factory SendChatMessage.fromJson(Map<String, dynamic> json) => SendChatMessage(
     confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     conversationId: (json['conversation_id'] as String),
+    files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     interrupt: (json['interrupt'] == null ? null : (json['interrupt'] as bool)),
     text: (json['text'] as String),
@@ -15706,6 +15711,7 @@ final class SendChatMessage {
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'conversation_id': conversationId,
+    'files': files,
     'images': images,
     if (interrupt != null) 'interrupt': interrupt,
     'text': text,
@@ -16840,6 +16846,7 @@ final class StartWorkSession {
   const StartWorkSession({
     this.confirmSecret,
     required this.employeeId,
+    this.files = const [],
     this.images = const [],
     required this.projectId,
     this.run,
@@ -16851,6 +16858,9 @@ final class StartWorkSession {
   /// (after `looks_like_secret`, B10): it is stored with the value redacted.
   final bool? confirmSecret;
   final String employeeId;
+  /// Files that belong to the first message (feature `chat_files`, see
+  /// `SendChatMessage::files`). Not with `worktree`: that folder does not exist yet.
+  final List<String> files;
   /// Images that belong to the first message (see `SendChatMessage::images`).
   final List<String> images;
   final String projectId;
@@ -16864,6 +16874,7 @@ final class StartWorkSession {
   factory StartWorkSession.fromJson(Map<String, dynamic> json) => StartWorkSession(
     confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
     employeeId: (json['employee_id'] as String),
+    files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     projectId: (json['project_id'] as String),
     run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
@@ -16874,6 +16885,7 @@ final class StartWorkSession {
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (confirmSecret != null) 'confirm_secret': confirmSecret,
     'employee_id': employeeId,
+    'files': files,
     'images': images,
     'project_id': projectId,
     if (run != null) 'run': run?.toJson(),

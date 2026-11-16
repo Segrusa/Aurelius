@@ -4861,6 +4861,11 @@ export interface SendChatMessage {
   confirm_secret?: boolean;
   conversation_id: string;
   /**
+   * Files of any type that belong to this message (feature `chat_files`): files on
+   * the server, copied into the conversation's work folder as with an employee message.
+   */
+  files?: string[];
+  /**
    * Images that belong to this message: files on the server (a remote
    * device's own uploads), kept with the message.
    */
@@ -5338,6 +5343,11 @@ export interface StartWorkSession {
    */
   confirm_secret?: boolean;
   employee_id: string;
+  /**
+   * Files that belong to the first message (feature `chat_files`, see
+   * `SendChatMessage::files`). Not with `worktree`: that folder does not exist yet.
+   */
+  files?: string[];
   /**
    * Images that belong to the first message (see `SendChatMessage::images`).
    */
