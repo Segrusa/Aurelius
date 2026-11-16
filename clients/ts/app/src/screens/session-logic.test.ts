@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SIDEBAR_SESSIONS, sessionPlace, sidebarSessions } from "./session-logic";
+import { runChange, runChipLabel, SIDEBAR_SESSIONS, sessionPlace, sidebarSessions } from "./session-logic";
 
 describe("sessionPlace", () => {
   it("names the employee, the project and the folder it works in", () => {
@@ -23,5 +23,28 @@ describe("sidebarSessions", () => {
     const shown = sidebarSessions(sessions, null);
     expect(shown).toHaveLength(SIDEBAR_SESSIONS);
     expect(shown[0]?.id).toBe(0);
+  });
+});
+
+describe("the run chips", () => {
+  it("say the choice, or that the employee's own applies", () => {
+    expect(runChipLabel(null)).toBe("Employee's default");
+    expect(runChipLabel("high")).toBe("high");
+    expect(runChipLabel("opus", (m) => m.toUpperCase())).toBe("OPUS");
+  });
+
+  it("send the picked one and keep the other", () => {
+    const current = { model: "opus", effort: "high" };
+    expect(runChange("c1", current, { effort: "low" })).toEqual({
+      conversation_id: "c1",
+      model: "opus",
+      effort: "low",
+    });
+    expect(runChange("c1", current, { model: "default" })).toEqual({
+      conversation_id: "c1",
+      model: null,
+      effort: "high",
+    });
+    expect(runChange("c1", {}, { model: "sonnet" })).toEqual({ conversation_id: "c1", model: "sonnet", effort: null });
   });
 });
