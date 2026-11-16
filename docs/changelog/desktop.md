@@ -9,8 +9,11 @@ The server and the desktop app are released separately. They work together
 as long as their protocol major matches. Releases up to v0.6.0 were combined:
 see [CHANGELOG.md](../../CHANGELOG.md).
 
-## v0.9.3
+## v0.9.4
 
+The first published build of these changes (v0.9.3 was tagged, but its Windows package could not be made).
+
+- **App icon repaired.** The Windows and macOS icon files were damaged; the app now shows its own icon again.
 - **Ideas become tickets.** Right-click an idea and choose "Create ticket…" (Ctrl+T): the New ticket form opens filled in from the idea, its files go along, and the idea is marked done with a link to the ticket. "Start as a task" is gone. Needs a server with `ticket_from_idea`.
 - **No more New task.** The screens no longer create tasks: "New task" became "New ticket", and Give work on the Dashboard now makes a started ticket for the employee you chose. Recurring tasks stay. On mobile, a task dictated in CarPlay becomes a ticket in Backlog.
 - **Notifications instead of the Inbox.** The Inbox page is gone. A bell next to "Session" (Ctrl+I) opens a popout with what waits for you first and what happened after it; a click leads to the channel, ticket or conversation where the question was asked. Something new shows for a moment as a toast at the top right: hovering keeps it, a click opens it. A proposal for a colleague or guideline opens in a dialog.
