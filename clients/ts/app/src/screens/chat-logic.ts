@@ -95,17 +95,26 @@ export interface Author {
   human: boolean;
 }
 
-/** `speaker`: who an unsigned answer is from, in a chat with one employee. */
-export function authorOf(m: MessageView, roleOf: (name: string) => string | null, speaker?: string | null): Author {
+/**
+ * `speaker`: who an unsigned answer is from, in a chat with one employee. `me`: the signed-in
+ * board member, who wrote a message that names nobody (as on mobile).
+ */
+export function authorOf(
+  m: MessageView,
+  roleOf: (name: string) => string | null,
+  speaker?: string | null,
+  me?: string | null,
+): Author {
   if (m.author_user) return { name: m.author_user.username, kind: "board member", human: true };
-  if (m.role === "user") return { name: "Board member", kind: "board member", human: true };
+  if (m.role === "user") return { name: me?.trim() || "You", kind: "board member", human: true };
   const name = m.author?.trim() || speaker?.trim() || "Aurelius";
   return { name, kind: roleOf(name) ?? "employee", human: false };
 }
 
 export function isSystemLine(m: MessageView, inGroup: boolean): boolean {
   if (m.role !== "assistant" || !m.update) return false;
-  if (m.update === "system") return true;
+  // The server's own lines: no employee wrote them.
+  if (m.update === "system" || m.update === "compacted") return true;
   if (m.update === "status") return inGroup;
   return m.update === "group" && !m.author?.trim() && m.status !== "partial";
 }

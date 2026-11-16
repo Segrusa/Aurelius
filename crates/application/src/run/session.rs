@@ -116,7 +116,7 @@ fn kilo(tokens: u64) -> String {
 
 /// The line in the conversation (and the trace) after a compaction.
 pub fn compacted_line(pre_tokens: u64, post_tokens: u64) -> String {
-    format!("Context gecomprimeerd: {} → {} tokens", kilo(pre_tokens), kilo(post_tokens))
+    format!("Context compacted: {} → {} tokens", kilo(pre_tokens), kilo(post_tokens))
 }
 
 /// What a `/compact` turn came to, from its runtime events in order: the sizes when
@@ -621,7 +621,7 @@ mod tests {
         let usage = Usage { steps: vec![step(3, 90_000, 2_000, false), step(5, 140_000, 9_000, false), step(4, 20_000, 0, true)], ..Default::default() };
         assert_eq!(context_size(&usage), Some(149_005), "the subagent's own context does not count");
         assert_eq!(context_size(&Usage::default()), None);
-        assert_eq!(compacted_line(152_400, 4_600), "Context gecomprimeerd: 152k → 5k tokens");
+        assert_eq!(compacted_line(152_400, 4_600), "Context compacted: 152k → 5k tokens");
     }
 
     #[test]

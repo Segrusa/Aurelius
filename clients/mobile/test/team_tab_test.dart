@@ -185,6 +185,7 @@ void main() {
     expect(isSystemLine(m(author: '  '), inGroup: true), isTrue, reason: 'a blank author is none');
     expect(isSystemLine(m(update: 'system', author: 'Aurelius'), inGroup: true), isTrue);
     expect(isSystemLine(m(update: 'status', author: 'Aurelius'), inGroup: true), isTrue);
+    expect(isSystemLine(m(update: 'compacted', author: 'Aurelius'), inGroup: false), isTrue, reason: 'the server says a session was compacted; no employee wrote it');
     expect(isSystemLine(m(update: 'status', author: 'Aurelius'), inGroup: false), isFalse, reason: 'in a task a status stays an update card');
     expect(isSystemLine(m(status: MessageStatus.partial), inGroup: true), isFalse, reason: 'streaming with its employee not known yet');
     expect(isSystemLine(m(author: 'Atlas'), inGroup: true), isFalse);

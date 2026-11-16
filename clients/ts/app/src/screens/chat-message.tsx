@@ -1226,7 +1226,7 @@ export const MessageRow = memo(function MessageRow({
     retryTarget ?? { channel, threadParent: m.thread_parent ?? null },
   );
   if (m.system || isSystemLine(m, true)) return <SystemRow m={m} />;
-  const who = authorOf(m, roleOf, speaker);
+  const who = authorOf(m, roleOf, speaker, me);
   const body = m.deleted_at_ms ? (
     <span {...stylex.props(styles.text3)}>⊘ This message was deleted.</span>
   ) : editing ? (
