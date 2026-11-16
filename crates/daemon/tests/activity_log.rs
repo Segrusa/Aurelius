@@ -75,7 +75,7 @@ async fn a_private_chat_stays_out_of_what_another_board_member_reads() {
     let robin = connect_as(dir.path(), "robin").await;
     let (ann, _) = hire(&grace, "Ann").await;
     let CommandResult::EmployeeChatOpened { conversation_id: chat } = grace.execute(envelope(Command::OpenEmployeeChat(OpenEmployeeChat { employee_id: ann }), None)).await.unwrap().result else { panic!() };
-    let send = SendChatMessage { conversation_id: chat, text: "just between us".into(), images: vec![], interrupt: false, confirm_secret: false };
+    let send = SendChatMessage { conversation_id: chat, text: "just between us".into(), images: vec![], files: vec![], interrupt: false, confirm_secret: false };
     grace.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap();
     answered(&grace, chat).await;
 

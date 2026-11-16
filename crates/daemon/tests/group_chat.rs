@@ -165,7 +165,7 @@ async fn the_ceo_answers_named_employees_answer_and_posts_stop_at_the_hop_limit(
     assert!(!handed.iter().any(|m| m.text.contains("En nog één.")), "a refused handoff is not shown as one");
 
     // The group chat is not a project conversation: no chat.send, no delete. The main chats stay.
-    let wrong = Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: group_id, text: "x".into(), images: vec![], interrupt: false });
+    let wrong = Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: group_id, text: "x".into(), images: vec![], files: vec![], interrupt: false });
     assert!(client.execute(envelope(wrong, None)).await.is_err());
     assert!(client.execute(envelope(Command::DeleteConversation(DeleteConversation { conversation_id: group_id }), None)).await.is_err());
     assert_eq!(client.group_chat().await.unwrap().conversation_id, group_id);

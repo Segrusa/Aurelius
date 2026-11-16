@@ -102,7 +102,7 @@ async fn a_run_at_the_usage_limit_waits_for_the_reset_instead_of_failing() {
     let reset = now_ms() + 3_600_000;
     let daemon = start_with(dir.path(), Arc::new(Limited::new(Some(reset)))).await;
     let client = connect(dir.path()).await;
-    let send = SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hello".into(), images: Vec::new(), interrupt: false };
+    let send = SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hello".into(), images: Vec::new(), files: vec![], interrupt: false };
     let CommandResult::ChatMessageSent { conversation_id, message_id, .. } = client.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap().result else { panic!() };
 
     let (status, error, job, not_before, attempts, waiting) = parked_run(dir.path()).await;
@@ -124,7 +124,7 @@ async fn without_a_reset_time_it_tries_again_after_the_default_delay() {
     let before = now_ms();
     let daemon = start_with(dir.path(), Arc::new(Limited::new(None))).await;
     let client = connect(dir.path()).await;
-    let send = SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hello".into(), images: Vec::new(), interrupt: false };
+    let send = SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hello".into(), images: Vec::new(), files: vec![], interrupt: false };
     client.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap();
     let (_, error, job, not_before, attempts, _) = parked_run(dir.path()).await;
     assert_eq!((error.as_deref(), job.as_str(), attempts), (Some("quota"), "ready", 0));
@@ -209,7 +209,7 @@ async fn stopping_a_parked_run_ends_it_at_once_and_its_chat_can_be_deleted() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_with(dir.path(), Arc::new(Limited::new(Some(now_ms() + 3_600_000)))).await;
     let client = connect(dir.path()).await;
-    let send = SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hello".into(), images: Vec::new(), interrupt: false };
+    let send = SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hello".into(), images: Vec::new(), files: vec![], interrupt: false };
     let CommandResult::ChatMessageSent { conversation_id, message_id, run_id, .. } = client.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap().result else { panic!() };
     parked_run(dir.path()).await;
 

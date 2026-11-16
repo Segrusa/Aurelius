@@ -170,7 +170,7 @@ pub async fn conversation(client: &Client) -> aurelius_domain::ConversationId {
 pub async fn send_new(client: &Client, text: &str) -> (aurelius_domain::ConversationId, aurelius_domain::MessageId, aurelius_domain::RunId) {
     use aurelius_domain::{Command, CommandResult, conversation::SendChatMessage};
     let conversation_id = conversation(client).await;
-    let send = SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images: Vec::new(), interrupt: false };
+    let send = SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images: Vec::new(), files: vec![], interrupt: false };
     match client.execute(aurelius_client::envelope(Command::SendChatMessage(send), None)).await.expect("send").result {
         CommandResult::ChatMessageSent { conversation_id, message_id, run_id } => (conversation_id, message_id, run_id),
         other => panic!("{other:?}"),

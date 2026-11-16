@@ -403,6 +403,10 @@ pub mod feature {
     /// go in with `chat.send`, and `work_session.list` lists the reader's sessions. A client
     /// without this feature offers quick tasks instead.
     pub const WORK_SESSIONS: &str = "work_sessions";
+    /// `chat.send` and `work_session.start` take `files` (additive): files of any type,
+    /// copied into the conversation's work folder as with an employee message. A client
+    /// without this feature sends only images in a chat or session.
+    pub const CHAT_FILES: &str = "chat_files";
 }
 
 /// Every feature this build has.
@@ -455,6 +459,7 @@ pub const FEATURES: &[&str] = &[
     feature::QUICK_TASK,
     feature::WORK_SESSIONS,
     feature::TICKET_HISTORY,
+    feature::CHAT_FILES,
 ];
 
 /// Daemon → client.

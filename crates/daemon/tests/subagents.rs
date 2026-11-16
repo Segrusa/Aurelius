@@ -137,7 +137,7 @@ async fn each_conversation_sees_only_its_own_subagents() {
     let client = connect(dir.path()).await;
     let (project_id, alex) = setup(&client).await;
     let idle = match client
-        .execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "Hello".into(), images: Vec::new(), interrupt: false }), None))
+        .execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "Hello".into(), images: Vec::new(), files: vec![], interrupt: false }), None))
         .await
         .unwrap()
         .result
