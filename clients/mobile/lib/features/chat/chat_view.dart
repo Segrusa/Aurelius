@@ -652,7 +652,7 @@ bool isSystemLine(MessageView m, {required bool inGroup}) {
   if (m.isUser) return false;
   final unnamed = m.author == null || m.author!.trim().isEmpty;
   return switch (m.update) {
-    'system' => true,
+    'system' || 'compacted' => true,
     'status' => inGroup,
     'group' => unnamed && !m.isStreaming,
     _ => false,

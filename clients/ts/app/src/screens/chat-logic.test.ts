@@ -133,13 +133,15 @@ describe("who wrote it", () => {
       kind: "board member",
       human: true,
     });
-    expect(authorOf(msg({ role: "user" }), roleOf).name).toBe("Board member");
+    expect(authorOf(msg({ role: "user" }), roleOf).name).toBe("You");
+    expect(authorOf(msg({ role: "user" }), roleOf, "Flux", "Sam").name).toBe("Sam");
     expect(authorOf(msg({ author: "Flux" }), roleOf)).toEqual({ name: "Flux", kind: "Engineer", human: false });
     expect(authorOf(msg({}), roleOf)).toEqual({ name: "Aurelius", kind: "employee", human: false });
     expect(authorOf(msg({}), roleOf, "Flux")).toEqual({ name: "Flux", kind: "Engineer", human: false });
   });
   it("tells a line from an answer", () => {
     expect(isSystemLine(msg({ update: "system" }), false)).toBe(true);
+    expect(isSystemLine(msg({ update: "compacted", author: "Aurelius" }), false)).toBe(true);
     expect(isSystemLine(msg({ update: "status" }), true)).toBe(true);
     expect(isSystemLine(msg({ update: "status" }), false)).toBe(false);
     expect(isSystemLine(msg({ update: "group" }), true)).toBe(true);
