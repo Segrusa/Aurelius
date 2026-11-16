@@ -1,0 +1,48 @@
+# The server crates' tests on Windows, the platform the releases are built
+# for: every night when main changed, and by hand (Actions → ci-windows → Run
+# workflow) before a release. Kept out of ci.yml because a Windows run takes
+# far longer than the 5 minutes ci.yml aims for (and its minutes count double).
+name: ci-windows
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-windows
+  cancel-in-progress: true
+
+jobs:
+  server:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: never
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+      # Nightly: skip when main did not change in the last day.
+      - name: Changed since yesterday?
+        id: changed
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(git log -1 --format=%ct)" -lt "$(( $(date +%s) - 86400 ))" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.run == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - if: steps.changed.outputs.run == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - if: steps.changed.outputs.run == 'true'
+        run: cargo nextest run --workspace --no-fail-fast

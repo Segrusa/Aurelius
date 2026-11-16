@@ -1,5 +1,6 @@
 # Tests on every pull request and every push to main: the server crates
-# (Rust), the mobile app (Flutter) and the TypeScript clients.
+# (Rust, on Linux), the mobile app (Flutter) and the TypeScript clients.
+# Goal: done within about 5 minutes.
 name: ci
 
 on:
@@ -15,15 +16,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Linux, so it stays within a few minutes: deps come from the cache (also
+  # saved when tests fail), mold links the many test binaries and nextest runs
+  # them in parallel. Windows-only breakage is caught by ci-windows.yml.
   server:
-    runs-on: windows-latest
-    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       CARGO_TERM_COLOR: never
+      # No debug info: much smaller test binaries, much faster links.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
+      - name: System libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libclang-dev libfontconfig-dev libwayland-dev libgbm-dev libdrm-dev libpipewire-0.3-dev libspa-0.2-dev
+      - uses: rui314/setup-mold@v1
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --no-fail-fast
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - run: cargo nextest run --workspace --no-fail-fast
 
   mobile:
     runs-on: ubuntu-latest
