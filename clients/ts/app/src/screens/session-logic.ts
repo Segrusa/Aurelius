@@ -19,3 +19,25 @@ export function sidebarSessions<T extends Pick<WorkSessionView, "project_id">>(
   const here = workspaceId ? sessions.filter((s) => s.project_id === workspaceId) : sessions;
   return here.slice(0, SIDEBAR_SESSIONS);
 }
+
+/** What the Model and Effort chips of a session say: the chosen one, or the employee's own. */
+export function runChipLabel(value: string | null | undefined, labelOf: (v: string) => string = (v) => v): string {
+  return value ? labelOf(value) : "Employee's default";
+}
+
+/**
+ * `conversation.set_run` after a pick: the server keeps model and effort together, so the one not
+ * picked is sent as it is. `"default"` clears the pick, and the employee's own setting applies again.
+ */
+export function runChange(
+  conversationId: string,
+  current: { model?: string | null; effort?: string | null },
+  pick: { model: string } | { effort: string },
+): { conversation_id: string; model: string | null; effort: string | null } {
+  const of = (v: string) => (v === "default" ? null : v);
+  return {
+    conversation_id: conversationId,
+    model: "model" in pick ? of(pick.model) : (current.model ?? null),
+    effort: "effort" in pick ? of(pick.effort) : (current.effort ?? null),
+  };
+}

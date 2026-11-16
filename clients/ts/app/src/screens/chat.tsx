@@ -12,7 +12,7 @@ import type { ChannelView, EmployeeSummary, MessageView } from "@aurelius/protoc
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
 import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket } from "../data";
@@ -579,6 +579,7 @@ export function Composer({
   archived,
   quick,
   everyone = false,
+  footer,
   send,
   onSent,
 }: {
@@ -594,6 +595,8 @@ export function Composer({
   quick: { question: string | null; options: string[] } | null;
   /** `@Everyone` is offered (the server has it and the writer is a board member). */
   everyone?: boolean;
+  /** Controls in the composer's bottom row, beside Send (a session's model, effort and mode). */
+  footer?: ReactNode;
   /** Where the words go; none: the channel. */
   send?: (message: { text: string; images: string[]; confirmSecret: boolean }) => Promise<unknown>;
   onSent: () => void;
@@ -738,6 +741,7 @@ export function Composer({
         xstyle={styles.composerBody}
         onSubmit={(value) => void go(value)}
         drawer={<AttachedImages images={images} />}
+        {...(footer ? { footerActions: footer } : {})}
         sendActions={
           activeRun && text.trim() !== "" ? (
             <Button label="Send now" onClick={() => void sendNow()}>

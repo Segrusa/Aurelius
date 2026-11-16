@@ -3,11 +3,11 @@ import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
-import type { EmployeeChatView } from "@aurelius/protocol";
+import type { EmployeeChatView, MessagesSnapshot } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
 import { useApprovals, useEmployees, useMessages } from "../data";
@@ -117,6 +117,8 @@ export interface ChatFrame {
   /** The head's second line while nobody answers. */
   subtitle?: string;
   empty: { title: string; description: string };
+  /** Controls in the composer's bottom row, from what the conversation runs on now. */
+  footer?: (snapshot: MessagesSnapshot) => ReactNode;
 }
 
 /**
@@ -322,6 +324,7 @@ export function EmployeeChat({
             people={NOBODY}
             archived={NOBODY}
             quick={quick}
+            footer={frame?.footer && feed.data ? frame.footer(feed.data) : null}
             send={(message) =>
               connection.write(
                 "chat.send",
