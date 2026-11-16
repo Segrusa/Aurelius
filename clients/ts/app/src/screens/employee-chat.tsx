@@ -326,8 +326,8 @@ export function EmployeeChat({
             archived={NOBODY}
             quick={quick}
             footer={frame?.footer && feed.data ? frame.footer(feed.data) : null}
-            // A session has New session's box; its files go along where the server takes them.
-            {...(frame ? { prompt: { files: features.includes(CHAT_FILES_FEATURE) } } : {})}
+            // New session's box; files go along where the server takes them.
+            prompt={{ files: features.includes(CHAT_FILES_FEATURE) }}
             send={(message) =>
               connection.write(
                 "chat.send",
