@@ -538,6 +538,8 @@ abstract final class Methods {
   /// With `expected_version` in the envelope a stale edit is `version_conflict`.
   /// Answers `VaultItem`. As `vault.create`: no value in receipt, hash or event.
   static const String vaultUpdate = 'vault.update';
+  static const String workSessionAssign = 'work_session.assign';
+  static const String workSessionDispatch = 'work_session.dispatch';
   /// The reader's work sessions, the latest activity first (feature `work_sessions`);
   /// `project_id`: only those of that project.
   static const String workSessionList = 'work_session.list';
@@ -2271,6 +2273,16 @@ Map<String, dynamic> ticketUseMyLogin({required String ticketId}) => <String, dy
   'params': <String, dynamic>{
     'ticket_id': ticketId,
   },
+};
+
+Map<String, dynamic> workSessionAssign(AssignWorkSession params) => <String, dynamic>{
+  'method': Methods.workSessionAssign,
+  'params': params.toJson(),
+};
+
+Map<String, dynamic> workSessionDispatch(DispatchWorkSession params) => <String, dynamic>{
+  'method': Methods.workSessionDispatch,
+  'params': params.toJson(),
 };
 
 Map<String, dynamic> workSessionStart(StartWorkSession params) => <String, dynamic>{
