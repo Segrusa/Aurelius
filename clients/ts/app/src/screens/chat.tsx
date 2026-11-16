@@ -574,6 +574,9 @@ function ChatTextarea(props: Omit<ComponentProps<"textarea">, "className" | "sty
   return <textarea {...props} {...stylex.props(styles.textarea)} />;
 }
 
+/** The Team chat has New session's box; it has taken files of any type since it began. */
+const TEAM_PROMPT = { files: true };
+
 export function Composer({
   draftKey,
   channel,
@@ -955,6 +958,7 @@ function ThreadPanel({
             archived={archived}
             quick={null}
             everyone={everyone}
+            prompt={TEAM_PROMPT}
             onSent={() => undefined}
           />
         </div>
@@ -1402,6 +1406,7 @@ function ChannelBody({
               archived={archived}
               quick={quick}
               everyone={everyone}
+              prompt={TEAM_PROMPT}
               onSent={() => {
                 atBottom.current = true;
                 handle.current?.scrollToIndex({ index: "LAST", align: "end" });
