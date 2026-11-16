@@ -20,6 +20,9 @@ fn repo() -> (tempfile::TempDir, PathBuf, PathBuf) {
     run(&repo, &["init", "--quiet", "--initial-branch=main"]);
     run(&repo, &["config", "user.name", "Test"]);
     run(&repo, &["config", "user.email", "test@example.com"]);
+    // Windows runners set core.autocrlf=true globally: files git writes back
+    // (e.g. after `merge --abort`) would get CRLF and differ from what we wrote.
+    run(&repo, &["config", "core.autocrlf", "false"]);
     fs::write(repo.join("readme.md"), "hello\n").unwrap();
     run(&repo, &["add", "."]);
     run(&repo, &["commit", "--quiet", "-m", "first"]);

@@ -9,7 +9,7 @@ The server and the desktop app are released separately. They work together
 as long as their protocol major matches. Releases up to v0.6.0 were combined:
 see [CHANGELOG.md](../../CHANGELOG.md).
 
-## Unreleased: v0.9.2
+## v0.9.2
 
 - **Ideas become tickets.** Right-click an idea and choose "Create ticket…" (Ctrl+T): the New ticket form opens filled in from the idea, its files go along, and the idea is marked done with a link to the ticket. "Start as a task" is gone. Needs a server with `ticket_from_idea`.
 - **No more New task.** The screens no longer create tasks: "New task" became "New ticket", and Give work on the Dashboard now makes a started ticket for the employee you chose. Recurring tasks stay. On mobile, a task dictated in CarPlay becomes a ticket in Backlog.
