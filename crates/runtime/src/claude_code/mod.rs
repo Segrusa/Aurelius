@@ -1127,7 +1127,7 @@ mod vault_delivery_tests {
         let command = runtime.command_from(&["-p".into()], |k| (k == "HOME").then(|| "/home/daemon".into()), &pairs);
         let env: std::collections::BTreeMap<String, String> = command.as_std().get_envs().filter_map(|(k, v)| Some((k.to_string_lossy().into_owned(), v?.to_string_lossy().into_owned()))).collect();
         assert_eq!(env["HOME"], "/vault-home", "the vault comes after the allow-list (and HOME is refused at create and delivery)");
-        assert_eq!(env["CLAUDE_CONFIG_DIR"], "/srv/a/runs/no-login", "Aurelius' own come last");
+        assert_eq!(Path::new(&env["CLAUDE_CONFIG_DIR"]), Path::new("/srv/a/runs/no-login"), "Aurelius' own come last");
         assert_ne!(env["CARGO_BUILD_JOBS"], "999");
         assert_eq!(env["GITHUB_TOKEN"], FAKE);
         assert!(!format!("{:?}", runtime.vault).contains("FAKE"));
@@ -1177,7 +1177,7 @@ mod vault_delivery_tests {
         std::fs::create_dir_all(&data).unwrap();
         let own = ClaudeLogin::of(&data, aurelius_domain::UserId::new()).unwrap();
         let rules = deny_rules(&own);
-        let secrets = format!("//{}/secrets", data.display().to_string().trim_start_matches('/'));
+        let secrets = format!("//{}/secrets", data.display().to_string().replace('\\', "/").trim_start_matches('/'));
         for tool in ["Read", "Edit", "Write", "Glob", "Grep"] {
             assert!(rules.contains(&format!("{tool}({secrets}/**)")), "{tool}: {rules:?}");
         }
@@ -1617,11 +1617,11 @@ mod login_tests {
     #[test]
     fn a_run_gets_its_own_login_and_never_the_default_folder() {
         let env = env_of(Some(alex()));
-        assert_eq!(get(&env, login::CONFIG_DIR_ENV), Some("/srv/aurelius/logins/0199c3a2-0000-7000-8000-0000000000a1"));
+        assert_eq!(get(&env, login::CONFIG_DIR_ENV).map(Path::new), Some(Path::new("/srv/aurelius/logins/0199c3a2-0000-7000-8000-0000000000a1")));
         // Without a login: an empty folder of Aurelius', never ~/.claude nor the daemon's CLAUDE_CONFIG_DIR.
         let none = env_of(None);
         let dir = get(&none, login::CONFIG_DIR_ENV).expect("always set, so the CLI never falls back to ~/.claude");
-        assert_eq!(dir, "/srv/aurelius/runtimes/c/runs/no-login");
+        assert_eq!(Path::new(dir), Path::new("/srv/aurelius/runtimes/c/runs/no-login"));
         assert!(!dir.contains(".claude"));
     }
 
@@ -1665,8 +1665,8 @@ mod login_tests {
         let own = ClaudeLogin::of(&data, alex).unwrap();
         ClaudeLogin::of(&data, robin).unwrap();
         let rules = deny_rules(&own);
-        let robins = format!("//{}/logins/{robin}/**", data.display().to_string().trim_start_matches('/'));
-        let db = format!("//{}/data/aurelius.sqlite*", data.display().to_string().trim_start_matches('/'));
+        let robins = format!("//{}/logins/{robin}/**", data.display().to_string().replace('\\', "/").trim_start_matches('/'));
+        let db = format!("//{}/data/aurelius.sqlite*", data.display().to_string().replace('\\', "/").trim_start_matches('/'));
         for tool in ["Read", "Edit", "Write", "Glob", "Grep"] {
             for path in [robins.as_str(), db.as_str(), "~/.claude/**", "~/.claude*"] {
                 assert!(rules.contains(&format!("{tool}({path})")), "{tool}({path}) missing: {rules:?}");
@@ -1674,7 +1674,7 @@ mod login_tests {
         }
         assert!(!rules.iter().any(|r| r.contains(&alex.to_string())), "the run's own folder stays open: {rules:?}");
         // SEC2 M1: a Grep or Glob of logins/ itself or of Robin's folder itself is refused for certain.
-        let logins = format!("//{}/logins", data.display().to_string().trim_start_matches('/'));
+        let logins = format!("//{}/logins", data.display().to_string().replace('\\', "/").trim_start_matches('/'));
         let robin_dir = format!("{logins}/{robin}");
         for tool in ["Read", "Glob", "Grep"] {
             for path in [logins.as_str(), robin_dir.as_str()] {
