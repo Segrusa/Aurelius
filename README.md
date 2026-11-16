@@ -12,9 +12,9 @@ Aurelius has a desktop app (Windows and macOS), a mobile app (iPhone and Android
 
 **Releases:** download the latest build from [GitHub Releases](https://github.com/Segrusa/Aurelius/releases). The Windows release is a signed zip, and the app updates itself from there. On macOS, build from source and install with `scripts/install-mac.sh`.
 
-**From source:** you need Rust via [rustup](https://rustup.rs) (the pinned toolchain installs itself) and CMake. Windows also needs the Visual Studio 2022 Build Tools with the C++ workload, and macOS needs the Xcode command line tools.
+**From source:** you need Rust via [rustup](https://rustup.rs) (the pinned toolchain installs itself) and Node.js (see `.node-version`). Linux and macOS also need CMake, macOS the Xcode command line tools, and Windows the Visual Studio 2022 Build Tools with the C++ workload.
 
-On Linux and macOS, `scripts/install-linux.sh` and `scripts/install-mac.sh` build and install everything, and `scripts/install-production.ps1` does so on Windows. They also need Node.js (see `.node-version`).
+On Linux and macOS, `scripts/install-linux.sh` and `scripts/install-mac.sh` build and install everything, and `scripts/install-production.ps1` does so on Windows. On Windows, `scripts\install-production.ps1 -InstallDeps` first installs whatever is missing (Git, Rust, the Build Tools, Node.js) with winget; `scripts\windows-deps.ps1` only checks.
 
 The app starts the server for you.
 

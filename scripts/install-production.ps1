@@ -9,13 +9,20 @@
 #   client  only the app; it connects to a server elsewhere (Settings → Servers)
 #
 # -SkipTests: install without running the tests first.
+# -InstallDeps: install missing build tools first with winget (Git, Rust, the
+#   VS 2022 C++ Build Tools, Node.js); see scripts\windows-deps.ps1. Without it
+#   the script stops and prints what is missing.
 param(
     [switch]$NoLaunch,
     [switch]$SkipTests,
+    [switch]$InstallDeps,
     [ValidateSet("both", "server", "client")][string]$Role = "both"
 )
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
+& ./scripts/windows-deps.ps1 -Install:$InstallDeps
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$pnpm = @("-y", "pnpm@12.16.1")
 # Tests run in their own (dev) environment; release builds are production.
 # Only the part this role installs (the server and the app are released apart).
 $part = switch ($Role) { "server" { "server" } "client" { "desktop" } default { "all" } }
@@ -34,23 +41,38 @@ cargo build --release @packages
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 # The app is a folder, built from clients\electron (Node and pnpm via npx).
 if ($Role -ne "server") {
-    npx -y pnpm@12.16.1 install --frozen-lockfile
+    npx @pnpm install --frozen-lockfile
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    npx -y pnpm@12.16.1 build
+    npx @pnpm build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    npx -y pnpm@12.16.1 --filter "@aurelius/electron" package
+    npx @pnpm --filter "@aurelius/electron" package
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 $dest = Join-Path $env:LOCALAPPDATA "Programs\Aurelius"
 New-Item -ItemType Directory -Force $dest | Out-Null
 
-# Stop the running production app and its background service (work resumes after restart).
-Get-Process aurelius -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dest*" } | Stop-Process
-if (Test-Path "$dest\aurelius-daemon.exe") {
-    & "$dest\aurelius-ctl.exe" shutdown 2>$null | Out-Null
-    Start-Sleep -Milliseconds 800
+# The installed programs that are running now (Windows locks a running .exe).
+function Get-Installed([string[]]$Names) {
+    @(Get-Process $Names -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$dest*" })
 }
+# Stop the running production app and its background service (work resumes after restart).
+$app = Get-Installed @("aurelius")
+$app | Stop-Process -Force -ErrorAction SilentlyContinue
+$app | ForEach-Object { $_.WaitForExit(5000) | Out-Null }
+if (Test-Path "$dest\aurelius-daemon.exe") {
+    $ErrorActionPreference = "Continue"
+    & "$dest\aurelius-ctl.exe" shutdown 2>$null | Out-Null
+    $ErrorActionPreference = "Stop"
+    # A clean shutdown first; whatever is still running after 10 s is stopped.
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Installed @("aurelius-daemon")).Count -gt 0 -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 200
+    }
+}
+$left = Get-Installed @("aurelius-daemon", "aurelius-bridge")
+$left | Stop-Process -Force -ErrorAction SilentlyContinue
+$left | ForEach-Object { $_.WaitForExit(5000) | Out-Null }
 
 $programs = switch ($Role) {
     # The daemon starts aurelius-bridge (Claude Code's approval MCP server) from its own folder.
