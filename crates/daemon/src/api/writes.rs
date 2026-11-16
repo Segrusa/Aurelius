@@ -75,6 +75,7 @@ pub(super) fn b10(command: Command) -> Result<Command, ProtocolError> {
         Command::SendChatMessage(c) => c.confirm_secret,
         Command::SendProjectMessage(c) => c.confirm_secret,
         Command::StartWorkSession(c) => c.confirm_secret,
+        Command::DispatchWorkSession(c) => c.confirm_secret,
         Command::CreateTask(c) => c.confirm_secret,
         Command::CreateTaskSchedule(c) => c.confirm_secret,
         Command::UpdateTaskSchedule(c) => c.confirm_secret,

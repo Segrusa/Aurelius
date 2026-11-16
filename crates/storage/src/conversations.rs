@@ -386,8 +386,10 @@ pub fn resume_run(tx: &Transaction<'_>, run_id: RunId) -> Result<(), StorageErro
 
 /// Runs that were active when the daemon stopped.
 pub fn unfinished_runs(tx: &Transaction<'_>) -> Result<Vec<(RunId, ConversationId)>, StorageError> {
+    // A session's dispatcher answers no message: its own job ends its runs (`work_sessions::end_unfinished_dispatch_runs`).
     let mut stmt = tx.prepare("SELECT id, conversation_id FROM runs WHERE status IN ('starting','running','waiting','cancelling') AND conversation_id IS NOT NULL
-           AND (status <> 'waiting' OR EXISTS (SELECT 1 FROM jobs j WHERE j.id = runs.id AND j.state = 'leased'))")?;
+           AND (status <> 'waiting' OR EXISTS (SELECT 1 FROM jobs j WHERE j.id = runs.id AND j.state = 'leased'))
+           AND id NOT IN (SELECT run_id FROM session_dispatch_runs)")?;
     let rows = stmt.query_map([], |r| {
         Ok((
             RunId::parse(&r.get::<_, String>(0)?).map_err(conv_err)?,

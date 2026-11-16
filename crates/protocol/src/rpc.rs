@@ -407,6 +407,12 @@ pub mod feature {
     /// copied into the conversation's work folder as with an employee message. A client
     /// without this feature sends only images in a chat or session.
     pub const CHAT_FILES: &str = "chat_files";
+    /// The dispatcher chooses who takes a work session (protocol 5, additive):
+    /// `work_session.dispatch` starts one without an employee, `work_session.assign` lets
+    /// the board member choose while it chooses or after it chose nobody, and
+    /// `WorkSessionView::dispatch` says where it is. A client without this feature
+    /// asks for an employee when a session starts.
+    pub const SESSION_DISPATCH: &str = "session_dispatch";
 }
 
 /// Every feature this build has.
@@ -458,6 +464,7 @@ pub const FEATURES: &[&str] = &[
     feature::ACTIVITY_OVERVIEW,
     feature::QUICK_TASK,
     feature::WORK_SESSIONS,
+    feature::SESSION_DISPATCH,
     feature::TICKET_HISTORY,
     feature::CHAT_FILES,
 ];

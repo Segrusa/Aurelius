@@ -143,6 +143,9 @@ pub enum EmployeeTaskOp {
     },
     /// The dispatcher of a ticket chooses its owner (the bridge's `assign_ticket`, `--triage` only).
     AssignTicket { employee: String, #[serde(default)] reason: String },
+    /// The dispatcher of a work session chooses who takes it (the bridge's `assign_session`,
+    /// `--session-dispatch` only, feature `session_dispatch`).
+    AssignSession { employee: String, #[serde(default)] reason: String },
     /// The tester's verdict on a ticket in Testing (the bridge's `report_test_result`,
     /// `--testing` only, ticket #5): `passed` moves the card to Review, else back to
     /// Doing with `summary` for the owner. The daemon refuses it for any run other
@@ -320,6 +323,7 @@ mod tests {
             VaultList { .. } => "vault_list",
             VaultRead { .. } => "vault_read",
             AssignTicket { .. } => "assign_ticket",
+            AssignSession { .. } => "assign_session",
             ReportTestResult { .. } => "report_test_result",
             ReportReady { .. } => "report_ready",
             ProposeGuideline { .. } => "propose_guideline",

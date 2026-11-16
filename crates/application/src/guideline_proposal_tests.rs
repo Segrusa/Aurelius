@@ -430,6 +430,7 @@ fn every_action() -> Vec<EmployeeAction> {
         EmployeeAction::ReadDiscussion { last: None },
         EmployeeAction::PostToDiscussion { message: "m".into() },
         EmployeeAction::AssignTicket { employee: "Ann".into(), reason: "r".into() },
+        EmployeeAction::AssignSession { employee: "Ann".into(), reason: "r".into() },
         EmployeeAction::ReportTestResult { passed: true, summary: "s".into() },
         EmployeeAction::ReportReady { report: "r".into() },
         EmployeeAction::ListTickets { project: None, column: None, query: None, limit: None },
@@ -458,6 +459,7 @@ fn every_action() -> Vec<EmployeeAction> {
             | EmployeeAction::ReadDiscussion { .. }
             | EmployeeAction::PostToDiscussion { .. }
             | EmployeeAction::AssignTicket { .. }
+            | EmployeeAction::AssignSession { .. }
             | EmployeeAction::ReportTestResult { .. }
             | EmployeeAction::ReportReady { .. }
             | EmployeeAction::ListTickets { .. }

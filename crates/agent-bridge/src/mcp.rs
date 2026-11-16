@@ -21,7 +21,8 @@
 //! assistant of a project conversation) leaves out `hand_over_task`, `propose_guideline`,
 //! `list_guidelines` and `read_guideline`.
 //! `--triage` (the dispatcher of a ticket choosing its owner) has only
-//! `assign_ticket` and `recall`.
+//! `assign_ticket` and `recall`; `--session-dispatch` (the dispatcher of a work
+//! session choosing who takes it) only `assign_session` and `recall`.
 //!
 //! It also gives the agent eyes: `screenshot` and `list_windows`. Claude Code
 //! never asks for these; the bridge asks the service itself, which allows them
@@ -47,6 +48,8 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
     let set_mode = args.iter().any(|a| a == "--set-mode");
     // The dispatcher of a ticket: only assign_ticket and recall.
     let triage = args.iter().any(|a| a == "--triage");
+    // The dispatcher of a work session: only assign_session and recall.
+    let session_dispatch = args.iter().any(|a| a == "--session-dispatch");
     // A run under a ticket, or woken from its discussion: read_discussion and post_to_discussion.
     let discussion = args.iter().any(|a| a == "--discussion");
     // A ticket's test task: report_test_result.
@@ -70,14 +73,14 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
             })),
             "ping" => Ok(json!({})),
             "tools/list" => {
-                let mut tools = if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion, testing, report) };
+                let mut tools = if session_dispatch { session_dispatch_tool_definitions() } else if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion, testing, report) };
                 switch_off(&mut tools, &without);
                 Ok(json!({ "tools": tools }))
             }
             "tools/call" => {
                 let name = msg["params"]["name"].as_str().unwrap_or("").to_owned();
                 let args = msg["params"]["arguments"].clone();
-                let call = if without.contains(&name) { None } else if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing, report }, &mut screen_granted, &name, args).await };
+                let call = if without.contains(&name) { None } else if session_dispatch { session_dispatch_call(&mut client, &root, run_id, &name, args).await } else if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing, report }, &mut screen_granted, &name, args).await };
                 match call {
                     Some(result) => Ok(result),
                     None => Err(json!({ "code": -32601, "message": "Method not found" })),
@@ -461,6 +464,33 @@ async fn triage_call(client: &mut Option<BridgeClient>, root: &Path, run_id: Run
     let text = |k: &str| args[k].as_str().unwrap_or("").to_owned();
     match name {
         "assign_ticket" => Some(act_call(client, root, run_id, EmployeeTaskOp::AssignTicket { employee: text("employee"), reason: text("reason") }).await),
+        "recall" => Some(memory_call(client, root, run_id, EmployeeMemoryOp::Recall { query: text("query") }).await),
+        _ => None,
+    }
+}
+
+/// The tools of the dispatcher of a work session.
+fn session_dispatch_tool_definitions() -> Vec<Value> {
+    let mut tools = vec![json!({
+        "name": "assign_session",
+        "description": "Choose the employee who takes this work session: they answer the board member's message and work with them. Call it once, with a short reason.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "employee": { "type": "string", "description": "The colleague's name, as in the list." },
+                "reason": { "type": "string", "description": "Why this colleague, in one sentence (the board member sees it)." }
+            },
+            "required": ["employee", "reason"]
+        }
+    })];
+    tools.extend(memory_tool_definitions().into_iter().filter(|t| t["name"] == "recall"));
+    tools
+}
+
+async fn session_dispatch_call(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId, name: &str, args: Value) -> Option<Value> {
+    let text = |k: &str| args[k].as_str().unwrap_or("").to_owned();
+    match name {
+        "assign_session" => Some(act_call(client, root, run_id, EmployeeTaskOp::AssignSession { employee: text("employee"), reason: text("reason") }).await),
         "recall" => Some(memory_call(client, root, run_id, EmployeeMemoryOp::Recall { query: text("query") }).await),
         _ => None,
     }
@@ -893,6 +923,14 @@ mod tests {
         assert_eq!(read["inputSchema"]["required"], json!(["guideline"]));
         let list = tool_definitions(false, false, false, false, false).into_iter().find(|t| t["name"] == "list_guidelines").unwrap();
         assert!(list["inputSchema"]["properties"].as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_session_dispatcher_has_only_assign_session_and_recall() {
+        let names: Vec<String> = session_dispatch_tool_definitions().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+        assert_eq!(names, ["assign_session", "recall"]);
+        assert!(!tool_definitions(false, false, true, false, false).iter().any(|t| t["name"] == "assign_session"), "no other run can assign a session");
+        assert!(!triage_tool_definitions().iter().any(|t| t["name"] == "assign_session"), "a ticket's dispatcher cannot either");
     }
 
     #[test]

@@ -4,6 +4,7 @@
 //! It works in the project's folder itself, or, when asked, in a worktree of its
 //! own on the branch `session/<last 8 of its id>` that the daemon makes before the first
 //! run. Later messages go in with `chat.send`; `work_session.list` lists them.
+//! With `work_session.dispatch` the dispatcher chooses the employee first.
 
 use crate::task::RunSettings;
 use crate::{ConversationId, EmployeeId, ProjectId};
@@ -35,6 +36,69 @@ pub struct StartWorkSession {
     pub confirm_secret: bool,
 }
 
+/// Start a work session and let the dispatcher choose who takes it (feature
+/// `session_dispatch`), as it chooses the owner of a ticket: the same as
+/// `StartWorkSession` without an employee. Until it has chosen, the session's
+/// employee is the dispatcher and nothing more can be written in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DispatchWorkSession {
+    pub project_id: ProjectId,
+    pub text: String,
+    /// See `StartWorkSession::images`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
+    /// See `StartWorkSession::files`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+    /// See `StartWorkSession::worktree`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub worktree: bool,
+    /// See `StartWorkSession::run`; it applies to the chosen employee's runs.
+    #[serde(default)]
+    pub run: RunSettings,
+    /// See `StartWorkSession::confirm_secret`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub confirm_secret: bool,
+}
+
+/// The board member who started a session chooses who takes it, while the
+/// dispatcher still chooses or after it chose nobody (feature `session_dispatch`).
+/// The chosen employee answers the first message at once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AssignWorkSession {
+    pub conversation_id: ConversationId,
+    pub employee_id: EmployeeId,
+}
+
+/// Where the dispatcher is with a session (`WorkSessionView::dispatch`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionDispatch {
+    /// Its job runs: the session waits for its choice.
+    Choosing,
+    /// It chose nobody (or could not): the board member chooses.
+    Nobody,
+}
+
+impl SessionDispatch {
+    /// The value in `work_sessions.dispatch`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Choosing => "choosing",
+            Self::Nobody => "nobody",
+        }
+    }
+
+    /// Read back from `work_sessions.dispatch`.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "choosing" => Some(Self::Choosing),
+            "nobody" => Some(Self::Nobody),
+            _ => None,
+        }
+    }
+}
+
 /// The branch of a session's worktree: `session/` and the last eight characters of its id
 /// (the first ones of a UUIDv7 are its time, the same for sessions started together).
 pub fn branch_of(conversation: ConversationId) -> String {
@@ -61,6 +125,11 @@ pub struct WorkSessionView {
     pub last_activity_ms: i64,
     /// Whether a run of it is queued or working now.
     pub running: bool,
+    /// The dispatcher still chooses who takes it, or chose nobody (feature
+    /// `session_dispatch`); none: `employee_id` works in it. While it chooses,
+    /// `employee_id` is the dispatcher.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch: Option<SessionDispatch>,
 }
 
 /// `work_session.list`: the reader's sessions, the latest activity first.
@@ -90,5 +159,14 @@ mod tests {
         let json = serde_json::json!({ "project_id": project, "employee_id": employee, "text": "fix the login" });
         let start: StartWorkSession = serde_json::from_value(json).unwrap();
         assert!(!start.worktree && start.images.is_empty() && start.run.is_empty() && !start.confirm_secret);
+    }
+
+    #[test]
+    fn a_dispatch_state_reads_back_what_it_stores() {
+        for state in [SessionDispatch::Choosing, SessionDispatch::Nobody] {
+            assert_eq!(SessionDispatch::parse(state.as_str()), Some(state));
+            assert_eq!(serde_json::to_value(state).unwrap(), serde_json::json!(state.as_str()));
+        }
+        assert_eq!(SessionDispatch::parse("chosen"), None);
     }
 }

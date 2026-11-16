@@ -8,7 +8,7 @@
 //! (`dispatcher::chat`); lost, it stops without writing anything more.
 
 use crate::{Shared, runtimes};
-use aurelius_application::task::triage::{ATTEMPTS, MAX_TURNS, TOOLS, TriageRun};
+use aurelius_application::task::triage::{ATTEMPTS, MAX_TURNS, TOOLS};
 use aurelius_domain::{RunId, TaskId, TicketId};
 use aurelius_runtime::{RunRequest, RuntimeEvent, ToolProfile, Turn, TurnRole};
 use aurelius_storage::queries;
@@ -22,7 +22,7 @@ const RENEW_EVERY: Duration = Duration::from_secs(10);
 /// (a busy database) has gone by at the second try.
 const PREPARE_AGAIN_AFTER: Duration = Duration::from_millis(1_500);
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     tokio::task::spawn_blocking(f).await.ok()
 }
 
@@ -62,7 +62,8 @@ pub async fn run_triage(shared: Arc<Shared>, job: queries::JobRow) {
         shared.publish(notices);
         let Some(run) = run else { break };
         let (run_id, login) = (run.run_id, run.config.login_user);
-        let Some(ended) = drive(&shared, run, &job.id, epoch).await else { return };
+        let one = OneRun { run_id, config: run.config, system: run.system, prompt: run.prompt, flag: "--triage", tools: &TOOLS };
+        let Some(ended) = drive(&shared, one, &job.id, epoch).await else { return };
         // The ticket's Claude login is missing or expired: the job waits for it (no try used).
         let ended = match ended {
             Ended::Login => {
@@ -121,7 +122,7 @@ async fn gave_up(shared: &Arc<Shared>, ticket: TicketId, root: TaskId) {
 }
 
 /// Renew the job's lease; false when it is no longer ours.
-async fn renew(shared: &Arc<Shared>, job: &str, epoch: i64) -> bool {
+pub(crate) async fn renew(shared: &Arc<Shared>, job: &str, epoch: i64) -> bool {
     let (store, id) = (shared.store().clone(), job.to_owned());
     let renewed = blocking(move || store.write(move |tx| queries::renew_lease(tx, &id, epoch, LEASE_MS))).await;
     if !matches!(renewed, Some(Ok(true))) {
@@ -133,16 +134,27 @@ async fn renew(shared: &Arc<Shared>, job: &str, epoch: i64) -> bool {
 
 /// How the dispatcher's run ended: done (the error when it failed), or it
 /// waits for the ticket's Claude login.
-enum Ended {
+pub(crate) enum Ended {
     Done(Result<(), String>),
     Login,
     /// Its login's usage limit, with the reset when Claude named one.
     Quota(Option<i64>),
 }
 
+/// One run of a dispatcher: for a ticket (`--triage`) or a work session (`--session-dispatch`),
+/// with the bridge's flag and the tools it may use without asking.
+pub(crate) struct OneRun {
+    pub run_id: RunId,
+    pub config: aurelius_application::run::connections::ResolvedRunConfig,
+    pub system: String,
+    pub prompt: String,
+    pub flag: &'static str,
+    pub tools: &'static [&'static str],
+}
+
 /// Run the dispatcher until its answer is complete; none when the job lost its
 /// lease (the run is stopped).
-async fn drive(shared: &Arc<Shared>, run: TriageRun, job: &str, epoch: i64) -> Option<Ended> {
+pub(crate) async fn drive(shared: &Arc<Shared>, run: OneRun, job: &str, epoch: i64) -> Option<Ended> {
     let claude = run.config.provider == Some(aurelius_domain::connection::ProviderKind::ClaudeCode);
     let login = run.config.login_user;
     let runtime = match runtimes::runtime_for_config(shared, &run.config) {
@@ -150,14 +162,14 @@ async fn drive(shared: &Arc<Shared>, run: TriageRun, job: &str, epoch: i64) -> O
         Err(aurelius_runtime::RuntimeError::Login(_)) => return Some(Ended::Login),
         Err(e) => return Some(Ended::Done(Err(e.to_string()))),
     };
-    let bridge = crate::dispatcher::with_flag(crate::dispatcher::approval_bridge(shared, run.run_id), "--triage");
+    let bridge = crate::dispatcher::with_flag(crate::dispatcher::approval_bridge(shared, run.run_id), run.flag);
     let request = RunRequest {
         run_id: run.run_id,
         model_id: run.config.model.clone().unwrap_or_default(),
         system: Some(run.system),
         turns: vec![Turn { role: TurnRole::User, text: run.prompt, images: Vec::new() }],
         effort: run.config.effort.clone(),
-        profile: ToolProfile::Triage { approval_bridge: bridge, tools: TOOLS.iter().map(|t| t.to_string()).collect(), max_turns: MAX_TURNS },
+        profile: ToolProfile::Triage { approval_bridge: bridge, tools: run.tools.iter().map(|t| t.to_string()).collect(), max_turns: MAX_TURNS },
         subagent_model: None,
         session: Default::default(),
         session_id: None,
@@ -216,7 +228,7 @@ async fn drive(shared: &Arc<Shared>, run: TriageRun, job: &str, epoch: i64) -> O
 }
 
 /// A cancelled ticket stops its dispatcher's run too (`api::writes` stops the runs of its tasks).
-fn remember_canceller(shared: &Shared, run: RunId, canceller: Option<aurelius_runtime::Canceller>) {
+pub(crate) fn remember_canceller(shared: &Shared, run: RunId, canceller: Option<aurelius_runtime::Canceller>) {
     if let Ok(mut map) = shared.cancellers.lock() {
         match canceller {
             Some(c) => {
@@ -229,7 +241,7 @@ fn remember_canceller(shared: &Shared, run: RunId, canceller: Option<aurelius_ru
     }
 }
 
-async fn close(shared: &Arc<Shared>, job: &str, epoch: i64) {
+pub(crate) async fn close(shared: &Arc<Shared>, job: &str, epoch: i64) {
     shared.live.job_ended(job);
     let (store, id) = (shared.store().clone(), job.to_owned());
     let _ = blocking(move || store.write(move |tx| queries::complete_job(tx, &id, epoch).map(|_| ()))).await;

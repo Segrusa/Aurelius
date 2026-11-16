@@ -757,6 +757,8 @@ pub enum EmployeeAction {
     Scratchpad { content: String },
     /// The dispatcher of a ticket chooses its owner (`triage`; only in a dispatcher's run).
     AssignTicket { employee: String, reason: String },
+    /// The dispatcher of a work session chooses who takes it (`session_dispatch`; only in its run).
+    AssignSession { employee: String, reason: String },
     /// The tester's verdict on a ticket in Testing (`testing::verdict`; only in
     /// the run of its open test task).
     ReportTestResult { passed: bool, summary: String },
@@ -998,6 +1000,10 @@ impl CommandService {
             let (employee, reason) = (employee.clone(), reason.clone());
             return self.store.write(move |tx| crate::task::triage::assign(tx, &st, run, &employee, &reason)).map_err(storage_error);
         }
+        if let EmployeeAction::AssignSession { employee, reason } = &action {
+            let (employee, reason) = (employee.clone(), reason.clone());
+            return self.store.write(move |tx| crate::conversation::session_dispatch::assign(tx, &st, run, &employee, &reason)).map_err(storage_error);
+        }
         if let EmployeeAction::ReportTestResult { passed, summary } = &action {
             let (passed, summary) = (*passed, summary.clone());
             return self.store.write(move |tx| crate::task::testing::verdict(tx, &st, run, passed, &summary)).map_err(storage_error);
@@ -1114,6 +1120,7 @@ impl CommandService {
                     | EmployeeAction::ScheduleMessage { .. }
                     | EmployeeAction::Scratchpad { .. }
                     | EmployeeAction::AssignTicket { .. }
+                    | EmployeeAction::AssignSession { .. }
                     | EmployeeAction::ReportTestResult { .. }
                     | EmployeeAction::ReportReady { .. }
                     | EmployeeAction::ListTickets { .. }
