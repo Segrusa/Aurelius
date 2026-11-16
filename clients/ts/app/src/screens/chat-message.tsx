@@ -1,6 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { ChatSystemMessage } from "@astryxdesign/core/Chat";
+import { ChatSystemMessage, ChatToolCalls } from "@astryxdesign/core/Chat";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { LayoutFooter } from "@astryxdesign/core/Layout";
@@ -37,6 +37,7 @@ import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { TypingDots } from "../ui/typing";
 import { useDelayed } from "../ui/use-delayed";
+import { answerParts, stepsLabel } from "./answer-steps-logic";
 import { ApprovalCard, ReplyCard } from "./approval-card";
 import type { LiveStore } from "./chat-live";
 import { useLive } from "./chat-live";
@@ -189,6 +190,21 @@ const styles = stylex.create({
   todoOpen: { color: "var(--color-text-secondary)" },
   minZero: { minWidth: 0 },
   answer: { display: "flex", flexDirection: "column", gap: 10 },
+  stepGroup: { display: "flex", flexDirection: "column", gap: 4 },
+  stepGroupToggle: {
+    display: "inline-flex",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6,
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    padding: 0,
+    fontSize: 13,
+    textAlign: "left",
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+  },
+  stepGroupFailed: { color: "var(--color-text-error)" },
   liveStatus: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--color-text-accent)" },
   dialogBody: { display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", padding: 16 },
   group: { display: "flex", flexDirection: "column", gap: 4 },
@@ -560,12 +576,77 @@ function statusLine(text: string, waiting: boolean): string {
   return text ? "Writing…" : "Thinking…";
 }
 
-/** What was said; what the employee did to get there is not part of a chat. */
-function AnswerBody({ m, text, live }: { m: MessageView; text: string; live: boolean }) {
+/** Steps that ran between two pieces of text: one quiet line, with each step behind it. */
+function StepGroup({ steps, messageId }: { steps: ActivityView[]; messageId: string }) {
+  const [open, setOpen] = useState(false);
+  const failed = steps.some((s) => s.ok === false);
+  return (
+    <div {...stylex.props(styles.stepGroup)}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        {...stylex.props(styles.stepGroupToggle, failed && styles.stepGroupFailed)}
+      >
+        {stepsLabel(steps)}
+        <span aria-hidden="true">{open ? "⌄" : "›"}</span>
+      </button>
+      {open
+        ? steps.map((step) => (
+            <ChatToolCalls
+              key={`${step.call_id}${step.offset}`}
+              calls={[
+                {
+                  name: step.tool,
+                  status: step.ok == null ? "running" : step.ok ? "complete" : "error",
+                  target: stepLine(step),
+                  ...(step.ok === false && step.output ? { errorMessage: step.output } : {}),
+                  resultDetail: <ActivityOutput step={step} messageId={messageId} />,
+                },
+              ]}
+            />
+          ))
+        : null}
+    </div>
+  );
+}
+
+/** Text with the steps taken in between, as Claude shows it; mentions are marked in each piece. */
+function MarkedText({ text }: { text: string }) {
+  const { people, me } = useChat();
+  const marked = useMemo(() => markMentions(text, people, me), [text, people, me]);
+  return <Markdown text={marked} />;
+}
+
+/** What was said, and where the employee took steps in between (folded to one line each). */
+function AnswerBody({
+  m,
+  text,
+  live,
+  activity,
+}: {
+  m: MessageView;
+  text: string;
+  live: boolean;
+  activity: ActivityView[];
+}) {
   const { store } = useChat();
+  const parts = useMemo(() => answerParts(text, activity), [text, activity]);
+  if (activity.length === 0)
+    return (
+      <div {...stylex.props(styles.answer)}>
+        {live ? <LiveText text={text} /> : <Prose text={text} seenLive={store.seen.has(m.id)} />}
+      </div>
+    );
   return (
     <div {...stylex.props(styles.answer)}>
-      {live ? <LiveText text={text} /> : <Prose text={text} seenLive={store.seen.has(m.id)} />}
+      {parts.map((part, i) => {
+        if (part.kind === "steps") return <StepGroup key={part.key} steps={part.steps} messageId={m.id} />;
+        // Only the last piece still grows while the answer streams.
+        const growing = live && i === parts.length - 1;
+        // biome-ignore lint/suspicious/noArrayIndexKey: pieces only ever grow at the end.
+        return growing ? <LiveText key={i} text={part.text} /> : <MarkedText key={i} text={part.text} />;
+      })}
     </div>
   );
 }
@@ -719,7 +800,7 @@ function LiveAnswer({ m, waiting }: { m: MessageView; waiting: boolean }) {
   const text = update?.text ?? m.text;
   return (
     <>
-      <AnswerBody m={m} text={text} live />
+      <AnswerBody m={m} text={text} live activity={update?.activity ?? m.activity} />
       <div {...stylex.props(styles.liveStatus)}>
         <TypingDots />
         {statusLine(text, waiting)}
@@ -1237,7 +1318,7 @@ export const MessageRow = memo(function MessageRow({
     <LiveAnswer m={m} waiting={[...approvals.values()].some((a) => a.run_id === m.run_id)} />
   ) : (
     <>
-      <AnswerBody m={m} text={m.text} live={false} />
+      <AnswerBody m={m} text={m.text} live={false} activity={m.activity} />
       <MarkdownChips
         text={m.text}
         scope={conversationId ? { kind: "conversation", conversation_id: conversationId } : null}
