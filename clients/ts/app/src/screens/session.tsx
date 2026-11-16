@@ -4,12 +4,13 @@
 // sessions, it chooses what the next run uses: model, effort and mode. On the right, as a task's run has,
 // a panel with the session's properties and what its runs used: files, guidelines and tokens.
 
+import { Button } from "@astryxdesign/core/Button";
 import type { AgentMode, MessagesSnapshot, WorkSessionView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { useConnection } from "../connection";
-import { useMessages, useWorkSessions } from "../data";
+import { useEmployees, useMessages, useWorkSessions } from "../data";
 import { useKeyContext } from "../keys/provider";
 import { Chip } from "../ui/chip";
 import { Menu } from "../ui/menu";
@@ -21,12 +22,24 @@ import { MODE_LABELS, MODES } from "./employee-logic";
 import { lastRunOf, usageTotals } from "./run-logic";
 import { FilesWritten, RunAside, RunGuidelines, SideProperties, SideRow, UsageTotalsLine } from "./run-side";
 import { SubagentsAtWork } from "./run-tools";
-import { runChange, runChipLabel, sessionFolder, sessionPlace, sessionStatus } from "./session-logic";
+import { chooserText, runChange, runChipLabel, sessionFolder, sessionPlace, sessionStatus } from "./session-logic";
 import { modelName } from "./settings-kit";
 import { filesWritten } from "./tasks-logic";
 
 const styles = stylex.create({
   body: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0 },
+  chooser: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    marginInline: "auto",
+    width: "100%",
+    maxWidth: 820,
+    paddingInline: 24,
+    paddingBottom: 16,
+    color: "var(--color-text-secondary)",
+  },
+  chooserText: { flexGrow: 1, margin: 0 },
 });
 
 export function SessionScreen({ conversationId }: { conversationId: string }) {
@@ -44,6 +57,7 @@ export function SessionScreen({ conversationId }: { conversationId: string }) {
             description: "The first answer appears here. Talk with the employee as in a chat; there is no ticket.",
           },
           footer: (snapshot) => <RunChips snapshot={snapshot} />,
+          ...(session?.dispatch ? { instead: <Chooser session={session} /> } : {}),
         }}
       />
       <SessionDetails conversationId={conversationId} session={session} />
@@ -65,8 +79,8 @@ function SessionDetails({ conversationId, session }: { conversationId: string; s
       <SideProperties>
         {session ? (
           <>
-            <SideRow name="Employee">{session.employee_name}</SideRow>
-            <SideRow name="Status">{sessionStatus(running)}</SideRow>
+            <SideRow name="Employee">{session.dispatch ? "Not chosen yet" : session.employee_name}</SideRow>
+            <SideRow name="Status">{sessionStatus(running, session.dispatch)}</SideRow>
             <SideRow name="Project">{session.project_name}</SideRow>
             {session.branch ? <SideRow name="Branch">{session.branch}</SideRow> : null}
             <SideRow name="Folder" title={session.worktree ?? undefined}>
@@ -88,6 +102,42 @@ function SessionDetails({ conversationId, session }: { conversationId: string; s
       <RunGuidelines runId={lastRunOf(list)} />
       <UsageTotalsLine usage={usage} />
     </RunAside>
+  );
+}
+
+/**
+ * Where the composer is while nobody works in the session yet (`session_dispatch`): the dispatcher
+ * chooses, or chose nobody; the board member can choose who takes it.
+ */
+function Chooser({ session }: { session: WorkSessionView }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const employees = useEmployees();
+  const active = (employees.data ?? []).filter((e) => e.status === "active");
+  const choose = async (employeeId: string) => {
+    try {
+      await connection.write(
+        "work_session.assign",
+        { conversation_id: session.conversation_id, employee_id: employeeId },
+        { retry: false },
+      );
+      await client.invalidateQueries({ queryKey: ["messages"] });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "This did not work.");
+    }
+  };
+  return (
+    <div {...stylex.props(styles.chooser)}>
+      <p {...stylex.props(styles.chooserText)}>{chooserText(session)}</p>
+      <Menu
+        label="Who takes this session"
+        options={active.map((e) => ({ key: e.id, label: e.name, description: e.title ?? e.role }))}
+        onPick={(id) => void choose(id)}
+        trigger={
+          <Button label="Choose who takes it" variant={session.dispatch === "nobody" ? "primary" : "secondary"} />
+        }
+      />
+    </div>
   );
 }
 

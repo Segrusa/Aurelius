@@ -5,10 +5,30 @@ import type { WorkSessionView } from "@aurelius/protocol";
 /** Sessions the sidebar lists. */
 export const SIDEBAR_SESSIONS = 8;
 
+/**
+ * Who works in a session: its employee, or, while the dispatcher still chooses (`session_dispatch`), the
+ * dispatcher at it; after it chose nobody, nobody yet.
+ */
+export function sessionWho(session: Pick<WorkSessionView, "employee_name" | "dispatch">): string {
+  if (session.dispatch === "choosing") return `${session.employee_name} is choosing who takes it`;
+  if (session.dispatch === "nobody") return "Nobody yet";
+  return session.employee_name;
+}
+
 /** The head's second line: who works where. */
-export function sessionPlace(session: Pick<WorkSessionView, "employee_name" | "project_name" | "branch">): string {
+export function sessionPlace(
+  session: Pick<WorkSessionView, "employee_name" | "project_name" | "branch" | "dispatch">,
+): string {
   const where = session.branch ? `own worktree on ${session.branch}` : "project folder";
-  return `${session.employee_name} · ${session.project_name} · ${where}`;
+  return `${sessionWho(session)} · ${session.project_name} · ${where}`;
+}
+
+/** What stands where the composer is while nobody works in the session yet; none once somebody does. */
+export function chooserText(session: Pick<WorkSessionView, "employee_name" | "dispatch">): string | null {
+  if (session.dispatch === "choosing")
+    return `${session.employee_name} is choosing who takes this session. You can also choose yourself.`;
+  if (session.dispatch === "nobody") return "The dispatcher chose nobody. Choose who takes this session.";
+  return null;
 }
 
 /** The sidebar's sessions: the workspace's project only when one is chosen, at most `SIDEBAR_SESSIONS`. */
@@ -42,8 +62,13 @@ export function runChange(
   };
 }
 
-/** The Status row of a session's side panel: a run queued or under way works; otherwise it is your turn. */
-export function sessionStatus(running: boolean): string {
+/**
+ * The Status row of a session's side panel: a run queued or under way works; otherwise it is your turn.
+ * While the dispatcher chooses, or after it chose nobody, it says so.
+ */
+export function sessionStatus(running: boolean, dispatch?: WorkSessionView["dispatch"]): string {
+  if (dispatch === "choosing") return "Dispatcher is choosing";
+  if (dispatch === "nobody") return "Waiting for your choice";
   return running ? "Working" : "Waiting for you";
 }
 

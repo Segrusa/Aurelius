@@ -10,6 +10,8 @@ export type SessionKind = "ticket" | "quick" | "session";
 
 /** The server feature of work sessions. */
 export const SESSIONS_FEATURE = "work_sessions";
+/** The server's dispatcher chooses who takes a session (`work_session.dispatch`). */
+export const SESSION_DISPATCH_FEATURE = "session_dispatch";
 
 /** What a session start says under the composer. */
 export function sessionNote(whoName: string | null, worktree: boolean): string {
@@ -17,6 +19,13 @@ export function sessionNote(whoName: string | null, worktree: boolean): string {
   return worktree
     ? `${who} works in a worktree of its own, on its own branch. No ticket: you talk with them in the session.`
     : `${who} works in the project's folder itself. No ticket: you talk with them in the session.`;
+}
+
+/** The dispatcher chooses who takes a session: its words after Start. */
+export function dispatchedNote(worktree: boolean): string {
+  return worktree
+    ? "The dispatcher chooses who takes it, in a worktree of its own on its own branch. No ticket: you talk with them in the session."
+    : "The dispatcher chooses who takes it, in the project's folder itself. No ticket: you talk with them in the session.";
 }
 
 /** The Who of a ticket nobody was chosen for: the dispatcher picks the owner. */
@@ -113,14 +122,18 @@ export function offeredKind(features: readonly string[], quickOn: boolean): Sess
 
 /**
  * §4.4: a ticket goes to the dispatcher, or to the one last chosen while still active; a quick task to the
- * employee last given one, else to no one (it needs an employee, so the board member chooses).
+ * employee last given one, else to no one (it needs an employee, so the board member chooses). A session
+ * goes to the dispatcher where the server has one for sessions (`dispatch`), unless an employee was
+ * chosen last and is still active.
  */
 export function defaultWho(
   kind: SessionKind,
   stored: string | null,
   employees: Listed[],
   lastQuick: string | null,
+  dispatch = false,
 ): string | null {
+  if (kind === "session" && dispatch) return quickAssignee(employees, lastQuick) ?? DISPATCHER;
   if (kind !== "ticket") return quickAssignee(employees, lastQuick);
   const active = employees.some((e) => e.id === stored && e.status === "active");
   return active ? stored : DISPATCHER;
@@ -235,11 +248,15 @@ export function startProblem(state: {
   sessionFiles?: boolean;
   /** A session in a worktree of its own: that folder is made only before the first run. */
   worktree?: boolean;
+  /** The server's dispatcher can choose who takes a session. */
+  sessionDispatch?: boolean;
 }): string | null {
   if (state.offline) return "Not connected to the server.";
   if (!state.projectId) return "Choose a project.";
   if (state.text.trim() === "") return "Describe what needs doing.";
-  if (state.kind !== "ticket" && (!state.who || state.who === DISPATCHER)) return "Choose who does it.";
+  const dispatcherOk = state.kind === "ticket" || (state.kind === "session" && (state.sessionDispatch ?? false));
+  if (state.kind !== "ticket" && (!state.who || (state.who === DISPATCHER && !dispatcherOk)))
+    return "Choose who does it.";
   if (state.kind === "session" && (state.files ?? 0) > 0) {
     if (!state.sessionFiles) return "Add files in the session once it has started.";
     if (state.worktree)
@@ -260,10 +277,16 @@ export function footerLine(state: {
   noConnection: boolean;
   /** A session in a worktree of its own. */
   worktree?: boolean;
+  /** The dispatcher chooses who takes the session. */
+  dispatcher?: boolean;
 }): FooterLine {
   if (state.noConnection) return { type: "no_connection" };
   if (state.kind === "quick") return { type: "text", text: QUICK_NOTE };
-  if (state.kind === "session") return { type: "text", text: sessionNote(state.whoName, state.worktree ?? false) };
+  if (state.kind === "session") {
+    const worktree = state.worktree ?? false;
+    const text = state.dispatcher ? dispatchedNote(worktree) : sessionNote(state.whoName, worktree);
+    return { type: "text", text };
+  }
   if (state.whoName) return { type: "text", text: `${state.whoName} reports back to you when it is done.` };
   const text = state.responsible
     ? "The dispatcher picks the owner. You are responsible."
@@ -338,10 +361,22 @@ export function sessionStartParams(
   };
 }
 
-/** The session a start made, from its receipt. */
+/** The request of a session the dispatcher gives to someone: a session start without the employee. */
+export function sessionDispatchParams(
+  start: Omit<Parameters<typeof sessionStartParams>[0], "employeeId">,
+  worktree: boolean,
+  confirmSecret: boolean,
+): MethodParams["work_session.dispatch"] {
+  const { employee_id: _, ...params } = sessionStartParams({ ...start, employeeId: "" }, worktree, confirmSecret);
+  return params;
+}
+
+/** The session a start made, from its receipt (also one the dispatcher still gives to someone). */
 export function startedSession(receipt: Receipt): string | null {
   const { result } = receipt;
-  return result.kind === "command" && result.value.type === "work_session_started"
-    ? result.value.conversation_id
+  if (result.kind !== "command") return null;
+  const { value } = result;
+  return value.type === "work_session_started" || value.type === "work_session_dispatching"
+    ? value.conversation_id
     : null;
 }

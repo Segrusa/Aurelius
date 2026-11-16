@@ -6,6 +6,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import * as stylex from "@stylexjs/stylex";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
@@ -38,7 +39,9 @@ import {
   placeholderOf,
   projectRows,
   remembered,
+  SESSION_DISPATCH_FEATURE,
   type SessionKind,
+  sessionDispatchParams,
   sessionKey,
   sessionRequest,
   sessionStartParams,
@@ -156,6 +159,7 @@ export function useOpenNewSession(): () => void {
 export function NewSessionScreen() {
   useKeyContext("NewSession");
   const connection = useConnection();
+  const client = useQueryClient();
   const keys = useKeys();
   const navigate = useNavigate();
   const { storage } = usePlatform();
@@ -209,12 +213,21 @@ export function NewSessionScreen() {
 
   const team = employees.data ?? [];
   const active = team.filter((e) => e.status === "active");
-  const fallbackWho = defaultWho(kind, storage.get(sessionKey("who", hostId)), team, storage.get(LAST_QUICK));
-  const whoPicked = pickedWho === DISPATCHER ? kind === "ticket" : active.some((e) => e.id === pickedWho);
+  // A session goes to the dispatcher too where the server lets it choose (`session_dispatch`).
+  const sessionDispatch = features.includes(SESSION_DISPATCH_FEATURE);
+  const dispatcherOffered = kind === "ticket" || (kind === "session" && sessionDispatch);
+  const fallbackWho = defaultWho(
+    kind,
+    storage.get(sessionKey("who", hostId)),
+    team,
+    storage.get(LAST_QUICK),
+    sessionDispatch,
+  );
+  const whoPicked = pickedWho === DISPATCHER ? dispatcherOffered : active.some((e) => e.id === pickedWho);
   const whoId = whoPicked ? pickedWho : fallbackWho;
   const who = active.find((e) => e.id === whoId) ?? null;
   const whoOptions = [
-    ...(kind === "ticket" ? [{ key: DISPATCHER, label: "Dispatcher" }] : []),
+    ...(dispatcherOffered ? [{ key: DISPATCHER, label: "Dispatcher" }] : []),
     ...active.map((e) => ({ key: e.id, label: e.name, description: e.title ?? e.role })),
   ];
   const whoLabel =
@@ -231,6 +244,7 @@ export function NewSessionScreen() {
     files: attach.files.length,
     sessionFiles,
     worktree,
+    sessionDispatch,
   });
   // Lands where the dialogs land since #58: the new ticket's chat, else its panel on the Board.
   const created = useOpenCreated();
@@ -243,8 +257,11 @@ export function NewSessionScreen() {
     attach.clear();
     const session = startedTo.current;
     startedTo.current = null;
-    if (session) void navigate({ to: "/session/$conversationId", params: { conversationId: session } });
-    else created.open();
+    if (session) {
+      // The new session is in the list its screen reads, also before the server's events arrive.
+      void client.invalidateQueries({ queryKey: ["messages", "work_sessions"] });
+      void navigate({ to: "/session/$conversationId", params: { conversationId: session } });
+    } else created.open();
   });
 
   const start = () => {
@@ -252,26 +269,32 @@ export function NewSessionScreen() {
     const startWho = { id: whoId, name: whoId === DISPATCHER ? "Dispatcher" : (who?.name ?? "the employee") };
     send(async (confirmSecret) => {
       if (kind === "session") {
-        const params = sessionStartParams(
-          {
-            projectId: project.id,
-            employeeId: whoId,
-            text: withFolders(text, attach.folders),
-            model,
-            effort,
-            mode,
-            images: attach.images,
-            files: attach.files,
-          },
-          worktree,
-          confirmSecret,
-        );
-        const receipt = await connection.write("work_session.start", params, { retry: false });
+        const first = {
+          projectId: project.id,
+          text: withFolders(text, attach.folders),
+          model,
+          effort,
+          mode,
+          images: attach.images,
+          files: attach.files,
+        };
+        const dispatched = whoId === DISPATCHER;
+        const receipt = dispatched
+          ? await connection.write("work_session.dispatch", sessionDispatchParams(first, worktree, confirmSecret), {
+              retry: false,
+            })
+          : await connection.write(
+              "work_session.start",
+              sessionStartParams({ ...first, employeeId: whoId }, worktree, confirmSecret),
+              { retry: false },
+            );
         startedTo.current = startedSession(receipt);
         for (const [key, value] of remembered(hostId, { kind, projectId: project.id, who: whoId }, recent)) {
           storage.set(key, value);
         }
-        return `Session started with ${startWho.name}.`;
+        return dispatched
+          ? "Session started: the dispatcher chooses who takes it."
+          : `Session started with ${startWho.name}.`;
       }
       const { params, done } = sessionRequest(
         {
@@ -347,6 +370,7 @@ export function NewSessionScreen() {
     responsible,
     noConnection,
     worktree,
+    dispatcher: whoId === DISPATCHER,
   });
   const noProjects = projects.isSuccess && shown.length === 0;
   const continuing = continueTickets(mine.data?.tickets ?? []);

@@ -120,6 +120,8 @@ export interface ChatFrame {
   empty: { title: string; description: string };
   /** Controls in the composer's bottom row, from what the conversation runs on now. */
   footer?: (snapshot: MessagesSnapshot) => ReactNode;
+  /** What stands where the composer is, while nothing can be written (a session nobody took yet). */
+  instead?: ReactNode;
 }
 
 /**
@@ -312,6 +314,8 @@ export function EmployeeChat({
               ? `${name} is paused: resume them to go on with this ${frame ? "session" : "chat"}.`
               : `${name} is archived: this ${frame ? "session" : "chat"} can only be read.`}
           </p>
+        ) : frame?.instead ? (
+          frame.instead
         ) : (
           <Composer
             key={conversationId}

@@ -639,6 +639,85 @@ test.describe("states a test daemon cannot produce", () => {
     await page.screenshot({ path: `${REPO}/target/session-details/session-panel.png` });
   });
 
+  test("a new session goes to the dispatcher, which chooses who takes it", async ({ page }) => {
+    const choosing = {
+      conversation_id: "s2",
+      title: "The login page is blank",
+      employee_id: "e0",
+      employee_name: "Orion",
+      project_id: "p",
+      project_name: "Northwind API",
+      running: true,
+      dispatch: "choosing",
+      created_at_ms: Date.now() - 1_000,
+      last_activity_ms: Date.now() - 1_000,
+    };
+    let sessions: unknown[] = [];
+    const { writes } = await scriptServer(page, {
+      ...script,
+      features: ["work_sessions", "session_dispatch"],
+      employees: [
+        { id: "e0", name: "Orion", role: "Project Manager", status: "active" },
+        { id: "e1", name: "Flux", role: "Engineer", status: "active" },
+      ],
+      conversations: {
+        s2: {
+          ...messages("s2", [
+            message("m1", "user", "The login page is blank."),
+            message("m2", "assistant", "Orion is choosing who takes this…", { update: "system" }),
+          ]),
+          employee_id: "e0",
+        },
+      },
+      reads: {
+        "work_session.list": () => ({ type: "work_sessions", value: { sessions, as_of_seq: 1 } }),
+        // A connection is set up, so Start can go.
+        "connection.list": () => ({
+          type: "connections",
+          value: {
+            connections: [{ id: "c1", display_name: "Claude", provider: "claude_code", status: "ready", models: [] }],
+            defaults: [],
+          },
+        }),
+      },
+      results: {
+        "work_session.dispatch": () => {
+          sessions = [choosing];
+          return {
+            kind: "command",
+            value: { type: "work_session_dispatching", conversation_id: "s2", project_id: "p", message_id: "m1" },
+          };
+        },
+      },
+    });
+    await page.goto(`${site.origin}/new`);
+    await page.getByRole("radio", { name: "Session" }).click();
+    await expect(page.getByRole("button", { name: "Who" })).toHaveText(/Dispatcher/);
+    await expect(page.getByText("The dispatcher chooses who takes it")).toBeVisible();
+    await page.getByRole("textbox", { name: "What needs doing" }).fill("The login page is blank.");
+    await page.getByRole("button", { name: /^Start/ }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "work_session.dispatch")?.params)
+      .toMatchObject({
+        project_id: "p",
+        text: "The login page is blank.",
+      });
+    expect(writes.some((w) => w.method === "work_session.start")).toBe(false);
+
+    // The session opens: the dispatcher is at it, and the board member can choose instead.
+    await expect(page).toHaveURL(/\/session\/s2$/);
+    await expect(page.getByText("Orion is choosing who takes this…")).toBeVisible();
+    const properties = page.getByRole("complementary", { name: "Session properties" });
+    await expect(properties.getByText("Dispatcher is choosing")).toBeVisible();
+    await expect(page.getByText(/You can also choose yourself/)).toBeVisible();
+    await page.screenshot({ path: `${REPO}/target/session-dispatch/session-choosing.png` });
+    await page.getByRole("button", { name: "Who takes this session" }).click();
+    await page.getByRole("menuitem", { name: /Flux/ }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "work_session.assign")?.params)
+      .toEqual({ conversation_id: "s2", employee_id: "e1" });
+  });
+
   test("the Inbox says what each row is, and acts on it", async ({ page }) => {
     const { writes } = await scriptServer(page, script);
     await page.goto(site.origin);
