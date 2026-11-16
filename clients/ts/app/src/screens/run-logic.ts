@@ -113,3 +113,29 @@ export function lastFailure(
   const last = [...messages].reverse().find((m) => m.role === "assistant" && !m.deleted_at_ms);
   return last?.status === "failed" ? last.text.replace(/\s*Send the message again to retry\.\s*$/, "") : null;
 }
+
+/** What a conversation's answers used, added up (the side panel of a task and of a session). */
+export interface UsageTotals {
+  input: number;
+  output: number;
+  cached: number;
+  written: number;
+  micro: number;
+}
+
+export function usageTotals(messages: { usage?: TokenUsage | null }[]): UsageTotals {
+  const totals = { input: 0, output: 0, cached: 0, written: 0, micro: 0 };
+  for (const m of messages) {
+    totals.input += m.usage?.input_tokens ?? 0;
+    totals.output += m.usage?.output_tokens ?? 0;
+    totals.cached += m.usage?.cached_tokens ?? 0;
+    totals.written += m.usage?.cache_creation_tokens ?? 0;
+    totals.micro += m.usage?.cost_micro_usd ?? 0;
+  }
+  return totals;
+}
+
+/** The run whose guidelines and context the side panel shows: the latest one that answered. */
+export function lastRunOf(messages: { run_id?: string | null }[]): string | null {
+  return [...messages].reverse().find((m) => m.run_id)?.run_id ?? null;
+}

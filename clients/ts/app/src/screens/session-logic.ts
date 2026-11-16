@@ -41,3 +41,13 @@ export function runChange(
     effort: "effort" in pick ? of(pick.effort) : (current.effort ?? null),
   };
 }
+
+/** The Status row of a session's side panel: a run queued or under way works; otherwise it is your turn. */
+export function sessionStatus(running: boolean): string {
+  return running ? "Working" : "Waiting for you";
+}
+
+/** The Folder row: the session's worktree when it has one, else the project's own folder. */
+export function sessionFolder(session: Pick<WorkSessionView, "worktree">): string {
+  return session.worktree || "Project folder";
+}

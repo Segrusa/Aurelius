@@ -1,12 +1,15 @@
 // A work session (server feature `work_sessions`): one employee in one project's folder, started from
 // New session without a ticket. It is the employee chat with its own head: the session's title and where
 // it works. Later messages go in with `chat.send`, as in a chat. Below the words, as in Claude's own
-// sessions, it chooses what the next run uses: model, effort and mode.
+// sessions, it chooses what the next run uses: model, effort and mode. On the right, as a task's run has,
+// a panel with the session's properties and what its runs used: files, guidelines and tokens.
 
-import type { AgentMode, MessagesSnapshot } from "@aurelius/protocol";
+import type { AgentMode, MessagesSnapshot, WorkSessionView } from "@aurelius/protocol";
+import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { useConnection } from "../connection";
-import { useWorkSessions } from "../data";
+import { useMessages, useWorkSessions } from "../data";
 import { useKeyContext } from "../keys/provider";
 import { Chip } from "../ui/chip";
 import { Menu } from "../ui/menu";
@@ -15,24 +18,76 @@ import { EFFORTS } from "./dialog-logic";
 import { useModels } from "./dialogs";
 import { EmployeeChat } from "./employee-chat";
 import { MODE_LABELS, MODES } from "./employee-logic";
-import { runChange, runChipLabel, sessionPlace } from "./session-logic";
+import { lastRunOf, usageTotals } from "./run-logic";
+import { FilesWritten, RunAside, RunGuidelines, SideProperties, SideRow, UsageTotalsLine } from "./run-side";
+import { SubagentsAtWork } from "./run-tools";
+import { runChange, runChipLabel, sessionFolder, sessionPlace, sessionStatus } from "./session-logic";
+import { modelName } from "./settings-kit";
+import { filesWritten } from "./tasks-logic";
+
+const styles = stylex.create({
+  body: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0 },
+});
 
 export function SessionScreen({ conversationId }: { conversationId: string }) {
   useKeyContext("TeamChat");
   const session = useWorkSessions().data?.find((s) => s.conversation_id === conversationId) ?? null;
   return (
-    <EmployeeChat
-      conversationId={conversationId}
-      frame={{
-        ...(session ? { title: session.title || "Session" } : {}),
-        ...(session ? { subtitle: sessionPlace(session) } : {}),
-        empty: {
-          title: "This session is starting.",
-          description: "The first answer appears here. Talk with the employee as in a chat; there is no ticket.",
-        },
-        footer: (snapshot) => <RunChips snapshot={snapshot} />,
-      }}
-    />
+    <div {...stylex.props(styles.body)}>
+      <EmployeeChat
+        conversationId={conversationId}
+        frame={{
+          ...(session ? { title: session.title || "Session" } : {}),
+          ...(session ? { subtitle: sessionPlace(session) } : {}),
+          empty: {
+            title: "This session is starting.",
+            description: "The first answer appears here. Talk with the employee as in a chat; there is no ticket.",
+          },
+          footer: (snapshot) => <RunChips snapshot={snapshot} />,
+        }}
+      />
+      <SessionDetails conversationId={conversationId} session={session} />
+    </div>
+  );
+}
+
+/** The session's side panel: what a task's run shows, for this session. */
+function SessionDetails({ conversationId, session }: { conversationId: string; session: WorkSessionView | null }) {
+  const feed = useMessages(conversationId);
+  const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
+  const files = useMemo(() => filesWritten(list), [list]);
+  const usage = useMemo(() => usageTotals(list), [list]);
+  const run = feed.data?.run;
+  const mode = feed.data?.agent_mode;
+  const running = session?.running ?? false;
+  return (
+    <RunAside label="Session properties">
+      <SideProperties>
+        {session ? (
+          <>
+            <SideRow name="Employee">{session.employee_name}</SideRow>
+            <SideRow name="Status">{sessionStatus(running)}</SideRow>
+            <SideRow name="Project">{session.project_name}</SideRow>
+            {session.branch ? <SideRow name="Branch">{session.branch}</SideRow> : null}
+            <SideRow name="Folder" title={session.worktree ?? undefined}>
+              {sessionFolder(session)}
+            </SideRow>
+          </>
+        ) : null}
+        <SideRow name="Model">{runChipLabel(run?.model, modelName)}</SideRow>
+        <SideRow name="Effort">{runChipLabel(run?.effort)}</SideRow>
+        {mode ? <SideRow name="Mode">{MODE_LABELS[mode]}</SideRow> : null}
+        {session ? (
+          <SideRow name="Started">
+            {new Date(session.created_at_ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
+          </SideRow>
+        ) : null}
+      </SideProperties>
+      <SubagentsAtWork conversationId={conversationId} live={running} />
+      <FilesWritten files={files} />
+      <RunGuidelines runId={lastRunOf(list)} />
+      <UsageTotalsLine usage={usage} />
+    </RunAside>
   );
 }
 

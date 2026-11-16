@@ -572,6 +572,73 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(page.getByRole("complementary", { name: /Still at work/ })).toBeVisible();
   });
 
+  test("a session shows the same properties as a task's run", async ({ page }) => {
+    const session = {
+      conversation_id: "s1",
+      title: "Fix the login page",
+      employee_id: "e1",
+      employee_name: "Flux",
+      project_id: "p",
+      project_name: "Northwind API",
+      branch: "session/ab12",
+      worktree: "/data/worktrees/session-ab12",
+      running: false,
+      created_at_ms: Date.now() - 600_000,
+      last_activity_ms: Date.now() - 60_000,
+    };
+    await scriptServer(page, {
+      ...script,
+      features: ["work_sessions"],
+      conversations: {
+        s1: {
+          ...messages("s1", [
+            message("m1", "user", "Fix the login page."),
+            message("m2", "assistant", "The login page works again.", {
+              run_id: "r9",
+              activity: [{ call_id: "a", offset: 0, tool: "Edit", input: { file_path: "src/login.tsx" }, ok: true }],
+              usage: {
+                input_tokens: 12,
+                output_tokens: 2100,
+                cached_tokens: 50000,
+                cache_creation_tokens: 3000,
+                cost_micro_usd: 120000,
+              },
+            }),
+          ]),
+          agent_mode: "plan",
+          run: { model: "claude-opus-5-5", effort: "high" },
+        },
+      },
+      reads: {
+        "work_session.list": () => ({ type: "work_sessions", value: { sessions: [session], as_of_seq: 1 } }),
+        "run.guidelines": (request) => ({
+          type: "run_guidelines",
+          value: {
+            run_id: (request.params as { run_id: string }).run_id,
+            guidelines:
+              (request.params as { run_id: string }).run_id === "r9"
+                ? [{ guideline_id: "g1", title: "Rust style", version: 3 }]
+                : [],
+          },
+        }),
+      },
+    });
+    await page.goto(site.origin);
+    await page.goto(`${site.origin}/session/s1`);
+    const properties = page.getByRole("complementary", { name: "Session properties" });
+    await expect(properties.getByText("Flux", { exact: true })).toBeVisible();
+    await expect(properties.getByText("Waiting for you")).toBeVisible();
+    await expect(properties.getByText("session/ab12")).toBeVisible();
+    await expect(properties.getByText("Opus")).toBeVisible();
+    await expect(properties.getByText("high", { exact: true })).toBeVisible();
+    await expect(properties.getByText("src/login.tsx")).toBeVisible();
+    await expect(properties.getByText("Rust style")).toBeVisible();
+    await expect(properties.getByText("v3")).toBeVisible();
+    await expect(properties.getByText(/2\.1k out/)).toBeVisible();
+    await expect(page.getByText("The login page works again.")).toBeVisible();
+    await page.screenshot({ path: `${REPO}/target/session-details/session-panel.png` });
+  });
+
   test("the Inbox says what each row is, and acts on it", async ({ page }) => {
     const { writes } = await scriptServer(page, script);
     await page.goto(site.origin);

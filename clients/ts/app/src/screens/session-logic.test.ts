@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { runChange, runChipLabel, SIDEBAR_SESSIONS, sessionPlace, sidebarSessions } from "./session-logic";
+import {
+  runChange,
+  runChipLabel,
+  SIDEBAR_SESSIONS,
+  sessionFolder,
+  sessionPlace,
+  sessionStatus,
+  sidebarSessions,
+} from "./session-logic";
+
+describe("the session's side panel", () => {
+  it("says it works while a run is queued or under way, else that it waits for you", () => {
+    expect(sessionStatus(true)).toBe("Working");
+    expect(sessionStatus(false)).toBe("Waiting for you");
+  });
+
+  it("shows the worktree, or the project folder when it has none", () => {
+    expect(sessionFolder({ worktree: "/data/worktrees/session-ab12" })).toBe("/data/worktrees/session-ab12");
+    expect(sessionFolder({ worktree: null })).toBe("Project folder");
+    expect(sessionFolder({})).toBe("Project folder");
+  });
+});
 
 describe("sessionPlace", () => {
   it("names the employee, the project and the folder it works in", () => {
