@@ -336,6 +336,13 @@ describe("work sessions", () => {
     expect(startProblem({ ...ready, files: 1 })).toBe("Add files in the session once it has started.");
   });
 
+  it("takes files with its first message on a server with chat_files, but not in its own worktree", () => {
+    const ready = { projectId: "p", text: "fix the login", kind: "session" as const, who: "e", offline: false };
+    expect(startProblem({ ...ready, files: 1, sessionFiles: true })).toBeNull();
+    expect(startProblem({ ...ready, files: 1, sessionFiles: true, worktree: true })).toContain("own worktree");
+    expect(startProblem({ ...ready, files: 0, sessionFiles: false, worktree: true })).toBeNull();
+  });
+
   it("says where the employee works", () => {
     const line = (worktree: boolean) =>
       footerLine({ kind: "session", whoName: "Orion", responsible: false, noConnection: false, worktree });
@@ -362,6 +369,21 @@ describe("work sessions", () => {
       confirm_secret: false,
     });
     expect(sessionStartParams({ ...start, mode: "default" }, false, true).run).toEqual({ model: null, effort: "high" });
+  });
+
+  it("sends photos and files only when there are some", () => {
+    const start = {
+      projectId: "p",
+      employeeId: "e",
+      text: "kijk",
+      model: "default",
+      effort: "default",
+      mode: "default",
+    };
+    expect(sessionStartParams({ ...start, images: [], files: [] }, false, false)).not.toHaveProperty("images");
+    expect(sessionStartParams({ ...start, images: [], files: [] }, false, false)).not.toHaveProperty("files");
+    const sent = sessionStartParams({ ...start, images: ["/a.png"], files: ["/b.pdf"] }, false, false);
+    expect([sent.images, sent.files]).toEqual([["/a.png"], ["/b.pdf"]]);
   });
 
   it("reads the started session from the receipt", () => {

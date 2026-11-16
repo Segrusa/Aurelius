@@ -4,7 +4,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
-import { IconButton } from "@astryxdesign/core/IconButton";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
@@ -14,11 +13,12 @@ import { useEmployees, useMyTickets, useProjects } from "../data";
 import { showChord } from "../keys/keymap";
 import { isMac, useAction, useKeyContext, useKeys } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { AttachRow, useAttachments } from "../ui/attach";
+import { usePromptAttachments } from "../ui/attach";
+import { CHAT_FILES_FEATURE, withFolders } from "../ui/attach-logic";
 import { Chip } from "../ui/chip";
-import { ArrowUpIcon, PlusIcon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
+import { PromptBox, PromptTextarea } from "../ui/prompt-box";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { cycle, EFFORTS, MODES, titleOfGoal } from "./dialog-logic";
@@ -124,76 +124,6 @@ const styles = stylex.create({
     paddingInline: 16,
     paddingBlockEnd: 24,
   },
-  // The input as in a chat app: a rounded card with the text on top and its own actions under it,
-  // and a tray tucked under the card with where and by whom the work goes.
-  stack: { display: "flex", flexDirection: "column" },
-  composer: {
-    position: "relative",
-    zIndex: 1,
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: { default: "var(--color-border)", ":focus-within": "var(--color-border-emphasized)" },
-    backgroundColor: "var(--color-background-card)",
-    boxShadow: "var(--precision-card-shadow)",
-    paddingBlock: 12,
-    paddingInline: 12,
-  },
-  textarea: {
-    display: "block",
-    width: "100%",
-    resize: "none",
-    borderWidth: 0,
-    backgroundColor: "transparent",
-    paddingBlock: 2,
-    paddingInline: 6,
-    fontFamily: "inherit",
-    fontSize: 15,
-    lineHeight: 1.45,
-    color: "var(--color-text-primary)",
-    outlineStyle: { default: "none", ":focus-visible": "none" },
-    "::placeholder": { color: "var(--precision-text3)" },
-    ":disabled": { cursor: "not-allowed" },
-  },
-  bar: { display: "flex", alignItems: "center", gap: 4 },
-  send: {
-    display: "inline-flex",
-    flexShrink: 0,
-    width: 34,
-    height: 34,
-    cursor: { default: "pointer", ":disabled": "not-allowed" },
-    alignItems: "center",
-    justifyContent: "center",
-    marginInlineStart: 4,
-    borderWidth: 0,
-    borderRadius: 999,
-    backgroundColor: { default: "var(--color-accent)", ":disabled": "var(--color-overlay-hover)" },
-    color: { default: "var(--color-on-accent)", ":disabled": "var(--precision-text3)" },
-    outline: { default: "none", ":focus-visible": "2px solid var(--focus-outline-color)" },
-    outlineOffset: 2,
-  },
-  tray: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: 4,
-    // Starts under the card's rounded bottom, so the card seems to rest on it.
-    marginBlockStart: -20,
-    marginInline: 12,
-    borderWidth: 1,
-    borderTopWidth: 0,
-    borderStyle: "solid",
-    borderColor: "var(--color-border)",
-    borderEndStartRadius: 14,
-    borderEndEndRadius: 14,
-    backgroundColor: "var(--color-background-muted)",
-    paddingInline: 8,
-    paddingBlockStart: 26,
-    paddingBlockEnd: 6,
-  },
   noteLine: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, fontSize: 12 },
   note: { marginInlineEnd: "auto", color: "var(--precision-text3)" },
   textButton: {
@@ -205,7 +135,6 @@ const styles = stylex.create({
     fontSize: 12,
     color: "var(--color-text-accent)",
   },
-  group: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 },
   right: { marginInlineStart: "auto" },
 });
 
@@ -254,7 +183,6 @@ export function NewSessionScreen() {
     setText(next);
     drafts.set(hostId, next);
   };
-  const attach = useAttachments();
   // Next to Ticket: a Session where the server has them (it replaces the quick task), else a Quick task.
   const other = offeredKind(features, quickOn);
   const [chosenKind, setKind] = useState<SessionKind>(() =>
@@ -262,6 +190,9 @@ export function NewSessionScreen() {
   );
   const kind: SessionKind = other && (chosenKind === "ticket" || chosenKind === other) ? chosenKind : "ticket";
   const [worktree, setWorktree] = useState(false);
+  // A ticket takes files of any type; a session's first message where the server has `chat_files`.
+  const sessionFiles = features.includes(CHAT_FILES_FEATURE);
+  const attach = usePromptAttachments({ files: kind !== "session" || (sessionFiles && !worktree), folders: true });
   const [pickedProject, setProject] = useState<string | null>(null);
   const [pickedWho, setWho] = useState<string | null>(null);
   const [model, setModel] = useState("default");
@@ -291,7 +222,16 @@ export function NewSessionScreen() {
       ? "Dispatcher"
       : (who?.name ?? (active.length === 0 ? "No employee yet" : "Choose who does it"));
 
-  const problem = startProblem({ projectId, text, kind, who: whoId, offline, files: attach.files.length });
+  const problem = startProblem({
+    projectId,
+    text,
+    kind,
+    who: whoId,
+    offline,
+    files: attach.files.length,
+    sessionFiles,
+    worktree,
+  });
   // Lands where the dialogs land since #58: the new ticket's chat, else its panel on the Board.
   const created = useOpenCreated();
   // A started session opens itself; a ticket where the dialogs open one.
@@ -313,7 +253,16 @@ export function NewSessionScreen() {
     send(async (confirmSecret) => {
       if (kind === "session") {
         const params = sessionStartParams(
-          { projectId: project.id, employeeId: whoId, text, model, effort, mode },
+          {
+            projectId: project.id,
+            employeeId: whoId,
+            text: withFolders(text, attach.folders),
+            model,
+            effort,
+            mode,
+            images: attach.images,
+            files: attach.files,
+          },
           worktree,
           confirmSecret,
         );
@@ -328,12 +277,13 @@ export function NewSessionScreen() {
         {
           kind,
           projectId: project.id,
-          text,
+          text: withFolders(text, attach.folders),
           who: startWho,
           model,
           effort,
           mode,
-          files: attach.paths,
+          // A ticket keeps photos as files.
+          files: [...attach.images, ...attach.files],
           responsibleUserId: responsible ? (user?.id ?? null) : null,
         },
         confirmSecret,
@@ -453,7 +403,7 @@ export function NewSessionScreen() {
   return (
     <Page>
       <PageHead title="New session" />
-      <div {...attach.target} {...stylex.props(styles.body)}>
+      <div {...stylex.props(styles.body)}>
         <div {...stylex.props(styles.centre)}>
           <div {...stylex.props(styles.centreBlock)}>
             <Heading level={2} xstyle={styles.heading}>
@@ -472,10 +422,10 @@ export function NewSessionScreen() {
           ) : null}
           {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
           {error ? <Banner status="error" role="alert" title={error} /> : null}
-          {attach.files.length > 0 ? <AttachRow attach={attach} /> : null}
-          <div {...stylex.props(styles.stack)}>
-            <div {...stylex.props(styles.composer)}>
-              <textarea
+          <PromptBox
+            attach={attach}
+            input={
+              <PromptTextarea
                 ref={composer}
                 aria-label="What needs doing"
                 placeholder={placeholderOf(kind)}
@@ -483,148 +433,137 @@ export function NewSessionScreen() {
                 value={text}
                 onChange={(e) => write(e.target.value)}
                 disabled={noProjects}
-                {...stylex.props(styles.textarea)}
               />
-              <div {...stylex.props(styles.bar)}>
-                <IconButton
-                  label="Add files"
-                  tooltip="Add files"
-                  icon={<PlusIcon />}
-                  variant="ghost"
-                  size="sm"
-                  onClick={attach.pick}
+            }
+            chips={
+              <>
+                <Menu
+                  label="Model"
+                  value={model}
+                  options={models}
+                  onPick={setModel}
+                  trigger={
+                    <Chip name="Model" quiet>
+                      {models.find((m) => m.key === model)?.label ?? "Default"}
+                    </Chip>
+                  }
                 />
-                <div {...stylex.props(styles.group, styles.right)}>
+                <Menu
+                  label="Effort"
+                  value={effort}
+                  options={EFFORTS.map((e) => ({ key: e, label: e === "default" ? "Default" : e }))}
+                  onPick={setEffort}
+                  trigger={
+                    <Chip name="Effort" quiet>
+                      {effort === "default" ? "Default" : effort}
+                    </Chip>
+                  }
+                />
+                {kind !== "quick" ? (
                   <Menu
-                    label="Model"
-                    value={model}
-                    options={models}
-                    onPick={setModel}
+                    label="Mode"
+                    value={mode}
+                    options={MODES.map((m) => ({
+                      key: m.key as string,
+                      label:
+                        m.key === "default" ? (kind === "session" ? "Employee's default" : "Owner's default") : m.label,
+                    }))}
+                    onPick={setMode}
                     trigger={
-                      <Chip name="Model" quiet>
-                        {models.find((m) => m.key === model)?.label ?? "Default"}
+                      <Chip name="Mode" quiet>
+                        {mode === "default"
+                          ? kind === "session"
+                            ? "Employee's default"
+                            : "Owner's default"
+                          : MODES.find((m) => m.key === mode)?.label}
                       </Chip>
                     }
                   />
+                ) : null}
+              </>
+            }
+            send={{
+              label: `Start (${showChord("secondary-enter", isMac)})`,
+              title: problem ?? `Start (${showChord("secondary-enter", isMac)})`,
+              disabled: problem !== null || busy,
+              onClick: start,
+            }}
+            tray={
+              <>
+                <Menu
+                  label="Project"
+                  {...(projectId ? { value: projectId } : {})}
+                  options={shown.map((p) => ({ key: p.id, label: p.name }))}
+                  onPick={pickProject}
+                  trigger={
+                    <Chip name="Project" quiet>
+                      {project ? (
+                        <>
+                          <Mark letter={initial(project.name)} color={markColor(project.id)} size={14} radius={3} />
+                          {project.name}
+                        </>
+                      ) : (
+                        "Choose"
+                      )}
+                    </Chip>
+                  }
+                />
+                {other ? (
+                  <SegmentedControl
+                    label="Kind"
+                    size="sm"
+                    value={kind}
+                    onChange={(next) => setKind(next === other ? other : "ticket")}
+                  >
+                    <SegmentedControlItem value="ticket" label="Ticket" />
+                    <SegmentedControlItem value={other} label={other === "session" ? "Session" : "Quick task"} />
+                  </SegmentedControl>
+                ) : null}
+                <Menu
+                  label="Who"
+                  {...(whoId ? { value: whoId } : {})}
+                  options={whoOptions}
+                  onPick={setWho}
+                  trigger={
+                    <Chip name="Who" quiet>
+                      {whoLabel}
+                    </Chip>
+                  }
+                />
+                {kind === "session" ? (
                   <Menu
-                    label="Effort"
-                    value={effort}
-                    options={EFFORTS.map((e) => ({ key: e, label: e === "default" ? "Default" : e }))}
-                    onPick={setEffort}
+                    label="Where"
+                    value={worktree ? "worktree" : "folder"}
+                    options={[
+                      { key: "folder", label: "Project folder", description: "Works in the project's folder itself" },
+                      { key: "worktree", label: "Own worktree", description: "A worktree and branch of its own" },
+                    ]}
+                    onPick={(key) => setWorktree(key === "worktree")}
                     trigger={
-                      <Chip name="Effort" quiet>
-                        {effort === "default" ? "Default" : effort}
+                      <Chip name="Where" quiet>
+                        {worktree ? "Own worktree" : "Project folder"}
                       </Chip>
                     }
                   />
+                ) : null}
+                {kind === "ticket" && project ? (
                   <button
                     type="button"
-                    aria-label={`Start (${showChord("secondary-enter", isMac)})`}
-                    title={problem ?? `Start (${showChord("secondary-enter", isMac)})`}
-                    disabled={problem !== null || busy}
-                    onClick={start}
-                    {...stylex.props(styles.send)}
+                    onClick={() =>
+                      overlays.open("ticket", {
+                        projectId: project.id,
+                        title: titleOfGoal(text),
+                        description: text.trim(),
+                      })
+                    }
+                    {...stylex.props(styles.textButton, styles.right)}
                   >
-                    <ArrowUpIcon />
+                    More options
                   </button>
-                </div>
-              </div>
-            </div>
-            <div {...stylex.props(styles.tray)}>
-              <Menu
-                label="Project"
-                {...(projectId ? { value: projectId } : {})}
-                options={shown.map((p) => ({ key: p.id, label: p.name }))}
-                onPick={pickProject}
-                trigger={
-                  <Chip name="Project" quiet>
-                    {project ? (
-                      <>
-                        <Mark letter={initial(project.name)} color={markColor(project.id)} size={14} radius={3} />
-                        {project.name}
-                      </>
-                    ) : (
-                      "Choose"
-                    )}
-                  </Chip>
-                }
-              />
-              {other ? (
-                <SegmentedControl
-                  label="Kind"
-                  size="sm"
-                  value={kind}
-                  onChange={(next) => setKind(next === other ? other : "ticket")}
-                >
-                  <SegmentedControlItem value="ticket" label="Ticket" />
-                  <SegmentedControlItem value={other} label={other === "session" ? "Session" : "Quick task"} />
-                </SegmentedControl>
-              ) : null}
-              <Menu
-                label="Who"
-                {...(whoId ? { value: whoId } : {})}
-                options={whoOptions}
-                onPick={setWho}
-                trigger={
-                  <Chip name="Who" quiet>
-                    {whoLabel}
-                  </Chip>
-                }
-              />
-              {kind === "session" ? (
-                <Menu
-                  label="Where"
-                  value={worktree ? "worktree" : "folder"}
-                  options={[
-                    { key: "folder", label: "Project folder", description: "Works in the project's folder itself" },
-                    { key: "worktree", label: "Own worktree", description: "A worktree and branch of its own" },
-                  ]}
-                  onPick={(key) => setWorktree(key === "worktree")}
-                  trigger={
-                    <Chip name="Where" quiet>
-                      {worktree ? "Own worktree" : "Project folder"}
-                    </Chip>
-                  }
-                />
-              ) : null}
-              {kind !== "quick" ? (
-                <Menu
-                  label="Mode"
-                  value={mode}
-                  options={MODES.map((m) => ({
-                    key: m.key as string,
-                    label:
-                      m.key === "default" ? (kind === "session" ? "Employee's default" : "Owner's default") : m.label,
-                  }))}
-                  onPick={setMode}
-                  trigger={
-                    <Chip name="Mode" quiet>
-                      {mode === "default"
-                        ? kind === "session"
-                          ? "Employee's default"
-                          : "Owner's default"
-                        : MODES.find((m) => m.key === mode)?.label}
-                    </Chip>
-                  }
-                />
-              ) : null}
-              {kind === "ticket" && project ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    overlays.open("ticket", {
-                      projectId: project.id,
-                      title: titleOfGoal(text),
-                      description: text.trim(),
-                    })
-                  }
-                  {...stylex.props(styles.textButton, styles.right)}
-                >
-                  More options
-                </button>
-              ) : null}
-            </div>
-          </div>
+                ) : null}
+              </>
+            }
+          />
           <div {...stylex.props(styles.noteLine)}>
             <span {...stylex.props(styles.note)}>
               {footer.type === "no_connection" ? <NoConnectionNote /> : footer.text}
