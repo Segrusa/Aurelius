@@ -115,7 +115,7 @@ async fn an_answer_survives_a_client_disconnect() {
     let daemon = start_with_delay(&root, 30).await;
     let conversation_id = {
         let client = connect(&root).await;
-        let send = SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hallo".into(), images: Vec::new(), interrupt: false };
+        let send = SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hallo".into(), images: Vec::new(), files: vec![], interrupt: false };
         match client.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap().result {
             CommandResult::ChatMessageSent { conversation_id, .. } => conversation_id,
             other => panic!("{other:?}"),

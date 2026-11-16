@@ -12,15 +12,17 @@ import type { ChannelView, EmployeeSummary, MessageView } from "@aurelius/protoc
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
 import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { AttachedImages, useImagePaste } from "../ui/attach";
+import { AttachmentTray, usePromptAttachments } from "../ui/attach";
+import { withFolders } from "../ui/attach-logic";
 import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
+import { PromptBox, PromptTextarea } from "../ui/prompt-box";
 import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
 import { useWorkspace } from "../workspace";
@@ -567,6 +569,11 @@ function ChannelList({
   );
 }
 
+/** The chat box's words: its own type, borderless inside Astryx's composer. */
+function ChatTextarea(props: Omit<ComponentProps<"textarea">, "className" | "style">) {
+  return <textarea {...props} {...stylex.props(styles.textarea)} />;
+}
+
 export function Composer({
   draftKey,
   channel,
@@ -580,6 +587,7 @@ export function Composer({
   quick,
   everyone = false,
   footer,
+  prompt,
   send,
   onSent,
 }: {
@@ -597,8 +605,13 @@ export function Composer({
   everyone?: boolean;
   /** Controls in the composer's bottom row, beside Send (a session's model, effort and mode). */
   footer?: ReactNode;
+  /**
+   * New session's box (`PromptBox`) instead of the chat's: + adds photos, files (where `files`:
+   * the place it sends to takes them) and folders. Without it only pasted photos go along.
+   */
+  prompt?: { files: boolean };
   /** Where the words go; none: the channel. */
-  send?: (message: { text: string; images: string[]; confirmSecret: boolean }) => Promise<unknown>;
+  send?: (message: { text: string; images: string[]; files: string[]; confirmSecret: boolean }) => Promise<unknown>;
   onSent: () => void;
 }) {
   const connection = useConnection();
@@ -625,30 +638,36 @@ export function Composer({
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   });
-  const images = useImagePaste();
+  const attach = usePromptAttachments({
+    files: prompt?.files ?? false,
+    folders: Boolean(prompt),
+    shortcut: Boolean(prompt),
+  });
+  const ready = text.trim() !== "" || attach.items.length > 0;
   const go = async (body: string, confirmSecret = false) => {
     const clean = body.trim();
-    if (clean === "" || busy) return;
+    if ((clean === "" && attach.items.length === 0) || busy) return;
+    const words = withFolders(clean, attach.folders);
     // Empty at once; a refusal puts the words back.
     setText("");
     setHeld(null);
     setBusy(true);
     try {
-      if (send) await send({ text: clean, images: images.paths, confirmSecret });
+      if (send) await send({ text: words, images: attach.images, files: attach.files, confirmSecret });
       else
         await connection.write(
           "group_chat.send",
           {
-            text: clean,
-            images: images.paths,
-            files: [],
+            text: words,
+            images: attach.images,
+            files: attach.files,
             channel,
             thread_parent: threadParent,
             confirm_secret: confirmSecret,
           },
           { retry: false },
         );
-      images.clear();
+      attach.clear();
       void client.invalidateQueries({ queryKey: ["messages"] });
       onSent();
     } catch (e) {
@@ -662,7 +681,7 @@ export function Composer({
     }
   };
   const sendNow = async () => {
-    if (!activeRun || text.trim() === "") return;
+    if (!activeRun || !ready) return;
     try {
       await connection.write("run.stop", { run_id: activeRun }, { retry: false });
     } catch {
@@ -700,6 +719,81 @@ export function Composer({
     area.current?.focus();
   };
   const offerQuick = quick && !dismissed && text.trim() === "" ? quick : null;
+  const sendNowButton =
+    activeRun && ready ? (
+      <Button label="Send now" onClick={() => void sendNow()}>
+        Send now <KeyHint>⌥↵</KeyHint>
+      </Button>
+    ) : null;
+  const Area = prompt ? PromptTextarea : ChatTextarea;
+  const input = (
+    <div {...stylex.props(styles.composerInput)}>
+      {suggestions ? (
+        <div role="listbox" aria-label="People" {...stylex.props(styles.people)}>
+          {suggestions.found.map((p, i) => (
+            <button
+              key={p.name}
+              type="button"
+              role="option"
+              aria-selected={i === active}
+              aria-label={`${p.name}, ${p.kind}, ${i + 1} of ${suggestions.found.length}`}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => pick(p.name)}
+              {...stylex.props(styles.person, i === active && styles.personOn)}
+            >
+              <Mark
+                letter={initial(p.name)}
+                color={p.employee ? markColor(p.name) : "#55595F"}
+                size={18}
+                radius={p.employee ? 5 : 9}
+              />
+              {p.name}
+              <span {...stylex.props(styles.personKind)}>{p.kind}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <Area
+        ref={area}
+        rows={1}
+        aria-label={placeholder}
+        placeholder={placeholder}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (suggestions) {
+            const of = suggestions.found.length;
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              e.stopPropagation();
+              setPicked((active + (e.key === "ArrowDown" ? 1 : of - 1)) % of);
+              return;
+            }
+            if (e.key === "Enter" || e.key === "Tab") {
+              e.preventDefault();
+              e.stopPropagation();
+              pick(suggestions.found[active]?.name as string);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              setClosedOn(text);
+              return;
+            }
+          }
+          if (e.key === "Escape") {
+            e.currentTarget.blur();
+            return;
+          }
+          if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            void go(text);
+          }
+        }}
+      />
+    </div>
+  );
   useAction("FocusComposer", () => area.current?.focus());
   useAction("SendNow", () => void sendNow(), Boolean(activeRun));
   useAction("ConfirmPrimary", () => offerQuick && void go(offerQuick.options[0] as string), Boolean(offerQuick));
@@ -734,99 +828,30 @@ export function Composer({
       {error ? <Banner status="error" role="alert" title={error} /> : null}
       {/* The text stays this component's own: Enter and Send call `go`, which empties the field at once and puts
           refused words back. The composer's own submit, which would clear it, is never reached. */}
-      <ChatComposer
-        {...images.target}
-        density="compact"
-        elevation="none"
-        xstyle={styles.composerBody}
-        onSubmit={(value) => void go(value)}
-        drawer={<AttachedImages images={images} />}
-        {...(footer ? { footerActions: footer } : {})}
-        sendActions={
-          activeRun && text.trim() !== "" ? (
-            <Button label="Send now" onClick={() => void sendNow()}>
-              Send now <KeyHint>⌥↵</KeyHint>
-            </Button>
-          ) : null
-        }
-        sendButton={
-          <Button
-            variant="primary"
-            label="Send"
-            isDisabled={busy || text.trim() === ""}
-            onClick={() => void go(text)}
-          />
-        }
-        input={
-          <div {...stylex.props(styles.composerInput)}>
-            {suggestions ? (
-              <div role="listbox" aria-label="People" {...stylex.props(styles.people)}>
-                {suggestions.found.map((p, i) => (
-                  <button
-                    key={p.name}
-                    type="button"
-                    role="option"
-                    aria-selected={i === active}
-                    aria-label={`${p.name}, ${p.kind}, ${i + 1} of ${suggestions.found.length}`}
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => pick(p.name)}
-                    {...stylex.props(styles.person, i === active && styles.personOn)}
-                  >
-                    <Mark
-                      letter={initial(p.name)}
-                      color={p.employee ? markColor(p.name) : "#55595F"}
-                      size={18}
-                      radius={p.employee ? 5 : 9}
-                    />
-                    {p.name}
-                    <span {...stylex.props(styles.personKind)}>{p.kind}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            <textarea
-              ref={area}
-              rows={1}
-              aria-label={placeholder}
-              placeholder={placeholder}
-              {...stylex.props(styles.textarea)}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (suggestions) {
-                  const of = suggestions.found.length;
-                  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setPicked((active + (e.key === "ArrowDown" ? 1 : of - 1)) % of);
-                    return;
-                  }
-                  if (e.key === "Enter" || e.key === "Tab") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    pick(suggestions.found[active]?.name as string);
-                    return;
-                  }
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setClosedOn(text);
-                    return;
-                  }
-                }
-                if (e.key === "Escape") {
-                  e.currentTarget.blur();
-                  return;
-                }
-                if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
-                  e.preventDefault();
-                  void go(text);
-                }
-              }}
-            />
-          </div>
-        }
-      />
+      {prompt ? (
+        <PromptBox
+          attach={attach}
+          input={input}
+          chips={footer}
+          sendActions={sendNowButton}
+          send={{ label: "Send", title: "Send (Enter)", disabled: busy || !ready, onClick: () => void go(text) }}
+        />
+      ) : (
+        <ChatComposer
+          {...attach.target}
+          density="compact"
+          elevation="none"
+          xstyle={styles.composerBody}
+          onSubmit={(value) => void go(value)}
+          drawer={<AttachmentTray attach={attach} />}
+          {...(footer ? { footerActions: footer } : {})}
+          sendActions={sendNowButton}
+          sendButton={
+            <Button variant="primary" label="Send" isDisabled={busy || !ready} onClick={() => void go(text)} />
+          }
+          input={input}
+        />
+      )}
       {warning ? (
         <div {...stylex.props(styles.warning)}>{warning}</div>
       ) : audience ? (

@@ -166,7 +166,7 @@ async fn claude_code(client: &Client, root: &Path) {
 }
 
 async fn send(client: &Client, conversation_id: Option<ConversationId>, text: &str, images: Vec<String>) -> (ConversationId, MessageId, RunId) {
-    let send = SendChatMessage { confirm_secret: false, conversation_id: match conversation_id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images, interrupt: false };
+    let send = SendChatMessage { confirm_secret: false, conversation_id: match conversation_id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images, files: vec![], interrupt: false };
     match client.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, message_id, run_id, .. } => (conversation_id, message_id, run_id),
         other => panic!("{other:?}"),

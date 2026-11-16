@@ -167,7 +167,7 @@ fn an_employee_can_work_in_another_thread_while_a_run_waits_for_an_approval() {
 fn a_conversation_without_an_employee_is_not_in_the_mailbox() {
     let s = setup();
     let conversation_id = crate::tests::conversation(&s.service);
-    let CommandResult::ChatMessageSent { run_id, .. } = exec(&s, Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: "hi".into(), images: vec![], interrupt: false })) else { panic!() };
+    let CommandResult::ChatMessageSent { run_id, .. } = exec(&s, Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: "hi".into(), images: vec![], files: vec![], interrupt: false })) else { panic!() };
     assert_eq!((items(&s, "queued"), run_rows(&s)), (0, 1));
     let job = claim(&s).expect("from jobs, as before");
     assert_eq!(job.id, run_id.to_string());

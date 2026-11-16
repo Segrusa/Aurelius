@@ -12,6 +12,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
 import { useApprovals, useEmployees, useMessages } from "../data";
 import { useKeyContext } from "../keys/provider";
+import { CHAT_FILES_FEATURE } from "../ui/attach-logic";
 import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
@@ -325,6 +326,8 @@ export function EmployeeChat({
             archived={NOBODY}
             quick={quick}
             footer={frame?.footer && feed.data ? frame.footer(feed.data) : null}
+            // A session has New session's box; its files go along where the server takes them.
+            {...(frame ? { prompt: { files: features.includes(CHAT_FILES_FEATURE) } } : {})}
             send={(message) =>
               connection.write(
                 "chat.send",
@@ -332,6 +335,7 @@ export function EmployeeChat({
                   conversation_id: conversationId,
                   text: message.text,
                   images: message.images,
+                  ...(message.files.length > 0 ? { files: message.files } : {}),
                   confirm_secret: message.confirmSecret,
                 },
                 { retry: false },

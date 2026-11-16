@@ -260,7 +260,7 @@ async fn closed_with(socket: &mut Socket) -> Option<u16> {
 }
 
 fn chat(conversation_id: ConversationId, text: &str, images: Vec<String>) -> Command {
-    Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images, interrupt: false })
+    Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images, files: vec![], interrupt: false })
 }
 
 #[tokio::test(flavor = "multi_thread")]

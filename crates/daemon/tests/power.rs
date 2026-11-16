@@ -97,7 +97,7 @@ async fn when_idle_waits_for_a_running_run_and_then_counts_down() {
     // Slow answer: the fake runtime streams with this delay per step.
     let daemon = start_power(dir.path(), 400).await;
     let client = connect(dir.path()).await;
-    let send = Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hello".into(), images: Vec::new(), interrupt: false });
+    let send = Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "hello".into(), images: Vec::new(), files: vec![], interrupt: false });
     client.execute(envelope(send, None)).await.unwrap();
 
     let state = client.power_shutdown(ShutdownWhen::WhenIdle).await.unwrap();

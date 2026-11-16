@@ -18,6 +18,10 @@ pub struct StartWorkSession {
     /// Images that belong to the first message (see `SendChatMessage::images`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<String>,
+    /// Files that belong to the first message (feature `chat_files`, see
+    /// `SendChatMessage::files`). Not with `worktree`: that folder does not exist yet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
     /// Work in a worktree of its own instead of the project's folder. Needs a
     /// project folder that is a git repository with a main branch.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

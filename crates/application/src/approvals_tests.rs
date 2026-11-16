@@ -18,7 +18,7 @@ fn setup() -> (tempfile::TempDir, CommandService, RunId) {
     let env = CommandEnvelope {
         command_id: CommandId::new(),
         expected_version: None,
-        command: Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: crate::tests::conversation(&service), text: "hoi".into(), images: Vec::new(), interrupt: false }),
+        command: Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: crate::tests::conversation(&service), text: "hoi".into(), images: Vec::new(), files: vec![], interrupt: false }),
     };
     let CommandResult::ChatMessageSent { run_id, .. } = service.execute(&ctx(), env).unwrap().receipt.result else { panic!() };
     // Running, so its job is claimed by the dispatcher.

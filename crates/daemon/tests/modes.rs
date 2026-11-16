@@ -18,7 +18,7 @@ use common::*;
 use std::time::Duration;
 
 async fn chat(client: &Client, id: Option<ConversationId>, text: &str) -> (ConversationId, RunId) {
-    match client.execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: match id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images: Vec::new(), interrupt: false }), None)).await.unwrap().result {
+    match client.execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: match id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images: Vec::new(), files: vec![], interrupt: false }), None)).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, run_id, .. } => (conversation_id, run_id),
         other => panic!("{other:?}"),
     }

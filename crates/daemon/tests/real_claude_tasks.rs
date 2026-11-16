@@ -116,7 +116,7 @@ async fn a_background_subagent_answers_before_the_answer_ends() {
     let client = connect(dir.path()).await;
     claude(&client).await;
     let send = |conversation_id, text: &str| {
-        Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images: Vec::new(), interrupt: false })
+        Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images: Vec::new(), files: vec![], interrupt: false })
     };
     let CommandResult::ChatMessageSent { conversation_id, .. } = client.execute(envelope(send(common::conversation(&client).await, "Hallo"), None)).await.unwrap().result else { panic!() };
     wait_answers(&client, conversation_id, 1).await;

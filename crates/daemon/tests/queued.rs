@@ -77,7 +77,7 @@ async fn running(root: &Path, run: RunId) {
 }
 
 async fn chat(client: &Client, conversation_id: Option<ConversationId>, text: &str) -> (ConversationId, MessageId, RunId) {
-    let send = SendChatMessage { confirm_secret: false, conversation_id: match conversation_id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images: Vec::new(), interrupt: false };
+    let send = SendChatMessage { confirm_secret: false, conversation_id: match conversation_id { Some(id) => id, None => common::conversation(client).await }, text: text.into(), images: Vec::new(), files: vec![], interrupt: false };
     match client.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap().result {
         CommandResult::ChatMessageSent { conversation_id, message_id, run_id } => (conversation_id, message_id, run_id),
         other => panic!("{other:?}"),

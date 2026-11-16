@@ -114,6 +114,10 @@ pub struct SendChatMessage {
     /// device's own uploads), kept with the message.
     #[serde(default)]
     pub images: Vec<String>,
+    /// Files of any type that belong to this message (feature `chat_files`): files on
+    /// the server, copied into the conversation's work folder as with an employee message.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
     /// "Send now": stop the conversation's running (and queued) answers in
     /// the same step, so this message is answered right away.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -188,7 +192,7 @@ pub struct SendQueuedNow {
 
 impl SendChatMessage {
     pub fn validate(&self) -> Result<String, DomainError> {
-        validate_message(&self.text, &self.images)
+        validate_employee_message(&self.text, &self.images, &self.files)
     }
 }
 
@@ -311,7 +315,7 @@ mod tests {
 
     #[test]
     fn empty_message_is_rejected() {
-        let cmd = SendChatMessage { confirm_secret: false, conversation_id: ConversationId::new(), text: "  ".into(), images: Vec::new(), interrupt: false };
+        let cmd = SendChatMessage { confirm_secret: false, conversation_id: ConversationId::new(), text: "  ".into(), images: Vec::new(), files: vec![], interrupt: false };
         assert!(cmd.validate().is_err());
     }
 
@@ -328,7 +332,7 @@ mod tests {
     fn a_message_needs_its_conversation() {
         let id = ConversationId::new();
         let sent: SendChatMessage = serde_json::from_value(serde_json::json!({ "conversation_id": id, "text": "hoi" })).unwrap();
-        assert_eq!(sent, SendChatMessage { confirm_secret: false, conversation_id: id, text: "hoi".into(), images: Vec::new(), interrupt: false });
+        assert_eq!(sent, SendChatMessage { confirm_secret: false, conversation_id: id, text: "hoi".into(), images: Vec::new(), files: vec![], interrupt: false });
         assert!(serde_json::from_value::<SendChatMessage>(serde_json::json!({ "text": "hoi" })).is_err(), "no standalone chats");
     }
 

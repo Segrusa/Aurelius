@@ -40,7 +40,39 @@ impl CommandService {
         cmd: &conversation::SendChatMessage,
     ) -> Result<Committed, AppError> {
         let text = cmd.validate().map_err(domain_error)?;
+        let sources = crate::conversation::message_uploads::check(&cmd.files)?;
         let images = crate::conversation::message_images::prepare(&self.store, &cmd.images)?;
+        // Files go into the conversation's work folder before the commit; a
+        // failed or replayed command removes them again (as an employee message does).
+        let uploaded = if sources.is_empty() {
+            None
+        } else {
+            let folders = self.store.read(|c| conv::work_folders(c, cmd.conversation_id)).map_err(storage_error)?;
+            let folder = crate::conversation::message_uploads::work_folder(&folders)?;
+            let uploads = crate::conversation::message_uploads::copy(&folder, &sources)?;
+            Some((folder, uploads))
+        };
+        let uploads = uploaded.as_ref().map(|(_, u)| u.clone()).unwrap_or_default();
+        let committed = self.commit_chat_message(ctx, envelope, hash, cmd, text, images, uploads);
+        if let Some((folder, uploads)) = &uploaded
+            && committed.as_ref().map_or(true, |c| c.receipt.replayed)
+        {
+            crate::conversation::message_uploads::remove(folder, uploads);
+        }
+        committed
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn commit_chat_message(
+        &self,
+        ctx: &CommandContext,
+        envelope: &CommandEnvelope,
+        hash: String,
+        cmd: &conversation::SendChatMessage,
+        text: String,
+        images: Vec<crate::conversation::message_images::PreparedImage>,
+        uploads: Vec<aurelius_domain::views::MessageFileView>,
+    ) -> Result<Committed, AppError> {
         let blobs = self.store.blobs();
         let text_blob = blobs.put(text.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?;
         let conversation_id = cmd.conversation_id;
@@ -83,6 +115,7 @@ impl CommandService {
                 reply_to: None,
             }, author)?;
             crate::conversation::message_images::keep(tx, message_id, &images)?;
+            conv::set_message_uploads(tx, message_id, &uploads)?;
             if interrupt {
                 notices.extend(interrupt_conversation(tx, &store, &meta, &correlation, conversation_id)?);
             }

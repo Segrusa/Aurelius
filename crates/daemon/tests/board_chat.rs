@@ -50,7 +50,7 @@ async fn a_board_member_talks_with_an_employee_and_hears_of_a_ticket_in_review_o
     assert_ne!(chat, main);
     assert!(alex.employee_chats().await.unwrap().chats.is_empty(), "nothing said yet");
 
-    alex.execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: chat, text: "Hallo".into(), images: vec![], interrupt: false }), None)).await.unwrap();
+    alex.execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: chat, text: "Hallo".into(), images: vec![], files: vec![], interrupt: false }), None)).await.unwrap();
     let all = answers(&alex, chat, 1).await;
     assert_eq!(all.iter().find(|m| m.role == MessageRole::User).and_then(|m| m.author_user.as_ref()).map(|u| u.username.as_str()), Some(BOARD_MEMBER));
 

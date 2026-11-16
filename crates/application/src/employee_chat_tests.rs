@@ -62,7 +62,7 @@ fn open(s: &Setup, user: UserId) -> ConversationId {
 }
 
 fn say(s: &Setup, user: UserId, chat: ConversationId, text: &str) -> Result<CommandResult, AppError> {
-    exec(s, user, Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: chat, text: text.into(), images: vec![], interrupt: false }))
+    exec(s, user, Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: chat, text: text.into(), images: vec![], files: vec![], interrupt: false }))
 }
 
 fn messages(s: &Setup, chat: ConversationId) -> Vec<MessageView> {

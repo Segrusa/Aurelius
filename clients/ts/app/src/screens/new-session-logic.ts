@@ -229,14 +229,22 @@ export function startProblem(state: {
   kind: SessionKind;
   who: string | null;
   offline: boolean;
-  /** Files added to the composer: a session takes them only once it has started. */
+  /** Files (not photos) added to the composer. */
   files?: number;
+  /** The server takes files with a session's first message (`chat_files`). */
+  sessionFiles?: boolean;
+  /** A session in a worktree of its own: that folder is made only before the first run. */
+  worktree?: boolean;
 }): string | null {
   if (state.offline) return "Not connected to the server.";
   if (!state.projectId) return "Choose a project.";
   if (state.text.trim() === "") return "Describe what needs doing.";
   if (state.kind !== "ticket" && (!state.who || state.who === DISPATCHER)) return "Choose who does it.";
-  if (state.kind === "session" && (state.files ?? 0) > 0) return "Add files in the session once it has started.";
+  if (state.kind === "session" && (state.files ?? 0) > 0) {
+    if (!state.sessionFiles) return "Add files in the session once it has started.";
+    if (state.worktree)
+      return "Add files once the session works in its own worktree, or start it in the project folder.";
+  }
   return null;
 }
 
@@ -298,7 +306,17 @@ export function createDrafts() {
 
 /** The request of a session start: the employee, the project and the first message. */
 export function sessionStartParams(
-  start: { projectId: string; employeeId: string; text: string; model: string; effort: string; mode: string },
+  start: {
+    projectId: string;
+    employeeId: string;
+    text: string;
+    model: string;
+    effort: string;
+    mode: string;
+    images?: string[];
+    /** Only on a server with `chat_files`, and not with a worktree of its own. */
+    files?: string[];
+  },
   worktree: boolean,
   confirmSecret: boolean,
 ): MethodParams["work_session.start"] {
@@ -308,6 +326,8 @@ export function sessionStartParams(
     project_id: start.projectId,
     employee_id: start.employeeId,
     text: start.text.trim(),
+    ...(start.images && start.images.length > 0 ? { images: start.images } : {}),
+    ...(start.files && start.files.length > 0 ? { files: start.files } : {}),
     worktree,
     run: {
       ...(mode ? { mode: mode as AgentMode } : {}),

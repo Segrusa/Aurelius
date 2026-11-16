@@ -258,7 +258,7 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
 
     // A work run in a project.
     let conversation = conversation(&client).await;
-    let sent = client.execute(aurelius_client::envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: conversation, text: "Deploy, and show me the token".into(), images: vec![], interrupt: false }), None)).await.unwrap().result;
+    let sent = client.execute(aurelius_client::envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: conversation, text: "Deploy, and show me the token".into(), images: vec![], files: vec![], interrupt: false }), None)).await.unwrap().result;
     let CommandResult::ChatMessageSent { conversation_id, message_id, run_id, .. } = sent else { panic!("{sent:?}") };
     for _ in 0..400 {
         let messages = client.messages(conversation_id).await.unwrap().messages;

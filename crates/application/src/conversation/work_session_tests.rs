@@ -63,7 +63,7 @@ fn setup() -> Setup {
 }
 
 fn start(project: ProjectId, employee: EmployeeId, worktree: bool) -> Command {
-    Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], worktree, run: RunSettings::default(), confirm_secret: false })
+    Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], files: vec![], worktree, run: RunSettings::default(), confirm_secret: false })
 }
 
 fn started(result: CommandResult) -> (ConversationId, aurelius_domain::RunId) {
@@ -169,9 +169,74 @@ fn a_sessions_run_is_told_it_is_a_session_and_where_it_works() {
 fn the_board_member_who_started_a_session_goes_on_in_it_with_chat_send() {
     let s = setup();
     let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
-    let send = || Command::SendChatMessage(aurelius_domain::conversation::SendChatMessage { conversation_id: conversation, text: "En de API?".into(), images: vec![], interrupt: false, confirm_secret: false });
+    let send = || Command::SendChatMessage(aurelius_domain::conversation::SendChatMessage { conversation_id: conversation, text: "En de API?".into(), images: vec![], files: vec![], interrupt: false, confirm_secret: false });
     let sent = exec_as(&s, Some(s.user), send()).unwrap();
     assert!(matches!(sent, CommandResult::ChatMessageSent { conversation_id, .. } if conversation_id == conversation), "{sent:?}");
     let refused = exec_as(&s, Some(s.other), send()).unwrap_err();
     assert_eq!(refused.code, aurelius_domain::ErrorCode::NotFound, "another board member's session");
+}
+
+/// A file outside every work folder, as a pasted or chosen file the client kept.
+fn outside_file(s: &Setup, name: &str) -> String {
+    let path = s._dir.path().join("kept").join(name);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "notes").unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+/// The uploads kept with a conversation's only (or last) user message.
+fn uploads_of(s: &Setup, conversation: ConversationId) -> Vec<String> {
+    let read = |key: &str| s.service.store().blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+    let messages = s.service.store().read(|c| aurelius_storage::conversations::list_messages(c, conversation, &read)).unwrap();
+    let last = messages.iter().rev().find(|m| m.role == aurelius_domain::conversation::MessageRole::User).expect("a user message");
+    last.uploads.iter().map(|u| u.path.clone()).collect()
+}
+
+#[test]
+fn a_sessions_first_message_copies_its_files_into_the_project_folder() {
+    let s = setup();
+    let mut command = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut command {
+        start.files = vec![outside_file(&s, "brief.md")];
+    }
+    let (conversation, _) = started(exec_as(&s, Some(s.user), command).unwrap());
+    let uploads = uploads_of(&s, conversation);
+    assert_eq!(uploads.len(), 1);
+    assert!(uploads[0].starts_with(".aurelius/uploads/") && uploads[0].ends_with(".md"), "{uploads:?}");
+    assert_eq!(std::fs::read_to_string(s.repo_folder.join(&uploads[0])).unwrap(), "notes");
+}
+
+#[test]
+fn files_with_the_first_message_of_a_session_in_a_worktree_are_refused_and_nothing_is_made() {
+    let s = setup();
+    let mut command = start(s.repo, s.orion, true);
+    if let Command::StartWorkSession(start) = &mut command {
+        start.files = vec![outside_file(&s, "brief.md")];
+    }
+    let refused = exec_as(&s, Some(s.user), command).unwrap_err();
+    assert!(refused.message.contains("later message"), "{}", refused.message);
+    let sessions: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'session'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(sessions, 0);
+    assert!(!s.repo_folder.join(".aurelius").exists(), "no file copied");
+}
+
+#[test]
+fn chat_send_in_a_session_copies_its_files_into_the_work_folder_and_may_have_no_text() {
+    let s = setup();
+    let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
+    let send = Command::SendChatMessage(aurelius_domain::conversation::SendChatMessage { conversation_id: conversation, text: String::new(), images: vec![], files: vec![outside_file(&s, "data.csv")], interrupt: false, confirm_secret: false });
+    exec_as(&s, Some(s.user), send).unwrap();
+    let uploads = uploads_of(&s, conversation);
+    assert_eq!(uploads.len(), 1);
+    assert!(s.repo_folder.join(&uploads[0]).is_file());
+}
+
+#[test]
+fn chat_send_refuses_a_folder_as_a_file() {
+    let s = setup();
+    let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
+    let folder = s._dir.path().join("plain").to_string_lossy().into_owned();
+    let send = Command::SendChatMessage(aurelius_domain::conversation::SendChatMessage { conversation_id: conversation, text: "Kijk".into(), images: vec![], files: vec![folder], interrupt: false, confirm_secret: false });
+    let refused = exec_as(&s, Some(s.user), send).unwrap_err();
+    assert!(refused.message.contains("not a folder"), "{}", refused.message);
 }

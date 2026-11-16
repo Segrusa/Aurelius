@@ -189,7 +189,7 @@ async fn every_text_command_is_refused_by_name_and_stored_redacted_when_confirme
 
     let conversation_id = conversation(&client).await;
     b10(root, &client, chat, "send_chat_message", |confirm_secret| {
-        Command::SendChatMessage(SendChatMessage { conversation_id, text: format!("use {}", chat.value), images: vec![], interrupt: false, confirm_secret })
+        Command::SendChatMessage(SendChatMessage { conversation_id, text: format!("use {}", chat.value), images: vec![], files: vec![], interrupt: false, confirm_secret })
     })
     .await;
 
@@ -332,7 +332,7 @@ async fn inbox_answers_are_refused_by_name_and_stored_redacted_when_confirmed() 
     let decide = secret(&client, 3, 0).await;
     let answer = secret(&client, 3, 1).await;
     let conversation_id = conversation(&client).await;
-    let sent = client.execute(aurelius_client::envelope(Command::SendChatMessage(SendChatMessage { conversation_id, text: "keep going".into(), images: vec![], interrupt: false, confirm_secret: false }), None)).await.unwrap();
+    let sent = client.execute(aurelius_client::envelope(Command::SendChatMessage(SendChatMessage { conversation_id, text: "keep going".into(), images: vec![], files: vec![], interrupt: false, confirm_secret: false }), None)).await.unwrap();
     let CommandResult::ChatMessageSent { .. } = sent.result else { panic!("{:?}", sent.result) };
     let run = live_run(root, conversation_id).await;
     let pending = |tool: &'static str| {

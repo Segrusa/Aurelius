@@ -17,7 +17,7 @@ use std::time::Duration;
 /// A chat answer that stays alive for a few seconds (slow fake runtime).
 async fn running_chat(client: &Client, root: &std::path::Path, text: &str) -> (ConversationId, RunId) {
     let env = envelope(
-        Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: text.into(), images: Vec::new(), interrupt: false }),
+        Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: text.into(), images: Vec::new(), files: vec![], interrupt: false }),
         None,
     );
     let CommandResult::ChatMessageSent { conversation_id, run_id, .. } = client.execute(env).await.unwrap().result else { panic!("not a chat message") };

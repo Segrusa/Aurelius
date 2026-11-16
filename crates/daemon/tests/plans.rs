@@ -19,7 +19,7 @@ use std::time::Duration;
 /// A chat run that stays alive (the fake streams slowly; `start_with_delay`).
 async fn live_run(root: &Path, client: &Client) -> (ConversationId, RunId) {
     let sent = client
-        .execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "houd me wakker".into(), images: Vec::new(), interrupt: false }), None))
+        .execute(envelope(Command::SendChatMessage(SendChatMessage { confirm_secret: false, conversation_id: common::conversation(&client).await, text: "houd me wakker".into(), images: Vec::new(), files: vec![], interrupt: false }), None))
         .await
         .unwrap()
         .result;

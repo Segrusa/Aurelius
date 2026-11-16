@@ -24,6 +24,10 @@ use std::path::{Path, PathBuf};
 /// Refused: a worktree needs a project folder that is a git repository.
 pub const WORKTREE_NEEDS_GIT: &str = "A worktree of its own needs a project folder that is a git repository; start the session without one, or set the project's folder.";
 
+/// Refused: files with the first message of a session in a worktree of its own (that
+/// folder is made only before the first run).
+pub const FILES_NEED_FOLDER: &str = "Files can go with a later message of a session in its own worktree; start it without files, or in the project folder.";
+
 /// The folder of a session's worktree: in the data folder, as a quick task's, so the
 /// project's own folder stays clean and a backup skips it.
 pub fn worktree_path(data_root: &Path, conversation: ConversationId) -> PathBuf {
@@ -36,9 +40,24 @@ impl CommandService {
         let Some(user) = ctx.user_id else {
             return Err(domain_error(DomainError::BoardMemberRequired));
         };
-        let text = aurelius_domain::conversation::validate_employee_message(&cmd.text, &cmd.images, &[]).map_err(domain_error)?;
+        let text = aurelius_domain::conversation::validate_employee_message(&cmd.text, &cmd.images, &cmd.files).map_err(domain_error)?;
         let run = cmd.run.validated().map_err(domain_error)?;
+        if cmd.worktree && !cmd.files.is_empty() {
+            return Err(domain_error(DomainError::OutOfRange { field: "files".into(), detail: FILES_NEED_FOLDER.into() }));
+        }
+        let sources = crate::conversation::message_uploads::check(&cmd.files)?;
         let images = crate::conversation::message_images::prepare(&self.store, &cmd.images)?;
+        // Files go into the project's folder before the commit; a failed or replayed
+        // command removes them again (as a chat message does).
+        let uploaded = if sources.is_empty() {
+            None
+        } else {
+            let folders = self.store.read(|c| aurelius_storage::tasks::work_folders(c, cmd.project_id, Some(cmd.employee_id))).map_err(storage_error)?;
+            let folder = crate::conversation::message_uploads::work_folder(&folders)?;
+            let uploads = crate::conversation::message_uploads::copy(&folder, &sources)?;
+            Some((folder, uploads))
+        };
+        let uploads = uploaded.as_ref().map(|(_, u)| u.clone()).unwrap_or_default();
         let text_blob = self.store.blobs().put(text.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?;
         let (project_id, employee_id, worktree) = (cmd.project_id, cmd.employee_id, cmd.worktree);
         let conversation_id = ConversationId::new();
@@ -47,7 +66,7 @@ impl CommandService {
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
         let actor = ctx.principal_id.to_string();
-        self.commit(command_id, hash, move |tx| {
+        let committed = self.commit(command_id, hash, move |tx| {
             match employees::project_scope(tx, project_id)? {
                 None => return Ok(Err(domain_error(DomainError::ProjectNotFound(project_id)))),
                 Some((_, LifecycleStatus::Archived)) => return Ok(Err(domain_error(DomainError::ProjectArchived))),
@@ -133,10 +152,17 @@ impl CommandService {
                 Some(user),
             )?;
             crate::conversation::message_images::keep(tx, message_id, &images)?;
+            conv::set_message_uploads(tx, message_id, &uploads)?;
             let (run_id, run_notice) = queue_run(tx, &meta, &command_id.to_string(), conversation_id, message_id)?;
             notices.extend(run_notice);
             Ok(Ok((CommandResult::WorkSessionStarted { project_id, conversation_id, message_id, run_id }, notices)))
-        })
+        });
+        if let Some((folder, uploads)) = &uploaded
+            && committed.as_ref().map_or(true, |c| c.receipt.replayed)
+        {
+            crate::conversation::message_uploads::remove(folder, uploads);
+        }
+        committed
     }
 }
 

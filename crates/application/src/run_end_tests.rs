@@ -15,7 +15,7 @@ fn send(service: &CommandService, conversation_id: aurelius_domain::Conversation
     let send = CommandEnvelope {
         command_id: CommandId::new(),
         expected_version: None,
-        command: Command::SendChatMessage(aurelius_domain::conversation::SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images: Vec::new(), interrupt: false }),
+        command: Command::SendChatMessage(aurelius_domain::conversation::SendChatMessage { confirm_secret: false, conversation_id, text: text.into(), images: Vec::new(), files: vec![], interrupt: false }),
     };
     let CommandResult::ChatMessageSent { run_id, .. } = service.execute(&ctx(), send).unwrap().receipt.result else { panic!() };
     run_id
