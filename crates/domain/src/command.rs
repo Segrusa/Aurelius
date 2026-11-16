@@ -192,6 +192,13 @@ pub enum CommandResult {
         project_id: ProjectId,
         conversation_id: ConversationId,
     },
+    /// A work session was made and its first message is being answered.
+    WorkSessionStarted {
+        project_id: ProjectId,
+        conversation_id: ConversationId,
+        message_id: MessageId,
+        run_id: RunId,
+    },
     /// A message in a project conversation was accepted and is being answered.
     ProjectMessageSent {
         project_id: ProjectId,

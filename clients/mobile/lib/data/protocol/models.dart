@@ -1637,6 +1637,8 @@ sealed class Command {
           employeeId: (json['employee_id'] == null ? null : (json['employee_id'] as String)),
           ticketId: (json['ticket_id'] as String),
         );
+      case 'start_work_session':
+        return CommandStartWorkSession(value: StartWorkSession.fromJson(json as Map<String, dynamic>));
       case 'stop_run':
         return CommandStopRun(value: StopRun.fromJson(json as Map<String, dynamic>));
       case 'unlink_guideline':
@@ -2991,6 +2993,20 @@ final class CommandStartTicket extends Command {
     };
 }
 
+final class CommandStartWorkSession extends Command {
+  const CommandStartWorkSession({
+    required this.value,
+  });
+
+  final StartWorkSession value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'start_work_session',
+      ...value.toJson(),
+    };
+}
+
 final class CommandStopRun extends Command {
   const CommandStopRun({
     required this.value,
@@ -3554,6 +3570,13 @@ sealed class CommandResult {
       case 'verification_started':
         return CommandResultVerificationStarted(
           connectionId: (json['connection_id'] as String),
+        );
+      case 'work_session_started':
+        return CommandResultWorkSessionStarted(
+          conversationId: (json['conversation_id'] as String),
+          messageId: (json['message_id'] as String),
+          projectId: (json['project_id'] as String),
+          runId: (json['run_id'] as String),
         );
       default:
         throw FormatException('Unknown CommandResult type: $tag');
@@ -4689,6 +4712,30 @@ final class CommandResultVerificationStarted extends CommandResult {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'verification_started',
       'connection_id': connectionId,
+    };
+}
+
+/// A work session was made and its first message is being answered.
+final class CommandResultWorkSessionStarted extends CommandResult {
+  const CommandResultWorkSessionStarted({
+    required this.conversationId,
+    required this.messageId,
+    required this.projectId,
+    required this.runId,
+  });
+
+  final String conversationId;
+  final String messageId;
+  final String projectId;
+  final String runId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'work_session_started',
+      'conversation_id': conversationId,
+      'message_id': messageId,
+      'project_id': projectId,
+      'run_id': runId,
     };
 }
 
@@ -10791,6 +10838,13 @@ sealed class Method {
           purpose: RevealPurpose.fromJson(src['purpose'] as String),
         );
         }
+      case 'work_session.list':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodWorkSessionList(
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+        );
+        }
       default:
         throw FormatException('Unknown Method method: $tag');
     }
@@ -12335,6 +12389,24 @@ final class MethodVaultReveal extends Method {
     };
 }
 
+/// The reader's work sessions, the latest activity first (feature `work_sessions`);
+/// `project_id`: only those of that project.
+final class MethodWorkSessionList extends Method {
+  const MethodWorkSessionList({
+    this.projectId,
+  });
+
+  final String? projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'work_session.list',
+      'params': <String, dynamic>{
+      if (projectId != null) 'project_id': projectId,
+    },
+    };
+}
+
 /// `ticket.my_tickets` (feature `my_tickets`): the tickets of the board member
 /// of the session, at most `MY_TICKETS_MAX`. The client makes its tabs and
 /// counters from this one answer.
@@ -13757,6 +13829,8 @@ sealed class ResponseBody {
         return ResponseBodyVaultValue(value: VaultValue.fromJson(json['value'] as Map<String, dynamic>));
       case 'who_am_i':
         return ResponseBodyWhoAmI(value: WhoAmI.fromJson(json['value'] as Map<String, dynamic>));
+      case 'work_sessions':
+        return ResponseBodyWorkSessions(value: WorkSessionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       default:
         throw FormatException('Unknown ResponseBody type: $tag');
     }
@@ -15059,6 +15133,21 @@ final class ResponseBodyWhoAmI extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'who_am_i',
+      'value': value.toJson(),
+    };
+}
+
+/// `work_session.list`.
+final class ResponseBodyWorkSessions extends ResponseBody {
+  const ResponseBodyWorkSessions({
+    required this.value,
+  });
+
+  final WorkSessionsSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'work_sessions',
       'value': value.toJson(),
     };
 }
@@ -16743,6 +16832,53 @@ final class StartProjectConversation {
     if (browserAllowed != null) 'browser_allowed': browserAllowed,
     'project_id': projectId,
     if (screenAllowed != null) 'screen_allowed': screenAllowed,
+  };
+}
+
+/// Start a work session with its first message.
+final class StartWorkSession {
+  const StartWorkSession({
+    this.confirmSecret,
+    required this.employeeId,
+    this.images = const [],
+    required this.projectId,
+    this.run,
+    required this.text,
+    this.worktree,
+  });
+
+  /// A board member confirmed that the text may hold a vault secret's value
+  /// (after `looks_like_secret`, B10): it is stored with the value redacted.
+  final bool? confirmSecret;
+  final String employeeId;
+  /// Images that belong to the first message (see `SendChatMessage::images`).
+  final List<String> images;
+  final String projectId;
+  /// Mode, model and effort it starts with (empty: the employee's defaults).
+  final TaskRun? run;
+  final String text;
+  /// Work in a worktree of its own instead of the project's folder. Needs a
+  /// project folder that is a git repository with a main branch.
+  final bool? worktree;
+
+  factory StartWorkSession.fromJson(Map<String, dynamic> json) => StartWorkSession(
+    confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
+    employeeId: (json['employee_id'] as String),
+    images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    projectId: (json['project_id'] as String),
+    run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
+    text: (json['text'] as String),
+    worktree: (json['worktree'] == null ? null : (json['worktree'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (confirmSecret != null) 'confirm_secret': confirmSecret,
+    'employee_id': employeeId,
+    'images': images,
+    'project_id': projectId,
+    if (run != null) 'run': run?.toJson(),
+    'text': text,
+    if (worktree != null) 'worktree': worktree,
   };
 }
 
@@ -19565,6 +19701,87 @@ final class WhoAmI {
     'board_members_exist': boardMembersExist,
     if (mustChangePassword != null) 'must_change_password': mustChangePassword,
     if (user != null) 'user': user?.toJson(),
+  };
+}
+
+/// One work session in `work_session.list`.
+final class WorkSessionView {
+  const WorkSessionView({
+    this.branch,
+    required this.conversationId,
+    required this.createdAtMs,
+    required this.employeeId,
+    required this.employeeName,
+    required this.lastActivityMs,
+    required this.projectId,
+    required this.projectName,
+    required this.running,
+    required this.title,
+    this.worktree,
+  });
+
+  final String? branch;
+  final String conversationId;
+  final int createdAtMs;
+  final String employeeId;
+  final String employeeName;
+  final int lastActivityMs;
+  final String projectId;
+  final String projectName;
+  /// Whether a run of it is queued or working now.
+  final bool running;
+  /// Named after its first message.
+  final String title;
+  /// Its own worktree and branch; none when it works in the project's folder.
+  final String? worktree;
+
+  factory WorkSessionView.fromJson(Map<String, dynamic> json) => WorkSessionView(
+    branch: (json['branch'] == null ? null : (json['branch'] as String)),
+    conversationId: (json['conversation_id'] as String),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    employeeId: (json['employee_id'] as String),
+    employeeName: (json['employee_name'] as String),
+    lastActivityMs: (json['last_activity_ms'] as num).toInt(),
+    projectId: (json['project_id'] as String),
+    projectName: (json['project_name'] as String),
+    running: (json['running'] as bool),
+    title: (json['title'] as String),
+    worktree: (json['worktree'] == null ? null : (json['worktree'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (branch != null) 'branch': branch,
+    'conversation_id': conversationId,
+    'created_at_ms': createdAtMs,
+    'employee_id': employeeId,
+    'employee_name': employeeName,
+    'last_activity_ms': lastActivityMs,
+    'project_id': projectId,
+    'project_name': projectName,
+    'running': running,
+    'title': title,
+    if (worktree != null) 'worktree': worktree,
+  };
+}
+
+/// `work_session.list`: the reader's sessions, the latest activity first.
+final class WorkSessionsSnapshot {
+  const WorkSessionsSnapshot({
+    required this.asOfSeq,
+    required this.sessions,
+  });
+
+  final int asOfSeq;
+  final List<WorkSessionView> sessions;
+
+  factory WorkSessionsSnapshot.fromJson(Map<String, dynamic> json) => WorkSessionsSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    sessions: (json['sessions'] as List<dynamic>).map((x0) => WorkSessionView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'sessions': sessions.map((x0) => x0.toJson()).toList(),
   };
 }
 

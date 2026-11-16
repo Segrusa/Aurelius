@@ -37,6 +37,7 @@ import { MemoryBody } from "./screens/memory";
 import { NewSessionScreen } from "./screens/new-session";
 import { ProjectPage, ProjectsScreen, projectTabShown } from "./screens/projects";
 import { ScheduledScreen } from "./screens/scheduled";
+import { SessionScreen } from "./screens/session";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
 import { TasksScreen } from "./screens/tasks";
@@ -129,6 +130,14 @@ const employeeChat = createRoute({
   component: function EmployeeChatRoute() {
     const { conversationId } = employeeChat.useParams();
     return <EmployeeChatScreen key={conversationId} conversationId={conversationId} />;
+  },
+});
+const workSession = createRoute({
+  getParentRoute: () => root,
+  path: "/session/$conversationId",
+  component: function SessionRoute() {
+    const { conversationId } = workSession.useParams();
+    return <SessionScreen key={conversationId} conversationId={conversationId} />;
   },
 });
 const knowledgeIndex = createRoute({
@@ -238,6 +247,7 @@ const router = createRouter({
     taskRun,
     chat,
     employeeChat,
+    workSession,
     settingsIndex,
     settings,
     usage,

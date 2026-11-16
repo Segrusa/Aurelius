@@ -1,0 +1,145 @@
+//! Work sessions (feature `work_sessions`): a board member starts one employee in
+//! one project's folder by typing, without a ticket (see
+//! `aurelius_domain::work_session`). This is the database side; the worktree, when
+//! the session asked for one, is made by the daemon before the first run
+//! (`aurelius_daemon::worktrees`).
+
+use crate::run::events::{Ev, emit};
+use crate::run::queue::queue_run;
+use crate::{CommandContext, CommandService, Committed, domain_error, storage_error};
+use aurelius_domain::{
+    ActorKind, AppError, CommandEnvelope, CommandResult, ConversationId, DomainError, MessageId,
+    conversation::{MessageRole, MessageStatus},
+    employee::LifecycleStatus,
+    work_session::{StartWorkSession, branch_of},
+};
+use aurelius_storage::{
+    blobs,
+    conversations::{self as conv, NewMessage},
+    employees,
+};
+use rusqlite::OptionalExtension;
+use std::path::{Path, PathBuf};
+
+/// Refused: a worktree needs a project folder that is a git repository.
+pub const WORKTREE_NEEDS_GIT: &str = "A worktree of its own needs a project folder that is a git repository; start the session without one, or set the project's folder.";
+
+/// The folder of a session's worktree: in the data folder, as a quick task's, so the
+/// project's own folder stays clean and a backup skips it.
+pub fn worktree_path(data_root: &Path, conversation: ConversationId) -> PathBuf {
+    let branch = branch_of(conversation);
+    data_root.join("worktrees").join(branch.replace('/', "-"))
+}
+
+impl CommandService {
+    pub(crate) fn start_work_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &StartWorkSession) -> Result<Committed, AppError> {
+        let Some(user) = ctx.user_id else {
+            return Err(domain_error(DomainError::BoardMemberRequired));
+        };
+        let text = aurelius_domain::conversation::validate_employee_message(&cmd.text, &cmd.images, &[]).map_err(domain_error)?;
+        let run = cmd.run.validated().map_err(domain_error)?;
+        let images = crate::conversation::message_images::prepare(&self.store, &cmd.images)?;
+        let text_blob = self.store.blobs().put(text.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?;
+        let (project_id, employee_id, worktree) = (cmd.project_id, cmd.employee_id, cmd.worktree);
+        let conversation_id = ConversationId::new();
+        let worktree_folder = worktree.then(|| worktree_path(self.store.root(), conversation_id));
+        let message_id = MessageId::new();
+        let command_id = envelope.command_id;
+        let meta = ctx.metadata();
+        let actor = ctx.principal_id.to_string();
+        self.commit(command_id, hash, move |tx| {
+            match employees::project_scope(tx, project_id)? {
+                None => return Ok(Err(domain_error(DomainError::ProjectNotFound(project_id)))),
+                Some((_, LifecycleStatus::Archived)) => return Ok(Err(domain_error(DomainError::ProjectArchived))),
+                Some(_) => {}
+            }
+            let Some(employee) = employees::load_employee(tx, employee_id)? else {
+                return Ok(Err(domain_error(DomainError::EmployeeNotFound(employee_id))));
+            };
+            match employee.status {
+                LifecycleStatus::Archived => return Ok(Err(domain_error(DomainError::EmployeeArchived))),
+                LifecycleStatus::Paused => return Ok(Err(domain_error(DomainError::EmployeePaused))),
+                LifecycleStatus::Active => {}
+            }
+            let worktree = match &worktree_folder {
+                None => None,
+                Some(folder) => {
+                    let project_folder: Option<String> = tx.query_row("SELECT folder FROM projects WHERE id = ?1", [project_id.to_string()], |r| r.get(0)).optional()?.flatten();
+                    if !project_folder.is_some_and(|f| crate::ticket::quick::is_git_folder(Path::new(&f))) {
+                        return Ok(Err(domain_error(DomainError::OutOfRange { field: "worktree".into(), detail: WORKTREE_NEEDS_GIT.into() })));
+                    }
+                    Some((folder.to_string_lossy().into_owned(), branch_of(conversation_id)))
+                }
+            };
+            let title = aurelius_domain::conversation::derive_title(&text);
+            aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str())))?;
+            if let Some(mode) = run.mode {
+                conv::set_agent_mode(tx, conversation_id, mode)?;
+            }
+            if run.browser_allowed {
+                conv::set_browser_allowed(tx, conversation_id, true)?;
+            }
+            if run.screen_allowed {
+                conv::set_screen_allowed(tx, conversation_id, true)?;
+            }
+            if run.model.is_some() || run.effort.is_some() {
+                let only = aurelius_domain::task::RunSettings { model: run.model.clone(), effort: run.effort.clone(), ..Default::default() };
+                conv::set_conversation_run(tx, conversation_id, &only)?;
+            }
+            let mut started = serde_json::json!({ "project_id": project_id, "employee_id": employee_id, "work_session": true, "ctx": meta });
+            if let Some((folder, branch)) = &worktree {
+                started["worktree"] = folder.clone().into();
+                started["branch"] = branch.clone().into();
+            }
+            let (_, mut n) = emit(tx, Ev {
+                aggregate_type: "conversation",
+                aggregate_id: conversation_id.to_string(),
+                event_type: "conversation.started",
+                actor: ActorKind::User,
+                actor_id: Some(actor.clone()),
+                correlation: command_id.to_string(),
+                payload: None,
+                metadata: started,
+                dedupe: format!("cmd:{command_id}:conversation"),
+            })?;
+            n.project_id = Some(project_id);
+            let mut notices = vec![n];
+            blobs::register(tx, &text_blob)?;
+            let (event_id, mut n) = emit(tx, Ev {
+                aggregate_type: "conversation",
+                aggregate_id: conversation_id.to_string(),
+                event_type: "message.user_committed",
+                actor: ActorKind::User,
+                actor_id: Some(actor),
+                correlation: command_id.to_string(),
+                payload: Some(text_blob.id.to_string()),
+                metadata: meta.clone(),
+                dedupe: format!("cmd:{command_id}:message"),
+            })?;
+            n.project_id = Some(project_id);
+            notices.push(n);
+            conv::insert_message_by(
+                tx,
+                NewMessage {
+                    id: message_id,
+                    conversation_id,
+                    role: MessageRole::User,
+                    content_blob_id: Some(text_blob.id.to_string()),
+                    source_event_id: event_id,
+                    status: MessageStatus::Complete,
+                    run_id: None,
+                    reply_to: None,
+                },
+                Some(user),
+            )?;
+            crate::conversation::message_images::keep(tx, message_id, &images)?;
+            let (run_id, run_notice) = queue_run(tx, &meta, &command_id.to_string(), conversation_id, message_id)?;
+            notices.extend(run_notice);
+            Ok(Ok((CommandResult::WorkSessionStarted { project_id, conversation_id, message_id, run_id }, notices)))
+        })
+    }
+}
+
+#[cfg(test)]
+#[path = "work_session_tests.rs"]
+mod tests;

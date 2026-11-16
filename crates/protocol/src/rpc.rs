@@ -398,6 +398,11 @@ pub mod feature {
     /// says `changed: ["summary"]` when it comes, fails or is made again. A client
     /// without this feature does not show the History.
     pub const TICKET_HISTORY: &str = "ticket_history";
+    /// Work sessions (protocol 5, additive): `work_session.start` starts one employee in one
+    /// project's folder without a ticket (optionally in a worktree of its own), later messages
+    /// go in with `chat.send`, and `work_session.list` lists the reader's sessions. A client
+    /// without this feature offers quick tasks instead.
+    pub const WORK_SESSIONS: &str = "work_sessions";
 }
 
 /// Every feature this build has.
@@ -448,6 +453,7 @@ pub const FEATURES: &[&str] = &[
     feature::EVERYONE_MENTION,
     feature::ACTIVITY_OVERVIEW,
     feature::QUICK_TASK,
+    feature::WORK_SESSIONS,
     feature::TICKET_HISTORY,
 ];
 
@@ -545,6 +551,8 @@ pub enum ResponseBody {
     Users(aurelius_domain::user::UsersSnapshot),
     Channels(aurelius_domain::views::ChannelsSnapshot),
     EmployeeChats(aurelius_domain::views::EmployeeChatsSnapshot),
+    /// `work_session.list`.
+    WorkSessions(aurelius_domain::work_session::WorkSessionsSnapshot),
     ScheduledMessages(aurelius_domain::views::ScheduledMessagesSnapshot),
     ThreadWaiting(aurelius_domain::views::ThreadWaitingSnapshot),
     EmployeeScratchpad(aurelius_domain::views::ScratchpadView),

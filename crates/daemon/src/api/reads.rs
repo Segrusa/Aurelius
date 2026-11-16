@@ -62,6 +62,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             }
         }
         Method::EmployeeChats => employee_chats(shared, reader).await,
+        Method::WorkSessionList { project_id } => work_sessions(shared, reader, project_id).await,
         Method::ScheduledMessageList { project_id } => scheduled_messages(shared, reader, project_id).await,
         Method::ThreadWaiting { ticket_id, conversation_id } => thread_waiting(shared, reader, ticket_id, conversation_id).await,
         Method::EmployeeScratchpad { employee_id } => employee_scratchpad(shared, employee_id).await,
@@ -378,6 +379,22 @@ async fn employee_chats(shared: &Arc<Shared>, reader: Option<aurelius_domain::Us
     })
     .await?;
     Ok(ResponseBody::EmployeeChats(aurelius_domain::views::EmployeeChatsSnapshot { as_of_seq, chats }))
+}
+
+/// The reader's work sessions (none before a board member is chosen).
+async fn work_sessions(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, project: Option<ProjectId>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let (as_of_seq, sessions) = storage_task(move || {
+        store.read(|c| {
+            let sessions = match reader {
+                Some(user) => aurelius_storage::work_sessions::list(c, user, project)?,
+                None => Vec::new(),
+            };
+            Ok((queries::last_seq(c)?, sessions))
+        })
+    })
+    .await?;
+    Ok(ResponseBody::WorkSessions(aurelius_domain::work_session::WorkSessionsSnapshot { as_of_seq, sessions }))
 }
 
 /// What employees scheduled, as far as `reader` may see it.

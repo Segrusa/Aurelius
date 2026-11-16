@@ -538,6 +538,10 @@ abstract final class Methods {
   /// With `expected_version` in the envelope a stale edit is `version_conflict`.
   /// Answers `VaultItem`. As `vault.create`: no value in receipt, hash or event.
   static const String vaultUpdate = 'vault.update';
+  /// The reader's work sessions, the latest activity first (feature `work_sessions`);
+  /// `project_id`: only those of that project.
+  static const String workSessionList = 'work_session.list';
+  static const String workSessionStart = 'work_session.start';
 }
 
 // Reads and session methods.
@@ -1291,6 +1295,15 @@ Map<String, dynamic> vaultReveal({required String itemId, required RevealPurpose
   'params': <String, dynamic>{
     'item_id': itemId,
     'purpose': purpose.toJson(),
+  },
+};
+
+/// The reader's work sessions, the latest activity first (feature `work_sessions`);
+/// `project_id`: only those of that project.
+Map<String, dynamic> workSessionList({String? projectId}) => <String, dynamic>{
+  'method': Methods.workSessionList,
+  'params': <String, dynamic>{
+    if (projectId != null) 'project_id': projectId,
   },
 };
 
@@ -2258,4 +2271,9 @@ Map<String, dynamic> ticketUseMyLogin({required String ticketId}) => <String, dy
   'params': <String, dynamic>{
     'ticket_id': ticketId,
   },
+};
+
+Map<String, dynamic> workSessionStart(StartWorkSession params) => <String, dynamic>{
+  'method': Methods.workSessionStart,
+  'params': params.toJson(),
 };

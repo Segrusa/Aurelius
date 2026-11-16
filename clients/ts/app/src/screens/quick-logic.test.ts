@@ -10,6 +10,7 @@ import {
   kindFilterOptions,
   kindMatches,
   quickAssignee,
+  quickCreatable,
   quickCreateParams,
   quickEnabled,
   quickProblem,
@@ -161,5 +162,13 @@ describe("creating a normal ticket", () => {
       run: {},
       confirm_secret: false,
     });
+  });
+});
+
+describe("quickCreatable", () => {
+  it("offers a new quick task only where the server has no work sessions", () => {
+    expect(quickCreatable(["quick_task"])).toBe(true);
+    expect(quickCreatable(["quick_task", "work_sessions"])).toBe(false);
+    expect(quickCreatable([])).toBe(false);
   });
 });

@@ -241,6 +241,8 @@ export const METHODS = {
   "vault.list": "read",
   "vault.reveal": "read",
   "vault.update": "host",
+  "work_session.list": "read",
+  "work_session.start": "command",
 } as const satisfies Record<string, MethodGroup>;
 
 export type MethodName = keyof typeof METHODS;
@@ -1038,4 +1040,10 @@ export interface MethodParams {
    * Answers `VaultItem`. As `vault.create`: no value in receipt, hash or event.
    */
   "vault.update": M.VaultUpdateParams;
+  /**
+   * The reader's work sessions, the latest activity first (feature `work_sessions`);
+   * `project_id`: only those of that project.
+   */
+  "work_session.list": { project_id?: string | null };
+  "work_session.start": M.StartWorkSession;
 }

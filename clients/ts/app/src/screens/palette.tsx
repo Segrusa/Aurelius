@@ -22,7 +22,7 @@ import { topCentered } from "./dialog-logic";
 import { useOpenNewSession } from "./new-session";
 import { overlays, useOpenOverlay } from "./overlays-store";
 import { filterGroups, type PaletteGroup, quickTaskCommands } from "./palette-logic";
-import { quickEnabled } from "./quick-logic";
+import { quickCreatable } from "./quick-logic";
 import { useSwitchWorkspace } from "./workspace-kit";
 import { guidelinesIn, narrow, openProjects } from "./workspace-logic";
 
@@ -135,7 +135,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const channels = useChannels();
   const workspace = useWorkspace();
   const switchTo = useSwitchWorkspace();
-  const quick = quickEnabled(useLinkState().features);
+  const quick = quickCreatable(useLinkState().features);
   const openNewSession = useOpenNewSession();
   // The workspace's id as the only thing the search depends on: `switchTo` changes every render.
   const switchRef = useRef(switchTo);

@@ -7,6 +7,7 @@ pub mod claude_code;
 pub mod fake;
 pub mod http_api;
 pub mod redact;
+pub mod written_calls;
 
 use aurelius_domain::RunId;
 use serde::{Deserialize, Serialize};

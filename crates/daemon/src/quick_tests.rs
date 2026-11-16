@@ -144,3 +144,34 @@ fn a_cancel_removes_the_worktree_and_the_branch_with_its_unmerged_work() {
     assert_eq!(head(&repo), before, "main is untouched");
     cleanup(&repo, BRANCH, &worktree).unwrap();
 }
+
+#[test]
+fn a_missing_main_says_why_in_words_a_board_member_can_act_on() {
+    // Not a repository at all (seen on Windows: "no main branch" said nothing).
+    let dir = tempfile::tempdir().unwrap();
+    let plain = dir.path().join("plain");
+    fs::create_dir_all(&plain).unwrap();
+    let worktree = dir.path().join("data/worktrees/session-1");
+    let why = ensure_worktree(&plain, "session/1", &worktree).unwrap_err();
+    assert!(why.contains("is not a git repository"), "{why}");
+    // A repository without a commit yet.
+    let empty = dir.path().join("empty");
+    fs::create_dir_all(&empty).unwrap();
+    run(&empty, &["init", "--quiet", "--initial-branch=main"]);
+    let why = ensure_worktree(&empty, "session/1", &worktree).unwrap_err();
+    assert!(why.contains("no commit yet"), "{why}");
+    // A repository whose branch has another name: it is named.
+    let (_dir, repo, worktree) = repo();
+    run(&repo, &["branch", "-m", "main", "develop"]);
+    let why = ensure_worktree(&repo, BRANCH, &worktree).unwrap_err();
+    assert!(why.contains("no main or master branch") && why.contains("develop"), "{why}");
+    assert!(matches!(merge(&repo, BRANCH, "m"), MergeOutcome::Failed { reason, .. } if reason.contains("develop")));
+}
+
+#[test]
+fn a_sessions_worktree_is_made_on_its_own_branch() {
+    let (_dir, repo, _) = repo();
+    let worktree = repo.parent().unwrap().join("data/worktrees/session-1a2b3c4d");
+    ensure_worktree(&repo, "session/1a2b3c4d", &worktree).unwrap();
+    assert_eq!(run(&worktree, &["symbolic-ref", "--short", "HEAD"]), "session/1a2b3c4d");
+}

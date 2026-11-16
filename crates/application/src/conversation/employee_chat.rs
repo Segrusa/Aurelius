@@ -35,10 +35,23 @@ pub(crate) fn ticket_link(st: &Store, ticket: TicketId, number: u32) -> String {
     }
 }
 
-/// Why `user` cannot write in `conversation` now, if so: another board member's chat,
-/// an employee that is not at work, or a conversation `chat.send` does not take.
+/// Why `user` cannot write in `conversation` now, if so: another board member's chat or
+/// work session, an employee that is not at work, or a conversation `chat.send` does not take.
 pub(crate) fn write_refusal(tx: &Tx<'_>, conversation: ConversationId, user: Option<UserId>) -> Result<Option<AppError>, StorageError> {
     let not_found = || domain_error(DomainError::ConversationNotFound(conversation));
+    // A work session: only the board member who started it writes in it, while its employee is at work.
+    if let Some(session) = aurelius_storage::work_sessions::of_conversation(tx, conversation)? {
+        if user != Some(session.started_by) {
+            return Ok(Some(not_found()));
+        }
+        let Some(employee) = conv::owner_of(tx, conversation)?.0 else { return Ok(Some(not_found())) };
+        let Some(employee) = employees::load_employee(tx, employee)? else { return Ok(Some(not_found())) };
+        return Ok(match employee.status {
+            LifecycleStatus::Archived => Some(domain_error(DomainError::EmployeeArchived)),
+            LifecycleStatus::Paused => Some(domain_error(DomainError::EmployeePaused)),
+            LifecycleStatus::Active => None,
+        });
+    }
     let Some(chat) = chats::of_conversation(tx, conversation)? else {
         if conv::is_older_employee_chat(tx, conversation)? {
             return Ok(Some(domain_error(DomainError::OutOfRange {

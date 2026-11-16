@@ -110,8 +110,28 @@ export function EmployeeChatScreen({ conversationId }: { conversationId: string 
   return <EmployeeChat conversationId={conversationId} />;
 }
 
-/** The chat itself: only the two of them read it. `compact`: in the popout, which has its own head. */
-export function EmployeeChat({ conversationId, compact = false }: { conversationId: string; compact?: boolean }) {
+/** What another kind of conversation with one employee (a work session) shows instead of a chat's words. */
+export interface ChatFrame {
+  /** The head's title; the employee's name when not given. */
+  title?: string;
+  /** The head's second line while nobody answers. */
+  subtitle?: string;
+  empty: { title: string; description: string };
+}
+
+/**
+ * The chat itself: only the two of them read it. `compact`: in the popout, which has its own head.
+ * `frame`: a work session, which is this same conversation with its own head and empty state.
+ */
+export function EmployeeChat({
+  conversationId,
+  compact = false,
+  frame,
+}: {
+  conversationId: string;
+  compact?: boolean;
+  frame?: ChatFrame;
+}) {
   const { user, features } = useLinkState();
   const connection = useConnection();
   const client = useQueryClient();
@@ -205,14 +225,16 @@ export function EmployeeChat({ conversationId, compact = false }: { conversation
   const closed = employee && employee.status !== "active" ? employee.status : null;
 
   return (
-    <section aria-label={`Chat with ${name}`} {...stylex.props(styles.screen)}>
+    <section aria-label={frame?.title ?? `Chat with ${name}`} {...stylex.props(styles.screen)}>
       {compact ? null : (
         <header data-titlebar {...stylex.props(styles.top)}>
           <Heading level={1} xstyle={styles.title}>
-            {name}
+            {frame?.title || name}
           </Heading>
           <span {...stylex.props(styles.subtitle)}>
-            {live.length > 0 ? `${name} answering` : employee ? (employee.title ?? employee.role) : ""}
+            {live.length > 0
+              ? `${name} answering`
+              : (frame?.subtitle ?? (employee ? (employee.title ?? employee.role) : ""))}
           </span>
         </header>
       )}
@@ -239,8 +261,11 @@ export function EmployeeChat({ conversationId, compact = false }: { conversation
               ) : null
             ) : rows.length === 0 ? (
               <EmptyState
-                title={`Talk with ${name} here.`}
-                description={`Only you and ${name} read this. Once the work is concrete, ${name} makes a ticket and tells you here when it reaches Review.`}
+                title={frame?.empty.title ?? `Talk with ${name} here.`}
+                description={
+                  frame?.empty.description ??
+                  `Only you and ${name} read this. Once the work is concrete, ${name} makes a ticket and tells you here when it reaches Review.`
+                }
               />
             ) : (
               <Virtuoso
@@ -281,8 +306,8 @@ export function EmployeeChat({ conversationId, compact = false }: { conversation
         {closed ? (
           <p {...stylex.props(styles.closed)}>
             {closed === "paused"
-              ? `${name} is paused: resume them to go on with this chat.`
-              : `${name} is archived: this chat can only be read.`}
+              ? `${name} is paused: resume them to go on with this ${frame ? "session" : "chat"}.`
+              : `${name} is archived: this ${frame ? "session" : "chat"} can only be read.`}
           </p>
         ) : (
           <Composer

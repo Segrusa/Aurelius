@@ -920,6 +920,7 @@ export type Command =
    * Also starts again a ticket whose main task failed.
    */
   | ({ type: "start_ticket"; employee_id?: string | null; ticket_id: string })
+  | ({ type: "start_work_session" } & StartWorkSession)
   | ({ type: "stop_run" } & StopRun)
   /**
    * `guideline.unlink`.
@@ -1093,6 +1094,10 @@ export type CommandResult =
    */
   | ({ type: "user_created"; user_id: string })
   | ({ type: "verification_started"; connection_id: string })
+  /**
+   * A work session was made and its first message is being answered.
+   */
+  | ({ type: "work_session_started"; conversation_id: string; message_id: string; project_id: string; run_id: string })
 ;
 
 /**
@@ -3869,6 +3874,11 @@ export type Method =
    * device. `vault_undecryptable` when the key does not fit. Not for apps.
    */
   | ({ method: "vault.reveal"; params: { item_id: string; purpose: RevealPurpose } })
+  /**
+   * The reader's work sessions, the latest activity first (feature `work_sessions`);
+   * `project_id`: only those of that project.
+   */
+  | ({ method: "work_session.list"; params: { project_id?: string | null } })
 ;
 
 /**
@@ -4571,6 +4581,10 @@ export type ResponseBody =
    */
   | ({ type: "vault_value"; value: VaultValue })
   | ({ type: "who_am_i"; value: WhoAmI })
+  /**
+   * `work_session.list`.
+   */
+  | ({ type: "work_sessions"; value: WorkSessionsSnapshot })
 ;
 
 /**
@@ -5312,6 +5326,33 @@ export interface StartProjectConversation {
   browser_allowed?: boolean;
   project_id: string;
   screen_allowed?: boolean;
+}
+
+/**
+ * Start a work session with its first message.
+ */
+export interface StartWorkSession {
+  /**
+   * A board member confirmed that the text may hold a vault secret's value
+   * (after `looks_like_secret`, B10): it is stored with the value redacted.
+   */
+  confirm_secret?: boolean;
+  employee_id: string;
+  /**
+   * Images that belong to the first message (see `SendChatMessage::images`).
+   */
+  images?: string[];
+  project_id: string;
+  /**
+   * Mode, model and effort it starts with (empty: the employee's defaults).
+   */
+  run?: TaskRun;
+  text: string;
+  /**
+   * Work in a worktree of its own instead of the project's folder. Needs a
+   * project folder that is a git repository with a main branch.
+   */
+  worktree?: boolean;
 }
 
 /**
@@ -6721,6 +6762,40 @@ export interface WhoAmI {
    * The board member of this connection's session.
    */
   user?: UserView | null;
+}
+
+/**
+ * One work session in `work_session.list`.
+ */
+export interface WorkSessionView {
+  branch?: string | null;
+  conversation_id: string;
+  created_at_ms: number;
+  employee_id: string;
+  employee_name: string;
+  last_activity_ms: number;
+  project_id: string;
+  project_name: string;
+  /**
+   * Whether a run of it is queued or working now.
+   */
+  running: boolean;
+  /**
+   * Named after its first message.
+   */
+  title: string;
+  /**
+   * Its own worktree and branch; none when it works in the project's folder.
+   */
+  worktree?: string | null;
+}
+
+/**
+ * `work_session.list`: the reader's sessions, the latest activity first.
+ */
+export interface WorkSessionsSnapshot {
+  as_of_seq: number;
+  sessions: WorkSessionView[];
 }
 
 export type WriteResult =

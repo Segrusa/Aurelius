@@ -81,6 +81,7 @@ pub const MIGRATIONS: &[Migration] = &[
     plain(40, include_str!("../../../migrations/0040_design_links.sql")),
     plain(41, include_str!("../../../migrations/0041_quick_tasks.sql")),
     Migration { version: 42, sql: include_str!("../../../migrations/0042_ticket_history.sql"), rebuild: false, then: Some(crate::history::backfill) },
+    Migration { version: 43, sql: include_str!("../../../migrations/0043_work_sessions.sql"), rebuild: true, then: None },
 ];
 
 /// The last schema of protocol 2 (managers per project). The v0.6 import writes

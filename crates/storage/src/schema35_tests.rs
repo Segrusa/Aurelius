@@ -28,7 +28,9 @@ fn a_schema_34_store_keeps_its_records_with_calls_not_known() {
     assert!(conn.prepare("SELECT model_calls FROM usage_records").is_err(), "the column is new in 35");
     drop(conn);
 
-    let store = Store::open(dir.path()).unwrap();
+    // Up to 42: the run's conversation is left out on purpose, and migration 43 rebuilds
+    // conversations, which refuses a reference to one that is not there.
+    let store = Store::open_until(dir.path(), 42).unwrap();
     let run = RunId::parse(RUN).unwrap();
     let before = store.read(move |c| usage::for_run(c, run)).unwrap().unwrap();
     assert_eq!((before.input_tokens, before.model_calls), (10, 0));
