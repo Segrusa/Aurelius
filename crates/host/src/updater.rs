@@ -16,7 +16,7 @@ pub const ZIP_PREFIX: &str = "aurelius-";
 pub const ZIP_SUFFIX: &str = "-windows-x64.zip";
 
 /// Public key of the release signing key (base64, 32 bytes).
-pub const PUBLIC_KEY: &str = "SrqZ3sOnSvckbpmNDgzMXAHmz+9p22nvzWxWR+JsBlU=";
+pub const PUBLIC_KEY: &str = "w2kjdvsccz50qf1f+JG85BPkUt8sDkGLXH4WLqucoYg=";
 
 /// Every program of an installation (both products).
 pub const BINARIES: [&str; 4] = ["aurelius.exe", "aurelius-daemon.exe", "aurelius-ctl.exe", "aurelius-bridge.exe"];
