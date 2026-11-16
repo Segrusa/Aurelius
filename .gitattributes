@@ -4,5 +4,6 @@ migrations/*.sql text eol=lf
 *.png binary
 *.ttf binary
 *.ico binary
+*.icns binary
 # Vendored minified bundle: no text diffs.
 clients/mobile/assets/mermaid/mermaid.min.js -diff
