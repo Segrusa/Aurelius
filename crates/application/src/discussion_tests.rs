@@ -1312,6 +1312,20 @@ fn a_mention_of_a_busy_employee_also_gets_a_quick_answer_that_wakes_nobody() {
 }
 
 #[test]
+fn a_mention_in_another_channel_of_an_employee_busy_elsewhere_gets_no_busy_line() {
+    let s = setup();
+    send(&s, None, "@Bo first question").unwrap();
+    go_running(&s, s.bo);
+    // Bo works in the general channel; the project channel is a thread of its own, so its run starts alongside.
+    let project = channel(&s, s.project);
+    let (to, runs) = send(&s, Some(project), "@Bo status?").unwrap();
+    assert_eq!((to, runs.len()), (vec![s.bo], 1));
+    assert!(quick_runs(&s, s.bo).is_none(), "no quick answer: the full one is not held back");
+    let lines = system_lines(&s, project);
+    assert!(!lines.iter().any(|(k, t)| *k == SystemLineKind::Limit && t.contains("is busy")), "{lines:?}");
+}
+
+#[test]
 fn a_quick_answer_is_told_of_no_tool_it_lacks_and_an_ordinary_run_still_is() {
     let s = setup();
     send(&s, None, "@Bo first").unwrap();

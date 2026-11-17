@@ -1,4 +1,4 @@
-//! The employee's mailbox end to end (R1-R3): one run at a time per employee,
+//! The employee's mailbox end to end (R1-R3): one run at a time per thread,
 //! merging per thread, parking on a question and going on when it is answered.
 //! `tests/queued.rs` covers Queued, Send now and delete; recovery is in
 //! `aurelius_application::inbox_tests`.
@@ -122,7 +122,7 @@ fn scalar(root: &Path, sql: &str) -> i64 {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_employee_does_one_run_at_a_time_across_its_conversations() {
+async fn an_employee_works_on_a_task_while_a_run_in_its_chat_still_goes() {
     let dir = tempfile::tempdir().unwrap();
     let s = start_gate(dir.path()).await;
     let client = connect(dir.path()).await;
@@ -131,22 +131,14 @@ async fn an_employee_does_one_run_at_a_time_across_its_conversations() {
     let (_, first) = say(&client, alex, chat, "eerste [hold]").await;
     wait_status(dir.path(), first, "running").await;
 
-    // A task for the same employee waits in its mailbox while the run goes.
+    // A task for the same employee is another thread: it runs and ends while the first run is held.
     let cmd = CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id: project, employee_id: Some(alex), title: "Logo".into(), goal: "Maak een logo".into(), acceptance_criteria: vec![] };
     let CommandResult::TaskCreated { task_id } = client.execute(envelope(Command::CreateTask(cmd), None)).await.unwrap().result else { panic!() };
-    let conn = db(dir.path());
-    for _ in 0..600 {
-        if conn.query_row("SELECT COUNT(*) FROM employee_inbox WHERE task_id = ?1 AND state = 'queued'", [task_id.to_string()], |r| r.get::<_, i64>(0)).unwrap() == 1 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-    tokio::time::sleep(Duration::from_millis(400)).await;
-    assert_eq!(conn.query_row("SELECT COUNT(*) FROM runs WHERE task_id = ?1", [task_id.to_string()], |r| r.get::<_, i64>(0)).unwrap(), 0, "no run of the task yet");
-    assert_eq!(scalar(dir.path(), "SELECT COUNT(*) FROM jobs WHERE kind = 'run.chat' AND state = 'leased'"), 1);
-
-    s.release.send(true).unwrap();
     wait_task(&client, task_id, |status| status.is_terminal()).await;
+    let status: String = db(dir.path()).query_row("SELECT status FROM runs WHERE id = ?1", [first.to_string()], |r| r.get(0)).unwrap();
+    assert_eq!(status, "running", "the first run is still held while the task ended");
+    s.release.send(true).unwrap();
+    wait_status(dir.path(), first, "succeeded").await;
     stop(dir.path(), s.daemon).await;
 }
 

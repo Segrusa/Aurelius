@@ -144,8 +144,8 @@ pub fn has_work(conn: &Connection) -> Result<bool, StorageError> {
 
 /// Claim the oldest due job at `now`: set leased, bump the epoch (fencing token).
 /// Run jobs (chat answers and task starts) respect the global run limit
-/// (0 holds them all back) and at most one active run per conversation (one
-/// mutating turn per employee).
+/// (0 holds them all back), at most one active run per conversation, and one per
+/// thread of an employee. An employee works on several threads at once.
 pub fn claim_due_job(tx: &Transaction<'_>, owner: &str, now: i64, lease_ms: i64, global_runs: u32) -> Result<Option<JobRow>, StorageError> {
     let job = tx
         .query_row(
@@ -155,10 +155,11 @@ pub fn claim_due_job(tx: &Transaction<'_>, owner: &str, now: i64, lease_ms: i64,
                      (SELECT COUNT(*) FROM jobs a WHERE a.kind IN ('run.chat', 'task.run') AND a.state = 'leased') < ?2
                      AND (j.kind <> 'run.chat' OR (NOT EXISTS (SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased'
                          AND json_extract(o.payload_json, '$.conversation_id') = json_extract(j.payload_json, '$.conversation_id'))
-                       -- One run per employee (R2): a retry or a run back from a limit waits for its slot too.
-                       AND (json_extract(j.payload_json, '$.employee_id') IS NULL OR NOT EXISTS (SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased'
+                       -- One run per thread of an employee: a retry or a run back from a limit waits for the run going there.
+                       AND (json_extract(j.payload_json, '$.employee_id') IS NULL OR json_extract(j.payload_json, '$.thread_key') IS NULL
+                         OR NOT EXISTS (SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased'
                          AND json_extract(o.payload_json, '$.employee_id') = json_extract(j.payload_json, '$.employee_id')
-                         AND NOT EXISTS (SELECT 1 FROM approvals a WHERE a.run_id = o.id AND a.status = 'pending')))))))
+                         AND json_extract(o.payload_json, '$.thread_key') = json_extract(j.payload_json, '$.thread_key')))))))
                  ORDER BY j.priority DESC, j.not_before_ms, j.id LIMIT 1"
             ),
             params![now, global_runs],

@@ -4,9 +4,9 @@
 //! waits in that thread and only then makes the run, with the configuration and
 //! login snapshots of that moment, and a leased job as its execution record.
 //!
-//! * One run at a time per employee (R2), held by the job's lease; a run that waits
-//!   for an approval keeps its thread but not the slot (assumption 3). A quick
-//!   answer is the bounded exception (assumption 2) and never comes here.
+//! * An employee works on several threads at once; each thread has one run at a
+//!   time, held by the job's lease (a run that waits for an approval keeps its
+//!   thread). Only the machine's run limit bounds how many go together.
 //! * Merged: the due items of one thread, in one conversation, on one login. The
 //!   newest is what the run answers; the others are in its context by then.
 //! * Parked (R3): a run that ended on a question parks its thread until a board
@@ -275,14 +275,14 @@ fn claim_next(tx: &Tx<'_>, owner: &str, now: i64, lease_ms: i64, limit: u32) -> 
         return Ok(None);
     }
     let due = store::due(tx, now)?;
-    let mut busy: HashSet<&str> = HashSet::new();
+    let mut paused: HashSet<&str> = HashSet::new();
     for item in &due {
-        if busy.contains(item.employee.as_str()) {
+        if paused.contains(item.employee.as_str()) {
             continue;
         }
         // A paused employee starts nothing new; a run it already has goes on.
-        if store::is_paused(tx, &item.employee)? || !store::slot_free(tx, &item.employee)? {
-            busy.insert(&item.employee);
+        if store::is_paused(tx, &item.employee)? {
+            paused.insert(&item.employee);
             continue;
         }
         if store::thread_held(tx, &item.employee, &item.thread_key, item.login_user.as_deref())? {

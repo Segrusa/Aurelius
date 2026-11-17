@@ -487,7 +487,7 @@ fn a_running_run_goes_on_when_its_employee_is_paused() {
 }
 
 #[test]
-fn a_ticket_behind_a_busy_employee_waits_for_a_slot_and_the_running_one_does_not() {
+fn a_second_ticket_of_a_busy_employee_runs_alongside_the_first() {
     let s = setup();
     use_real_mailbox(s.atlas);
     let (first, _) = ticket_from(&s, s.main, "One");
@@ -497,9 +497,13 @@ fn a_ticket_behind_a_busy_employee_waits_for_a_slot_and_the_running_one_does_not
     s.service.store().write(move |tx| Ok(tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [run])?)).unwrap();
     let (second, _) = ticket_from(&s, s.main, "Two");
     started(&s, second);
+    assert_ne!(ticket_state(&s, second).1.as_deref(), Some("slot"), "nothing of its own employee holds it back");
 
+    let (job, _) = s.service.claim_next_work("t", 45_000, 4).unwrap().expect("the second run starts while the first goes");
+    let run = job.id.clone();
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [run])?)).unwrap();
     assert_eq!(ticket_state(&s, first).0, "running");
-    assert_eq!(ticket_state(&s, second), ("waiting_slot".to_owned(), Some("slot".to_owned())));
+    assert_eq!(ticket_state(&s, second).0, "running");
 }
 
 #[test]

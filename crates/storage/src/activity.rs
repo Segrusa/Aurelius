@@ -73,7 +73,7 @@ fn paused(people: &HashMap<String, Person>, employee: Option<&str>) -> bool {
     employee.and_then(|e| people.get(e)).is_some_and(|p| p.paused)
 }
 
-/// An approval is pending in this thread, so its run holds the thread but no slot.
+/// An approval is pending in this thread: its run holds the thread while it waits.
 fn approval_in_thread(conn: &Connection, employee: &str, thread: &str) -> Result<bool, StorageError> {
     Ok(conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM jobs o JOIN approvals a ON a.run_id = o.id WHERE o.kind = 'run.chat' AND o.state = 'leased' AND a.status = 'pending'
@@ -100,20 +100,26 @@ fn line_waits_for(conn: &Connection, people: &HashMap<String, Person>, line: &Li
         _ if !line.resumes && inbox::is_parked(conn, line.employee, line.thread)? => "question",
         _ if line.not_before > now && line.quota => "limit",
         _ if line.not_before > now => "later",
-        _ if !inbox::slot_free(conn, line.employee)? => "slot",
+        _ if inbox::thread_running(conn, line.employee, line.thread)? => "slot",
         _ if approval_in_thread(conn, line.employee, line.thread)? => "approval",
         _ => "machine",
     })
 }
 
 /// What a chat run back in line waits for.
-fn job_waits_for(conn: &Connection, people: &HashMap<String, Person>, employee: Option<&str>, error: Option<&str>, not_before: i64, now: i64) -> Result<&'static str, StorageError> {
+fn job_waits_for(conn: &Connection, people: &HashMap<String, Person>, (employee, thread): (Option<&str>, Option<&str>), error: Option<&str>, not_before: i64, now: i64) -> Result<&'static str, StorageError> {
     Ok(match (employee, error) {
         _ if paused(people, employee) => "paused",
         (_, Some("login")) => "login",
         (_, Some("quota")) if not_before > now => "limit",
         _ if not_before > now => "later",
-        (Some(e), _) if !inbox::slot_free(conn, e)? => "slot",
+        (Some(e), _) if match thread {
+            Some(t) => inbox::thread_running(conn, e, t)?,
+            None => false,
+        } =>
+        {
+            "slot"
+        }
         _ => "machine",
     })
 }
@@ -231,7 +237,7 @@ pub fn overview(conn: &Connection, reader: Option<UserId>, now: i64) -> Result<A
         {
             continue;
         }
-        let waits_for = job_waits_for(conn, &people, employee.as_deref(), error.as_deref(), not_before, now)?;
+        let waits_for = job_waits_for(conn, &people, (employee.as_deref(), thread.as_deref()), error.as_deref(), not_before, now)?;
         let at = Where { thread: thread.as_deref(), conversation: conversation.as_deref(), task: task.as_deref(), board_member: board_member.as_deref() };
         // A far-away `not_before_ms` is a parking date, not when it began to wait.
         push_waiting(conn, &people, &mut waiting, &mut tickets, employee.as_deref(), &at, reader, waits_for, not_before.min(now))?;

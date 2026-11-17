@@ -1032,14 +1032,17 @@ pub fn going_run_since(conn: &rusqlite::Connection, conversation: ConversationId
     Ok(stmt.query_row([conversation.to_string()], |r| r.get::<_, Option<i64>>(0)).optional()?)
 }
 
-/// Since when `employee` is busy in a run in any of its conversations (a quick
-/// answer does not count): `Some(None)` when one is going but not timed yet.
-pub fn employee_going_since(conn: &rusqlite::Connection, employee: aurelius_domain::EmployeeId) -> Result<Option<Option<i64>>, StorageError> {
+/// Since when `employee` is busy in a run of `thread` (`ticket:…`, `channel:…`), the
+/// run a new message there waits for; its other threads run alongside. `Some(None)`
+/// when one is going but not timed yet.
+pub fn employee_going_in_thread_since(conn: &rusqlite::Connection, employee: aurelius_domain::EmployeeId, thread: &str) -> Result<Option<Option<i64>>, StorageError> {
     let mut stmt = conn.prepare(
-        "SELECT r.started_at_ms FROM runs r JOIN conversations c ON c.id = r.conversation_id
-         WHERE c.employee_id = ?1 AND c.quick_answer = 0 AND r.status IN ('starting','running','waiting','cancelling') ORDER BY r.started_at_ms LIMIT 1",
+        "SELECT r.started_at_ms FROM runs r JOIN jobs o ON o.id = r.id
+         WHERE o.kind = 'run.chat' AND json_extract(o.payload_json, '$.employee_id') = ?1
+           AND json_extract(o.payload_json, '$.thread_key') = ?2 AND r.status IN ('starting','running','waiting','cancelling')
+         ORDER BY r.started_at_ms LIMIT 1",
     )?;
-    Ok(stmt.query_row([employee.to_string()], |r| r.get::<_, Option<i64>>(0)).optional()?)
+    Ok(stmt.query_row([employee.to_string(), thread.to_owned()], |r| r.get::<_, Option<i64>>(0)).optional()?)
 }
 
 /// The title of the hidden conversation of an employee's quick answers.

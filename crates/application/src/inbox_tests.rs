@@ -1,5 +1,5 @@
-//! The worker over the mailbox (R2, R3): one run per employee, merging per
-//! thread, and recovery after a lease ran out. The daemon's `tests/mailbox.rs`
+//! The worker over the mailbox (R2, R3): one run per thread while an employee works
+//! on several threads at once, merging per thread, and recovery after a lease ran out. The daemon's `tests/mailbox.rs`
 //! does this end to end.
 
 use crate::*;
@@ -78,14 +78,14 @@ fn nothing_is_made_until_the_worker_takes_the_item() {
 }
 
 #[test]
-fn one_run_at_a_time_per_employee_and_the_items_of_a_thread_are_merged() {
+fn one_run_at_a_time_per_thread_and_the_items_of_a_thread_are_merged() {
     let s = setup();
     let (_, first) = say(&s, "first");
     let job = claim(&s).expect("first");
     assert_eq!(job.id, first.to_string());
     let (second, _) = say(&s, "second");
     let (third, third_run) = say(&s, "third");
-    assert!(claim(&s).is_none(), "the employee is busy");
+    assert!(claim(&s).is_none(), "its thread is busy");
 
     // The first run ends: the two that waited are one run, answering the newest.
     let epoch = job.lease_epoch;
@@ -146,21 +146,33 @@ fn a_run_whose_lease_ran_out_goes_again_and_only_then_the_employee_takes_more() 
 }
 
 #[test]
-fn an_employee_can_work_in_another_thread_while_a_run_waits_for_an_approval() {
+fn an_employee_works_in_another_thread_while_a_run_is_going() {
     let s = setup();
     let (_, first) = say(&s, "first");
     let job = claim(&s).unwrap();
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [first.to_string()])?)).unwrap();
     let CommandResult::TaskCreated { task_id } = exec(&s, Command::CreateTask(CreateTask { confirm_secret: false, files: vec![], run: Default::default(), project_id: s.project, employee_id: Some(s.alex), title: "Dark".into(), goal: "Dark mode".into(), acceptance_criteria: vec![] })) else { panic!() };
     let task_job = s.service.store().write(|tx| queries::claim_due_job(tx, "t", aurelius_storage::now_ms() + 60_000, 45_000, 4)).unwrap().expect("the task's job");
     assert_eq!(task_job.id, task_id.to_string());
     let task = s.service.task_context(task_id).unwrap().unwrap();
     s.service.start_task_conversation(&task, task_job.lease_epoch).unwrap();
-    assert!(claim(&s).is_none(), "the employee is busy");
-    // The first run waits for an approval: its slot is free for the other thread, its thread stays held.
+    let next = claim(&s).expect("the task's run goes while the first one is going");
+    assert_ne!(next.id, job.id);
+    assert_ne!(next.payload["thread_key"], job.payload["thread_key"]);
+    // The machine's limit still holds: with room for two, nothing more starts.
+    say(&s, "third");
+    assert!(s.service.claim_next_work("t", 45_000, 2).unwrap().is_none(), "two go, the limit is two");
+}
+
+#[test]
+fn a_run_that_waits_for_an_approval_keeps_its_thread() {
+    let s = setup();
+    let (_, first) = say(&s, "first");
+    claim(&s).unwrap();
     s.service.store().write(move |tx| Ok(tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [first.to_string()])?)).unwrap();
     assert!(matches!(s.service.request_runtime_permission(first, Some("c1".into()), "Bash", &serde_json::json!({ "command": "ls" })).unwrap(), RuntimePermission::Pending { .. }));
-    let next = claim(&s).expect("the task's run goes");
-    assert_ne!(next.id, job.id);
+    say(&s, "second");
+    assert!(claim(&s).is_none(), "the same thread waits for the approval");
 }
 
 #[test]

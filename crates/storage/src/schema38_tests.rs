@@ -100,26 +100,45 @@ fn item(store: &Store, thread: &'static str, not_before: i64, error: Option<&'st
         .unwrap();
 }
 
+/// A run of Ann going in `thread`: a leased chat job.
+fn going(store: &Store, thread: &'static str) {
+    let run = RunId::new();
+    store
+        .write(move |tx| {
+            let appended = crate::events::append(tx, crate::events::NewEvent {
+                aggregate_type: "run", aggregate_id: run.to_string(), aggregate_version: 1, event_type: "run.queued", project_id: None,
+                actor_kind: aurelius_domain::ActorKind::User, actor_id: None, correlation_id: "test".into(), causation_id: None,
+                payload_blob_id: None, metadata: serde_json::json!({}), dedupe_key: format!("g-{run}"),
+            })?;
+            crate::events::insert_job(tx, &run.to_string(), "run.chat", appended.id, &format!("run:{run}"), &serde_json::json!({ "employee_id": EMPLOYEE, "thread_key": thread }))?;
+            crate::queries::lease_new_job(tx, &run.to_string(), "worker", 0, 60_000)?;
+            Ok(())
+        })
+        .unwrap();
+}
+
 #[test]
-fn a_waiter_is_behind_the_other_threads_that_go_first() {
+fn a_waiter_is_behind_only_its_own_run_in_that_thread_not_its_other_threads() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
     employee(&db(dir.path()));
     let waiters = |thread: &'static str, now: i64| store.read(move |c| inbox::waiters(c, thread, now)).unwrap();
     assert!(waiters("ticket:a", 100).is_empty(), "nobody waits");
 
-    // Thread b first (two items, one run), then a: Ann is behind b.
-    item(&store, "ticket:b", 0, None);
+    // Thread b is queued first and a run of Ann goes in thread c: neither holds a back.
     item(&store, "ticket:b", 0, None);
     item(&store, "ticket:a", 0, None);
+    going(&store, "ticket:c");
     let found = waiters("ticket:a", 100);
-    assert_eq!((found.len(), found[0].employee_name.as_str(), found[0].behind, found[0].reason.as_deref()), (1, "Ann", 1, None));
-    assert_eq!(waiters("ticket:b", 100)[0].behind, 0, "nothing before it");
+    assert_eq!((found.len(), found[0].employee_name.as_str(), found[0].behind, found[0].reason.as_deref()), (1, "Ann", 0, None));
 
-    // An item held for a usage limit says so, and is not in front of anyone.
-    item(&store, "ticket:c", 500, Some("quota"));
-    let found = waiters("ticket:c", 100);
-    assert_eq!(found[0].reason.as_deref(), Some("limit"));
-    assert_eq!(found[0].behind, 2, "b and a go first");
-    assert_eq!(waiters("ticket:a", 100)[0].behind, 1, "c does not count: it is not due");
+    // A run of Ann going in thread a itself goes first.
+    going(&store, "ticket:a");
+    assert_eq!(waiters("ticket:a", 100)[0].behind, 1, "its run in this thread");
+    assert_eq!(waiters("ticket:b", 100)[0].behind, 0, "another thread runs alongside");
+
+    // An item held for a usage limit says so.
+    item(&store, "ticket:d", 500, Some("quota"));
+    let found = waiters("ticket:d", 100);
+    assert_eq!((found[0].reason.as_deref(), found[0].behind), (Some("limit"), 0));
 }

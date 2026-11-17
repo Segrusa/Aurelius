@@ -996,7 +996,7 @@ fn run_duration(ms: i64) -> String {
 /// going there. Call it before the run for the message is queued. The line is a
 /// `Limit` system line with its own words, so old clients show it as it is.
 fn busy_notices(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str, (employee, name): (EmployeeId, &str), w: &Wake<'_>) -> Result<Vec<EventNotice>, StorageError> {
-    let Some(since) = conv::employee_going_since(tx, employee)? else { return Ok(Vec::new()) };
+    let Some(since) = conv::employee_going_in_thread_since(tx, employee, &thread_key(w.discussion))? else { return Ok(Vec::new()) };
     let for_how_long = since.map_or_else(|| "just started".to_owned(), |at| run_duration(aurelius_storage::now_ms() - at));
     let quick = quick_answer(tx, store, meta, correlation, (employee, name), w, &for_how_long)?;
     let text = match quick {
