@@ -696,7 +696,7 @@ fn run_ended_waiting(conn: &Connection, run: RunId) -> Result<bool, StorageError
 /// Every tool call of `run` (`run.get_activity`), each cut as `conversation.get` cuts it.
 pub fn activity_for_run(conn: &Connection, run: RunId) -> Result<aurelius_domain::views::RunActivity, StorageError> {
     let mut stmt = conn.prepare(
-        "SELECT call_id, tool, input_json, output, ok, text_offset, message_id FROM run_activity WHERE run_id = ?1 ORDER BY started_at_ms, rowid",
+        "SELECT call_id, tool, input_json, output, ok, text_offset, message_id, parent_call_id FROM run_activity WHERE run_id = ?1 ORDER BY started_at_ms, rowid",
     )?;
     let rows = stmt.query_map([run.to_string()], |r| {
         Ok((
@@ -709,6 +709,7 @@ pub fn activity_for_run(conn: &Connection, run: RunId) -> Result<aurelius_domain
                 offset: r.get::<_, i64>(5)?.max(0) as u32,
                 truncated: false,
                 output_bytes: None,
+                parent_call_id: r.get(7)?,
             },
             r.get::<_, String>(6)?,
         ))
@@ -736,7 +737,7 @@ pub(crate) fn has_edit_columns(conn: &Connection) -> Result<bool, StorageError> 
 /// Tool use during one answer, in order.
 pub fn activity_for_message(conn: &Connection, message: MessageId) -> Result<Vec<aurelius_domain::views::ActivityView>, StorageError> {
     let mut stmt = conn.prepare(
-        "SELECT call_id, tool, input_json, output, ok, text_offset FROM run_activity WHERE message_id = ?1 ORDER BY started_at_ms, rowid",
+        "SELECT call_id, tool, input_json, output, ok, text_offset, parent_call_id FROM run_activity WHERE message_id = ?1 ORDER BY started_at_ms, rowid",
     )?;
     let rows = stmt.query_map([message.to_string()], |r| {
         Ok(aurelius_domain::views::ActivityView {
@@ -748,6 +749,7 @@ pub fn activity_for_message(conn: &Connection, message: MessageId) -> Result<Vec
             offset: r.get::<_, i64>(5)?.max(0) as u32,
             truncated: false,
             output_bytes: None,
+            parent_call_id: r.get(6)?,
         })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -757,7 +759,7 @@ pub fn activity_for_message(conn: &Connection, message: MessageId) -> Result<Vec
 pub fn activity_call(conn: &Connection, message: MessageId, call_id: &str) -> Result<Option<aurelius_domain::views::ActivityView>, StorageError> {
     Ok(conn
         .query_row(
-            "SELECT call_id, tool, input_json, output, ok, text_offset FROM run_activity WHERE message_id = ?1 AND call_id = ?2 LIMIT 1",
+            "SELECT call_id, tool, input_json, output, ok, text_offset, parent_call_id FROM run_activity WHERE message_id = ?1 AND call_id = ?2 LIMIT 1",
             params![message.to_string(), call_id],
             |r| {
                 Ok(aurelius_domain::views::ActivityView {
@@ -769,6 +771,7 @@ pub fn activity_call(conn: &Connection, message: MessageId, call_id: &str) -> Re
                     offset: r.get::<_, i64>(5)?.max(0) as u32,
                     truncated: false,
                     output_bytes: None,
+                    parent_call_id: r.get(6)?,
                 })
             },
         )

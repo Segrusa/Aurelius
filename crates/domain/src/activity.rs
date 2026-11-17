@@ -52,7 +52,7 @@ mod tests {
     use super::*;
 
     fn call(input: serde_json::Value, output: Option<&str>) -> ActivityView {
-        ActivityView { call_id: "1".into(), tool: "Write".into(), input, output: output.map(str::to_owned), ok: Some(true), offset: 0, truncated: false, output_bytes: None }
+        ActivityView { call_id: "1".into(), tool: "Write".into(), input, output: output.map(str::to_owned), ok: Some(true), offset: 0, truncated: false, output_bytes: None, parent_call_id: None }
     }
 
     #[test]

@@ -413,6 +413,11 @@ pub mod feature {
     /// `WorkSessionView::dispatch` says where it is. A client without this feature
     /// asks for an employee when a session starts.
     pub const SESSION_DISPATCH: &str = "session_dispatch";
+    /// Every step of a running subagent (protocol 5, additive): `AgentView::call_id`
+    /// names its `Task`/`Agent` call and `ActivityView::parent_call_id` the subagent
+    /// behind a call, so `run.get_activity` shows what one subagent did. A client
+    /// without this feature shows only its latest step.
+    pub const SUBAGENT_STEPS: &str = "subagent_steps";
 }
 
 /// Every feature this build has.
@@ -467,6 +472,7 @@ pub const FEATURES: &[&str] = &[
     feature::SESSION_DISPATCH,
     feature::TICKET_HISTORY,
     feature::CHAT_FILES,
+    feature::SUBAGENT_STEPS,
 ];
 
 /// Daemon → client.

@@ -355,6 +355,11 @@ pub struct AgentView {
     pub doing: Option<String>,
     /// A subagent: how many tools it used so far.
     pub steps: u32,
+    /// A subagent: the `Task`/`Agent` call that started it, so its steps can be
+    /// picked out of `run.get_activity` by `ActivityView::parent_call_id`
+    /// (feature `subagent_steps`). Older servers leave it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -1128,6 +1133,11 @@ pub struct ActivityView {
     /// The whole output's length in bytes, when `output` was shortened.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_bytes: Option<u32>,
+    /// The `Task`/`Agent` call of the subagent that made this call (its
+    /// `AgentView::call_id`); none for the employee's own calls (feature
+    /// `subagent_steps`). Older servers leave it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_call_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

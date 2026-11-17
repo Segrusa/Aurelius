@@ -147,7 +147,7 @@ mod tests {
     fn activity_is_kept_until_it_changes() {
         let mut r = Rebuild::default();
         let id = MessageId::new();
-        let tool = ActivityView { call_id: "1".into(), tool: "Bash".into(), input: serde_json::json!({}), output: None, ok: None, offset: 0, truncated: false, output_bytes: None };
+        let tool = ActivityView { call_id: "1".into(), tool: "Bash".into(), input: serde_json::json!({}), output: None, ok: None, offset: 0, truncated: false, output_bytes: None, parent_call_id: None };
         let mut first = append(id, 0, "a");
         first.activity = Some(vec![tool.clone()]);
         r.apply(first);
@@ -155,7 +155,7 @@ mod tests {
     }
 
     fn call(id: &str, ok: Option<bool>) -> ActivityView {
-        ActivityView { call_id: id.into(), tool: "Bash".into(), input: serde_json::json!({}), output: None, ok, offset: 0, truncated: false, output_bytes: None }
+        ActivityView { call_id: id.into(), tool: "Bash".into(), input: serde_json::json!({}), output: None, ok, offset: 0, truncated: false, output_bytes: None, parent_call_id: None }
     }
 
     fn update(id: MessageId, activity: Vec<ActivityView>, activity_changes: bool) -> StreamDelta {

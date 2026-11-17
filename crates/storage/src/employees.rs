@@ -405,6 +405,7 @@ fn subagents_of_run(conn: &Connection, run: &str, conversation_id: Option<Conver
             prompt: input["prompt"].as_str().map(|p| shorten(p, 600)),
             doing: latest.map(|(tool, input)| step_line(&tool, &serde_json::from_str(&input).unwrap_or_default())),
             steps,
+            call_id: Some(call),
         });
     }
     Ok(out)
