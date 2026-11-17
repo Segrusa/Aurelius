@@ -141,6 +141,12 @@ export interface ActivityView {
    */
   output_bytes?: number | null;
   /**
+   * The `Task`/`Agent` call of the subagent that made this call (its
+   * `AgentView::call_id`); none for the employee's own calls (feature
+   * `subagent_steps`). Older servers leave it out.
+   */
+  parent_call_id?: string | null;
+  /**
    * The runtime's tool name, e.g. "Bash", "Edit", "WebSearch".
    */
   tool: string;
@@ -235,6 +241,12 @@ export type AgentMode =
  * One agent at work for an employee.
  */
 export interface AgentView {
+  /**
+   * A subagent: the `Task`/`Agent` call that started it, so its steps can be
+   * picked out of `run.get_activity` by `ActivityView::parent_call_id`
+   * (feature `subagent_steps`). Older servers leave it out.
+   */
+  call_id?: string | null;
   /**
    * The employee's conversation this work shows in (a chat, or the task's).
    */
