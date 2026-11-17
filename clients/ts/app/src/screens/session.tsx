@@ -21,9 +21,9 @@ import { EmployeeChat } from "./employee-chat";
 import { MODE_LABELS, MODES } from "./employee-logic";
 import { lastRunOf, usageTotals } from "./run-logic";
 import { FilesWritten, RunAside, RunGuidelines, SideProperties, SideRow, UsageTotalsLine } from "./run-side";
-import { SubagentsAtWork } from "./run-tools";
 import { chooserText, runChange, runChipLabel, sessionFolder, sessionPlace, sessionStatus } from "./session-logic";
 import { modelName } from "./settings-kit";
+import { SubagentsAtWork } from "./subagents";
 import { filesWritten } from "./tasks-logic";
 
 const styles = stylex.create({

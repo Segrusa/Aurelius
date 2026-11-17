@@ -40,12 +40,12 @@ import {
   LoadBanner,
   MarkdownChips,
   RunMenu,
-  SubagentsAtWork,
   TraceLink,
   UsageChip,
   useRetryAnswer,
 } from "./run-tools";
 import { modelName } from "./settings-kit";
+import { SubagentsAtWork } from "./subagents";
 import { filesWritten, isActive, stepLine, stepsOf, subtasksOf, taskStateLine } from "./tasks-logic";
 
 const styles = stylex.create({

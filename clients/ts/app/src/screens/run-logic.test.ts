@@ -10,6 +10,7 @@ import {
   markdownPaths,
   screenshotId,
   subagentDoingText,
+  subagentSteps,
   usageLine,
   usageTotals,
   waitingText,
@@ -20,6 +21,19 @@ describe("run texts", () => {
     expect(subagentDoingText({ doing: null, steps: 0 })).toBe("Starting…");
     expect(subagentDoingText({ doing: "Grep · poll", steps: 1 })).toBe("Grep · poll · 1 step");
     expect(subagentDoingText({ doing: "Bash · sleep 90", steps: 3 })).toBe("Bash · sleep 90 · 3 steps");
+  });
+
+  it("picks one subagent's own steps out of the run, in order", () => {
+    const calls: { call_id: string; parent_call_id?: string }[] = [
+      { call_id: "a1" },
+      { call_id: "s1", parent_call_id: "a1" },
+      { call_id: "a2" },
+      { call_id: "t1", parent_call_id: "a2" },
+      { call_id: "s2", parent_call_id: "a1" },
+    ];
+    expect(subagentSteps(calls, "a1").map((c) => c.call_id)).toEqual(["s1", "s2"]);
+    expect(subagentSteps(calls, null)).toEqual([]);
+    expect(subagentSteps(calls.slice(0, 1), undefined)).toEqual([]);
   });
 
   it("finds markdown files, not web pages", () => {
