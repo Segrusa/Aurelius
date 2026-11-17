@@ -1380,6 +1380,43 @@ pub struct TraceSetting {
     pub keep_days: u32,
 }
 
+/// The threshold when a board member never chose one.
+pub const COMPACT_THRESHOLD_DEFAULT: u64 = 120_000;
+/// The lowest threshold a board member may choose: below it a session would
+/// compact on almost every turn, since the system text alone is tens of thousands of tokens.
+pub const COMPACT_THRESHOLD_MIN: u64 = 20_000;
+/// The highest threshold a board member may choose: the largest context window
+/// Claude Code runs with. Above the model's own window Claude Code compacts by itself.
+pub const COMPACT_THRESHOLD_MAX: u64 = 1_000_000;
+
+/// `compaction.get_setting` / `compaction.set_threshold` (feature `compaction_setting`):
+/// above how many tokens of context a conversation's session is compacted before its
+/// next turn. The limits travel along so a client needs no copy of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CompactionSetting {
+    /// The threshold in tokens; 0: never compacted by Aurelius (Claude Code still
+    /// compacts by itself when its context window is full).
+    pub threshold_tokens: u64,
+    pub default_tokens: u64,
+    pub min_tokens: u64,
+    pub max_tokens: u64,
+}
+
+impl CompactionSetting {
+    /// The setting with this threshold and the server's limits.
+    pub fn of(threshold_tokens: u64) -> Self {
+        Self { threshold_tokens, default_tokens: COMPACT_THRESHOLD_DEFAULT, min_tokens: COMPACT_THRESHOLD_MIN, max_tokens: COMPACT_THRESHOLD_MAX }
+    }
+}
+
+/// A threshold a board member chose: 0 (never) or between the limits.
+pub fn valid_compact_threshold(tokens: u64) -> Result<u64, crate::DomainError> {
+    if tokens == 0 || (COMPACT_THRESHOLD_MIN..=COMPACT_THRESHOLD_MAX).contains(&tokens) {
+        return Ok(tokens);
+    }
+    Err(crate::DomainError::OutOfRange { field: "threshold_tokens".into(), detail: format!("0 (never) or {COMPACT_THRESHOLD_MIN} to {COMPACT_THRESHOLD_MAX} tokens") })
+}
+
 /// Where an employee's effective model or effort comes from (`employee.run_overview`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -1669,6 +1706,16 @@ pub struct ProposalsSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_compact_threshold_is_never_or_within_the_limits() {
+        assert_eq!(valid_compact_threshold(0), Ok(0));
+        assert_eq!(valid_compact_threshold(COMPACT_THRESHOLD_MIN), Ok(COMPACT_THRESHOLD_MIN));
+        assert_eq!(valid_compact_threshold(400_000), Ok(400_000));
+        assert_eq!(valid_compact_threshold(COMPACT_THRESHOLD_MAX), Ok(COMPACT_THRESHOLD_MAX));
+        assert!(valid_compact_threshold(COMPACT_THRESHOLD_MIN - 1).is_err());
+        assert!(valid_compact_threshold(COMPACT_THRESHOLD_MAX + 1).is_err());
+    }
 
     #[test]
     fn a_ticket_channel_is_named_by_number_and_a_lowercase_slug() {

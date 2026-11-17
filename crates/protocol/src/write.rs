@@ -114,6 +114,10 @@ pub enum HostWrite {
     /// that starts afterwards. On by default.
     #[serde(rename = "management_mode.set_enabled")]
     ManagementModeSetEnabled { enabled: bool },
+    /// Above how many tokens of context a session is compacted before its next turn
+    /// (feature `compaction_setting`), from the next run on; 0: never.
+    #[serde(rename = "compaction.set_threshold")]
+    CompactionSetThreshold { threshold_tokens: u64 },
     /// Auto-allow of the safe read-only tools on or off, from the next tool call. On by default.
     #[serde(rename = "auto_allow.set_enabled")]
     AutoAllowSetEnabled { enabled: bool },
@@ -345,6 +349,7 @@ impl HostWrite {
         "browser.set",
         "browser.set_backend",
         "management_mode.set_enabled",
+        "compaction.set_threshold",
         "auto_allow.set_enabled",
         "trace.set_enabled",
         "notification.mark_all_read",
@@ -413,6 +418,7 @@ pub enum HostResult {
     ManagementModeSetting(ManagementModeSetting),
     AutoAllowSetting(AutoAllowSetting),
     TraceSetting(TraceSetting),
+    CompactionSetting(CompactionSetting),
     Backups(BackupsSnapshot),
     Exported { markdown_path: String, json_path: String },
     Power(PowerState),

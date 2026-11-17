@@ -1149,6 +1149,16 @@ impl Client {
         self.host(HostWrite::ManagementModeSetEnabled { enabled }, done!(ManagementModeSetting)).await
     }
 
+    /// Above how many tokens a session is compacted (feature `compaction_setting`).
+    pub async fn compaction_setting(&self) -> Result<aurelius_protocol::CompactionSetting, ClientError> {
+        self.read(Method::CompactionGetSetting, body!(CompactionSetting)).await
+    }
+
+    /// Choose above how many tokens a session is compacted (0: never); needs the Approve right.
+    pub async fn set_compact_threshold(&self, threshold_tokens: u64) -> Result<aurelius_protocol::CompactionSetting, ClientError> {
+        self.host(HostWrite::CompactionSetThreshold { threshold_tokens }, done!(CompactionSetting)).await
+    }
+
     /// Whether the safe read-only tools pass without a question, and which they are.
     pub async fn auto_allow_setting(&self) -> Result<aurelius_protocol::AutoAllowSetting, ClientError> {
         self.read(Method::AutoAllowGetSetting, body!(AutoAllowSetting)).await

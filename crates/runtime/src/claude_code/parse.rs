@@ -140,6 +140,12 @@ impl StreamState {
                 }
                 Ok(events)
             }
+            // Compacting starts ("compacting") and ends (a `compact_result`); other statuses say nothing.
+            "system" if value["subtype"] == "status" => Ok(match (value["status"].as_str(), value.get("compact_result")) {
+                (Some("compacting"), _) => vec![RuntimeEvent::Compacting(true)],
+                (_, Some(_)) => vec![RuntimeEvent::Compacting(false)],
+                _ => Vec::new(),
+            }),
             // The session was compacted (CLI 2.1.303: after `/compact`, also on --resume).
             "system" if value["subtype"] == "compact_boundary" => {
                 let meta = &value["compact_metadata"];
@@ -431,14 +437,21 @@ mod tests {
     fn a_compaction_reports_its_sizes() {
         // As Claude Code 2.1.303 answers `/compact` on a resumed session (probe 2026-10-19).
         let mut s = StreamState::default();
-        assert!(s.feed(r#"{"type":"system","subtype":"status","status":"compacting","session_id":"s1"}"#).unwrap().is_empty());
-        assert!(s.feed(r#"{"type":"system","subtype":"status","status":null,"compact_result":"success","session_id":"s1"}"#).unwrap().is_empty());
+        assert_eq!(s.feed(r#"{"type":"system","subtype":"status","status":"compacting","session_id":"s1"}"#).unwrap(), vec![RuntimeEvent::Compacting(true)]);
+        assert_eq!(s.feed(r#"{"type":"system","subtype":"status","status":null,"compact_result":"success","session_id":"s1"}"#).unwrap(), vec![RuntimeEvent::Compacting(false)]);
         s.feed(INIT).unwrap();
         let boundary = r#"{"type":"system","subtype":"compact_boundary","session_id":"s1","compact_metadata":{"trigger":"manual","pre_tokens":34747,"post_tokens":5059}}"#;
         assert_eq!(s.feed(boundary).unwrap(), vec![RuntimeEvent::Compacted { pre_tokens: 34747, post_tokens: 5059 }]);
         assert!(s.feed(r#"{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"},"isReplay":true}"#).unwrap().is_empty());
         let done = s.feed(r#"{"type":"result","subtype":"success","is_error":false,"num_turns":0,"result":"","total_cost_usd":0.0068,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}"#).unwrap();
         assert_eq!(done.last(), Some(&RuntimeEvent::Completed));
+    }
+
+    #[test]
+    fn a_status_other_than_compacting_says_nothing() {
+        let mut s = StreamState::default();
+        assert!(s.feed(r#"{"type":"system","subtype":"status","status":"requesting","session_id":"s1"}"#).unwrap().is_empty());
+        assert!(s.feed(r#"{"type":"system","subtype":"status","status":null,"session_id":"s1"}"#).unwrap().is_empty());
     }
 
     #[test]

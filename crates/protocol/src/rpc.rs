@@ -413,6 +413,11 @@ pub mod feature {
     /// `WorkSessionView::dispatch` says where it is. A client without this feature
     /// asks for an employee when a session starts.
     pub const SESSION_DISPATCH: &str = "session_dispatch";
+    /// A board member chooses above how many tokens a session is compacted:
+    /// `compaction.get_setting` / `compaction.set_threshold` (`CompactionSetting`).
+    /// Claude Code compacting by itself during a turn shows too: `RunProgress::compacting`
+    /// while it works and a `compacted` update afterwards. Older servers keep 120k.
+    pub const COMPACTION_SETTING: &str = "compaction_setting";
 }
 
 /// Every feature this build has.
@@ -467,6 +472,7 @@ pub const FEATURES: &[&str] = &[
     feature::SESSION_DISPATCH,
     feature::TICKET_HISTORY,
     feature::CHAT_FILES,
+    feature::COMPACTION_SETTING,
 ];
 
 /// Daemon → client.
@@ -643,6 +649,7 @@ pub enum ResponseBody {
     Browser(BrowserSetting),
     ManagementModeSetting(ManagementModeSetting),
     AutoAllowSetting(AutoAllowSetting),
+    CompactionSetting(CompactionSetting),
     McpServers(McpServers),
     McpLogin(McpLogin),
     McpAlwaysAllow(McpAlwaysAllow),

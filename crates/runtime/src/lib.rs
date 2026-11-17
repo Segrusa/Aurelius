@@ -182,6 +182,9 @@ pub enum RuntimeEvent {
     /// recorded as usage (that is `Usage`). Exact per finished message, estimated
     /// (characters / 4) while a message streams.
     Progress { output_tokens: u64 },
+    /// The runtime starts (true) or stops (false) compacting the session's context:
+    /// asked with `/compact`, or on its own in the middle of a turn. Display only.
+    Compacting(bool),
     /// The runtime compacted the session's context (asked with `/compact`, or on its
     /// own when it ran full): about this many tokens before and after.
     Compacted { pre_tokens: u64, post_tokens: u64 },
