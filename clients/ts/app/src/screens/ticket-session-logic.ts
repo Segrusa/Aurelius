@@ -179,3 +179,9 @@ export function gateKeyAllowed(focused: { tagName: string; value?: string } | nu
   if (!focused || (focused.tagName !== "TEXTAREA" && focused.tagName !== "INPUT")) return true;
   return (focused.value ?? "").trim() === "";
 }
+
+/** The first `#N` a line names (a system line, the "→ #N" chip), so its link opens the session directly. */
+export function ticketNumberIn(text: string): number | null {
+  const n = /#(\d+)/.exec(text)?.[1];
+  return n ? Number(n) : null;
+}

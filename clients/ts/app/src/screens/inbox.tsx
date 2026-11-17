@@ -47,6 +47,7 @@ import { Confirm, Loading, Page, PageHead, Problem } from "./org-kit";
 import { lastFailure } from "./run-logic";
 import { useRetryAnswer } from "./run-tools";
 import { TicketDecision } from "./ticket-panel";
+import { ticketPlace } from "./ticket-session-logic";
 import { NoConnectionNote, useNoConnection, useTicketNeeds } from "./tickets-kit";
 import { guidelineProposalsIn, narrow } from "./workspace-logic";
 
@@ -412,7 +413,10 @@ function NotificationDetail({ row, n }: { row: InboxRow; n: NotificationView }) 
     const inDiscussion = n.reason === "mention" || n.reason === "sent_back";
     if (n.message_id && hostId && follow && (!n.ticket_id || inDiscussion) && features.includes("message_locate")) {
       follow(messageLink(hostId, n.message_id));
-    } else if (n.ticket_id) void navigate({ to: "/board", search: { ticket: n.ticket_id } });
+    } else if (n.ticket_id)
+      void navigate(
+        ticketPlace({ id: n.ticket_id, number: n.ticket_number }, n.message_id ? { message: n.message_id } : undefined),
+      );
     else if (n.task_id) void navigate({ to: "/tasks/$taskId", params: { taskId: n.task_id } });
     else if (n.conversation_id) void navigate({ to: "/chat", search: { channel: n.conversation_id } });
   };
@@ -457,7 +461,7 @@ function TaskDetail({ row, task }: { row: InboxRow; task: TaskView }) {
   const connection = useConnection();
   const ticketId = task.ticket_id ?? null;
   const open = () => {
-    if (ticketId) void navigate({ to: "/board", search: { ticket: ticketId } });
+    if (ticketId) void navigate(ticketPlace({ id: ticketId, number: task.ticket_number }));
     else void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } });
   };
   useAction("OpenSelected", open);

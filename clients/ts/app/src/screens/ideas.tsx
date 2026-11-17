@@ -34,6 +34,7 @@ import {
 } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { FileChips } from "./run-tools";
+import { ticketPlace } from "./ticket-session-logic";
 
 const PAGE = 100;
 const TITLE_LIMIT = 160;
@@ -380,7 +381,10 @@ export function IdeasBody({ projectId, chrome = true }: { projectId: string | nu
             {selected.note ? <p {...stylex.props(styles.noteText)}>{selected.note}</p> : null}
             <FileChips files={selected.attachments ?? []} />
             {selected.ticket_id ? (
-              <Link to="/board" search={{ ticket: selected.ticket_id }} {...stylex.props(styles.link)}>
+              <Link
+                {...ticketPlace({ id: selected.ticket_id, number: selected.ticket_number })}
+                {...stylex.props(styles.link)}
+              >
                 Open ticket{selected.ticket_number ? ` #${selected.ticket_number}` : ""}
               </Link>
             ) : null}

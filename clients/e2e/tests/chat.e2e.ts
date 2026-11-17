@@ -32,13 +32,20 @@ const writesOf = (writes: Record<string, unknown>[], method: string) => writes.f
 test.describe("scripted", () => {
   test("channels, drafts and sending", async ({ page }) => {
     const { writes, stop } = await open(page, {
-      channels: [general, alpha, channel("t", "#21-screens", { kind: "ticket", ticket_number: 21, archived: true })],
+      // A ticket's channel is never listed: the ticket opens as its session (ticket #70).
+      channels: [
+        general,
+        alpha,
+        channel("t", "#21-screens", { kind: "ticket", ticket_number: 21, archived: true }),
+        channel("x", "gone", { archived: true }),
+      ],
       feeds: {
         general: feed("g", [
           message("m1", "user", "Morning all", { author_user: { id: "u", username: "Sam", created_at_ms: 0 } }),
         ]),
         a: feed("a", []),
         t: feed("t", []),
+        x: feed("x", []),
       },
       refuse: (w) =>
         (w.params as { text?: string }).text === "key abc"
@@ -87,9 +94,10 @@ test.describe("scripted", () => {
         .toMatchObject({ text: "key abc", confirm_secret: true });
 
       // Read-only says why.
-      await page.getByRole("button", { name: /Archived/ }).click();
-      await page.getByRole("button", { name: /Ticket 21/ }).click();
-      await expect(page.getByText("#21 is archived · read-only.")).toBeVisible();
+      await expect(page.getByRole("button", { name: /Ticket 21/ })).toHaveCount(0);
+      await page.getByRole("button", { name: /Archived \(1\)/ }).click();
+      await page.getByRole("button", { name: /^gone/ }).click();
+      await expect(page.getByText("This project is archived · read-only.")).toBeVisible();
       await expect(bottom(page)).toHaveCount(0);
     } finally {
       await stop();
@@ -268,7 +276,7 @@ test.describe("scripted", () => {
     }
   });
 
-  test("a ticket's chat keeps the todo list, open tasks and an overview beside the talk", async ({ page }) => {
+  test("a ticket's session keeps the todo list, open tasks and its properties beside the talk", async ({ page }) => {
     const todos = [
       { content: "Find the causes", activeForm: "Finding the causes", status: "completed" },
       { content: "Fix the prompt", activeForm: "Fixing the prompt", status: "in_progress" },
@@ -322,16 +330,17 @@ test.describe("scripted", () => {
       // The posts stay words only.
       await expect(page.getByRole("article").getByText("Fixing the prompt")).toHaveCount(0);
 
-      const panel = page.getByRole("complementary", { name: "Ticket overview" });
+      // The old channel link opened the ticket's session; its properties replace the overview.
+      await expect(page).toHaveURL(/\/ticket\/21$/);
+      const panel = page.getByRole("complementary", { name: "Ticket properties" });
       await expect(panel).toContainText("quick/ticket-21");
-      await expect(panel.getByRole("link", { name: /Read the code/ })).toBeVisible();
-      await panel.getByRole("button", { name: "Close overview" }).click();
+      await expect(panel.getByRole("button", { name: /Read the code/ })).toBeVisible();
+      await page.getByRole("button", { name: "Hide ticket properties" }).click();
       await expect(panel).toHaveCount(0);
-      await page.getByRole("button", { name: "Overview" }).click();
+      await page.getByRole("button", { name: "Show ticket properties" }).click();
       await expect(panel).toBeVisible();
 
       await expect(card.getByRole("button", { name: /Working: Flux, Fiona/ })).toBeVisible();
-      await expect(panel).toContainText("Working: Flux, Fiona");
       await card.getByRole("button", { name: /Working/ }).click();
       await expect(card.getByRole("list", { name: "Todo list" })).toHaveCount(0);
       await expect(card).toContainText("Fixing the prompt");

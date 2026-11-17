@@ -6,8 +6,9 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useR
 import { useConnection, useLinkState } from "../connection";
 import { usePlatform } from "../platform";
 import { toast } from "../ui/toast";
-import { type AppLink, INVALID_LINK, NOT_PAIRED, OLD_SERVER, parseLink } from "./links-logic";
+import { type AppLink, INVALID_LINK, linkedTicket, NOT_PAIRED, OLD_SERVER, parseLink } from "./links-logic";
 import { Confirm } from "./org-kit";
+import { ticketPlace } from "./ticket-session-logic";
 
 const FollowContext = createContext<((url: string) => void) | null>(null);
 
@@ -24,7 +25,9 @@ export function LinkFollower({ children }: { children: ReactNode }) {
   const go = useCallback(
     async (link: AppLink) => {
       if (link.kind === "ticket") {
-        void navigate({ to: "/board", search: { ticket: link.id } });
+        // A number since ticket #70; an older link has the id, which the Board's redirect resolves.
+        const which = linkedTicket(link.id);
+        void navigate(ticketPlace("number" in which ? { id: "", number: which.number } : { id: which.id }));
         return;
       }
       if (!features.includes("message_locate")) {

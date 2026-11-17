@@ -83,7 +83,7 @@ const board = createRoute({
     return (
       <>
         {ticket ? <TicketRedirect ticketId={ticket} /> : null}
-        <BoardScreen ticket={undefined} />
+        <BoardScreen />
       </>
     );
   },

@@ -52,6 +52,7 @@ import {
 import { Empty, Loading, Page, PageHead } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { LAST_QUICK, quickEnabled } from "./quick-logic";
+import { ticketPlace } from "./ticket-session-logic";
 import { NoConnectionNote, useNoConnection } from "./tickets-kit";
 
 const NARROW = "@media (max-width: 720px)";
@@ -406,7 +407,7 @@ export function NewSessionScreen() {
               <button
                 key={t.id}
                 type="button"
-                onClick={() => void navigate({ to: "/board", search: { ticket: t.id } })}
+                onClick={() => void navigate(ticketPlace(t))}
                 {...stylex.props(styles.row)}
               >
                 <span aria-hidden="true" {...stylex.props(styles.muted)}>

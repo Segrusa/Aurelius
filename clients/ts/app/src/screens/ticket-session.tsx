@@ -526,6 +526,23 @@ function Head({
   );
 }
 
+/**
+ * The compact session in the chat popout (O2): the same timeline, progress, gate and composer rules
+ * in the narrow column, without a head or side panel. None until the ticket is read.
+ */
+export function useCompactSession(ticketId: string): SessionSlots | undefined {
+  const detail = useTicket(ticketId);
+  const t = detail.data?.ticket;
+  if (!t || !detail.data) return undefined;
+  return {
+    gate: <TicketGate detail={detail.data} t={t} narrow />,
+    readOnly: readOnly(t, null),
+    readOnlyText: readOnlyBar({ ticket_number: t.number }, t.column === "done"),
+    placeholder: composerPlaceholder(t),
+    hint: composerHint(t),
+  };
+}
+
 /** The decision of the moment, right above the composer: the column's gate, or what the column says. */
 export function TicketGate({ detail, t, narrow = false }: { detail: TicketDetail; t: TicketView; narrow?: boolean }) {
   const { status } = useLinkState();

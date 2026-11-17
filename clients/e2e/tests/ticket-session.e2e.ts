@@ -321,6 +321,36 @@ test.describe("a ticket's session", () => {
     await expect(list.getByRole("button", { name: /Archived/ })).toHaveCount(0);
   });
 
+  test("a Board card and a Team chat search hit open the session", async ({ page }) => {
+    const world: World = {
+      tickets: { t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }) },
+      feeds: { general: feedOf("g", []), d70: feedOf("d70", []) },
+    };
+    const script = scripted(world);
+    await scriptServer(
+      page,
+      plus(script, {
+        reads: {
+          ...script.reads,
+          "channel.search": () => ({
+            type: "channels",
+            value: { channels: [ticketChannel("d70", 70, "doing")] },
+          }),
+        },
+      }),
+    );
+    await page.goto(`${site.origin}/board`);
+    await page.getByRole("button", { name: /#70 A ticket opens/ }).click();
+    await expect(page).toHaveURL(/\/ticket\/70$/);
+    // Board stays the place it came from in the sidebar.
+    await expect(page.getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
+
+    await page.goto(`${site.origin}/chat`);
+    await page.getByLabel("Search channels").fill("70");
+    await page.getByRole("button", { name: "Ticket 70, A ticket opens as its own session" }).click();
+    await expect(page).toHaveURL(/\/ticket\/70$/);
+  });
+
   test("an unknown number says so", async ({ page }) => {
     await scriptServer(page, scripted({ tickets: {}, feeds: {} }));
     await page.goto(`${site.origin}/ticket/9999`);

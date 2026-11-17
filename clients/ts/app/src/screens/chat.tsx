@@ -15,7 +15,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
-import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket } from "../data";
+import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket, useTickets } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { AttachmentTray, usePromptAttachments } from "../ui/attach";
@@ -71,6 +71,7 @@ import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
 import { OVERVIEW_KEY, OverviewPanel, ProgressCard, useTicketProgress } from "./ticket-overview";
+import { ticketPlace } from "./ticket-session-logic";
 import { ColumnGlyph } from "./tickets-kit";
 import { homeChannel, narrow } from "./workspace-logic";
 
@@ -454,6 +455,25 @@ function ChannelRow({ c, on, onOpen }: { c: ChannelView; on: boolean; onOpen: (c
   );
 }
 
+/** A search hit on a ticket: it opens the ticket's session, not a channel (TS-06). */
+function TicketResult({ c, title }: { c: ChannelView; title: string | null }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      aria-label={`Ticket ${c.ticket_number ?? ""}, ${title ?? bareName(c)}`}
+      onClick={() => void navigate(ticketPlace({ id: c.ticket_id ?? "", number: c.ticket_number }))}
+      {...stylex.props(styles.channelRow)}
+    >
+      {c.ticket_column ? <ColumnGlyph kind={c.ticket_column} /> : <span {...stylex.props(styles.hash)}>#</span>}
+      <span {...stylex.props(styles.channelName)}>
+        {c.ticket_number ? `#${c.ticket_number} ` : ""}
+        {title ?? bareName(c)}
+      </span>
+    </button>
+  );
+}
+
 function ChannelList({
   channels,
   open,
@@ -498,9 +518,15 @@ function ChannelList({
   const eyebrow = stylex.props(styles.eyebrow);
   const more = stylex.props(styles.more);
   const group = stylex.props(styles.listGroup);
-  const row = (c: ChannelView) => (
-    <ChannelRow key={c.conversation_id} c={c} on={c.conversation_id === openId} onOpen={onOpen} />
-  );
+  // Only a search shows tickets; their titles come from the tickets read the palette uses too.
+  const tickets = useTickets(found?.some((c) => c.kind === "ticket") === true);
+  const titleOf = (id: string | null | undefined) => tickets.data?.find((t) => t.id === id)?.title ?? null;
+  const row = (c: ChannelView) =>
+    c.kind === "ticket" ? (
+      <TicketResult key={c.conversation_id} c={c} title={titleOf(c.ticket_id)} />
+    ) : (
+      <ChannelRow key={c.conversation_id} c={c} on={c.conversation_id === openId} onOpen={onOpen} />
+    );
   return (
     <section aria-label="Channels" {...stylex.props(styles.list)}>
       <TextInput
@@ -1318,7 +1344,7 @@ function ChannelBody({
                     : `You and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`}
             </span>
             {c?.ticket_id ? (
-              <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.openTicket)}>
+              <Link {...ticketPlace({ id: c.ticket_id, number: c.ticket_number })} {...stylex.props(styles.openTicket)}>
                 Open ticket ↗
               </Link>
             ) : null}
@@ -1434,7 +1460,10 @@ function ChannelBody({
                 </span>
                 {session?.readOnlyEnd}
                 {c?.ticket_id && !embedded && !session ? (
-                  <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.readOnlyLink)}>
+                  <Link
+                    {...ticketPlace({ id: c.ticket_id, number: c.ticket_number })}
+                    {...stylex.props(styles.readOnlyLink)}
+                  >
                     Open ticket
                   </Link>
                 ) : null}

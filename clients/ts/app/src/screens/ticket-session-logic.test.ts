@@ -13,6 +13,7 @@ import {
   resolveNumber,
   sessionRedirect,
   ticketConversations,
+  ticketNumberIn,
   ticketPlace,
   ticketUsage,
 } from "./ticket-session-logic";
@@ -299,5 +300,13 @@ describe("gateKeyAllowed", () => {
     expect(gateKeyAllowed({ tagName: "TEXTAREA", value: "" })).toBe(true);
     expect(gateKeyAllowed({ tagName: "TEXTAREA", value: "please also" })).toBe(false);
     expect(gateKeyAllowed({ tagName: "INPUT", value: "x" })).toBe(false);
+  });
+});
+
+describe("ticketNumberIn", () => {
+  it("reads the number a line names, for a link straight to the session", () => {
+    expect(ticketNumberIn("Sam opened #12 Fix the login")).toBe(12);
+    expect(ticketNumberIn("#7")).toBe(7);
+    expect(ticketNumberIn("a ticket")).toBeNull();
   });
 });

@@ -274,9 +274,10 @@ for (const theme of ["dark", "light"] as const) {
         await page.getByRole("navigation").first().waitFor();
         await shoot(route.replaceAll("/", "-"));
       }
+      // A ticket opens as its session (ticket #70); the old Board link redirects to it.
       await page.goto(`${site.origin}/board?ticket=t1`);
       await page.getByText("In review · your decision").waitFor();
-      await shoot("ticket-panel");
+      await shoot("ticket-session");
       await page.goto(`${site.origin}/board`);
       await page.getByRole("button", { name: /^Workspace: / }).click();
       await page.getByRole("menuitem", { name: "Northwind API" }).waitFor();

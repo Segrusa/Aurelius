@@ -24,7 +24,7 @@ async function drag(page: Page, from: Locator, to: Locator) {
 const nav = (page: Page, name: string) =>
   page.getByRole("navigation").getByRole("link", { name, exact: false }).first().click();
 
-test("the board and the ticket panel against a real daemon", async () => {
+test("the board and a ticket's session against a real daemon", async () => {
   const daemon = new TestDaemon();
   await daemon.start();
   const profile = mkdtempSync(join(tmpdir(), "aurelius-electron-"));
@@ -100,18 +100,20 @@ test("the board and the ticket panel against a real daemon", async () => {
     await drag(page, card("Second ticket"), page.getByRole("region", { name: "Todo" }));
     await until("started", async () => ((await read()).todo as string[]).includes("Second ticket"));
     await expect(backlog.getByText("Second ticket")).toHaveCount(0);
+    // A card opens the ticket's session (ticket #70): the decision above the composer.
     await card("Second ticket").click();
-    const panel = page.getByRole("complementary", { name: /Second ticket/ });
-    await expect(panel.getByText("No dispatcher is set. Choose an employee.")).toBeVisible();
+    const gate = page.getByRole("region", { name: "Your decision" });
+    await expect(gate.getByText("No dispatcher is set. Choose an employee.")).toBeVisible();
 
-    // Edit in place.
-    await panel.getByRole("button", { name: "Edit Title" }).click();
-    await panel.getByLabel("Title").fill("Second ticket, renamed");
+    // Edit the title in place, in the session's head.
+    const head = page.locator("header[data-titlebar]").filter({ hasText: "Second ticket" });
+    await head.getByRole("button", { name: "Edit Title" }).click();
+    await head.getByLabel("Title").fill("Second ticket, renamed");
     await page.keyboard.press("Enter");
     await until("renamed", async () => ((await read()).todo as string[]).includes("Second ticket, renamed"));
 
-    // The discussion lives in the chat, not in the panel; the activity tells what happened.
-    await expect(panel.getByRole("tab", { name: /Discussion/ })).toHaveCount(0);
+    // The talk is the session's timeline; the activity tells what happened.
+    const panel = page.getByRole("complementary", { name: "Ticket properties" });
     await panel.getByRole("tab", { name: "Activity" }).click();
     await expect(panel.getByText("Nothing happened yet.")).toHaveCount(0);
 
@@ -126,10 +128,9 @@ test("the board and the ticket panel against a real daemon", async () => {
     const none = "00000000-0000-7000-8000-000000000001";
     expect(expectBody(await server.call("run.get_activity", { run_id: none }), "run_activity").value.calls).toEqual([]);
 
-    // Back closes the panel.
-    await page.getByRole("heading", { name: "Board" }).click();
-    await page.keyboard.press("Escape");
-    await expect(panel).toHaveCount(0);
+    // Back to the Board for the keyboard moves.
+    await nav(page, "Board");
+    await expect(card("First ticket")).toBeVisible();
 
     // By keyboard: pick up with Space, move with the arrows, drop with Space.
     await card("First ticket").focus();
@@ -266,8 +267,10 @@ test.describe("states a test daemon cannot produce", () => {
     await nav(page, "Board");
     const card = (name: string) => page.getByRole("button", { name: new RegExp(`#\\d+ ${name}`) });
 
+    // A card opens the ticket's session (ticket #70); its gate sits above the composer.
     await card("Screenshots in review").click();
-    const review = page.getByRole("complementary", { name: /Screenshots in review/ });
+    await expect(page).toHaveURL(/\/ticket\/21$/);
+    const review = page.getByRole("region", { name: "Your decision" });
     await expect(review.getByText("In review · your decision")).toBeVisible();
     await expect(review.getByText("All")).toBeVisible();
     // Send back needs feedback.
@@ -282,9 +285,13 @@ test.describe("states a test daemon cannot produce", () => {
     await review.getByRole("button", { name: "Mark done" }).click();
     await expect.poll(() => writes.some((w) => w.method === "ticket.accept")).toBe(true);
 
+    await nav(page, "Board");
     await card("A plan to read").click();
-    const plan = page.getByRole("complementary", { name: /A plan to read/ });
+    await expect(page).toHaveURL(/\/ticket\/22$/);
+    const plan = page.getByRole("region", { name: "Your decision" });
     await expect(plan.getByText("First the migration.")).toBeVisible();
+    // In the session the note opens on the first press; the second asks for it.
+    await plan.getByRole("button", { name: "Request changes" }).click();
     await plan.getByRole("button", { name: "Request changes" }).click();
     await expect(plan.getByText("Write what needs to change.")).toBeVisible();
     await plan.getByRole("button", { name: "Approve", exact: true }).click();
@@ -294,7 +301,7 @@ test.describe("states a test daemon cannot produce", () => {
     await plan.getByRole("button", { name: "Reject" }).click();
     await expect(page.getByRole("dialog", { name: "Reject the plan of #22?" })).toBeVisible();
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await nav(page, "Board");
 
     // In review → Doing asks what needs to change.
     await drag(page, card("Screenshots in review"), page.getByRole("region", { name: "Doing" }));
@@ -466,14 +473,13 @@ test.describe("states a test daemon cannot produce", () => {
     });
     await page.goto(site.origin);
     await nav(page, "Board");
+    // The card opens the ticket's session: what its runs used is in its head.
     await page.getByRole("button", { name: /#\d+ Still at work/ }).click();
-    const panel = page.getByRole("complementary", { name: /Still at work/ });
-    await expect(panel.getByText("Tokens in")).toBeVisible();
-    await expect(panel.getByText("9k", { exact: true })).toBeVisible();
-    await expect(panel.getByText("$0.12", { exact: true })).toBeVisible();
+    const head = page.locator("header[data-titlebar]").filter({ hasText: "Still at work" });
+    await expect(head.getByText("Tokens in")).toBeVisible();
+    await expect(head.getByText("9k", { exact: true })).toBeVisible();
+    await expect(head.getByText("$0.12", { exact: true })).toBeVisible();
 
-    // The panel has no discussion: it is the ticket's channel in the chat.
-    await expect(panel.getByRole("tab", { name: /Discussion/ })).toHaveCount(0);
     await page.goto(`${site.origin}/chat?channel=d3`);
     const chat = page.getByRole("main");
     // A discussion is a chat: that someone is at work, and how to stop it, but not what they ran.
@@ -569,7 +575,8 @@ test.describe("states a test daemon cannot produce", () => {
     await page.getByRole("button", { name: "Stop run" }).click();
     await expect.poll(() => writes.find((w) => w.method === "run.stop")?.params).toMatchObject({ run_id: "r3" });
     await page.getByRole("link", { name: "#23", exact: true }).click();
-    await expect(page.getByRole("complementary", { name: /Still at work/ })).toBeVisible();
+    await expect(page).toHaveURL(/\/ticket\/23$/);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Still at work");
   });
 
   test("a session shows the same properties as a task's run", async ({ page }) => {

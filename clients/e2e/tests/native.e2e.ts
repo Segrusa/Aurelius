@@ -185,8 +185,9 @@ test("a link from the operating system opens in the running app; a project gets 
 
     // A second program gives its link to the first and ends.
     expect(await second(`aurelius://${host}/ticket/${ticket.id}`)).toBe(0);
-    await expect(page).toHaveURL(/\/board\?ticket=/);
-    await expect(page.getByRole("complementary", { name: /From a link/ })).toBeVisible();
+    // An old link (with the id) still opens the ticket: its session, at /ticket/N (ticket #70).
+    await expect(page).toHaveURL(/\/ticket\/\d+$/);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("From a link");
 
     await second("aurelius://nonsense");
     await expect(
