@@ -33,7 +33,7 @@ import {
   summaryShown,
 } from "./history-logic";
 import { failureOf, Hint, Loading, Page, Problem } from "./org-kit";
-import { TicketPanel } from "./ticket-panel";
+import { ticketPlace } from "./ticket-session-logic";
 import { useTicketWrite } from "./tickets-kit";
 
 const ALL = "all";
@@ -164,14 +164,14 @@ function Row({
 }: {
   entry: HistoryEntry;
   selected: boolean;
-  onOpen: (id: string) => void;
+  onOpen: (entry: HistoryEntry) => void;
   retry: (id: string) => void;
 }) {
   const time = new Date(entry.done_at_ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   return (
     <div {...stylex.props(styles.row, selected && styles.rowOn)}>
       <div {...stylex.props(styles.top)}>
-        <button type="button" onClick={() => onOpen(entry.ticket_id)} {...stylex.props(styles.open)}>
+        <button type="button" onClick={() => onOpen(entry)} {...stylex.props(styles.open)}>
           <span {...stylex.props(styles.number)}>#{entry.number}</span>
           <span {...stylex.props(styles.name)}>{entry.title}</span>
         </button>
@@ -201,10 +201,9 @@ export function HistoryScreen({ filters }: { filters: HistoryFilters }) {
     const merged: Record<string, string | undefined> = { ...filters, ...part };
     go(Object.fromEntries(Object.entries(merged).filter(([, v]) => v !== undefined)) as HistoryFilters);
   };
-  const { ticket: _open, ...withoutTicket } = filters;
-  const open = (id: string) => go({ ...filters, ticket: id });
-  const close = () => go(withoutTicket);
-  const clear = () => go(filters.ticket ? { ticket: filters.ticket } : {});
+  // A ticket opens as its session (ticket #70).
+  const open = (entry: HistoryEntry) => void navigate(ticketPlace({ id: entry.ticket_id, number: entry.number }));
+  const clear = () => go({});
   const retry = (id: string) => void write("ticket.retry_summary", { ticket_id: id });
 
   const [typed, setTyped] = useState(filters.q ?? "");
@@ -233,7 +232,6 @@ export function HistoryScreen({ filters }: { filters: HistoryFilters }) {
         <div {...stylex.props(styles.fill)}>
           <Layout
             height="fill"
-            end={filters.ticket ? <TicketPanel key={filters.ticket} id={filters.ticket} onClose={close} /> : null}
             content={
               <LayoutContent isScrollable={false} padding={0}>
                 <div {...stylex.props(styles.scroll)}>

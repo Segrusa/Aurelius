@@ -25,6 +25,7 @@ import {
   todoTally,
   workingLine,
 } from "./ticket-overview-logic";
+import { ticketPlace } from "./ticket-session-logic";
 import { ColumnGlyph } from "./tickets-kit";
 
 const styles = stylex.create({
@@ -421,8 +422,8 @@ export function OverviewPanel({ p, onClose }: { p: TicketProgress; onClose: () =
       ) : null}
       <Section title="Links">
         <div {...stylex.props(styles.links)}>
-          <Link to="/board" search={{ ticket: t.id }} {...stylex.props(styles.link)}>
-            Open ticket on the board
+          <Link {...ticketPlace(t)} {...stylex.props(styles.link)}>
+            Open ticket
           </Link>
           {p.rootId ? (
             <Link to="/tasks/$taskId" params={{ taskId: p.rootId }} {...stylex.props(styles.link)}>

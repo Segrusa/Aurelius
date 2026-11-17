@@ -1,11 +1,16 @@
 // What the chat popout lists and where it stays out of the way. Pure, so it is tested without a screen.
 
 import type { ChannelView, EmployeeChatView, EmployeeSummary, TicketView } from "@aurelius/protocol";
-import { bareName, sections } from "./chat-logic";
+import { bareName, sections, ticketChannels } from "./chat-logic";
 
 /** Where a chat already fills the screen: a popout next to it adds nothing. */
 export function dockAway(pathname: string): boolean {
-  return pathname === "/chat" || pathname.startsWith("/chat/") || pathname.startsWith("/talk/");
+  return (
+    pathname === "/chat" ||
+    pathname.startsWith("/chat/") ||
+    pathname.startsWith("/talk/") ||
+    pathname.startsWith("/ticket/")
+  );
 }
 
 /** Where a message box sits in the corner the launcher would cover. */
@@ -34,6 +39,8 @@ export function dockChats(chats: EmployeeChatView[], employees: EmployeeSummary[
 export interface DockTicket {
   conversation: string;
   ticketId: string;
+  /** For "Open full screen": the ticket's session. */
+  number: number | null;
   title: string;
   /** "Doing · Pixel". */
   line: string;
@@ -51,7 +58,7 @@ export function dockTickets(
   search: string,
 ): DockTicket[] {
   const wanted = search.trim().toLowerCase();
-  const all = sections(channels).tickets.flatMap((c): DockTicket[] => {
+  const all = ticketChannels(channels).flatMap((c): DockTicket[] => {
     if (!c.ticket_id) return [];
     const ticket = tickets.find((t) => t.id === c.ticket_id);
     const number = c.ticket_number == null ? "" : `#${c.ticket_number} `;
@@ -62,6 +69,7 @@ export function dockTickets(
       {
         conversation: c.conversation_id,
         ticketId: c.ticket_id,
+        number: c.ticket_number ?? null,
         title: `${number}${ticket?.title ?? bareName(c)}`,
         line: [column, ticket?.owner_name].filter(Boolean).join(" · "),
         unread: c.unread,

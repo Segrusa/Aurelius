@@ -31,7 +31,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useBoard, useCompany, useEmployees, useMembers } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
@@ -52,7 +52,6 @@ import {
   type Needs,
   type OwnerFilter,
   type ResponsibleFilter,
-  scrollToShow,
   shownCards,
 } from "./board-logic";
 import { Held, useSend } from "./dialogs";
@@ -68,8 +67,9 @@ import {
   kindFilterOptions,
   quickEnabled,
 } from "./quick-logic";
-import { ConfirmDialog, TicketPanel } from "./ticket-panel";
+import { ConfirmDialog } from "./ticket-panel";
 import { TicketRows } from "./ticket-rows";
+import { ticketPlace } from "./ticket-session-logic";
 import {
   ColumnGlyph,
   NeedsTag,
@@ -225,7 +225,6 @@ const styles = stylex.create({
     paddingInline: 12,
   },
   // Room behind the last column, so that with the panel open it can start the row as well.
-  lastStop: { width: 248, flexShrink: 0 },
   hidden: { display: "flex", width: 170, flexShrink: 0, flexDirection: "column", gap: 4, paddingInline: 6 },
   hiddenHead: {
     display: "flex",
@@ -561,7 +560,7 @@ function SendBackDialog({ t, onClose }: { t: TicketView; onClose: () => void }) 
 
 type Pending = { kind: "send_back" | "mark_done" | "back_to_backlog" | "reject"; ticket: TicketView } | null;
 
-export function BoardScreen({ ticket, projectId }: { ticket: string | undefined; projectId?: string }) {
+export function BoardScreen({ projectId }: { projectId?: string }) {
   useKeyContext("Board");
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -605,29 +604,6 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
       ),
     [board.data, testing, tester],
   );
-  // The panel takes room from the board: the opened card stays in view, also on a link straight to a ticket.
-  useEffect(() => {
-    if (!ticket || !board.isSuccess) return;
-    const frame = requestAnimationFrame(() => {
-      const card = document.querySelector<HTMLElement>(`[data-card="${ticket}"]`);
-      const row = card?.closest<HTMLElement>("[data-board-columns]");
-      if (!card || !row) return;
-      const edge = row.getBoundingClientRect().left;
-      const first = row.firstElementChild?.getBoundingClientRect().left ?? edge;
-      const stops = [...row.children].map((c) => c.getBoundingClientRect().left - first);
-      const box = card.getBoundingClientRect();
-      const inRow = (x: number) => x - edge + row.scrollLeft;
-      // A plain scrollIntoView stops wherever the card just fits: that left Backlog half behind the sidebar.
-      row.scrollLeft = scrollToShow(
-        { start: inRow(box.left), end: inRow(box.right) },
-        stops,
-        row.scrollLeft,
-        row.clientWidth,
-      );
-      card.scrollIntoView({ inline: "nearest", block: "nearest" });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [ticket, board.isSuccess]);
   const quickOn = quickEnabled(features);
   // A server without quick tasks has no filter for them: every ticket shows.
   const kind: KindFilter = quickOn ? kindFilter : "all";
@@ -639,8 +615,8 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
     () => columns.map((c) => ({ ...c, ...shownCards(c.column.kind, c.tickets, filter, doneAll) })),
     [columns, filter, doneAll],
   );
-  const open = (id: string) => void navigate({ to: "/board", search: { ticket: id } });
-  const close = () => void navigate({ to: "/board", search: {} });
+  // A card opens its ticket's session (ticket #70; O1: straight to it).
+  const open = (id: string) => void navigate(ticketPlace({ id, number: all.find((x) => x.id === id)?.number }));
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, {
@@ -719,7 +695,7 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
     const here =
       document.activeElement instanceof HTMLElement && document.activeElement.dataset.card
         ? document.activeElement
-        : (cards.find((c) => c.dataset.card === ticket) ?? null);
+        : null;
     if (!here) return cards[0]?.focus();
     if (step === "next" || step === "prev") {
       const same = cards.filter((c) => c.dataset.column === here.dataset.column);
@@ -747,7 +723,7 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
     setCardMenuOpen(true);
   }, []);
   const copyLink = (t: TicketView) =>
-    void platform.copy(ticketLink(hostId ?? "", t.id)).then(() => toast("Link copied."));
+    void platform.copy(ticketLink(hostId ?? "", String(t.number))).then(() => toast("Link copied."));
   const pickFromMenu = (t: TicketView, key: string) => {
     if (key === "open") open(t.id);
     else if (key === "start") void write("ticket.start", { ticket_id: t.id }, { done: `${ticketNumber(t)} started.` });
@@ -973,7 +949,6 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
         <div {...stylex.props(styles.fill)}>
           <Layout
             height="fill"
-            end={ticket ? <TicketPanel key={ticket} id={ticket} onClose={close} /> : null}
             content={
               <LayoutContent isScrollable={false} padding={0}>
                 {board.error ? (
@@ -985,7 +960,7 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
                     <TicketRows
                       tickets={shown.flatMap((c) => c.cards)}
                       columnName={columnName}
-                      selected={ticket}
+                      selected={undefined}
                       needs={need.needs}
                       mine={need.mine}
                       onOpen={open}
@@ -1011,7 +986,7 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
                             total={c.cards.length + c.older}
                             need={need.needs}
                             mine={need.mine}
-                            selected={ticket}
+                            selected={undefined}
                             onOpen={open}
                             onMenu={openMenu}
                             onShowOlder={() => setDoneAll(true)}
@@ -1036,7 +1011,6 @@ export function BoardScreen({ ticket, projectId }: { ticket: string | undefined;
                             ))}
                         </div>
                       ) : null}
-                      {ticket ? <div aria-hidden {...stylex.props(styles.lastStop)} /> : null}
                     </div>
                     <DragOverlay dropAnimation={null}>
                       {active ? (

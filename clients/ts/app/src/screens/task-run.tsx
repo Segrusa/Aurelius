@@ -40,12 +40,12 @@ import {
   LoadBanner,
   MarkdownChips,
   RunMenu,
-  SubagentsAtWork,
   TraceLink,
   UsageChip,
   useRetryAnswer,
 } from "./run-tools";
 import { modelName } from "./settings-kit";
+import { SubagentsAtWork } from "./subagents";
 import { filesWritten, isActive, stepLine, stepsOf, subtasksOf, taskStateLine } from "./tasks-logic";
 
 const styles = stylex.create({
@@ -574,7 +574,11 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
           ) : null}
           {task.ticket_id ? (
             <>
-              <Link href={`/board?ticket=${task.ticket_id}`} color="inherit" xstyle={styles.ticketLink}>
+              <Link
+                href={task.ticket_number ? `/ticket/${task.ticket_number}` : `/board?ticket=${task.ticket_id}`}
+                color="inherit"
+                xstyle={styles.ticketLink}
+              >
                 #{task.ticket_number}
               </Link>
               <span {...stylex.props(styles.chevron)}>›</span>

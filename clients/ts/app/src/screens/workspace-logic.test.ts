@@ -138,6 +138,8 @@ describe("switching under an open screen", () => {
     expect(pathAfterSwitch("/board", "atlas")).toBe("/board");
     expect(pathAfterSwitch("/chat", "atlas")).toBe("/chat");
     expect(pathAfterSwitch("/tasks/k1", "atlas")).toBe("/tasks");
+    // A ticket's session is of one project: the Board of the new workspace instead.
+    expect(pathAfterSwitch("/ticket/70", "atlas")).toBe("/board");
   });
 
   it("follows the settings page of a workspace", () => {

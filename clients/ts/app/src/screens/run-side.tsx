@@ -22,6 +22,10 @@ const styles = stylex.create({
     backgroundColor: "var(--precision-sunk)",
     padding: 18,
   },
+  // A ticket's panel holds text to edit, so it may be a little wider.
+  wide: { width: "clamp(280px, 28%, 380px)" },
+  // As an overlay sheet on a narrow window: no border of its own, the whole sheet.
+  sheet: { display: "flex", width: "100%", minHeight: "100%", borderLeftWidth: 0, padding: 0 },
   title: { marginTop: 0, marginBottom: 8, fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
   section: {
     borderTopWidth: 1,
@@ -47,10 +51,24 @@ const styles = stylex.create({
   usage: { fontSize: 12, lineHeight: 1.7, color: "var(--precision-text3)" },
 });
 
-/** The panel itself, right of the conversation; hidden on a narrow window. */
-export function RunAside({ label, children }: { label: string; children: ReactNode }) {
+/** The panel itself, right of the conversation; hidden on a narrow window, unless it is that window's sheet. */
+export function RunAside({
+  label,
+  children,
+  id,
+  wide = false,
+  sheet = false,
+}: {
+  label: string;
+  children: ReactNode;
+  id?: string;
+  /** A ticket's properties (ticket #70). */
+  wide?: boolean;
+  /** Inside the overlay sheet of a narrow window. */
+  sheet?: boolean;
+}) {
   return (
-    <aside aria-label={label} {...stylex.props(styles.aside)}>
+    <aside id={id} aria-label={label} {...stylex.props(styles.aside, wide && styles.wide, sheet && styles.sheet)}>
       {children}
     </aside>
   );
@@ -101,12 +119,12 @@ export function FilesWritten({ files }: { files: string[] }) {
 }
 
 /** The guidelines the server put in that run's system text (`run.guidelines`). */
-export function RunGuidelines({ runId }: { runId: string | null }) {
+export function RunGuidelines({ runId, title = "Guidelines in this run" }: { runId: string | null; title?: string }) {
   const guidelines = useRunGuidelines(runId);
   const list = guidelines.data?.guidelines ?? [];
   if (list.length === 0) return null;
   return (
-    <SideSection title="Guidelines in this run">
+    <SideSection title={title}>
       {list.map((g) => (
         <div key={g.guideline_id} {...stylex.props(styles.guideline)}>
           <span {...stylex.props(styles.truncate)}>{g.title}</span>

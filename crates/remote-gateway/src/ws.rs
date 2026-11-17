@@ -181,7 +181,7 @@ mod tests {
     }
 
     fn tool(call: &str, ok: Option<bool>) -> ActivityView {
-        ActivityView { call_id: call.into(), tool: "Bash".into(), input: serde_json::json!({ "command": "ls" }), output: None, ok, offset: 3, truncated: false, output_bytes: None }
+        ActivityView { call_id: call.into(), tool: "Bash".into(), input: serde_json::json!({ "command": "ls" }), output: None, ok, offset: 3, truncated: false, output_bytes: None, parent_call_id: None }
     }
 
     fn activity(message: ServerMessage) -> Option<Vec<ActivityView>> {

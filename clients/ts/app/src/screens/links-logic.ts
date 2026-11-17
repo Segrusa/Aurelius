@@ -25,3 +25,8 @@ export function parseLink(text: string): AppLink | null {
 
 export const ticketLink = (host: string, ticket: string) => `${SCHEME}${host}/ticket/${ticket}`;
 export const messageLink = (host: string, message: string) => `${SCHEME}${host}/message/${message}`;
+
+/** A ticket link's last part: a number since ticket #70, the ticket's id in an older link. */
+export function linkedTicket(id: string): { number: number } | { id: string } {
+  return /^\d+$/.test(id) ? { number: Number(id) } : { id };
+}

@@ -101,7 +101,7 @@ describe("the ticket a create made", () => {
   });
 
   it("opens on its channel in Chat, or on the Board when there is no channel", () => {
-    expect(createdTicketPlace("t-58", "c-58")).toEqual({ to: "/chat", search: { channel: "c-58" } });
+    expect(createdTicketPlace("t-58", 58)).toEqual({ to: "/ticket/$number", params: { number: "58" } });
     expect(createdTicketPlace("t-58", null)).toEqual({ to: "/board", search: { ticket: "t-58" } });
   });
 });

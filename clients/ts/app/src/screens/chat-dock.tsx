@@ -26,6 +26,8 @@ import {
 } from "./chat-dock-logic";
 import { bareName } from "./chat-logic";
 import { EmployeeChat, useChatOpener } from "./employee-chat";
+import { useCompactSession } from "./ticket-session";
+import { ticketPlace } from "./ticket-session-logic";
 import { narrow } from "./workspace-logic";
 
 const DOCK_KEY = "aurelius.chat-dock";
@@ -406,6 +408,7 @@ function OneTicket({
 }) {
   const navigate = useNavigate();
   const ticket = useDockTickets("").find((t) => t.ticketId === ticketId);
+  const session = useCompactSession(ticketId);
   return (
     <>
       <div {...stylex.props(styles.head)}>
@@ -430,7 +433,8 @@ function OneTicket({
           icon={<Icon name="expand" size={15} />}
           onClick={() => {
             onCollapse();
-            void navigate({ to: "/chat", search: { channel: conversation } });
+            // The full screen of a ticket is its session (ticket #70).
+            void navigate(ticketPlace({ id: ticketId, number: ticket?.number }));
           }}
         />
         <IconButton
@@ -443,7 +447,12 @@ function OneTicket({
         />
       </div>
       <div {...stylex.props(styles.chat)}>
-        <TicketChat key={conversation} conversationId={conversation} ticketId={ticketId} />
+        <TicketChat
+          key={conversation}
+          conversationId={conversation}
+          ticketId={ticketId}
+          {...(session ? { session } : {})}
+        />
       </div>
     </>
   );

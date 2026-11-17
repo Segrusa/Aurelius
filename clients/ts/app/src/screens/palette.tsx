@@ -23,6 +23,7 @@ import { useOpenNewSession } from "./new-session";
 import { overlays, useOpenOverlay } from "./overlays-store";
 import { filterGroups, type PaletteGroup, quickTaskCommands } from "./palette-logic";
 import { quickCreatable } from "./quick-logic";
+import { ticketPlace } from "./ticket-session-logic";
 import { useSwitchWorkspace } from "./workspace-kit";
 import { guidelinesIn, narrow, openProjects } from "./workspace-logic";
 
@@ -214,7 +215,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           label: `#${t.number} ${t.title}`,
           detail: [COLUMN[t.column] ?? t.column, t.owner_name].filter(Boolean).join(" · "),
           mark: t.id,
-          run: () => void navigate({ to: "/board", search: { ticket: t.id } }),
+          run: () => void navigate(ticketPlace(t)),
         })),
       },
       {
@@ -225,10 +226,11 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
           detail: "Team chat",
           mark: c.conversation_id,
           run: () =>
-            void navigate({
-              to: "/chat",
-              search: c.kind && c.kind !== "general" ? { channel: c.conversation_id } : {},
-            }),
+            void navigate(
+              c.kind === "ticket" && c.ticket_id
+                ? ticketPlace({ id: c.ticket_id, number: c.ticket_number })
+                : { to: "/chat", search: c.kind && c.kind !== "general" ? { channel: c.conversation_id } : {} },
+            ),
         })),
       },
       {

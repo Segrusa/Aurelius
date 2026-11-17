@@ -77,6 +77,7 @@ import { RunNote } from "./run-card";
 import { waitsOnReply } from "./run-card-logic";
 import { FileChips, KeptFiles, MarkdownChips, type RetryTarget, ScreenshotLink, useRetryAnswer } from "./run-tools";
 import { stepLine } from "./tasks-logic";
+import { ticketNumberIn, ticketPlace } from "./ticket-session-logic";
 
 const OUTPUT_LINES = 400;
 
@@ -851,7 +852,10 @@ function SystemRow({ m }: { m: MessageView }) {
             Open task →
           </Link>
         ) : line.ticket_id ? (
-          <Link to="/board" search={{ ticket: line.ticket_id }} {...stylex.props(styles.accentLink)}>
+          <Link
+            {...ticketPlace({ id: line.ticket_id, number: ticketNumberIn(text) })}
+            {...stylex.props(styles.accentLink)}
+          >
             Open ticket →
           </Link>
         ) : null}
@@ -1379,7 +1383,10 @@ export const MessageRow = memo(function MessageRow({
             {m.edited_at_ms && !m.deleted_at_ms ? <EditedLink id={m.id} /> : null}
             {made ? (
               made.ticket ? (
-                <Link to="/board" search={{ ticket: made.ticket }} {...stylex.props(styles.ticketChip)}>
+                <Link
+                  {...ticketPlace({ id: made.ticket, number: ticketNumberIn(made.label) })}
+                  {...stylex.props(styles.ticketChip)}
+                >
                   → {made.label}
                 </Link>
               ) : (

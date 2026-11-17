@@ -413,6 +413,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                             offset,
                             truncated: false,
                             output_bytes: None,
+                            parent_call_id: parent.clone(),
                         }));
                         let _ = blocking(move || s.service.record_activity_started(&p, &call_id, &tool, &input, parent.as_deref(), offset)).await;
                     }

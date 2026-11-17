@@ -213,6 +213,7 @@ final class ActivityView {
     this.ok,
     this.output,
     this.outputBytes,
+    this.parentCallId,
     required this.tool,
     this.truncated,
   });
@@ -227,6 +228,10 @@ final class ActivityView {
   final String? output;
   /// The whole output's length in bytes, when `output` was shortened.
   final int? outputBytes;
+  /// The `Task`/`Agent` call of the subagent that made this call (its
+  /// `AgentView::call_id`); none for the employee's own calls (feature
+  /// `subagent_steps`). Older servers leave it out.
+  final String? parentCallId;
   /// The runtime's tool name, e.g. "Bash", "Edit", "WebSearch".
   final String tool;
   /// `conversation.get` and live updates shorten the output and long strings
@@ -241,6 +246,7 @@ final class ActivityView {
     ok: (json['ok'] == null ? null : (json['ok'] as bool)),
     output: (json['output'] == null ? null : (json['output'] as String)),
     outputBytes: (json['output_bytes'] == null ? null : (json['output_bytes'] as num).toInt()),
+    parentCallId: (json['parent_call_id'] == null ? null : (json['parent_call_id'] as String)),
     tool: (json['tool'] as String),
     truncated: (json['truncated'] == null ? null : (json['truncated'] as bool)),
   );
@@ -252,6 +258,7 @@ final class ActivityView {
     if (ok != null) 'ok': ok,
     if (output != null) 'output': output,
     if (outputBytes != null) 'output_bytes': outputBytes,
+    if (parentCallId != null) 'parent_call_id': parentCallId,
     'tool': tool,
     if (truncated != null) 'truncated': truncated,
   };
@@ -427,6 +434,7 @@ enum AgentMode {
 /// One agent at work for an employee.
 final class AgentView {
   const AgentView({
+    this.callId,
     this.conversationId,
     required this.detail,
     this.doing,
@@ -439,6 +447,10 @@ final class AgentView {
     this.taskId,
   });
 
+  /// A subagent: the `Task`/`Agent` call that started it, so its steps can be
+  /// picked out of `run.get_activity` by `ActivityView::parent_call_id`
+  /// (feature `subagent_steps`). Older servers leave it out.
+  final String? callId;
   /// The employee's conversation this work shows in (a chat, or the task's).
   final String? conversationId;
   final String detail;
@@ -456,6 +468,7 @@ final class AgentView {
   final String? taskId;
 
   factory AgentView.fromJson(Map<String, dynamic> json) => AgentView(
+    callId: (json['call_id'] == null ? null : (json['call_id'] as String)),
     conversationId: (json['conversation_id'] == null ? null : (json['conversation_id'] as String)),
     detail: (json['detail'] as String),
     doing: (json['doing'] == null ? null : (json['doing'] as String)),
@@ -469,6 +482,7 @@ final class AgentView {
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+    if (callId != null) 'call_id': callId,
     if (conversationId != null) 'conversation_id': conversationId,
     'detail': detail,
     if (doing != null) 'doing': doing,

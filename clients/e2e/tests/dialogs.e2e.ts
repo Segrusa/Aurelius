@@ -27,11 +27,9 @@ test("a confirm dialog keeps its title and buttons away from its edge", async ({
   const site = await serveStatic(WEB_DIST);
   try {
     await scriptServer(page, script);
+    // The ticket's session: Backlog's Delete sits in the decision above the composer.
     await page.goto(`${site.origin}/board?ticket=t1`);
-    await page
-      .getByRole("complementary", { name: /Delete me/ })
-      .getByRole("button", { name: "Delete" })
-      .click();
+    await page.getByRole("region", { name: "Your decision" }).getByRole("button", { name: "Delete" }).click();
     const dialog = page.getByRole("dialog", { name: "Delete #30?" });
     await expect(dialog).toBeVisible();
     // It opens with a small scale, which would shrink what is measured.

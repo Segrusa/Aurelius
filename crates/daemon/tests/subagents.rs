@@ -11,7 +11,7 @@ use aurelius_domain::{
     project::CreateProject,
     task::CreateTask,
 };
-use aurelius_protocol::{AgentView, CommandResult};
+use aurelius_protocol::{AgentView, CommandResult, Method, ResponseBody};
 use aurelius_runtime::{Activity, AgentRuntime, RunHandle, RunRequest, RuntimeCapabilities, RuntimeError, RuntimeEvent, fake};
 use common::*;
 use std::sync::Arc;
@@ -123,6 +123,33 @@ async fn a_running_subagent_shows_what_it_was_asked_and_its_latest_step() {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
     panic!("the subagent still shows after it finished");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_step_of_a_running_subagent_is_found_by_its_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let _daemon = start_with(dir.path(), Arc::new(WithSubagent { release: release.clone() })).await;
+    let client = connect(dir.path()).await;
+    let (project_id, alex) = setup(&client).await;
+    let thread = start_task(&client, project_id, alex).await;
+    let mut seen = Vec::new();
+    for _ in 0..400 {
+        seen = own(&client, thread).await;
+        if seen.first().is_some_and(|a| a.steps == 2) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let [agent] = &seen[..] else { panic!("one subagent: {seen:?}") };
+    assert_eq!(agent.call_id.as_deref(), Some("agent1"));
+
+    let Ok(ResponseBody::RunActivity(activity)) = client.call(Method::RunGetActivity { run_id: agent.run_id.unwrap() }).await else { panic!("the run's activity") };
+    let steps: Vec<_> = activity.calls.iter().filter(|c| c.parent_call_id == agent.call_id).map(|c| (c.call_id.as_str(), c.tool.as_str())).collect();
+    assert_eq!(steps, [("s1", "Glob"), ("s2", "Grep")]);
+    let agent_call = activity.calls.iter().find(|c| c.call_id == "agent1").unwrap();
+    assert_eq!(agent_call.parent_call_id, None, "the employee's own call has no subagent behind it");
+    release.notify_waiters();
 }
 
 async fn own(client: &Client, conversation: ConversationId) -> Vec<AgentView> {

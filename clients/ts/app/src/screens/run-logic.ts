@@ -31,6 +31,15 @@ export function subagentDoingText(a: { doing?: string | null; steps: number }): 
   return `${a.doing} · ${a.steps} ${a.steps === 1 ? "step" : "steps"}`;
 }
 
+/** The calls one subagent made, in the order of the run (`subagent_steps`); none without its call. */
+export function subagentSteps<T extends { parent_call_id?: string | null }>(
+  calls: readonly T[],
+  callId: string | null | undefined,
+): T[] {
+  if (!callId) return [];
+  return calls.filter((c) => c.parent_call_id === callId);
+}
+
 /** Which subagent a row is; the server gives no id, its name and start time tell them apart. */
 export const subagentKey = (a: { name: string; since_ms: number }) => `${a.name}|${a.since_ms}`;
 

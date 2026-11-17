@@ -316,7 +316,7 @@ mod tests {
     use aurelius_domain::{ConversationId, RunId};
 
     fn call(id: &str, ok: Option<bool>) -> ActivityView {
-        ActivityView { call_id: id.into(), tool: "Bash".into(), input: serde_json::json!({}), output: ok.map(|_| "done".into()), ok, offset: 0, truncated: false, output_bytes: None }
+        ActivityView { call_id: id.into(), tool: "Bash".into(), input: serde_json::json!({}), output: ok.map(|_| "done".into()), ok, offset: 0, truncated: false, output_bytes: None, parent_call_id: None }
     }
 
     fn delta(message_id: MessageId, activity: Vec<ActivityView>) -> StreamDelta {

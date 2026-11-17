@@ -112,6 +112,7 @@ export function workspaceAfterOpening(current: Workspace, owner: string | null, 
 export function pathAfterSwitch(pathname: string, next: Workspace): string | null {
   if (pathname === "/board" || pathname === "/chat") return pathname;
   if (/^\/tasks\/[^/]+$/.test(pathname)) return "/tasks";
+  if (/^\/ticket\/[^/]+$/.test(pathname)) return "/board";
   if (/^\/projects\/[^/]+$/.test(pathname)) return next === null ? "/projects" : `/projects/${next}`;
   return null;
 }

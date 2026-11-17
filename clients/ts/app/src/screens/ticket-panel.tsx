@@ -73,6 +73,7 @@ import { lastFailure, lastSummaryFailed } from "./run-logic";
 import { FileChips, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
+import { gateKeyAllowed } from "./ticket-session-logic";
 import {
   ColumnGlyph,
   NoConnectionNote,
@@ -82,7 +83,7 @@ import {
   useTicketWrite,
 } from "./tickets-kit";
 
-const MODES: { key: string; label: string }[] = [
+export const MODES: { key: string; label: string }[] = [
   { key: "default", label: "Owner's default" },
   { key: "ask", label: "Ask" },
   { key: "accept_edits", label: "Accept edits" },
@@ -135,6 +136,8 @@ const styles = stylex.create({
   buttons: { display: "flex", flexWrap: "wrap", gap: 8 },
   buttonsCentered: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
   gateHead: { display: "flex", alignItems: "center", gap: 8, fontWeight: 500 },
+  gateTitle: { flexGrow: 1 },
+  clamped: { maxHeight: "calc(8 * 1.5em)", overflow: "hidden" },
   dot: { width: 7, height: 7, borderRadius: "50%", backgroundColor: "var(--color-text-warning)" },
   small: { fontSize: 12, color: "var(--color-text-secondary)" },
   secondary: { color: "var(--color-text-secondary)" },
@@ -224,11 +227,11 @@ const styles = stylex.create({
   taskState: { flexShrink: 0, fontSize: 12 },
 });
 
-function time(ms: number): string {
+export function time(ms: number): string {
   return new Date(ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
-function Box({ tone = "plain", children }: { tone?: "plain" | "amber" | "red"; children: ReactNode }) {
+export function Box({ tone = "plain", children }: { tone?: "plain" | "amber" | "red"; children: ReactNode }) {
   return (
     <div {...stylex.props(styles.box, tone === "amber" && styles.boxAmber, tone === "red" && styles.boxRed)}>
       {children}
@@ -236,7 +239,7 @@ function Box({ tone = "plain", children }: { tone?: "plain" | "amber" | "red"; c
   );
 }
 
-function Row({ name, children }: { name: string; children: ReactNode }) {
+export function Row({ name, children }: { name: string; children: ReactNode }) {
   return (
     <div {...stylex.props(styles.row)}>
       <span {...stylex.props(styles.third)}>{name}</span>
@@ -246,7 +249,7 @@ function Row({ name, children }: { name: string; children: ReactNode }) {
 }
 
 /** Text that turns into a field on a click. Saved with Enter or the button, left with Escape. */
-function Editable({
+export function Editable({
   value,
   enabled,
   multiline = false,
@@ -333,7 +336,7 @@ function Editable({
 }
 
 /** A ticket's design: only an Open link when it has one; "None" (click to edit) otherwise. */
-function DesignRow({
+export function DesignRow({
   url,
   enabled,
   onSave,
@@ -403,10 +406,12 @@ function Feedback({
   );
 }
 
-/** Enter stays "open"; deciding takes the stronger chord. */
+/** Enter stays "open"; deciding takes the stronger chord, never while it would send a filled field's words. */
 function GateKeys({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
   useKeyContext("Decision");
-  useAction("DecideYes", onYes);
+  useAction("DecideYes", () => {
+    if (gateKeyAllowed(document.activeElement as HTMLInputElement | null)) onYes();
+  });
   useAction("RejectApproval", onNo);
   return null;
 }
@@ -445,14 +450,20 @@ export function TicketDecision({ id }: { id: string }) {
   return null;
 }
 
-function ReviewGate({
+export function ReviewGate({
   keyed = false,
+  session = false,
   t,
   report,
   ready,
   whyNot,
 }: {
   keyed?: boolean;
+  /**
+   * In the ticket's session (ticket #70): the composer under it is the reply to the owner and the
+   * timeline above is the discussion, so neither button shows; the report folds.
+   */
+  session?: boolean;
   t: TicketView;
   report: string | null;
   ready: boolean;
@@ -472,7 +483,7 @@ function ReviewGate({
   const navigate = useNavigate();
   const { features } = useLinkState();
   // The discussion is the ticket's channel in the chat; an older server without ticket channels has none to open.
-  const discussion = useMessages(features.includes("ticket_channels") ? t.conversation_id : null);
+  const discussion = useMessages(features.includes("ticket_channels") && !session ? t.conversation_id : null);
   const lastMessage = (discussion.data?.messages ?? []).filter((m) => !m.deleted_at_ms).at(-1);
   const reply = (text: string) =>
     send(async (confirmSecret) => {
@@ -489,6 +500,7 @@ function ReviewGate({
       { done: quick ? `Merging ${ticketNumber(t)} into main…` : `${ticketNumber(t)} is Done.` },
     );
   const accept = acceptLabel(t);
+  const [open, toggle] = useGateOpen(session);
   return (
     <Box tone="amber">
       {keyed ? (
@@ -499,13 +511,16 @@ function ReviewGate({
           onNo={() => setMode("back")}
         />
       ) : null}
-      <div {...stylex.props(styles.gateHead)}>
-        <span {...stylex.props(styles.dot)} />
+      <GateHead session={session} open={open} onToggle={toggle}>
         In review · your decision
-      </div>
-      {too ? <span {...stylex.props(styles.small)}>{too}</span> : null}
-      {report ? (
-        <Markdown text={report} />
+      </GateHead>
+      {open && too ? <span {...stylex.props(styles.small)}>{too}</span> : null}
+      {!open ? null : report ? (
+        session ? (
+          <Clamped text={report} more="Show the whole report" />
+        ) : (
+          <Markdown text={report} />
+        )
       ) : (
         <span {...stylex.props(styles.secondary)}>No report text. See the conversation.</span>
       )}
@@ -534,23 +549,25 @@ function ReviewGate({
             </>
           ) : null}
         </Button>
-        <Button
-          label={`Reply to ${t.owner_name ?? "the owner"}`}
-          isDisabled={busy}
-          onClick={() => {
-            if (mode !== "reply") return setMode("reply");
-            if (feedback.trim() === "") return setMissing(true);
-            setMissing(false);
-            send(async (confirmSecret) => {
-              await connection.write("ticket.post", {
-                ticket_id: t.id,
-                text: feedback.trim(),
-                confirm_secret: confirmSecret,
+        {session ? null : (
+          <Button
+            label={`Reply to ${t.owner_name ?? "the owner"}`}
+            isDisabled={busy}
+            onClick={() => {
+              if (mode !== "reply") return setMode("reply");
+              if (feedback.trim() === "") return setMissing(true);
+              setMissing(false);
+              send(async (confirmSecret) => {
+                await connection.write("ticket.post", {
+                  ticket_id: t.id,
+                  text: feedback.trim(),
+                  confirm_secret: confirmSecret,
+                });
+                return "";
               });
-              return "";
-            });
-          }}
-        />
+            }}
+          />
+        )}
         <Button
           label="Send back to Doing"
           isDisabled={busy}
@@ -568,7 +585,7 @@ function ReviewGate({
             });
           }}
         />
-        {lastMessage ? (
+        {lastMessage && !session ? (
           <Button
             label="Open discussion"
             onClick={() =>
@@ -586,10 +603,23 @@ function ReviewGate({
   );
 }
 
-function PlanGate({ t, plan, keyed = false }: { t: TicketView; plan: string | null | undefined; keyed?: boolean }) {
+export function PlanGate({
+  t,
+  plan,
+  keyed = false,
+  session = false,
+}: {
+  t: TicketView;
+  plan: string | null | undefined;
+  keyed?: boolean;
+  /** In the ticket's session: the plan folds, and the note opens only when it is wanted. */
+  session?: boolean;
+}) {
   const connection = useConnection();
   const write = useTicketWrite();
   const [feedback, setFeedback] = useState("");
+  const [noting, setNoting] = useState(!session);
+  const [open, toggle] = useGateOpen(session);
   const [missing, setMissing] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const { busy, held, error, send, sendAnyway } = useSend((text) => {
@@ -606,27 +636,30 @@ function PlanGate({ t, plan, keyed = false }: { t: TicketView; plan: string | nu
   return (
     <Box tone="amber">
       {keyed ? <GateKeys onYes={() => void approve("approve")} onNo={() => setRejecting(true)} /> : null}
-      <div {...stylex.props(styles.gateHead)}>
-        <span {...stylex.props(styles.dot)} />
+      <GateHead session={session} open={open} onToggle={toggle}>
         Plan review · your decision
-      </div>
-      {too ? <span {...stylex.props(styles.small)}>{too}</span> : null}
-      {plan === undefined ? (
+      </GateHead>
+      {open && too ? <span {...stylex.props(styles.small)}>{too}</span> : null}
+      {!open ? null : plan === undefined ? (
         <Loading />
       ) : plan === null ? (
         <span {...stylex.props(styles.secondary)}>
           This agent did not write a plan of its own.{" "}
           {t.root_task_id ? <Link href={`/tasks/${t.root_task_id}`}>Read what it said →</Link> : null}
         </span>
+      ) : session ? (
+        <Clamped text={plan} more="Show the whole plan" />
       ) : (
         <Markdown text={plan} />
       )}
-      <Feedback
-        placeholder="Feedback (needed for Request changes)"
-        value={feedback}
-        onChange={setFeedback}
-        missing={missing}
-      />
+      {noting ? (
+        <Feedback
+          placeholder="Feedback (needed for Request changes)"
+          value={feedback}
+          onChange={setFeedback}
+          missing={missing}
+        />
+      ) : null}
       {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
       {error ? <Problem>{error}</Problem> : null}
       <div {...stylex.props(styles.buttons)}>
@@ -642,6 +675,7 @@ function PlanGate({ t, plan, keyed = false }: { t: TicketView; plan: string | nu
           label="Request changes"
           isDisabled={busy}
           onClick={() => {
+            if (!noting) return setNoting(true);
             if (feedback.trim() === "") return setMissing(true);
             setMissing(false);
             send(async (confirmSecret) => {
@@ -655,6 +689,7 @@ function PlanGate({ t, plan, keyed = false }: { t: TicketView; plan: string | nu
           }}
         />
         <Button label="Reject" variant="destructive" onClick={() => setRejecting(true)} />
+        {noting ? null : <Button variant="ghost" label="Add a note" onClick={() => setNoting(true)} />}
       </div>
       <ConfirmDialog
         open={rejecting}
@@ -667,6 +702,176 @@ function PlanGate({ t, plan, keyed = false }: { t: TicketView; plan: string | nu
       />
     </Box>
   );
+}
+
+/** Whether a gate shows its body; in the session it folds to its head and buttons, remembered. */
+const GATE_KEY = "ticket-session.gate.open";
+
+function useGateOpen(session: boolean): [boolean, () => void] {
+  const { storage } = usePlatform();
+  const [open, setOpen] = useState(() => !session || storage.get(GATE_KEY) !== "0");
+  return [
+    open,
+    () => {
+      storage.set(GATE_KEY, open ? "0" : "1");
+      setOpen(!open);
+    },
+  ];
+}
+
+function GateHead({
+  session,
+  open,
+  onToggle,
+  children,
+}: {
+  session: boolean;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div {...stylex.props(styles.gateHead)}>
+      <span {...stylex.props(styles.dot)} />
+      <span {...stylex.props(styles.gateTitle)}>{children}</span>
+      {session ? (
+        <IconButton
+          variant="ghost"
+          size="sm"
+          label={open ? "Fold the decision" : "Unfold the decision"}
+          aria-expanded={open}
+          icon={<Icon icon={open ? "chevronDown" : "chevronRight"} />}
+          onClick={onToggle}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** A long report or plan starts at eight lines; the rest on request. */
+function Clamped({ text, more }: { text: string; more: string }) {
+  const [all, setAll] = useState(false);
+  const long = text.split("\n").length > 8 || text.length > 640;
+  return (
+    <div {...stylex.props(styles.stack)}>
+      <div {...stylex.props(long && !all && styles.clamped)}>
+        <Markdown text={text} />
+      </div>
+      {long ? (
+        <button type="button" onClick={() => setAll(!all)} {...stylex.props(styles.designChange)}>
+          {all ? "Show less" : more}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** What the dispatcher does for a ticket in Todo without an owner, in words, and whether it is choosing. */
+export function useDispatcherLine(t: TicketView | undefined): { choosing: boolean; line: string | null } {
+  const list = useMemo(() => (t ? [t] : []), [t]);
+  const need = useTicketNeeds(list);
+  if (!t) return { choosing: false, line: null };
+  const dispatcher = need.dispatcher(t.project_id);
+  const choosing = need.choosing(t);
+  const name = dispatcher.kind === "project" || dispatcher.kind === "company" ? dispatcher.name : null;
+  const line = choosing
+    ? `${name ?? "The dispatcher"} is choosing an employee…`
+    : dispatcher.kind === "none"
+      ? "No dispatcher is set. Choose an employee."
+      : dispatcher.kind === "inactive"
+        ? `${dispatcher.name} is ${dispatcher.state}. Choose an employee.`
+        : `${dispatcher.name} could not choose. Choose an employee.`;
+  return { choosing, line };
+}
+
+/**
+ * A ticket's More menu: Move to, Follow, Responsible and Copy link, with the same writes and the
+ * quick task's confirmations as the board. `dialogs` must be rendered for those confirmations.
+ */
+export function useTicketMenu(
+  t: TicketView | undefined,
+  choosing: boolean,
+): { options: { key: string; label: string }[]; pick: (key: string) => void; dialogs: ReactNode } {
+  const platform = usePlatform();
+  const { hostId, features } = useLinkState();
+  const board = useBoard(null);
+  const members = useMembers();
+  const write = useTicketWrite();
+  const need = useTicketNeeds(useMemo(() => (t ? [t] : []), [t]));
+  // Done or Backlog of a quick task: merging and losing its branch are asked first.
+  const [asking, setAsking] = useState<"done" | "backlog" | null>(null);
+  if (!t) return { options: [], pick: () => undefined, dialogs: null };
+  const quick = isQuick(t);
+  const columns = (board.data?.columns ?? []).filter((c) => c.column.kind !== t.column);
+  const moves = columns.flatMap((c) => {
+    const effect = dropEffect(t.column, c.column.kind, choosing);
+    return effect.kind === "refused" ? [] : [{ key: c.column.kind, label: `Move to ${c.column.name}` }];
+  });
+  const move = (to: string) => {
+    const effect = dropEffect(t.column, to as TicketView["column"], choosing);
+    if (effect.kind === "start") void write("ticket.start", { ticket_id: t.id });
+    else if (quick && effect.kind === "back_to_backlog") setAsking("backlog");
+    else if (quick && effect.kind === "mark_done") setAsking("done");
+    else if (effect.kind === "back_to_backlog" || effect.kind === "reject")
+      void write("ticket.cancel", { ticket_id: t.id });
+    else if (effect.kind === "mark_done") void write("ticket.accept", { ticket_id: t.id });
+  };
+  const options = [
+    ...moves,
+    ...(features.includes("ticket_follow")
+      ? [
+          { key: "follow", label: "Follow" },
+          { key: "unfollow", label: "Unfollow" },
+        ]
+      : []),
+    ...(features.includes("ticket_responsible") && t.column !== "done"
+      ? [
+          t.responsible_user_id === need.me
+            ? { key: "responsible:none", label: "Remove me as responsible" }
+            : { key: "responsible", label: "Make me responsible" },
+          ...(members.data ?? [])
+            .filter((u) => !u.disabled_at_ms && u.id !== need.me && u.id !== t.responsible_user_id)
+            .map((u) => ({ key: `responsible:${u.id}`, label: `Responsible: ${u.username}` })),
+          ...(t.responsible_user_id && t.responsible_user_id !== need.me
+            ? [{ key: "responsible:none", label: "Responsible: no one" }]
+            : []),
+        ]
+      : []),
+    { key: "copy", label: "Copy link" },
+  ];
+  const pick = (key: string) => {
+    if (key === "follow" || key === "unfollow")
+      void write(
+        "ticket.follow",
+        { ticket_id: t.id, on: key === "follow" },
+        { done: key === "follow" ? "You follow this ticket." : "You don't follow this ticket any more." },
+      );
+    else if (key.startsWith("responsible:")) {
+      const who = key.slice("responsible:".length);
+      void write("ticket.set_responsible", { ticket_id: t.id, responsible_user_id: who === "none" ? null : who });
+    } else if (key === "responsible")
+      void write("ticket.set_responsible", { ticket_id: t.id, responsible_user_id: need.me });
+    else if (key === "copy")
+      void platform.copy(ticketLink(hostId ?? "", String(t.number))).then(() => toast("Link copied."));
+    else move(key);
+  };
+  const asked = asking === "done" ? doneConfirmation(t) : cancelConfirmation(t);
+  const dialogs = (
+    <ConfirmDialog
+      open={asking !== null}
+      onClose={() => setAsking(null)}
+      title={asked.title}
+      body={asked.body}
+      confirm={asked.confirm}
+      danger={asking === "backlog"}
+      onConfirm={() =>
+        asking === "done"
+          ? write("ticket.accept", { ticket_id: t.id }, { done: `Merging ${ticketNumber(t)} into main…` })
+          : write("ticket.cancel", { ticket_id: t.id }, { done: `${ticketNumber(t)} is back in Backlog.` })
+      }
+    />
+  );
+  return { options, pick, dialogs };
 }
 
 export function ConfirmDialog({
@@ -717,7 +922,7 @@ export function ConfirmDialog({
 
 const FOLLOWERS_SHOWN = 3;
 
-function Followers({ id }: { id: string }) {
+export function Followers({ id }: { id: string }) {
   const connection = useConnection();
   const followers = useKeyed(
     ["tickets", "followers", id],
@@ -739,14 +944,20 @@ function Followers({ id }: { id: string }) {
   );
 }
 
-function StatusBox({
+export function StatusBox({
   t,
   choosing,
   dispatcherLine,
+  session = false,
 }: {
   t: TicketView;
   choosing: boolean;
   dispatcherLine: string | null;
+  /**
+   * In the ticket's session: nothing while the owner simply works (the progress says what runs), and
+   * on Done only what there is to do or know: a summary to retry, a quick task's merge.
+   */
+  session?: boolean;
 }) {
   const { user, claudeLogin } = useLinkState();
   const write = useTicketWrite();
@@ -885,6 +1096,7 @@ function StatusBox({
           </Box>
         );
       }
+      if (session) return null;
       return (
         <Box>
           <div {...stylex.props(styles.buttonsCentered)}>
@@ -911,6 +1123,7 @@ function StatusBox({
         </Box>
       );
     case "done":
+      if (session && !summaryFailed && !isQuick(t)) return null;
       return (
         <Box>
           {doneLine(t, t.done_at_ms ? time(t.done_at_ms) : null)}
@@ -927,7 +1140,7 @@ function StatusBox({
   }
 }
 
-function Activity({ id }: { id: string }) {
+export function Activity({ id }: { id: string }) {
   const activity = useTicketActivity(id);
   if (activity.isPending) return <Loading />;
   if (activity.error) return <Problem>{activity.error.message}</Problem>;
@@ -952,7 +1165,6 @@ type Section = "ticket" | "activity";
 
 export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }) {
   const platform = usePlatform();
-  const { hostId } = useLinkState();
   useKeyContext("TicketPanel");
   useAction("Back", onClose);
   const resizable = useResizable({ defaultSize: 460, minSize: 360, maxSize: 720, autoSaveId: "ticket-panel" });
@@ -963,10 +1175,7 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
   const employees = useEmployees();
   const models = useModels();
   const write = useTicketWrite();
-  const members = useMembers();
   const [tab, setTab] = useState<Section>("ticket");
-  // Done or Backlog of a quick task from the More menu: merging and losing its branch are asked first.
-  const [asking, setAsking] = useState<"done" | "backlog" | null>(null);
   const t = detail.data?.ticket;
   const list = useMemo(() => (t ? [t] : []), [t]);
   const need = useTicketNeeds(list);
@@ -974,6 +1183,8 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
   const rootMessages = useMessages(t?.column === "plan_review" ? rootConversation : null);
   const activity = useTicketActivity(t?.review_feedback ? id : null);
   const tasks = useMemo(() => foldTree(treeOrder(detail.data?.tasks ?? []), {}), [detail.data?.tasks]);
+  const { choosing, line: dispatcherLine } = useDispatcherLine(t);
+  const menu = useTicketMenu(t, choosing);
 
   if (!t) {
     const gone = detail.error && /not.?found/i.test(detail.error.message);
@@ -1003,74 +1214,9 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
   const locked = runLocked(t);
   const choosable = ownerChoosable(t) && can;
   const check = doneCheck(detail.data);
-  const dispatcher = need.dispatcher(t.project_id);
-  const choosing = need.choosing(t);
-  const dispatcherName = dispatcher.kind === "project" || dispatcher.kind === "company" ? dispatcher.name : null;
-  const dispatcherLine = choosing
-    ? `${dispatcherName ?? "The dispatcher"} is choosing an employee…`
-    : dispatcher.kind === "none"
-      ? "No dispatcher is set. Choose an employee."
-      : dispatcher.kind === "inactive"
-        ? `${dispatcher.name} is ${dispatcher.state}. Choose an employee.`
-        : `${dispatcher.name} could not choose. Choose an employee.`;
   const update = (params: Record<string, unknown>) =>
     write("ticket.update", { ticket_id: t.id, ...params } as never, { expectedVersion: t.version });
-  const columns = (board.data?.columns ?? []).filter((c) => c.column.kind !== t.column);
-  const moves = columns.flatMap((c) => {
-    const effect = dropEffect(t.column, c.column.kind, choosing);
-    return effect.kind === "refused" ? [] : [{ key: c.column.kind, label: `Move to ${c.column.name}` }];
-  });
   const quick = isQuick(t);
-  const move = (to: string) => {
-    const effect = dropEffect(t.column, to as TicketView["column"], choosing);
-    if (effect.kind === "start") void write("ticket.start", { ticket_id: t.id });
-    else if (quick && effect.kind === "back_to_backlog") setAsking("backlog");
-    else if (quick && effect.kind === "mark_done") setAsking("done");
-    else if (effect.kind === "back_to_backlog" || effect.kind === "reject")
-      void write("ticket.cancel", { ticket_id: t.id });
-    else if (effect.kind === "mark_done") void write("ticket.accept", { ticket_id: t.id });
-    else setTab("ticket");
-  };
-  const asked = asking === "done" ? doneConfirmation(t) : cancelConfirmation(t);
-  const more = [
-    ...moves,
-    ...(features.includes("ticket_follow")
-      ? [
-          { key: "follow", label: "Follow" },
-          { key: "unfollow", label: "Unfollow" },
-        ]
-      : []),
-    ...(features.includes("ticket_responsible") && t.column !== "done"
-      ? [
-          t.responsible_user_id === need.me
-            ? { key: "responsible:none", label: "Remove me as responsible" }
-            : { key: "responsible", label: "Make me responsible" },
-          ...(members.data ?? [])
-            .filter((u) => !u.disabled_at_ms && u.id !== need.me && u.id !== t.responsible_user_id)
-            .map((u) => ({ key: `responsible:${u.id}`, label: `Responsible: ${u.username}` })),
-          ...(t.responsible_user_id && t.responsible_user_id !== need.me
-            ? [{ key: "responsible:none", label: "Responsible: no one" }]
-            : []),
-        ]
-      : []),
-    { key: "copy", label: "Copy link" },
-  ];
-  const pick = (key: string) => {
-    if (key === "follow" || key === "unfollow")
-      void write(
-        "ticket.follow",
-        { ticket_id: t.id, on: key === "follow" },
-        { done: key === "follow" ? "You follow this ticket." : "You don't follow this ticket any more." },
-      );
-    else if (key.startsWith("responsible:")) {
-      const who = key.slice("responsible:".length);
-      void write("ticket.set_responsible", { ticket_id: t.id, responsible_user_id: who === "none" ? null : who });
-    } else if (key === "responsible")
-      void write("ticket.set_responsible", { ticket_id: t.id, responsible_user_id: need.me });
-    else if (key === "copy") void platform.copy(ticketLink(hostId ?? "", t.id)).then(() => toast("Link copied."));
-    else move(key);
-  };
-
   const addFiles = async (files: { path: string }[]) => {
     if (files.length === 0) return;
     await write(
@@ -1088,19 +1234,7 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
   };
   return (
     <>
-      <ConfirmDialog
-        open={asking !== null}
-        onClose={() => setAsking(null)}
-        title={asked.title}
-        body={asked.body}
-        confirm={asked.confirm}
-        danger={asking === "backlog"}
-        onConfirm={() =>
-          asking === "done"
-            ? write("ticket.accept", { ticket_id: t.id }, { done: `Merging ${ticketNumber(t)} into main…` })
-            : write("ticket.cancel", { ticket_id: t.id }, { done: `${ticketNumber(t)} is back in Backlog.` })
-        }
-      />
+      {menu.dialogs}
       <ResizeHandle resizable={resizable} isReversed hasDivider />
       <LayoutPanel
         resizable={resizable}
@@ -1130,8 +1264,8 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
             <div {...stylex.props(styles.panelTools)}>
               <Menu
                 label="More"
-                options={more}
-                onPick={pick}
+                options={menu.options}
+                onPick={menu.pick}
                 trigger={<IconButton variant="ghost" size="sm" label="More" icon={<Icon icon="moreHorizontal" />} />}
               />
               <IconButton variant="ghost" size="sm" label="Close" icon={<Icon icon="close" />} onClick={onClose} />
@@ -1153,9 +1287,7 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
             <div {...stylex.props(styles.chips)}>
               <Chip>
                 <ColumnGlyph kind={t.column} />
-                {columns.length >= 0
-                  ? (board.data?.columns.find((c) => c.column.kind === t.column)?.column.name ?? t.column)
-                  : null}
+                {board.data?.columns.find((c) => c.column.kind === t.column)?.column.name ?? t.column}
               </Chip>
               {open ? (
                 <Menu
