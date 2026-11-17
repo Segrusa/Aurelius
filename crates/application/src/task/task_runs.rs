@@ -634,7 +634,7 @@ fn ticket_busy(tx: &Tx<'_>, task: TaskId, except: Option<RunId>) -> Result<bool,
 
 /// A task waiting for its colleagues goes on once none of them is still at work.
 pub(crate) fn continue_when_done(tx: &Tx<'_>, st: &Store, task: TaskId) -> Result<Vec<EventNotice>, StorageError> {
-    continue_with(tx, st, task, COLLEAGUES_DONE, "colleagues_done")
+    continue_with(tx, st, task, None, COLLEAGUES_DONE, "colleagues_done")
 }
 
 /// A run, handoff or message of `ticket` ended or was cancelled (`except`: that run): when the
@@ -651,7 +651,7 @@ pub(crate) fn ticket_settled(tx: &Tx<'_>, st: &Store, ticket: TicketId, except: 
         return Ok(vec![]);
     }
     let (text, reason) = if broken { (HANDOFF_BROKEN, "handoff_broken") } else { (HANDOFFS_DONE, "handoff_done") };
-    continue_with(tx, st, root, text, reason)
+    continue_with(tx, st, root, except, text, reason)
 }
 
 /// `ticket_settled` for the run that ended: whatever ticket its mailbox item was for.
@@ -663,9 +663,11 @@ pub(crate) fn run_settled(tx: &Tx<'_>, st: &Store, run: RunId, broken: bool) -> 
 }
 
 /// The owner of a waiting task goes on, told `text`, when nothing of it is still open.
-fn continue_with(tx: &Tx<'_>, st: &Store, task: TaskId, text: &str, reason: &str) -> Result<Vec<EventNotice>, StorageError> {
+/// `except`: the run whose end this is. Its status is set only after this, so it would
+/// otherwise count as open work on the ticket and the owner would never go on (ticket #70).
+fn continue_with(tx: &Tx<'_>, st: &Store, task: TaskId, except: Option<RunId>, text: &str, reason: &str) -> Result<Vec<EventNotice>, StorageError> {
     let Some(row) = store::load_task(tx, task)? else { return Ok(vec![]) };
-    if row.status != TaskStatus::Waiting || open_parts(tx, task)? || live_run(tx, task, None)? || ticket_busy(tx, task, None)? {
+    if row.status != TaskStatus::Waiting || open_parts(tx, task)? || live_run(tx, task, None)? || ticket_busy(tx, task, except)? {
         return Ok(vec![]);
     }
     let Some((conversation, _)) = store::task_conversation(tx, task)? else { return Ok(vec![]) };
