@@ -9,12 +9,19 @@ import {
   lastSummaryFailed,
   markdownPaths,
   screenshotId,
+  subagentDoingText,
   usageLine,
   usageTotals,
   waitingText,
 } from "./run-logic";
 
 describe("run texts", () => {
+  it("tells a subagent's latest step and how many it took", () => {
+    expect(subagentDoingText({ doing: null, steps: 0 })).toBe("Starting…");
+    expect(subagentDoingText({ doing: "Grep · poll", steps: 1 })).toBe("Grep · poll · 1 step");
+    expect(subagentDoingText({ doing: "Bash · sleep 90", steps: 3 })).toBe("Bash · sleep 90 · 3 steps");
+  });
+
   it("finds markdown files, not web pages", () => {
     expect(markdownPaths("See docs/plan.md, (README.md) and https://x.org/a.md or plan.md#top.")).toEqual([
       "docs/plan.md",

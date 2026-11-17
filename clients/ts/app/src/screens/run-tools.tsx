@@ -9,6 +9,7 @@ import { Table } from "@astryxdesign/core/Table";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { expectBody } from "@aurelius/client";
 import type {
+  AgentView,
   DirEntryView,
   FileRef,
   FileScope,
@@ -28,7 +29,16 @@ import { Markdown } from "../ui/markdown";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { FormDialog, Hint, Loading, Problem } from "./org-kit";
-import { elapsedText, markdownPaths, screenshotId, traceSessionText, usageLine, waitingText } from "./run-logic";
+import {
+  elapsedText,
+  markdownPaths,
+  screenshotId,
+  subagentDoingText,
+  subagentKey,
+  traceSessionText,
+  usageLine,
+  waitingText,
+} from "./run-logic";
 import { modelName } from "./settings-kit";
 import { costText, tokensShort } from "./usage-logic";
 
@@ -87,6 +97,19 @@ const styles = stylex.create({
   },
   sideTitle: { marginTop: 0, marginBottom: 8, fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
   agent: { display: "flex", flexDirection: "column", paddingBlock: 4, fontSize: 12 },
+  agentButton: {
+    width: "100%",
+    cursor: "pointer",
+    borderWidth: 0,
+    borderRadius: 5,
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    paddingInline: 4,
+    marginInline: -4,
+    textAlign: "start",
+    color: "inherit",
+    font: "inherit",
+  },
+  promptText: { marginTop: 0 },
   agentHead: { display: "flex", justifyContent: "space-between", gap: 8 },
   agentName: { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", fontWeight: 500 },
   muted: { flexShrink: 0, color: "var(--precision-text3)" },
@@ -346,12 +369,14 @@ function TraceText({ title, text }: { title: string; text: string }) {
   );
 }
 
-/** The helpers of a running answer; nothing tells when they change, so it looks while the run lasts. */
+/**
+ * The helpers of a running answer; nothing tells when they change, so it looks while the run lasts.
+ * A row opens what the subagent was asked and its latest step, which follow along while it runs.
+ */
 export function SubagentsAtWork({ conversationId, live }: { conversationId: string; live: boolean }) {
   const connection = useConnection();
-  const [agents, setAgents] = useState<
-    { name: string; doing?: string | null; detail: string; since_ms: number; steps: number }[]
-  >([]);
+  const [agents, setAgents] = useState<AgentView[]>([]);
+  const [opened, setOpened] = useState<AgentView | null>(null);
   useEffect(() => {
     if (!live) {
       setAgents([]);
@@ -366,21 +391,64 @@ export function SubagentsAtWork({ conversationId, live }: { conversationId: stri
     const tick = setInterval(read, 2000);
     return () => clearInterval(tick);
   }, [connection, conversationId, live]);
-  if (agents.length === 0) return null;
   const now = Date.now();
+  // The open one as the latest list tells it; once it is done, the last that was seen.
+  const shown = opened ? (agents.find((a) => subagentKey(a) === subagentKey(opened)) ?? null) : null;
+  const dialog = opened ? (
+    <SubagentDialog agent={shown ?? opened} done={shown === null} now={now} onClose={() => setOpened(null)} />
+  ) : null;
+  if (agents.length === 0) return dialog;
   return (
     <div {...stylex.props(styles.side)}>
       <p {...stylex.props(styles.sideTitle)}>Subagents at work</p>
       {agents.map((a) => (
-        <div key={`${a.name}|${a.since_ms}`} {...stylex.props(styles.agent)}>
+        <button
+          key={subagentKey(a)}
+          type="button"
+          title="Show what this subagent was asked and what it is doing"
+          onClick={() => setOpened(a)}
+          {...stylex.props(styles.agent, styles.agentButton)}
+        >
           <span {...stylex.props(styles.agentHead)}>
             <span {...stylex.props(styles.agentName)}>{a.name}</span>
             <span {...stylex.props(styles.muted)}>{elapsedText(now - a.since_ms)}</span>
           </span>
           <span {...stylex.props(styles.agentDoing)}>{a.doing ?? a.detail}</span>
-        </div>
+        </button>
       ))}
+      {dialog}
     </div>
+  );
+}
+
+/** One subagent: its type, how long it runs, its latest step and what it was asked. */
+function SubagentDialog({
+  agent,
+  done,
+  now,
+  onClose,
+}: {
+  agent: AgentView;
+  done: boolean;
+  now: number;
+  onClose: () => void;
+}) {
+  const prompt = agent.prompt?.trim() ?? "";
+  return (
+    <FormDialog title={agent.name} width={640} onClose={onClose} footer={<Button label="Close" onClick={onClose} />}>
+      <p {...stylex.props(styles.line)}>
+        {[agent.detail || "Subagent", done ? "done" : `running ${elapsedText(now - agent.since_ms)}`].join(" · ")}
+      </p>
+      <p {...stylex.props(styles.line)}>
+        {done ? `Last step: ${subagentDoingText(agent)}` : `Now: ${subagentDoingText(agent)}`}
+      </p>
+      {prompt ? (
+        <>
+          <p {...stylex.props(styles.sideTitle)}>What it was asked</p>
+          <pre {...stylex.props(styles.traceText, styles.promptText)}>{prompt}</pre>
+        </>
+      ) : null}
+    </FormDialog>
   );
 }
 

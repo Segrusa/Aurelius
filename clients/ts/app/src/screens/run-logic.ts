@@ -25,6 +25,15 @@ export function elapsedText(ms: number): string {
   return `${Math.floor(s / 3600)}h ${String(Math.floor(s / 60) % 60).padStart(2, "0")}m`;
 }
 
+/** A subagent's latest step and how many it took ("Grep · x · 3 steps"), as on mobile. */
+export function subagentDoingText(a: { doing?: string | null; steps: number }): string {
+  if (!a.doing) return "Starting…";
+  return `${a.doing} · ${a.steps} ${a.steps === 1 ? "step" : "steps"}`;
+}
+
+/** Which subagent a row is; the server gives no id, its name and start time tell them apart. */
+export const subagentKey = (a: { name: string; since_ms: number }) => `${a.name}|${a.since_ms}`;
+
 const MARKDOWN_MAX = 4;
 
 /** The first few markdown files a text names; a link to the web is not a file here. */
