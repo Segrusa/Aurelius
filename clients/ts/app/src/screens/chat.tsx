@@ -37,7 +37,6 @@ import {
   channelLabel,
   completeMention,
   EVERYONE,
-  keepOrder,
   localDay,
   type Mentionable,
   mentionSuggestions,
@@ -469,12 +468,9 @@ function ChannelList({
   const workspace = useWorkspace().id;
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<ChannelView[] | null>(null);
-  const [ticketsAll, setTicketsAll] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [archivedAll, setArchivedAll] = useState(false);
-  const [frozen, setFrozen] = useState<string[] | null>(null);
   const s = useMemo(() => sections(channels), [channels]);
-  const tickets = frozen ? keepOrder(s.tickets, frozen) : s.tickets;
   const openId = open ?? s.general?.conversation_id ?? null;
 
   useEffect(() => {
@@ -506,12 +502,7 @@ function ChannelList({
     <ChannelRow key={c.conversation_id} c={c} on={c.conversation_id === openId} onOpen={onOpen} />
   );
   return (
-    <section
-      aria-label="Channels"
-      {...stylex.props(styles.list)}
-      onPointerEnter={() => setFrozen(s.tickets.map((c) => c.conversation_id))}
-      onPointerLeave={() => setFrozen(null)}
-    >
+    <section aria-label="Channels" {...stylex.props(styles.list)}>
       <TextInput
         label="Search channels"
         isLabelHidden
@@ -534,17 +525,6 @@ function ChannelList({
             {s.general ? row(s.general) : null}
             {s.projects.map(row)}
           </div>
-          {tickets.length > 0 ? (
-            <div {...group}>
-              <p {...eyebrow}>Tickets</p>
-              {tickets.slice(0, shownCount(tickets.length, ticketsAll)).map(row)}
-              {!ticketsAll && tickets.length > 15 ? (
-                <button type="button" {...more} onClick={() => setTicketsAll(true)}>
-                  Show more ({tickets.length - 15})
-                </button>
-              ) : null}
-            </div>
-          ) : null}
           {s.archived.length > 0 ? (
             <div {...group}>
               <button
@@ -1482,7 +1462,7 @@ export function ChatScreen({
     if (gone) void navigate({ to: "/chat", search: {} });
   }, [gone, navigate]);
 
-  const visible = useMemo(() => visibleChannels(s, true, false, false), [s]);
+  const visible = useMemo(() => visibleChannels(s, false, false), [s]);
   const step = (down: boolean) => {
     const next = stepChannel(
       visible.map((c) => c.conversation_id),

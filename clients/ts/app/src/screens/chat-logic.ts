@@ -353,18 +353,22 @@ const byName = (a: ChannelView, b: ChannelView) => a.name.toLowerCase().localeCo
 export interface Sections {
   general: ChannelView | null;
   projects: ChannelView[];
-  tickets: ChannelView[];
+  /** Archived projects. A ticket's channel is never listed: the ticket opens as its session (TS-06). */
   archived: ChannelView[];
 }
 
 export function sections(channels: ChannelView[]): Sections {
-  const of = (kind: string, archived: boolean) => channels.filter((c) => kindOf(c) === kind && c.archived === archived);
+  const of = (archived: boolean) => channels.filter((c) => kindOf(c) === "project" && c.archived === archived);
   return {
     general: channels.find((c) => kindOf(c) === "general") ?? null,
-    projects: of("project", false).sort(byName),
-    tickets: of("ticket", false).sort(byActivity),
-    archived: [...of("project", true).sort(byName), ...of("ticket", true).sort(byActivity)],
+    projects: of(false).sort(byName),
+    archived: of(true).sort(byName),
   };
+}
+
+/** The open tickets' channels, the latest activity first: the chat popout's ticket list (O2). */
+export function ticketChannels(channels: ChannelView[]): ChannelView[] {
+  return channels.filter((c) => kindOf(c) === "ticket" && !c.archived).sort(byActivity);
 }
 
 /** `list` in the frozen order, the ones not in it after: a row never jumps under the pointer. */
@@ -378,16 +382,10 @@ export function keepOrder(list: ChannelView[], frozen: string[]): ChannelView[] 
 
 export const shownCount = (len: number, expanded: boolean) => (expanded ? len : Math.min(len, SHOW_MORE_AFTER));
 
-export function visibleChannels(
-  s: Sections,
-  ticketsAll: boolean,
-  archivedOpen: boolean,
-  archivedAll: boolean,
-): ChannelView[] {
+export function visibleChannels(s: Sections, archivedOpen: boolean, archivedAll: boolean): ChannelView[] {
   return [
     ...(s.general ? [s.general] : []),
     ...s.projects,
-    ...s.tickets.slice(0, shownCount(s.tickets.length, ticketsAll)),
     ...s.archived.slice(0, archivedOpen ? shownCount(s.archived.length, archivedAll) : 0),
   ];
 }

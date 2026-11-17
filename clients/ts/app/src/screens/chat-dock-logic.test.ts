@@ -18,6 +18,8 @@ describe("the chat popout", () => {
     expect(dockAway("/talk/abc")).toBe(true);
     expect(dockAway("/board")).toBe(false);
     expect(dockAway("/chatter")).toBe(false);
+    // A ticket's session has its own composer where the dock would sit.
+    expect(dockAway("/ticket/70")).toBe(true);
   });
 
   it("hides only its launcher where a message box sits in that corner", () => {
@@ -63,6 +65,7 @@ describe("the chat popout", () => {
       "",
     );
     expect(list.map((t) => [t.title, t.line])).toEqual([["#1 Trim the texts", "Plan review · Pixel"]]);
+    expect(list[0]?.number).toBe(1);
     const many = Array.from({ length: 20 }, (_, i) => channel(i + 1));
     expect(dockTickets(many, [], "")).toHaveLength(12);
     expect(dockTickets(many, [], "#17 ").map((t) => t.ticketId)).toEqual(["t17"]);
