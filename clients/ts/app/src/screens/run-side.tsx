@@ -25,7 +25,7 @@ const styles = stylex.create({
   // A ticket's panel holds text to edit, so it may be a little wider.
   wide: { width: "clamp(280px, 28%, 380px)" },
   // As an overlay sheet on a narrow window: no border of its own, the whole sheet.
-  sheet: { display: "flex", width: "100%", borderLeftWidth: 0, padding: 0 },
+  sheet: { display: "flex", width: "100%", minHeight: "100%", borderLeftWidth: 0, padding: 0 },
   title: { marginTop: 0, marginBottom: 8, fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
   section: {
     borderTopWidth: 1,

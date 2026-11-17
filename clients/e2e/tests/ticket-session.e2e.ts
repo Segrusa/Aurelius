@@ -437,7 +437,7 @@ test("shots", async ({ page }) => {
   );
   const shot = async (name: string) => {
     await page.waitForLoadState("networkidle");
-    await page.screenshot({ path: join(SHOTS, name) });
+    await page.screenshot({ path: join(SHOTS, name), animations: "disabled" });
   };
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
