@@ -211,13 +211,27 @@ describe("ticketUsage", () => {
       cache_creation_tokens: 40,
       cost_micro_usd: 50,
       estimate: true,
+      runs: 2,
     };
     expect(ticketUsage(u)).toEqual({ input: 10, output: 20, cached: 30, written: 40, micro: 50 });
   });
 
   it("reads a missing cost as 0, and no totals as none", () => {
-    const u = { input_tokens: 1, output_tokens: 2, cached_tokens: 0, cache_creation_tokens: 0, estimate: false };
-    expect(ticketUsage({ ...u, cost_micro_usd: null })).toEqual({ input: 1, output: 2, cached: 0, written: 0, micro: 0 });
+    const u = {
+      input_tokens: 1,
+      output_tokens: 2,
+      cached_tokens: 0,
+      cache_creation_tokens: 0,
+      estimate: false,
+      runs: 1,
+    };
+    expect(ticketUsage({ ...u, cost_micro_usd: null })).toEqual({
+      input: 1,
+      output: 2,
+      cached: 0,
+      written: 0,
+      micro: 0,
+    });
     expect(ticketUsage(null)).toBeNull();
     expect(ticketUsage(undefined)).toBeNull();
   });

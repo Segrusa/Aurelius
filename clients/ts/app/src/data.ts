@@ -19,7 +19,7 @@ import type {
   TicketView,
   WorkSessionView,
 } from "@aurelius/protocol";
-import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { useConnection, useLinkState } from "./connection";
 
@@ -304,6 +304,24 @@ export function useMessages(conversationId: string | null | undefined) {
         .value,
     Boolean(conversationId),
   );
+}
+
+/**
+ * Several conversations at once, under the same keys and read as `useMessages`, so each shares its
+ * cache: a ticket's discussion and its tasks' conversations, for what all its runs wrote.
+ */
+export function useMessagesOf(conversationIds: string[], wanted = true) {
+  const connection = useConnection();
+  const { status, user } = useLinkState();
+  return useQueries({
+    queries: conversationIds.map((id) => ({
+      queryKey: ["messages", id],
+      queryFn: async () =>
+        expectBody(await connection.call("conversation.get", { conversation_id: id }), "messages").value,
+      enabled: wanted && status === "online" && user !== null,
+      staleTime: 30_000,
+    })),
+  });
 }
 
 /** Every task, ended too. */

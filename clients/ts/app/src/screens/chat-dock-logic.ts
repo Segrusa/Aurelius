@@ -6,7 +6,10 @@ import { bareName, sections, ticketChannels } from "./chat-logic";
 /** Where a chat already fills the screen: a popout next to it adds nothing. */
 export function dockAway(pathname: string): boolean {
   return (
-    pathname === "/chat" || pathname.startsWith("/chat/") || pathname.startsWith("/talk/") || pathname.startsWith("/ticket/")
+    pathname === "/chat" ||
+    pathname.startsWith("/chat/") ||
+    pathname.startsWith("/talk/") ||
+    pathname.startsWith("/ticket/")
   );
 }
 

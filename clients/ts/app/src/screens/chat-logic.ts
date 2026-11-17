@@ -420,7 +420,7 @@ export function stepChannel(visible: string[], current: string | null, down: boo
   return visible[down ? Math.min(at + 1, visible.length - 1) : Math.max(at - 1, 0)] ?? null;
 }
 
-export function readOnlyBar(c: ChannelView, ticketDone: boolean): string {
+export function readOnlyBar(c: Pick<ChannelView, "ticket_number">, ticketDone: boolean): string {
   if (c.ticket_number !== null && c.ticket_number !== undefined) {
     return `#${c.ticket_number} is ${ticketDone ? "Done" : "archived"} · read-only.`;
   }

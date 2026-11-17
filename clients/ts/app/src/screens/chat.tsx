@@ -963,6 +963,27 @@ interface ChannelProps {
   embedded?: boolean;
   /** The ticket, when `c` may not be known yet. */
   ticketId?: string | null;
+  /** A ticket's session fills these (ticket #70); the Team chat leaves them out. */
+  session?: SessionSlots;
+}
+
+/** What a ticket's session puts around the channel's feed and composer. */
+export interface SessionSlots {
+  /** In place of the channel's head. */
+  head?: ReactNode;
+  /** Between the progress and the composer: the decision of the moment. */
+  gate: ReactNode;
+  /** Beside Send: the next run's mode and model. */
+  chips?: ReactNode;
+  /** The right panel while no thread is open. */
+  aside?: ReactNode;
+  /** The ticket decides, so leaving Done makes it writable before the channel's read catches up. */
+  readOnly: boolean;
+  readOnlyText: string;
+  /** At the end of the read-only bar (Send back on Done). */
+  readOnlyEnd?: ReactNode;
+  placeholder: string;
+  hint: string;
 }
 
 function Channel(props: ChannelProps) {
@@ -970,15 +991,17 @@ function Channel(props: ChannelProps) {
   return <ChannelBody {...props} />;
 }
 
-/** A ticket's discussion, as a chat: in the ticket's panel and in the popout. */
+/** A ticket's discussion, as a chat: the compact session in the popout. */
 export function TicketChat({
   conversationId,
   ticketId,
   message = null,
+  session,
 }: {
   conversationId: string;
   ticketId: string;
   message?: string | null;
+  session?: SessionSlots;
 }) {
   const channels = useChannels();
   const c = channels.data?.find((x) => x.conversation_id === conversationId) ?? null;
@@ -993,6 +1016,39 @@ export function TicketChat({
       general={false}
       message={message}
       embedded
+      {...(session ? { session } : {})}
+    />
+  );
+}
+
+/** A ticket's session: its channel's feed and composer, with the session's head, gate and panel around them. */
+export function TicketSessionBody({
+  conversationId,
+  ticketId,
+  message,
+  thread,
+  onThread,
+  session,
+}: {
+  conversationId: string;
+  ticketId: string;
+  message: string | null;
+  thread: string | null;
+  onThread: (id: string | null) => void;
+  session: SessionSlots;
+}) {
+  const channels = useChannels();
+  const c = channels.data?.find((x) => x.conversation_id === conversationId) ?? null;
+  return (
+    <ChannelBody
+      channel={conversationId}
+      c={c}
+      ticketId={ticketId}
+      thread={thread}
+      onThread={onThread}
+      general={false}
+      message={message}
+      session={session}
     />
   );
 }
@@ -1006,6 +1062,7 @@ function ChannelBody({
   message = null,
   embedded = false,
   ticketId = null,
+  session,
 }: ChannelProps) {
   const { user, features, status } = useLinkState();
   const connection = useConnection();
@@ -1119,7 +1176,7 @@ function ChannelBody({
     return out;
   }, [list2, folded.earlier, newAt, live, inList, pending, onCard]);
 
-  const readOnly = (c?.archived ?? false) || feed.data?.read_only === true;
+  const readOnly = session ? session.readOnly : (c?.archived ?? false) || feed.data?.read_only === true;
   const caps = useMemo<Caps>(
     () => ({ threads: features.includes("chat_threads"), reactions: features.includes("chat_reactions"), readOnly }),
     [features, readOnly],
@@ -1206,24 +1263,29 @@ function ChannelBody({
       ? quickReplies(lastAnswer.activity)
       : null;
   const owner = t && t.column !== "done" ? (t.owner_name ?? null) : null;
-  const placeholder =
-    isTicket && owner
+  const placeholder = session
+    ? session.placeholder
+    : isTicket && owner
       ? `Message ${owner} (owner)… · @ to mention`
       : general
         ? "Message the team · @ to mention"
         : `Message #${name} · @ to mention`;
-  const hint = isTicket
-    ? t
-      ? `@Name asks that employee${ownerAnswers(owner)}.`
-      : "@Name asks that employee about this ticket."
-    : `@Name asks that employee; without a name, ${first ?? "the top of the org chart"} answers.`;
+  const hint = session
+    ? session.hint
+    : isTicket
+      ? t
+        ? `@Name asks that employee${ownerAnswers(owner)}.`
+        : "@Name asks that employee about this ticket."
+      : `@Name asks that employee; without a name, ${first ?? "the top of the org chart"} answers.`;
   const answering = [...new Set(live.flatMap((u) => runAuthor(employeesData ?? [], u.run_id) ?? []))];
   const loading = useDelayed(feed.isPending);
 
   return (
     <section aria-label={`#${name}`} {...stylex.props(styles.channel)}>
       <div {...stylex.props(styles.channelMain, embedded && thread !== null && styles.hiddenMain)}>
-        {embedded ? null : (
+        {session?.head ? (
+          session.head
+        ) : embedded ? null : (
           <header data-titlebar {...stylex.props(styles.top)}>
             <Heading level={1} xstyle={styles.title}>
               <span {...stylex.props(styles.hash)}>#</span> {name}
@@ -1359,13 +1421,19 @@ function ChannelBody({
             </div>
           </FeedIdsProvider>
           {isTicket && !readOnly ? <ProgressCard p={progress} narrow={embedded} /> : null}
+          {session?.gate}
           {readOnly ? (
             <div {...stylex.props(styles.readOnlyRow)}>
               <div {...stylex.props(styles.readOnlyBar)}>
                 <span {...stylex.props(styles.readOnlyText)}>
-                  {c ? readOnlyBar(c, c.ticket_column === "done") : "This channel is read-only."}
+                  {session
+                    ? session.readOnlyText
+                    : c
+                      ? readOnlyBar(c, c.ticket_column === "done")
+                      : "This channel is read-only."}
                 </span>
-                {c?.ticket_id && !embedded ? (
+                {session?.readOnlyEnd}
+                {c?.ticket_id && !embedded && !session ? (
                   <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.readOnlyLink)}>
                     Open ticket
                   </Link>
@@ -1387,6 +1455,7 @@ function ChannelBody({
               quick={quick}
               everyone={everyone}
               prompt={TEAM_PROMPT}
+              {...(session?.chips ? { footer: session.chips } : {})}
               onSent={() => {
                 atBottom.current = true;
                 handle.current?.scrollToIndex({ index: "LAST", align: "end" });
@@ -1412,6 +1481,8 @@ function ChannelBody({
             full={embedded}
           />
         </ChatProvider>
+      ) : session ? (
+        (session.aside ?? null)
       ) : isTicket && !embedded && overviewOpen ? (
         <OverviewPanel p={progress} onClose={() => showOverview(false)} />
       ) : null}

@@ -145,7 +145,9 @@ export function filesWrittenAcross(lists: (Activity[] | undefined)[]): string[] 
 }
 
 /** The latest run that answered in any of them: its guidelines show in the side panel. */
-export function latestRunAcross(lists: ({ run_id?: string | null; created_at_ms: number }[] | undefined)[]): string | null {
+export function latestRunAcross(
+  lists: ({ run_id?: string | null; created_at_ms: number }[] | undefined)[],
+): string | null {
   let best: { run: string; at: number } | null = null;
   for (const list of lists) {
     for (const m of list ?? []) {

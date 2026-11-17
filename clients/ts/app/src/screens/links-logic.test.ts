@@ -11,7 +11,9 @@ describe("aurelius links", () => {
   it("open a ticket by its number, and an old link by its id", () => {
     expect(linkedTicket("70")).toEqual({ number: 70 });
     expect(linkedTicket("0b1c-2d")).toEqual({ id: "0b1c-2d" });
-    expect(linkedTicket("4f1e3c2a-1b2c-4d5e-8f90-123456789abc")).toEqual({ id: "4f1e3c2a-1b2c-4d5e-8f90-123456789abc" });
+    expect(linkedTicket("4f1e3c2a-1b2c-4d5e-8f90-123456789abc")).toEqual({
+      id: "4f1e3c2a-1b2c-4d5e-8f90-123456789abc",
+    });
   });
 
   it("refuse any other form", () => {
