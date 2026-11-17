@@ -320,3 +320,57 @@ fn the_owner_is_not_woken_while_a_second_colleague_still_works() {
     colleague_ends(&s, cy_run, false);
     assert_eq!(task_status(&s, root), TaskStatus::Running);
 }
+
+#[test]
+fn the_owner_goes_on_when_the_last_delegated_part_ends_in_a_run_that_is_still_live() {
+    // Ticket #70: the part's run is still live on the ticket while its end is handled
+    // (its status is set last), so it must not count as open work for the owner.
+    use aurelius_domain::task::TaskStatus;
+    let s = setup();
+    let (ann, cy) = (s.ann, s.cy);
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE employees SET reports_to = ?2 WHERE id = ?1", [cy.to_string(), ann.to_string()])?)).unwrap();
+    let (t, root, conversation, run) = started_ticket(&s);
+    let (ok, text) = act(&s, run, EmployeeAction::Delegate { employee: "Cy".into(), title: "Port".into(), goal: "Port the module.".into(), criteria: vec![], ticket: Some(t.to_string()) });
+    assert!(ok, "{text}");
+    end_run(&s, run, "Cy ports the module.");
+    assert_eq!(task_status(&s, root), TaskStatus::Waiting);
+    let part = s.service.store().read(|c| Ok(c.query_row("SELECT id FROM tasks WHERE title = 'Port'", [], |r| r.get::<_, String>(0))?)).map(|id| TaskId::parse(&id).unwrap()).unwrap();
+    // The part's job, past the owner's own run that is still leased.
+    let job = std::iter::from_fn(|| s.service.store().write(|tx| aurelius_storage::queries::claim_due_job(tx, "test", aurelius_storage::now_ms() + 60_000, 45_000, 4)).unwrap())
+        .find(|j| j.id == part.to_string())
+        .expect("the part's job");
+    let ctx = s.service.task_context(part).unwrap().unwrap();
+    s.service.start_task_conversation(&ctx, job.lease_epoch).unwrap();
+    let part_conversation = s.service.store().read(move |c| aurelius_storage::tasks::task_conversation(c, part)).unwrap().map(|(c, _)| c).expect("the part's conversation");
+    let cy_run = runs_in(&s, part_conversation)[0].0;
+    // As on the live board: the part's run is a claimed mailbox item of the ticket and it is
+    // running. The test mailbox runs it as a job, so the item is written here.
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute(
+                "INSERT INTO employee_inbox(id, employee_id, thread_key, ticket_id, conversation_id, kind, state, source, hop, payload_json, task_id, source_event_id, not_before_ms, run_id, created_at_ms)
+                 SELECT ?1, ?2, thread_key, ticket_id, ?6, 'task', 'claimed', 'employee', 1, '{}', ?3, source_event_id, not_before_ms, ?4, created_at_ms
+                 FROM employee_inbox WHERE task_id = ?5",
+                [RunId::new().to_string(), cy.to_string(), part.to_string(), cy_run.to_string(), root.to_string(), part_conversation.to_string()],
+            )?;
+            Ok(tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [cy_run.to_string()])?)
+        })
+        .unwrap();
+    assert_eq!(s.service.store().read(move |c| aurelius_storage::inbox::ticket_of_run(c, cy_run)).unwrap(), Some(t));
+    // The end of the part's run in the dispatcher's order: the task, the ticket, then the run's status.
+    let st = s.service.store().clone();
+    s.service
+        .store()
+        .write(move |tx| {
+            let mut notices = crate::task::task_runs::on_run_finished(tx, &st, cy_run, true, None, "Ported.")?;
+            notices.extend(crate::task::task_runs::run_settled(tx, &st, cy_run, false)?);
+            tx.execute("UPDATE runs SET status = 'succeeded' WHERE id = ?1", [cy_run.to_string()])?;
+            Ok(notices)
+        })
+        .unwrap();
+    assert_eq!(task_status(&s, part), TaskStatus::Succeeded);
+    assert_eq!(task_status(&s, root), TaskStatus::Running, "the owner goes on with the part's result");
+    let told = messages(&s, conversation).into_iter().last().unwrap().text;
+    assert!(told.contains("done"), "{told}");
+}
