@@ -17,7 +17,6 @@ import {
   orgTree,
   pinnedFirst,
   position,
-  recentChats,
   reportsCandidates,
   threadGroup,
   togglePin,
@@ -190,14 +189,6 @@ describe("what an employee runs on", () => {
     expect(accessOf(m("A", null, { access_level: "read_only" }))).toBe("read_only");
     expect(accessLabel("read_edit")).toBe("Read and edit");
     expect(accessLabel("unknown")).toBe("Unknown");
-  });
-});
-
-describe("recentChats", () => {
-  it("keeps the order and shows at most four", () => {
-    expect(recentChats([1, 2, 3, 4, 5, 6])).toEqual([1, 2, 3, 4]);
-    expect(recentChats([2, 1])).toEqual([2, 1]);
-    expect(recentChats([])).toEqual([]);
   });
 });
 

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeSessions,
   chooserText,
   runChange,
   runChipLabel,
   SIDEBAR_SESSIONS,
   sessionFolder,
   sessionPlace,
+  sessionSignal,
   sessionStatus,
   sessionWho,
   sidebarSessions,
@@ -67,6 +69,40 @@ describe("sidebarSessions", () => {
     const shown = sidebarSessions(sessions, null);
     expect(shown).toHaveLength(SIDEBAR_SESSIONS);
     expect(shown[0]?.id).toBe(0);
+  });
+
+  it("never leaves out a session that is active, even past the limit", () => {
+    const many = Array.from({ length: SIDEBAR_SESSIONS + 3 }, (_, i) => ({
+      id: i,
+      project_id: "a",
+      running: i === SIDEBAR_SESSIONS + 1,
+    }));
+    const shown = sidebarSessions(many, null);
+    expect(shown).toHaveLength(SIDEBAR_SESSIONS + 1);
+    expect(shown.at(-1)?.id).toBe(SIDEBAR_SESSIONS + 1);
+  });
+});
+
+describe("sessionSignal", () => {
+  it("says a session works while a run of it is queued or under way", () => {
+    expect(sessionSignal({ running: true })).toBe("working");
+  });
+
+  it("counts the dispatcher choosing as working, and its choice of nobody as needing you", () => {
+    expect(sessionSignal({ running: false, dispatch: "choosing" })).toBe("working");
+    expect(sessionSignal({ running: false, dispatch: "nobody" })).toBe("needs_you");
+  });
+
+  it("gives an idle session no signal", () => {
+    expect(sessionSignal({ running: false })).toBeNull();
+    expect(sessionSignal({ running: false, dispatch: null })).toBeNull();
+  });
+});
+
+describe("activeSessions", () => {
+  it("counts the sessions that work now", () => {
+    expect(activeSessions([{ running: true }, { running: false, dispatch: "choosing" }, { running: false }])).toBe(2);
+    expect(activeSessions([])).toBe(0);
   });
 });
 

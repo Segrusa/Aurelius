@@ -31,13 +31,35 @@ export function chooserText(session: Pick<WorkSessionView, "employee_name" | "di
   return null;
 }
 
-/** The sidebar's sessions: the workspace's project only when one is chosen, at most `SIDEBAR_SESSIONS`. */
-export function sidebarSessions<T extends Pick<WorkSessionView, "project_id">>(
+/** What a session's sidebar row signals: it works now, or it waits for your choice of who takes it. */
+export type SessionSignal = "working" | "needs_you";
+
+type SignalFields = Pick<WorkSessionView, "running"> & Partial<Pick<WorkSessionView, "dispatch">>;
+
+/** A session works while a run of it is queued or under way, or while the dispatcher chooses who takes it. */
+export function sessionSignal(session: SignalFields): SessionSignal | null {
+  if (session.running || session.dispatch === "choosing") return "working";
+  if (session.dispatch === "nobody") return "needs_you";
+  return null;
+}
+
+/** How many of these sessions work now. */
+export function activeSessions(sessions: SignalFields[]): number {
+  return sessions.filter((s) => sessionSignal(s) === "working").length;
+}
+
+/**
+ * The sidebar's sessions: the workspace's project only when one is chosen, the latest `SIDEBAR_SESSIONS`,
+ * plus any older one that still has a signal, so an active session is never out of sight.
+ */
+export function sidebarSessions<T extends Pick<WorkSessionView, "project_id"> & Partial<SignalFields>>(
   sessions: T[],
   workspaceId: string | null,
 ): T[] {
   const here = workspaceId ? sessions.filter((s) => s.project_id === workspaceId) : sessions;
-  return here.slice(0, SIDEBAR_SESSIONS);
+  return here.filter(
+    (s, i) => i < SIDEBAR_SESSIONS || sessionSignal({ running: s.running ?? false, dispatch: s.dispatch }) !== null,
+  );
 }
 
 /** What the Model and Effort chips of a session say: the chosen one, or the employee's own. */

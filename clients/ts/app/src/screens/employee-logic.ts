@@ -150,12 +150,6 @@ export function roots(all: EmployeeSummary[]): EmployeeSummary[] {
   return all.filter((e) => e.status === "active" && (!e.reports_to || !here.has(e.reports_to)));
 }
 
-/** How many chats the sidebar shows. */
-const RECENT_CHATS = 4;
-
-/** The sidebar's chats: the server gives them latest first. */
-export const recentChats = <T>(chats: T[]): T[] => chats.slice(0, RECENT_CHATS);
-
 export function pinnedFirst<T extends { id: string }>(list: T[], pins: string[]): T[] {
   const pinned = pins.flatMap((id) => list.find((x) => x.id === id) ?? []);
   return [...pinned, ...list.filter((x) => !pins.includes(x.id))];

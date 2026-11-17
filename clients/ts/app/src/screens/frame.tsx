@@ -12,7 +12,6 @@ import { useConnection, useLinkState } from "../connection";
 import {
   useAllTasks,
   useChannels,
-  useEmployeeChats,
   useEmployees,
   useLiveQueries,
   useNotifications,
@@ -41,19 +40,25 @@ import { ActivityBar } from "./activity-bar";
 import { ChatDock } from "./chat-dock";
 import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
-import { recentChats } from "./employee-logic";
 import { pinKey, usePins } from "./employees";
 import { useInbox } from "./inbox";
 import { needsYouCount, newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
 import { useOpenNewSession } from "./new-session";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
-import { sidebarSessions } from "./session-logic";
+import { activeSessions, type SessionSignal, sessionSignal, sidebarSessions } from "./session-logic";
 import { SettingsSidebar } from "./settings";
 import { useTicketNeeds } from "./tickets-kit";
 import { subscriptionFor } from "./usage-logic";
 import { useOpenedWorkspace, WorkspaceSwitcher } from "./workspace-kit";
 import { narrow } from "./workspace-logic";
+
+// A working session's dot breathes, so it reads as live next to the still unread dots.
+const pulse = stylex.keyframes({
+  "0%": { opacity: 1, transform: "scale(1)" },
+  "50%": { opacity: 0.35, transform: "scale(0.75)" },
+  "100%": { opacity: 1, transform: "scale(1)" },
+});
 
 const styles = stylex.create({
   // What the screens were written against: a column that fills the shell and scrolls inside.
@@ -105,6 +110,16 @@ const styles = stylex.create({
   dot: { display: "block", width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
   dotUnread: { backgroundColor: "var(--color-text-secondary)" },
   dotLive: { backgroundColor: "var(--color-text-accent)" },
+  dotWorking: {
+    width: 8,
+    height: 8,
+    backgroundColor: "var(--color-text-accent)",
+    animationName: pulse,
+    animationDuration: "1.6s",
+    animationIterationCount: "infinite",
+    animationTimingFunction: "ease-in-out",
+  },
+  dotNeedsYou: { width: 8, height: 8, backgroundColor: "var(--color-text-warning)" },
   place: {
     maxWidth: 90,
     overflow: "hidden",
@@ -221,51 +236,46 @@ function Live() {
   );
 }
 
-/** The board member's latest chats with employees. */
+/** What the end of a session's row shows: a pulsing dot while it works, a warning dot while it needs you. */
+function SessionMark({ signal }: { signal: SessionSignal | null }) {
+  if (signal === null) return null;
+  const working = signal === "working";
+  return (
+    <Tooltip content={working ? "Working" : "Waiting for your choice"} delay={400} hasHoverIndication={false}>
+      <span
+        role="img"
+        aria-label={working ? "Working" : "Waiting for your choice"}
+        {...stylex.props(styles.dot, working ? styles.dotWorking : styles.dotNeedsYou)}
+      />
+    </Tooltip>
+  );
+}
+
 /** The board member's latest work sessions (server feature `work_sessions`), the workspace's when one is chosen. */
 function RecentSessions() {
   const workspace = useWorkspace().id;
   const sessions = sidebarSessions(useWorkSessions().data ?? [], workspace);
   if (sessions.length === 0) return null;
+  const active = activeSessions(sessions);
   return (
     <div {...stylex.props(styles.group)}>
-      <SectionLabel>Sessions</SectionLabel>
+      <SectionLabel>
+        Sessions
+        {active > 0 ? (
+          <>
+            <span {...stylex.props(styles.dot, styles.dotLive)} /> {active} working
+          </>
+        ) : null}
+      </SectionLabel>
       {sessions.map((s) => (
         <NavRow
           key={s.conversation_id}
           to={`/session/${s.conversation_id}`}
           label={s.title || "Session"}
           icon={markIcon(initial(s.employee_name), markColor(s.employee_id), 15, 4)}
-          end={
-            s.running ? (
-              <span role="img" aria-label="Working" {...stylex.props(styles.dot, styles.dotLive)} />
-            ) : undefined
-          }
+          end={<SessionMark signal={sessionSignal(s)} />}
         />
       ))}
-    </div>
-  );
-}
-
-function RecentChats() {
-  const path = useRouterState({ select: (s) => s.location.pathname });
-  const chats = recentChats(useEmployeeChats().data ?? []);
-  if (chats.length === 0) return null;
-  return (
-    <div {...stylex.props(styles.group)}>
-      <SectionLabel>Chats</SectionLabel>
-      {chats.map((c) => {
-        const to = `/talk/${c.conversation_id}`;
-        return (
-          <NavRow
-            key={c.conversation_id}
-            to={to}
-            label={c.employee_name}
-            icon={markIcon(initial(c.employee_name), markColor(c.employee_id), 15, 4)}
-            end={<Counted dot={c.unread > 0 && path !== to} />}
-          />
-        );
-      })}
     </div>
   );
 }
@@ -560,7 +570,6 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
             </div>
           ) : null}
           <RecentSessions />
-          <RecentChats />
           <Live />
         </>
       )}
