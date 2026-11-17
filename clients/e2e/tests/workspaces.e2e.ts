@@ -112,8 +112,10 @@ test("a workspace and a ticket show their Claude Design link, and an older serve
     await expect(page.getByRole("button", { name: "Open", exact: true }).first()).toBeVisible();
     await expect(page.getByText("The link only works for people the artifact is shared with.")).toBeVisible();
 
+    // The old Board link opens the ticket's session; the design link is in its properties.
     await page.goto(`${site.origin}/board?ticket=t1`);
-    const panel = page.getByRole("complementary", { name: /Atlas ticket/ });
+    await expect(page).toHaveURL(/\/ticket\/21$/);
+    const panel = page.getByRole("complementary", { name: "Ticket properties" });
     await expect(panel.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", link);
     await expect(panel.getByText("The link only works for people the artifact is shared with.")).toBeVisible();
 
@@ -122,7 +124,7 @@ test("a workspace and a ticket show their Claude Design link, and an older serve
     await expect(page.getByText("WORKSPACE SETTINGS")).toBeVisible();
     await expect(page.getByText("Styleguide", { exact: true })).toBeHidden();
     await page.goto(`${site.origin}/board?ticket=t1`);
-    await expect(page.getByRole("complementary", { name: /Atlas ticket/ })).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Ticket properties" })).toBeVisible();
     await expect(page.getByText("The link only works for people the artifact is shared with.")).toBeHidden();
   } finally {
     await site.close();
@@ -146,7 +148,8 @@ test("switching narrows the board, the inbox and the chat, and All projects show
     await page.getByRole("link", { name: "Team chat" }).click();
     const channels = page.getByRole("region", { name: "Channels" });
     await expect(channels.getByText("Atlas", { exact: true })).toBeVisible();
-    await expect(channels.getByText("21-atlas-ticket")).toBeVisible();
+    // A ticket opens as its session, never as a channel in this list (ticket #70).
+    await expect(channels.getByText("21-atlas-ticket")).toBeHidden();
     await expect(channels.getByText("Zephyr")).toBeHidden();
     await expect(channels.getByText("general")).toBeHidden();
 
@@ -212,19 +215,15 @@ test("the switcher works from the collapsed rail and from the palette", async ({
   }
 });
 
-test("the ticket panel never leaves a column cut in half at the sidebar", async ({ page }) => {
+// The Board no longer opens a panel beside its columns: a card opens the ticket's session (ticket #70, O1).
+test("a card opens its ticket's session instead of a panel beside the columns", async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 800 });
   const site = await open(page, "/board");
   try {
     await page.getByText("Zephyr ticket").click();
-    await expect(page.getByRole("button", { name: /Close/ }).first()).toBeVisible();
-    const row = page.locator("[data-board-columns]");
-    await expect.poll(() => row.evaluate((e) => e.scrollLeft)).toBeGreaterThan(0);
-    const edge = (await row.boundingBox())?.x ?? 0;
-    for (const column of await row.locator("section[aria-label]").all()) {
-      const box = await column.boundingBox();
-      expect((box?.x ?? 0) >= edge || (box?.x ?? 0) + (box?.width ?? 0) <= edge).toBe(true);
-    }
+    await expect(page).toHaveURL(/\/ticket\/\d+$/);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Zephyr ticket");
+    await expect(page.locator("[data-board-columns]")).toHaveCount(0);
   } finally {
     site.close();
   }

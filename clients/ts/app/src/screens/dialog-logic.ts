@@ -1,6 +1,7 @@
 // The rules of New ticket and Give work, pure.
 
 import type { AgentMode, MethodParams, Receipt, TaskRun, TicketPriority } from "@aurelius/protocol";
+import { type TicketPlace, ticketPlace } from "./ticket-session-logic";
 
 /** A normal ticket from New ticket. It never names a kind: an older server refuses a field it does not know. */
 export interface TicketForm {
@@ -96,17 +97,9 @@ export function createdTicketId(receipt: Receipt): string | null {
   return result.kind === "command" && result.value.type === "ticket_created" ? result.value.ticket_id : null;
 }
 
-/**
- * Where a new ticket opens: its channel in Chat, which is its discussion since the panel has none
- * (ticket #56); on the Board when there is no channel to open (an older server, or the read failed).
- */
-export function createdTicketPlace(
-  ticketId: string,
-  conversationId: string | null,
-): { to: "/chat"; search: { channel: string } } | { to: "/board"; search: { ticket: string } } {
-  return conversationId
-    ? { to: "/chat", search: { channel: conversationId } }
-    : { to: "/board", search: { ticket: ticketId } };
+/** Where a new ticket opens: its session (ticket #70); with no number known, the Board's redirect finds it. */
+export function createdTicketPlace(ticketId: string, number: number | null): TicketPlace {
+  return ticketPlace({ id: ticketId, number });
 }
 
 const WRONG = "Write the date as 2026-11-03, optionally with a time: 2026-11-03 17:00.";

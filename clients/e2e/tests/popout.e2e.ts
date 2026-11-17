@@ -115,7 +115,7 @@ test("the popout lists the chats, opens one, sends and keeps out of the way", as
   }
 });
 
-test("a ticket reads as a chat: in the chat and in the popout, not in its panel", async ({ page }) => {
+test("a ticket reads as a chat: in its session and in the popout's compact session", async ({ page }) => {
   const site = await serveStatic(WEB_DIST);
   try {
     const open = ticket("t1", 35, "doing", { title: "Trim the texts", conversation_id: "d1", owner_name: "Pixel" });
@@ -142,13 +142,14 @@ test("a ticket reads as a chat: in the chat and in the popout, not in its panel"
       conversations: { d1: talk },
       reads: { "employee.chats": chats },
     });
+    // An old link to the Board's panel opens the ticket's session (ticket #70): the talk and the properties.
     await page.goto(`${site.origin}/board?ticket=t1`);
-    const panel = page.getByRole("complementary", { name: /Trim the texts/ });
+    await expect(page).toHaveURL(/\/ticket\/35$/);
+    const panel = page.getByRole("complementary", { name: "Ticket properties" });
     await expect(panel.getByText("No description.")).toBeVisible();
-    await expect(panel.getByRole("tab", { name: /Discussion/ })).toHaveCount(0);
-    await expect(panel.getByText("Which group may I remove first?")).toHaveCount(0);
 
     await page.goto(`${site.origin}/chat?channel=d1`);
+    await expect(page).toHaveURL(/\/ticket\/35$/);
     const chat = page.getByRole("main");
     await chat.getByText("Which group may I remove first?").hover();
     await expect(chat.locator("[data-row-bar]")).toBeVisible();
@@ -169,6 +170,9 @@ test("a ticket reads as a chat: in the chat and in the popout, not in its panel"
     await expect(popout.getByText("Which group may I remove first?")).toBeVisible();
     await expect(popout.getByRole("textbox", { name: /^Message/ })).toBeVisible();
     await shot(page, "popout-ticket");
+    // Full screen is the ticket's session.
+    await popout.getByRole("button", { name: "Open full screen" }).click();
+    await expect(page).toHaveURL(/\/ticket\/35$/);
   } finally {
     await site.close();
   }

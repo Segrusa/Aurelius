@@ -196,15 +196,16 @@ export function useOpenCreated() {
       const ticket = created.current;
       created.current = null;
       if (!ticket) return;
-      const go = (conversation: string | null) => void navigate(createdTicketPlace(ticket, conversation));
-      if (!features.includes("ticket_channels")) return go(null);
+      // The new ticket opens as its session (ticket #70), which needs its number.
+      const go = (number: number | null) => void navigate(createdTicketPlace(ticket, number));
       connection
         .call("ticket.get", { ticket_id: ticket })
         .then(async (body) => {
-          const conversation = expectBody(body, "ticket").value.ticket.conversation_id ?? null;
-          // Chat sends a channel it does not know back to general, and the cached list predates this one.
-          if (conversation) await client.invalidateQueries({ queryKey: ["messages", "channels"], refetchType: "all" });
-          go(conversation);
+          const created = expectBody(body, "ticket").value.ticket;
+          // The session finds its conversation in the channel list, and the cached one predates this ticket.
+          if (created.conversation_id && features.includes("ticket_channels"))
+            await client.invalidateQueries({ queryKey: ["messages", "channels"], refetchType: "all" });
+          go(created.number);
         })
         .catch(() => go(null));
     },

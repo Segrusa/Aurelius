@@ -186,8 +186,13 @@ function markIcon(letter: string, color: string, size: number, radius: number): 
 
 function NavRow({ to, label, icon, end }: { to: string; label: string; icon: IconType; end?: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
-  // The list of projects is a tab of Knowledge.
-  const on = path === to || path.startsWith(`${to}/`) || (to === "/knowledge" && path.startsWith("/projects"));
+  // The list of projects is a tab of Knowledge; a ticket's session counts as the Board, where it came
+  // from (ticket #70).
+  const on =
+    path === to ||
+    path.startsWith(`${to}/`) ||
+    (to === "/knowledge" && path.startsWith("/projects")) ||
+    (to === "/board" && path.startsWith("/ticket/"));
   return <SideNavItem label={label} href={to} icon={icon} size="sm" isSelected={on} endContent={end} />;
 }
 

@@ -15,7 +15,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
-import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket } from "../data";
+import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket, useTickets } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { AttachmentTray, usePromptAttachments } from "../ui/attach";
@@ -37,7 +37,6 @@ import {
   channelLabel,
   completeMention,
   EVERYONE,
-  keepOrder,
   localDay,
   type Mentionable,
   mentionSuggestions,
@@ -72,6 +71,7 @@ import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
 import { OVERVIEW_KEY, OverviewPanel, ProgressCard, useTicketProgress } from "./ticket-overview";
+import { ticketPlace } from "./ticket-session-logic";
 import { ColumnGlyph } from "./tickets-kit";
 import { homeChannel, narrow } from "./workspace-logic";
 
@@ -455,6 +455,25 @@ function ChannelRow({ c, on, onOpen }: { c: ChannelView; on: boolean; onOpen: (c
   );
 }
 
+/** A search hit on a ticket: it opens the ticket's session, not a channel (TS-06). */
+function TicketResult({ c, title }: { c: ChannelView; title: string | null }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      type="button"
+      aria-label={`Ticket ${c.ticket_number ?? ""}, ${title ?? bareName(c)}`}
+      onClick={() => void navigate(ticketPlace({ id: c.ticket_id ?? "", number: c.ticket_number }))}
+      {...stylex.props(styles.channelRow)}
+    >
+      {c.ticket_column ? <ColumnGlyph kind={c.ticket_column} /> : <span {...stylex.props(styles.hash)}>#</span>}
+      <span {...stylex.props(styles.channelName)}>
+        {c.ticket_number ? `#${c.ticket_number} ` : ""}
+        {title ?? bareName(c)}
+      </span>
+    </button>
+  );
+}
+
 function ChannelList({
   channels,
   open,
@@ -469,12 +488,9 @@ function ChannelList({
   const workspace = useWorkspace().id;
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<ChannelView[] | null>(null);
-  const [ticketsAll, setTicketsAll] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [archivedAll, setArchivedAll] = useState(false);
-  const [frozen, setFrozen] = useState<string[] | null>(null);
   const s = useMemo(() => sections(channels), [channels]);
-  const tickets = frozen ? keepOrder(s.tickets, frozen) : s.tickets;
   const openId = open ?? s.general?.conversation_id ?? null;
 
   useEffect(() => {
@@ -502,16 +518,17 @@ function ChannelList({
   const eyebrow = stylex.props(styles.eyebrow);
   const more = stylex.props(styles.more);
   const group = stylex.props(styles.listGroup);
-  const row = (c: ChannelView) => (
-    <ChannelRow key={c.conversation_id} c={c} on={c.conversation_id === openId} onOpen={onOpen} />
-  );
+  // Only a search shows tickets; their titles come from the tickets read the palette uses too.
+  const tickets = useTickets(found?.some((c) => c.kind === "ticket") === true);
+  const titleOf = (id: string | null | undefined) => tickets.data?.find((t) => t.id === id)?.title ?? null;
+  const row = (c: ChannelView) =>
+    c.kind === "ticket" ? (
+      <TicketResult key={c.conversation_id} c={c} title={titleOf(c.ticket_id)} />
+    ) : (
+      <ChannelRow key={c.conversation_id} c={c} on={c.conversation_id === openId} onOpen={onOpen} />
+    );
   return (
-    <section
-      aria-label="Channels"
-      {...stylex.props(styles.list)}
-      onPointerEnter={() => setFrozen(s.tickets.map((c) => c.conversation_id))}
-      onPointerLeave={() => setFrozen(null)}
-    >
+    <section aria-label="Channels" {...stylex.props(styles.list)}>
       <TextInput
         label="Search channels"
         isLabelHidden
@@ -534,17 +551,6 @@ function ChannelList({
             {s.general ? row(s.general) : null}
             {s.projects.map(row)}
           </div>
-          {tickets.length > 0 ? (
-            <div {...group}>
-              <p {...eyebrow}>Tickets</p>
-              {tickets.slice(0, shownCount(tickets.length, ticketsAll)).map(row)}
-              {!ticketsAll && tickets.length > 15 ? (
-                <button type="button" {...more} onClick={() => setTicketsAll(true)}>
-                  Show more ({tickets.length - 15})
-                </button>
-              ) : null}
-            </div>
-          ) : null}
           {s.archived.length > 0 ? (
             <div {...group}>
               <button
@@ -983,6 +989,27 @@ interface ChannelProps {
   embedded?: boolean;
   /** The ticket, when `c` may not be known yet. */
   ticketId?: string | null;
+  /** A ticket's session fills these (ticket #70); the Team chat leaves them out. */
+  session?: SessionSlots;
+}
+
+/** What a ticket's session puts around the channel's feed and composer. */
+export interface SessionSlots {
+  /** In place of the channel's head. */
+  head?: ReactNode;
+  /** Between the progress and the composer: the decision of the moment. */
+  gate: ReactNode;
+  /** Beside Send: the next run's mode and model. */
+  chips?: ReactNode;
+  /** The right panel while no thread is open. */
+  aside?: ReactNode;
+  /** The ticket decides, so leaving Done makes it writable before the channel's read catches up. */
+  readOnly: boolean;
+  readOnlyText: string;
+  /** At the end of the read-only bar (Send back on Done). */
+  readOnlyEnd?: ReactNode;
+  placeholder: string;
+  hint: string;
 }
 
 function Channel(props: ChannelProps) {
@@ -990,15 +1017,17 @@ function Channel(props: ChannelProps) {
   return <ChannelBody {...props} />;
 }
 
-/** A ticket's discussion, as a chat: in the ticket's panel and in the popout. */
+/** A ticket's discussion, as a chat: the compact session in the popout. */
 export function TicketChat({
   conversationId,
   ticketId,
   message = null,
+  session,
 }: {
   conversationId: string;
   ticketId: string;
   message?: string | null;
+  session?: SessionSlots;
 }) {
   const channels = useChannels();
   const c = channels.data?.find((x) => x.conversation_id === conversationId) ?? null;
@@ -1013,6 +1042,39 @@ export function TicketChat({
       general={false}
       message={message}
       embedded
+      {...(session ? { session } : {})}
+    />
+  );
+}
+
+/** A ticket's session: its channel's feed and composer, with the session's head, gate and panel around them. */
+export function TicketSessionBody({
+  conversationId,
+  ticketId,
+  message,
+  thread,
+  onThread,
+  session,
+}: {
+  conversationId: string;
+  ticketId: string;
+  message: string | null;
+  thread: string | null;
+  onThread: (id: string | null) => void;
+  session: SessionSlots;
+}) {
+  const channels = useChannels();
+  const c = channels.data?.find((x) => x.conversation_id === conversationId) ?? null;
+  return (
+    <ChannelBody
+      channel={conversationId}
+      c={c}
+      ticketId={ticketId}
+      thread={thread}
+      onThread={onThread}
+      general={false}
+      message={message}
+      session={session}
     />
   );
 }
@@ -1026,6 +1088,7 @@ function ChannelBody({
   message = null,
   embedded = false,
   ticketId = null,
+  session,
 }: ChannelProps) {
   const { user, features, status } = useLinkState();
   const connection = useConnection();
@@ -1139,7 +1202,7 @@ function ChannelBody({
     return out;
   }, [list2, folded.earlier, newAt, live, inList, pending, onCard]);
 
-  const readOnly = (c?.archived ?? false) || feed.data?.read_only === true;
+  const readOnly = session ? session.readOnly : (c?.archived ?? false) || feed.data?.read_only === true;
   const caps = useMemo<Caps>(
     () => ({ threads: features.includes("chat_threads"), reactions: features.includes("chat_reactions"), readOnly }),
     [features, readOnly],
@@ -1226,24 +1289,29 @@ function ChannelBody({
       ? quickReplies(lastAnswer.activity)
       : null;
   const owner = t && t.column !== "done" ? (t.owner_name ?? null) : null;
-  const placeholder =
-    isTicket && owner
+  const placeholder = session
+    ? session.placeholder
+    : isTicket && owner
       ? `Message ${owner} (owner)… · @ to mention`
       : general
         ? "Message the team · @ to mention"
         : `Message #${name} · @ to mention`;
-  const hint = isTicket
-    ? t
-      ? `@Name asks that employee${ownerAnswers(owner)}.`
-      : "@Name asks that employee about this ticket."
-    : `@Name asks that employee; without a name, ${first ?? "the top of the org chart"} answers.`;
+  const hint = session
+    ? session.hint
+    : isTicket
+      ? t
+        ? `@Name asks that employee${ownerAnswers(owner)}.`
+        : "@Name asks that employee about this ticket."
+      : `@Name asks that employee; without a name, ${first ?? "the top of the org chart"} answers.`;
   const answering = [...new Set(live.flatMap((u) => runAuthor(employeesData ?? [], u.run_id) ?? []))];
   const loading = useDelayed(feed.isPending);
 
   return (
     <section aria-label={`#${name}`} {...stylex.props(styles.channel)}>
       <div {...stylex.props(styles.channelMain, embedded && thread !== null && styles.hiddenMain)}>
-        {embedded ? null : (
+        {session?.head ? (
+          session.head
+        ) : embedded ? null : (
           <header data-titlebar {...stylex.props(styles.top)}>
             <Heading level={1} xstyle={styles.title}>
               <span {...stylex.props(styles.hash)}>#</span> {name}
@@ -1276,7 +1344,7 @@ function ChannelBody({
                     : `You and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`}
             </span>
             {c?.ticket_id ? (
-              <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.openTicket)}>
+              <Link {...ticketPlace({ id: c.ticket_id, number: c.ticket_number })} {...stylex.props(styles.openTicket)}>
                 Open ticket ↗
               </Link>
             ) : null}
@@ -1379,14 +1447,23 @@ function ChannelBody({
             </div>
           </FeedIdsProvider>
           {isTicket && !readOnly ? <ProgressCard p={progress} narrow={embedded} /> : null}
+          {session?.gate}
           {readOnly ? (
             <div {...stylex.props(styles.readOnlyRow)}>
               <div {...stylex.props(styles.readOnlyBar)}>
                 <span {...stylex.props(styles.readOnlyText)}>
-                  {c ? readOnlyBar(c, c.ticket_column === "done") : "This channel is read-only."}
+                  {session
+                    ? session.readOnlyText
+                    : c
+                      ? readOnlyBar(c, c.ticket_column === "done")
+                      : "This channel is read-only."}
                 </span>
-                {c?.ticket_id && !embedded ? (
-                  <Link to="/board" search={{ ticket: c.ticket_id }} {...stylex.props(styles.readOnlyLink)}>
+                {session?.readOnlyEnd}
+                {c?.ticket_id && !embedded && !session ? (
+                  <Link
+                    {...ticketPlace({ id: c.ticket_id, number: c.ticket_number })}
+                    {...stylex.props(styles.readOnlyLink)}
+                  >
                     Open ticket
                   </Link>
                 ) : null}
@@ -1407,6 +1484,7 @@ function ChannelBody({
               quick={quick}
               everyone={everyone}
               prompt={TEAM_PROMPT}
+              {...(session?.chips ? { footer: session.chips } : {})}
               onSent={() => {
                 atBottom.current = true;
                 handle.current?.scrollToIndex({ index: "LAST", align: "end" });
@@ -1432,6 +1510,8 @@ function ChannelBody({
             full={embedded}
           />
         </ChatProvider>
+      ) : session ? (
+        (session.aside ?? null)
       ) : isTicket && !embedded && overviewOpen ? (
         <OverviewPanel p={progress} onClose={() => showOverview(false)} />
       ) : null}
@@ -1482,7 +1562,7 @@ export function ChatScreen({
     if (gone) void navigate({ to: "/chat", search: {} });
   }, [gone, navigate]);
 
-  const visible = useMemo(() => visibleChannels(s, true, false, false), [s]);
+  const visible = useMemo(() => visibleChannels(s, false, false), [s]);
   const step = (down: boolean) => {
     const next = stepChannel(
       visible.map((c) => c.conversation_id),

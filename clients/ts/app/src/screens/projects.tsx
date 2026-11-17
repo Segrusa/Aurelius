@@ -1151,7 +1151,7 @@ export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab })
         />
       </PageHead>
       {tab === "overview" ? <Overview project={project} onEdit={() => setEditing(true)} pick={pick} /> : null}
-      {tab === "board" ? <BoardScreen ticket={undefined} projectId={project.id} /> : null}
+      {tab === "board" ? <BoardScreen projectId={project.id} /> : null}
       {tab === "tasks" ? <TasksScreen projectId={project.id} /> : null}
       {tab === "ideas" ? <IdeasBody projectId={project.id} chrome={false} /> : null}
       {tab === "vault" ? (

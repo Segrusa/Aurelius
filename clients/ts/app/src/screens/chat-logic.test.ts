@@ -239,18 +239,23 @@ describe("channels", () => {
     const s = sections(list);
     expect(s.general?.conversation_id).toBe("g");
     expect(s.projects.map((c) => c.conversation_id)).toEqual(["a", "b"]);
-    expect(s.tickets.map((c) => c.conversation_id)).toEqual(["t2", "t1"]);
-    expect(s.archived.map((c) => c.conversation_id)).toEqual(["x", "y"]);
+    expect(s.archived.map((c) => c.conversation_id)).toEqual(["x"]);
   });
-  it("shows fifteen and the archived only unfolded", () => {
-    const tickets = Array.from({ length: 20 }, (_, i) =>
-      chan({ conversation_id: `t${i}`, kind: "ticket", ticket_number: i }),
+  it("leaves out every ticket's channel, open and archived: a ticket opens as its session (TS-06)", () => {
+    const s = sections(list);
+    const shown = [s.general, ...s.projects, ...s.archived].map((c) => c?.kind);
+    expect(shown).not.toContain("ticket");
+    expect(visibleChannels(s, true, true).some((c) => c.kind === "ticket")).toBe(false);
+  });
+  it("shows fifteen archived and the archived only unfolded", () => {
+    const gone = Array.from({ length: 20 }, (_, i) =>
+      chan({ conversation_id: `p${i}`, kind: "project", name: `p${i}`, archived: true }),
     );
-    const s = sections(tickets);
-    expect(visibleChannels(s, false, false, false)).toHaveLength(15);
-    expect(visibleChannels(s, true, false, false)).toHaveLength(20);
-    expect(visibleChannels(sections(list), true, false, false).map((c) => c.conversation_id)).not.toContain("x");
-    expect(visibleChannels(sections(list), true, true, false).map((c) => c.conversation_id)).toContain("x");
+    const s = sections(gone);
+    expect(visibleChannels(s, true, false)).toHaveLength(15);
+    expect(visibleChannels(s, true, true)).toHaveLength(20);
+    expect(visibleChannels(sections(list), false, false).map((c) => c.conversation_id)).not.toContain("x");
+    expect(visibleChannels(sections(list), true, false).map((c) => c.conversation_id)).toContain("x");
   });
   it("keeps the frozen order", () => {
     const [a, b, c] = [chan({ conversation_id: "a" }), chan({ conversation_id: "b" }), chan({ conversation_id: "c" })];

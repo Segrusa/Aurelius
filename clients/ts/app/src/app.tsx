@@ -41,6 +41,7 @@ import { SessionScreen } from "./screens/session";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
 import { TasksScreen } from "./screens/tasks";
+import { ChatRedirect, TicketRedirect, TicketSessionScreen } from "./screens/ticket-session";
 import { UsageScreen } from "./screens/usage";
 import { VaultScreen } from "./screens/vault";
 import { precisionTheme } from "./theme/precision/precision";
@@ -77,7 +78,14 @@ const board = createRoute({
   path: "/board",
   validateSearch: ticketSearch,
   component: function BoardRoute() {
-    return <BoardScreen ticket={board.useSearch().ticket} />;
+    const { ticket } = board.useSearch();
+    // An old link to a ticket on the Board opens its session (BR6); the Board shows while it resolves.
+    return (
+      <>
+        {ticket ? <TicketRedirect ticketId={ticket} /> : null}
+        <BoardScreen />
+      </>
+    );
   },
 });
 // My tickets is gone (ticket #65); an old link opens its ticket on the Board.
@@ -108,7 +116,32 @@ const chat = createRoute({
   }),
   component: function ChatRoute() {
     const { channel, thread, message } = chat.useSearch();
-    return <ChatScreen channel={channel ?? null} thread={thread ?? null} message={message ?? null} />;
+    return (
+      <>
+        <ChatRedirect channel={channel ?? null} message={message ?? null} thread={thread ?? null} />
+        <ChatScreen channel={channel ?? null} thread={thread ?? null} message={message ?? null} />
+      </>
+    );
+  },
+});
+// A ticket opens as its own session (ticket #70); the number is the one people see on the card.
+const ticketSession = createRoute({
+  getParentRoute: () => root,
+  path: "/ticket/$number",
+  validateSearch: (search: Record<string, unknown>): { message?: string; thread?: string } => ({
+    ...(typeof search.message === "string" ? { message: search.message } : {}),
+    ...(typeof search.thread === "string" ? { thread: search.thread } : {}),
+  }),
+  component: function TicketSessionRoute() {
+    const { number } = ticketSession.useParams();
+    const { message, thread } = ticketSession.useSearch();
+    const n = Number(number);
+    if (!Number.isInteger(n) || n <= 0) {
+      return (
+        <EmptyState title={`Ticket #${number} not found.`} actions={<Button label="Open the Board" href="/board" />} />
+      );
+    }
+    return <TicketSessionScreen key={n} number={n} message={message ?? null} thread={thread ?? null} />;
   },
 });
 const employees = createRoute({ getParentRoute: () => root, path: "/employees", component: EmployeesScreen });
@@ -195,7 +228,14 @@ const history = createRoute({
   path: "/history",
   validateSearch: historyFilters,
   component: function HistoryRoute() {
-    return <HistoryScreen filters={history.useSearch()} />;
+    const { ticket, ...filters } = history.useSearch();
+    // An old link to a ticket in History opens its session (BR6).
+    return (
+      <>
+        {ticket ? <TicketRedirect ticketId={ticket} /> : null}
+        <HistoryScreen filters={filters} />
+      </>
+    );
   },
 });
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
@@ -246,6 +286,7 @@ const router = createRouter({
     tasks,
     taskRun,
     chat,
+    ticketSession,
     employeeChat,
     workSession,
     settingsIndex,
