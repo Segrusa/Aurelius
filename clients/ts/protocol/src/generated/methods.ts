@@ -40,6 +40,8 @@ export const METHODS = {
   "claude_login.link": "host",
   "claude_login.status": "read",
   "claude_login.unlink": "host",
+  "compaction.get_setting": "read",
+  "compaction.set_threshold": "host",
   "company.get": "read",
   "company.set_background_login": "command",
   "company.set_follow_org_chart": "command",
@@ -353,6 +355,15 @@ export interface MethodParams {
    * removed). Answers `ClaudeLogin`.
    */
   "claude_login.unlink": undefined;
+  /**
+   * Above how many tokens a session is compacted (feature `compaction_setting`).
+   */
+  "compaction.get_setting": undefined;
+  /**
+   * Above how many tokens of context a session is compacted before its next turn
+   * (feature `compaction_setting`), from the next run on; 0: never.
+   */
+  "compaction.set_threshold": { threshold_tokens: number };
   /**
    * The company in one read: employees, the org chart setting and the
    * management team (roots).

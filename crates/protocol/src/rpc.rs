@@ -418,6 +418,11 @@ pub mod feature {
     /// behind a call, so `run.get_activity` shows what one subagent did. A client
     /// without this feature shows only its latest step.
     pub const SUBAGENT_STEPS: &str = "subagent_steps";
+    /// A board member chooses above how many tokens a session is compacted:
+    /// `compaction.get_setting` / `compaction.set_threshold` (`CompactionSetting`).
+    /// Claude Code compacting by itself during a turn shows too: `RunProgress::compacting`
+    /// while it works and a `compacted` update afterwards. Older servers keep 120k.
+    pub const COMPACTION_SETTING: &str = "compaction_setting";
 }
 
 /// Every feature this build has.
@@ -473,6 +478,7 @@ pub const FEATURES: &[&str] = &[
     feature::TICKET_HISTORY,
     feature::CHAT_FILES,
     feature::SUBAGENT_STEPS,
+    feature::COMPACTION_SETTING,
 ];
 
 /// Daemon → client.
@@ -649,6 +655,7 @@ pub enum ResponseBody {
     Browser(BrowserSetting),
     ManagementModeSetting(ManagementModeSetting),
     AutoAllowSetting(AutoAllowSetting),
+    CompactionSetting(CompactionSetting),
     McpServers(McpServers),
     McpLogin(McpLogin),
     McpAlwaysAllow(McpAlwaysAllow),

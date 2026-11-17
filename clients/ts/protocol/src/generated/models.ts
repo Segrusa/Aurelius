@@ -1129,6 +1129,22 @@ export type CommandResult =
 ;
 
 /**
+ * `compaction.get_setting` / `compaction.set_threshold` (feature `compaction_setting`):
+ * above how many tokens of context a conversation's session is compacted before its
+ * next turn. The limits travel along so a client needs no copy of them.
+ */
+export interface CompactionSetting {
+  default_tokens: number;
+  max_tokens: number;
+  min_tokens: number;
+  /**
+   * The threshold in tokens; 0: never compacted by Aurelius (Claude Code still
+   * compacts by itself when its context window is full).
+   */
+  threshold_tokens: number;
+}
+
+/**
  * The company in one read (`company.get`): employees, the org chart setting
  * and its roots (the management team).
  */
@@ -2480,6 +2496,7 @@ export type HostResult =
    * `ServerMessage::ClaudeLoginPrompt` with this id.
    */
   | ({ type: "claude_login_link"; link_id: string })
+  | ({ type: "compaction_setting" } & CompactionSetting)
   /**
    * Notifications changed.
    */
@@ -2548,6 +2565,11 @@ export type HostWrite =
    * removed). Answers `ClaudeLogin`.
    */
   | ({ method: "claude_login.unlink" })
+  /**
+   * Above how many tokens of context a session is compacted before its next turn
+   * (feature `compaction_setting`), from the next run on; 0: never.
+   */
+  | ({ method: "compaction.set_threshold"; params: { threshold_tokens: number } })
   /**
    * A new folder `name` in the folder `parent`.
    */
@@ -3567,6 +3589,10 @@ export type Method =
    */
   | ({ method: "claude_login.status" })
   /**
+   * Above how many tokens a session is compacted (feature `compaction_setting`).
+   */
+  | ({ method: "compaction.get_setting" })
+  /**
    * The company in one read: employees, the org chart setting and the
    * management team (roots).
    */
@@ -4475,6 +4501,7 @@ export type ResponseBody =
   | ({ type: "browser"; value: BrowserSetting })
   | ({ type: "channels"; value: ChannelsSnapshot })
   | ({ type: "claude_login"; value: ClaudeLoginView })
+  | ({ type: "compaction_setting"; value: CompactionSetting })
   | ({ type: "company"; value: CompanySnapshot })
   | ({ type: "connections"; value: ConnectionsSnapshot })
   | ({ type: "context"; value: ContextView })

@@ -4835,6 +4835,39 @@ final class CommandResultWorkSessionStarted extends CommandResult {
     };
 }
 
+/// `compaction.get_setting` / `compaction.set_threshold` (feature `compaction_setting`):
+/// above how many tokens of context a conversation's session is compacted before its
+/// next turn. The limits travel along so a client needs no copy of them.
+final class CompactionSetting {
+  const CompactionSetting({
+    required this.defaultTokens,
+    required this.maxTokens,
+    required this.minTokens,
+    required this.thresholdTokens,
+  });
+
+  final int defaultTokens;
+  final int maxTokens;
+  final int minTokens;
+  /// The threshold in tokens; 0: never compacted by Aurelius (Claude Code still
+  /// compacts by itself when its context window is full).
+  final int thresholdTokens;
+
+  factory CompactionSetting.fromJson(Map<String, dynamic> json) => CompactionSetting(
+    defaultTokens: (json['default_tokens'] as num).toInt(),
+    maxTokens: (json['max_tokens'] as num).toInt(),
+    minTokens: (json['min_tokens'] as num).toInt(),
+    thresholdTokens: (json['threshold_tokens'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'default_tokens': defaultTokens,
+    'max_tokens': maxTokens,
+    'min_tokens': minTokens,
+    'threshold_tokens': thresholdTokens,
+  };
+}
+
 /// The company in one read (`company.get`): employees, the org chart setting
 /// and its roots (the management team).
 final class CompanySnapshot {
@@ -7497,6 +7530,8 @@ sealed class HostResult {
         return HostResultClaudeLoginLink(
           linkId: (json['link_id'] as String),
         );
+      case 'compaction_setting':
+        return HostResultCompactionSetting(value: CompactionSetting.fromJson(json as Map<String, dynamic>));
       case 'count':
         return HostResultCount(
           count: (json['count'] as num).toInt(),
@@ -7614,6 +7649,20 @@ final class HostResultClaudeLoginLink extends HostResult {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'claude_login_link',
       'link_id': linkId,
+    };
+}
+
+final class HostResultCompactionSetting extends HostResult {
+  const HostResultCompactionSetting({
+    required this.value,
+  });
+
+  final CompactionSetting value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'compaction_setting',
+      ...value.toJson(),
     };
 }
 
@@ -7903,6 +7952,13 @@ sealed class HostWrite {
         return const HostWriteClaudeLoginLink();
       case 'claude_login.unlink':
         return const HostWriteClaudeLoginUnlink();
+      case 'compaction.set_threshold':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteCompactionSetThreshold(
+          thresholdTokens: (src['threshold_tokens'] as num).toInt(),
+        );
+        }
       case 'fs.create_dir':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -8216,6 +8272,24 @@ final class HostWriteClaudeLoginUnlink extends HostWrite {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'claude_login.unlink',
+    };
+}
+
+/// Above how many tokens of context a session is compacted before its next turn
+/// (feature `compaction_setting`), from the next run on; 0: never.
+final class HostWriteCompactionSetThreshold extends HostWrite {
+  const HostWriteCompactionSetThreshold({
+    required this.thresholdTokens,
+  });
+
+  final int thresholdTokens;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'compaction.set_threshold',
+      'params': <String, dynamic>{
+      'threshold_tokens': thresholdTokens,
+    },
     };
 }
 
@@ -10539,6 +10613,8 @@ sealed class Method {
         return MethodClaudeLoginInput(params: ClaudeLoginInputParams.fromJson(json['params'] as Map<String, dynamic>));
       case 'claude_login.status':
         return const MethodClaudeLoginStatus();
+      case 'compaction.get_setting':
+        return const MethodCompactionGetSetting();
       case 'company.get':
         return const MethodCompanyGet();
       case 'connection.detect_runtime':
@@ -11195,6 +11271,16 @@ final class MethodClaudeLoginStatus extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'claude_login.status',
+    };
+}
+
+/// Above how many tokens a session is compacted (feature `compaction_setting`).
+final class MethodCompactionGetSetting extends Method {
+  const MethodCompactionGetSetting();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'compaction.get_setting',
     };
 }
 
@@ -13794,6 +13880,8 @@ sealed class ResponseBody {
         return ResponseBodyChannels(value: ChannelsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'claude_login':
         return ResponseBodyClaudeLogin(value: ClaudeLoginView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'compaction_setting':
+        return ResponseBodyCompactionSetting(value: CompactionSetting.fromJson(json['value'] as Map<String, dynamic>));
       case 'company':
         return ResponseBodyCompany(value: CompanySnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'connections':
@@ -14137,6 +14225,20 @@ final class ResponseBodyClaudeLogin extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'claude_login',
+      'value': value.toJson(),
+    };
+}
+
+final class ResponseBodyCompactionSetting extends ResponseBody {
+  const ResponseBodyCompactionSetting({
+    required this.value,
+  });
+
+  final CompactionSetting value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'compaction_setting',
       'value': value.toJson(),
     };
 }

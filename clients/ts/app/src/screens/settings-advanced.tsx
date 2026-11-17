@@ -8,7 +8,7 @@ import type { LoadLimitsUpdate, McpLogin, McpTransport, ProviderKind, TaskSchedu
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, Fragment, useEffect, useState } from "react";
-import { useConnection } from "../connection";
+import { useConnection, useLinkState } from "../connection";
 import { useEmployees, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { AttachRow, useAttachments } from "../ui/attach";
@@ -33,7 +33,15 @@ import {
   useSetting,
   when,
 } from "./settings-kit";
-import { type RecurrenceForm, recurrenceForm, recurrenceOf, recurrenceText, WEEKDAYS } from "./settings-logic";
+import {
+  compactFieldOf,
+  compactThresholdOf,
+  type RecurrenceForm,
+  recurrenceForm,
+  recurrenceOf,
+  recurrenceText,
+  WEEKDAYS,
+} from "./settings-logic";
 
 const TEXT3 = "var(--precision-text3)";
 
@@ -1188,6 +1196,79 @@ export function TraceSection() {
         </Row>
       </Group>
       <Problem error={trace.error ?? error} />
+    </>
+  );
+}
+
+export function CompactionSection() {
+  const { features } = useLinkState();
+  return features.includes("compaction_setting") ? (
+    <CompactionThreshold />
+  ) : (
+    <Group>
+      <Muted>This server compacts a session above 120k tokens. Update the server to choose when.</Muted>
+    </Group>
+  );
+}
+
+function CompactionThreshold() {
+  const connection = useConnection();
+  const { busy, error, run } = useChange();
+  const setting = useSetting(
+    "compaction",
+    async () => expectBody(await connection.call("compaction.get_setting"), "compaction_setting").value,
+  );
+  const [draft, setDraft] = useState<string | null>(null);
+  const data = setting.data;
+  const field = draft ?? (data ? compactFieldOf(data.threshold_tokens) : "");
+  const parsed = data && draft !== null ? compactThresholdOf(draft, data) : null;
+  const invalid = typeof parsed === "string" ? parsed : null;
+  const save = async (tokens: number) => {
+    if (await run(() => connection.write("compaction.set_threshold", { threshold_tokens: tokens }, { retry: false })))
+      setDraft(null);
+  };
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (typeof parsed === "number") void save(parsed);
+  };
+  return (
+    <>
+      <form onSubmit={submit} {...stylex.props(styles.contents)}>
+        <Group>
+          <Row
+            title="Compact the context above (thousands of tokens)"
+            hint={
+              data
+                ? `Before its next turn a session whose context grew past this is summarised. Default ${compactFieldOf(data.default_tokens)}, from ${compactFieldOf(data.min_tokens)} to ${compactFieldOf(data.max_tokens)}; 0: never. Claude Code still compacts by itself when the model's context window is full.`
+                : undefined
+            }
+          >
+            <TextInput
+              label="Compact the context above (thousands of tokens)"
+              type="number"
+              min={0}
+              step={1}
+              width={90}
+              value={field}
+              disabled={busy || !data}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            {data && data.threshold_tokens !== data.default_tokens && draft === null ? (
+              <SmallButton disabled={busy} onClick={() => void save(data.default_tokens)}>
+                Use the default
+              </SmallButton>
+            ) : null}
+          </Row>
+        </Group>
+        {draft !== null && typeof parsed === "number" && parsed !== data?.threshold_tokens ? (
+          <div>
+            <SmallButton kind="primary" type="submit" disabled={busy}>
+              Save
+            </SmallButton>
+          </div>
+        ) : null}
+      </form>
+      <Problem error={setting.error ?? invalid ?? error} />
     </>
   );
 }

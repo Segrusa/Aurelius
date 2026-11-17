@@ -183,6 +183,10 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let store = shared.store().clone();
             storage_task(move || store.read(aurelius_storage::auto_allow::enabled)).await.map(|enabled| ResponseBody::AutoAllowSetting(aurelius_protocol::AutoAllowSetting::new(enabled)))
         }
+        Method::CompactionGetSetting => {
+            let store = shared.store().clone();
+            storage_task(move || store.read(aurelius_storage::conversation_sessions::compaction_setting)).await.map(ResponseBody::CompactionSetting)
+        }
         Method::ManagementModeGetSetting => {
             let store = shared.store().clone();
             storage_task(move || store.read(aurelius_storage::management_mode::enabled)).await.map(|enabled| ResponseBody::ManagementModeSetting(aurelius_protocol::ManagementModeSetting { enabled }))

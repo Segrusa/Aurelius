@@ -48,13 +48,15 @@ impl Live {
         }
     }
 
-    /// A run ended; its tokens stay counted for the job.
+    /// A run ended; its tokens stay counted for the job. One that ended while it
+    /// compacted (interrupted, failed) no longer compacts.
     pub fn run_ended(&self, run: RunId) {
         let Some(job) = self.run_job.lock().ok().and_then(|mut m| m.remove(&run)) else { return };
         if let Ok(mut jobs) = self.jobs.lock() {
             if let Some(j) = jobs.get_mut(&job) {
                 let n = j.runs.remove(&run).unwrap_or(0);
                 j.done += n;
+                j.compacting = false;
             }
         }
     }
@@ -131,5 +133,16 @@ mod tests {
         assert!(!live.is_compacting("task-1"));
         live.job_ended("task-1");
         assert!(live.job("task-1").is_none() && live.for_run(b).is_none());
+    }
+
+    #[test]
+    fn a_run_that_ends_while_it_compacts_leaves_its_job_not_compacting() {
+        let live = Live::default();
+        let (a, b) = (RunId::new(), RunId::new());
+        live.run_started("task-1", a);
+        live.set_compacting(a, true);
+        live.run_ended(a);
+        live.run_started("task-1", b);
+        assert!(!live.is_compacting("task-1"), "the next step of the task does not show as compacting");
     }
 }

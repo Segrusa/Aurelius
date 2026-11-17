@@ -463,6 +463,9 @@ pub enum Method {
     /// Whether management chooses its own task mode (feature `management_chooses_mode`).
     #[serde(rename = "management_mode.get_setting")]
     ManagementModeGetSetting,
+    /// Above how many tokens a session is compacted (feature `compaction_setting`).
+    #[serde(rename = "compaction.get_setting")]
+    CompactionGetSetting,
     /// Whether the safe read-only tools pass without a question (the auto-allow list).
     #[serde(rename = "auto_allow.get_setting")]
     AutoAllowGetSetting,

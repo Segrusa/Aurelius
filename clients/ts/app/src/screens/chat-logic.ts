@@ -775,3 +775,13 @@ export function mentionsMe(text: string, me: string | null): boolean {
   const name = me.toLowerCase();
   return mentions(text).some((m) => m.toLowerCase() === name);
 }
+
+/**
+ * The line under an answer that is still being written. Compacting comes first: while
+ * the context is summarised nothing else moves, and it can take minutes.
+ */
+export function statusLine(text: string, waiting: boolean, compacting: boolean): string {
+  if (waiting) return "Waiting for your approval";
+  if (compacting) return "Compacting context…";
+  return text ? "Writing…" : "Thinking…";
+}

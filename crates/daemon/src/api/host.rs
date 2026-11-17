@@ -49,6 +49,13 @@ pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite, user: Option
             storage_task(move || store.write(move |tx| aurelius_storage::management_mode::set_enabled(tx, enabled, aurelius_storage::now_ms()))).await?;
             HostResult::ManagementModeSetting(aurelius_protocol::ManagementModeSetting { enabled })
         }
+        // Read when each run is planned: applies from the next run on.
+        HostWrite::CompactionSetThreshold { threshold_tokens } => {
+            let tokens = aurelius_domain::views::valid_compact_threshold(threshold_tokens).map_err(|e| ProtocolError::new(ErrorCode::Validation, e.to_string()))?;
+            let store = shared.store().clone();
+            storage_task(move || store.write(move |tx| aurelius_storage::conversation_sessions::set_compact_threshold(tx, tokens))).await?;
+            HostResult::CompactionSetting(aurelius_protocol::CompactionSetting::of(tokens))
+        }
         // Read when each run starts: applies from the next run on.
         HostWrite::TraceSetEnabled { enabled } => {
             let store = shared.store().clone();

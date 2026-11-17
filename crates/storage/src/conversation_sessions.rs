@@ -40,10 +40,15 @@ pub struct SessionRow {
 /// The server setting: a session whose context grew past this many tokens is
 /// compacted before its next turn (0: never).
 pub const COMPACT_THRESHOLD: &str = "session_compact_threshold";
-pub const DEFAULT_COMPACT_THRESHOLD: u64 = 120_000;
+pub const DEFAULT_COMPACT_THRESHOLD: u64 = aurelius_domain::views::COMPACT_THRESHOLD_DEFAULT;
 
 pub fn compact_threshold(conn: &Connection) -> Result<u64, StorageError> {
     Ok(crate::settings::get(conn, COMPACT_THRESHOLD)?.and_then(|j| serde_json::from_str::<u64>(j.trim()).ok()).unwrap_or(DEFAULT_COMPACT_THRESHOLD))
+}
+
+/// `compaction.get_setting`: the threshold and its limits.
+pub fn compaction_setting(conn: &Connection) -> Result<aurelius_domain::views::CompactionSetting, StorageError> {
+    Ok(aurelius_domain::views::CompactionSetting::of(compact_threshold(conn)?))
 }
 
 pub fn set_compact_threshold(tx: &Transaction<'_>, tokens: u64) -> Result<(), StorageError> {

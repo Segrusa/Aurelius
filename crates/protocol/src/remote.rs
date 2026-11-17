@@ -99,6 +99,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::LoadGet
         | Method::BrowserGet
         | Method::ManagementModeGetSetting
+        | Method::CompactionGetSetting
         | Method::AutoAllowGetSetting
         | Method::McpList
         | Method::McpLoginGet { .. }
@@ -166,6 +167,8 @@ fn host_needs(host: &HostWrite) -> Needs {
         HostWrite::BrowserSet { .. } | HostWrite::BrowserSetBackend { .. } => Needs::Cap(Approve),
         // Whether management may switch its own tasks to Auto decides what runs without asking.
         HostWrite::ManagementModeSetEnabled { .. } => Needs::Cap(Approve),
+        // When a session compacts decides what each run keeps of its context: a server-wide setting.
+        HostWrite::CompactionSetThreshold { .. } => Needs::Cap(Approve),
         HostWrite::AutoAllowSetEnabled { .. } => Needs::Cap(Approve),
         // A server-wide setting like the others in Settings; it only keeps more of what runs send.
         HostWrite::TraceSetEnabled { .. } => Needs::Cap(Approve),

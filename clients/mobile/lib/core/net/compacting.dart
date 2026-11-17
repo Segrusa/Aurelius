@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 /// `progress.compacting`), so a task's mark can say so wherever it shows. Servers
 /// without feature `compact_status` never set it: the set stays empty.
 /// What a run shows while it compacts the conversation's context.
-const compactingLabel = 'Context comprimeren…';
+const compactingLabel = 'Compacting context…';
 
 final compactingConversations = ValueNotifier<Set<String>>(const {});
 

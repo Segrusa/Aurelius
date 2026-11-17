@@ -1,6 +1,13 @@
 // A recurrence as the schedule dialog types it, and as the wire holds it.
 
-import type { EmployeeRunLine, EmployeeRunsView, Recurrence, RunValueSource, Setting2 } from "@aurelius/protocol";
+import type {
+  CompactionSetting,
+  EmployeeRunLine,
+  EmployeeRunsView,
+  Recurrence,
+  RunValueSource,
+  Setting2,
+} from "@aurelius/protocol";
 import { effortName } from "./employee-logic";
 
 export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -123,4 +130,19 @@ export function employeeRunHint(run: EmployeeRunLine, name: (model: string) => s
     parts.push(`Its chat is set to ${chat.join(", ")}`);
   }
   return parts.join(". ");
+}
+
+/** The compaction threshold as the field shows it: thousands of tokens, "0" for never. */
+export function compactFieldOf(tokens: number): string {
+  return String(Math.round(tokens / 1000));
+}
+
+/** What the field holds (thousands of tokens) as tokens to send, or why it cannot be sent. */
+export function compactThresholdOf(field: string, limits: CompactionSetting): number | string {
+  const k = Number(field.trim());
+  if (field.trim() === "" || !Number.isInteger(k) || k < 0) return "Type a whole number of thousands of tokens.";
+  const tokens = k * 1000;
+  if (tokens !== 0 && (tokens < limits.min_tokens || tokens > limits.max_tokens))
+    return `Choose 0 (never) or ${compactFieldOf(limits.min_tokens)} to ${compactFieldOf(limits.max_tokens)}.`;
+  return tokens;
 }

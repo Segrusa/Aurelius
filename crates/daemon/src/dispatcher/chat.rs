@@ -134,7 +134,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     plan.session.frozen = choice.system.is_some();
     // Its context grew too big: compacted first (or started over when that fails).
     if choice.compact {
-        // While it compacts the answer already shows as running ("Context comprimeren…"):
+        // While it compacts the answer already shows as running ("Compacting context…"):
         // the answer message and the job's clock exist before the turn starts (starting
         // again below finds both). A lost lease falls through to compact_first's own check.
         let (s, p) = (shared.clone(), plan.clone());
@@ -439,9 +439,22 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     thread_parent: None,
                 });
             }
-            // Claude Code compacted on its own while it answered: the next run measures again.
+            // Claude Code compacts on its own while it answers: the answer says so while it does.
+            RuntimeEvent::Compacting(on) => {
+                shared.live.set_compacting(plan.run_id, on);
+                send_progress(&shared, &plan);
+            }
+            // Claude Code compacted on its own while it answered: a line in the conversation
+            // says so, as after a compaction before the turn. The next run measures again.
             RuntimeEvent::Compacted { pre_tokens, post_tokens } => {
                 tracing::info!(run = %plan.run_id, pre_tokens, post_tokens, "the runtime compacted the session while it answered");
+                shared.live.set_compacting(plan.run_id, false);
+                send_progress(&shared, &plan);
+                let (s, conversation) = (shared.clone(), plan.conversation_id);
+                match blocking(move || s.service.record_compaction(conversation, pre_tokens, post_tokens)).await {
+                    Some(Ok(notices)) => shared.publish(notices),
+                    other => tracing::warn!(run = %plan.run_id, ?other, "could not show that the session was compacted"),
+                }
             }
             RuntimeEvent::Completed => break RunOutcome::Completed,
             RuntimeEvent::Interrupted => break RunOutcome::Interrupted,

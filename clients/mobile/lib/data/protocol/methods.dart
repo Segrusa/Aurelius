@@ -77,6 +77,11 @@ abstract final class Methods {
   /// Disconnect the session's own Claude login (`claude auth logout`, its folder
   /// removed). Answers `ClaudeLogin`.
   static const String claudeLoginUnlink = 'claude_login.unlink';
+  /// Above how many tokens a session is compacted (feature `compaction_setting`).
+  static const String compactionGetSetting = 'compaction.get_setting';
+  /// Above how many tokens of context a session is compacted before its next turn
+  /// (feature `compaction_setting`), from the next run on; 0: never.
+  static const String compactionSetThreshold = 'compaction.set_threshold';
   /// The company in one read: employees, the org chart setting and the
   /// management team (roots).
   static const String companyGet = 'company.get';
@@ -643,6 +648,11 @@ Map<String, dynamic> claudeLoginInput(ClaudeLoginInputParams params) => <String,
 /// The session's own Claude login (`ClaudeLoginView`). Feature of protocol 5.
 Map<String, dynamic> claudeLoginStatus() => <String, dynamic>{
   'method': Methods.claudeLoginStatus,
+};
+
+/// Above how many tokens a session is compacted (feature `compaction_setting`).
+Map<String, dynamic> compactionGetSetting() => <String, dynamic>{
+  'method': Methods.compactionGetSetting,
 };
 
 /// The company in one read: employees, the org chart setting and the
@@ -1371,6 +1381,15 @@ Map<String, dynamic> claudeLoginLink() => <String, dynamic>{
 /// removed). Answers `ClaudeLogin`.
 Map<String, dynamic> claudeLoginUnlink() => <String, dynamic>{
   'method': Methods.claudeLoginUnlink,
+};
+
+/// Above how many tokens of context a session is compacted before its next turn
+/// (feature `compaction_setting`), from the next run on; 0: never.
+Map<String, dynamic> compactionSetThreshold({required int thresholdTokens}) => <String, dynamic>{
+  'method': Methods.compactionSetThreshold,
+  'params': <String, dynamic>{
+    'threshold_tokens': thresholdTokens,
+  },
 };
 
 /// A new folder `name` in the folder `parent`.

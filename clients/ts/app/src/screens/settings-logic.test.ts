@@ -1,6 +1,8 @@
 import type { EmployeeRunLine } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  compactFieldOf,
+  compactThresholdOf,
   defaultEffortLabel,
   effortOptions,
   employeeRunHint,
@@ -78,5 +80,28 @@ describe("model and effort per employee", () => {
     expect(employeeRunHint(run, (m) => m)).toBe(
       "claude-opus-5-5 · company default. Max is not supported by this model, so it is not used. Its chat is set to Low",
     );
+  });
+});
+
+describe("compaction threshold", () => {
+  const limits = { threshold_tokens: 120_000, default_tokens: 120_000, min_tokens: 20_000, max_tokens: 1_000_000 };
+
+  it("shows and reads thousands of tokens", () => {
+    expect(compactFieldOf(120_000)).toBe("120");
+    expect(compactThresholdOf("400", limits)).toBe(400_000);
+    expect(compactThresholdOf(" 20 ", limits)).toBe(20_000);
+    expect(compactThresholdOf("1000", limits)).toBe(1_000_000);
+  });
+
+  it("takes 0 as never", () => {
+    expect(compactThresholdOf("0", limits)).toBe(0);
+  });
+
+  it("refuses what the server would refuse", () => {
+    expect(compactThresholdOf("19", limits)).toBe("Choose 0 (never) or 20 to 1000.");
+    expect(compactThresholdOf("1001", limits)).toBe("Choose 0 (never) or 20 to 1000.");
+    expect(compactThresholdOf("", limits)).toBe("Type a whole number of thousands of tokens.");
+    expect(compactThresholdOf("1.5", limits)).toBe("Type a whole number of thousands of tokens.");
+    expect(compactThresholdOf("-5", limits)).toBe("Type a whole number of thousands of tokens.");
   });
 });

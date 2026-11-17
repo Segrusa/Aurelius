@@ -36,6 +36,7 @@ import {
   saveOf,
   sections,
   splitBlocks,
+  statusLine,
   stepChannel,
   streamTo,
   systemText,
@@ -431,5 +432,15 @@ describe("@Everyone", () => {
       "Wakes 1 employee and tells 1 board member",
     );
     expect(audienceLine({ employees: 0, paused: 2, board_members: 0 })).toBe("Wakes no employees (2 paused)");
+  });
+});
+
+describe("statusLine", () => {
+  it("says the context is being compacted while it is", () => {
+    expect(statusLine("", false, true)).toBe("Compacting context…");
+    expect(statusLine("half an answer", false, true)).toBe("Compacting context…");
+    expect(statusLine("", false, false)).toBe("Thinking…");
+    expect(statusLine("text", false, false)).toBe("Writing…");
+    expect(statusLine("", true, true)).toBe("Waiting for your approval");
   });
 });

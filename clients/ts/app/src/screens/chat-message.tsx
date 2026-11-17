@@ -64,6 +64,7 @@ import {
   rowActions,
   saveOf,
   splitBlocks,
+  statusLine,
   systemText,
   threadLabel,
   threadLine,
@@ -572,11 +573,6 @@ function LiveText({ text }: { text: string }) {
   );
 }
 
-function statusLine(text: string, waiting: boolean): string {
-  if (waiting) return "Waiting for your approval";
-  return text ? "Writing…" : "Thinking…";
-}
-
 /** Steps that ran between two pieces of text: one quiet line, with each step behind it. */
 function StepGroup({ steps, messageId }: { steps: ActivityView[]; messageId: string }) {
   const [open, setOpen] = useState(false);
@@ -804,7 +800,7 @@ function LiveAnswer({ m, waiting }: { m: MessageView; waiting: boolean }) {
       <AnswerBody m={m} text={text} live activity={update?.activity ?? m.activity} />
       <div {...stylex.props(styles.liveStatus)}>
         <TypingDots />
-        {statusLine(text, waiting)}
+        {statusLine(text, waiting, update?.progress?.compacting === true)}
         {m.run_id ? <StopButton run={m.run_id} /> : null}
       </div>
     </>
