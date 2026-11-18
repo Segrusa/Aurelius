@@ -6,8 +6,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/push/push_service.dart';
 import '../../core/theme/tokens.dart';
+import '../../core/widgets/dialogs.dart' show confirm;
 import '../../core/widgets/ios.dart';
+import '../../core/widgets/widgets.dart' show Monogram, toast;
 import '../../data/aurelius_repository.dart';
+import '../account/claude_login.dart' show claudeLoginLine;
+import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../hosts/hosts_bloc.dart';
 import '../server_name/server_name_bloc.dart';
@@ -24,24 +28,83 @@ Future<String> appVersion() async {
   }
 }
 
-/// Settings, in the style of iOS Settings: the PC this phone talks to, then
-/// what is used while operating (notifications, board, board members, paired
-/// PCs). The PC's own settings are changed on the desktop.
-class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key});
+String _monogram(String name) => name.isEmpty ? '?' : String.fromCharCode(name.runes.first).toUpperCase();
+
+/// The Profile tab (ticket #72), one page instead of More › Account and
+/// More › Settings, in the style of iOS Settings: the signed-in board member
+/// and their account (sessions, Claude login, password), the PC this phone
+/// talks to, what is used while operating (employees, notifications, board,
+/// board members, paired PCs), About and Sign out. The PC's own settings are
+/// changed on the desktop.
+class ProfilePage extends StatelessWidget {
+  const ProfilePage({super.key});
+
+  Future<void> _signOut(BuildContext context) async {
+    final repository = context.read<AureliusRepository>();
+    final ok = await confirm(context, title: 'Sign out on this phone?', body: 'You need your password to come back.', action: 'Sign out', danger: true);
+    if (!ok) return;
+    try {
+      await repository.signOut();
+    } catch (e) {
+      if (context.mounted) toast(context, '$e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final repository = context.read<AureliusRepository>();
     final host = repository.host;
     final link = context.watch<ConnectionBloc>().state;
+    final user = link.user;
     final push = context.read<PushService>();
     final paired = context.select<HostsBloc, int>((b) => b.state.hosts.length);
+    final employees = context.select<CompanyBloc, int>((b) => b.state.activeEmployees.length);
     return LargeTitleScaffold(
-      title: 'Settings',
+      title: 'Profile',
       children: [
+        if (user != null) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+            child: Row(children: [
+              Monogram(_monogram(user.username), active: true, size: 48),
+              const SizedBox(width: 14),
+              Expanded(child: Text(user.username, key: const ValueKey('profile-name'), style: Tokens.title(size: 22))),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          const GroupHeader('Account'),
+          InsetGroup(
+            dividerIndent: 60,
+            children: [
+              GroupRow(
+                key: const ValueKey('account-sessions'),
+                leading: const IconTile(CupertinoIcons.device_phone_portrait),
+                title: 'Sessions',
+                chevron: true,
+                onTap: () => context.push('/account/sessions'),
+              ),
+              GroupRow(
+                key: const ValueKey('account-claude'),
+                leading: const IconTile(CupertinoIcons.sparkles),
+                title: 'Claude login',
+                value: claudeLoginLine(link.claudeLogin),
+                chevron: true,
+                onTap: () => context.push('/account/claude'),
+              ),
+              GroupRow(
+                key: const ValueKey('account-password'),
+                leading: const IconTile(CupertinoIcons.lock_fill),
+                title: 'Change password',
+                chevron: true,
+                onTap: () => context.push('/account/password'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+        const GroupHeader('Settings'),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
           child: Material(
             color: Tokens.cell,
             clipBehavior: Clip.antiAlias,
@@ -101,6 +164,15 @@ class SettingsPage extends StatelessWidget {
         InsetGroup(
           dividerIndent: 60,
           children: [
+            // The way to the chat with an employee, and to Give work from an employee's page.
+            GroupRow(
+              key: const ValueKey('profile-employees'),
+              leading: const IconTile(CupertinoIcons.person_2_fill),
+              title: 'Employees',
+              value: employees == 0 ? null : '$employees',
+              chevron: true,
+              onTap: () => context.push('/company'),
+            ),
             ValueListenableBuilder<PushState>(
               valueListenable: push.state,
               builder: (context, state, _) => GroupRow(
@@ -157,6 +229,18 @@ class SettingsPage extends StatelessWidget {
             ),
           ],
         ),
+        if (user != null) ...[
+          const SizedBox(height: 20),
+          InsetGroup(children: [
+            GroupRow(
+              key: const ValueKey('account-sign-out'),
+              title: 'Sign out',
+              titleStyle: TextStyle(fontSize: 17, color: Tokens.negative),
+              chevron: false,
+              onTap: () => _signOut(context),
+            ),
+          ]),
+        ],
         const SizedBox(height: 32),
       ],
     );

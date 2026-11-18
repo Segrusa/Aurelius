@@ -12,7 +12,7 @@ import '../../core/widgets/refresh.dart';
 import '../../data/views.dart';
 import 'company_bloc.dart';
 
-/// Projects (under More): every project as a row with its status and who works
+/// Projects: every project as a row with its status and who works
 /// there; hold a row to drag it into another order (kept on this phone).
 class ProjectsPage extends StatelessWidget {
   const ProjectsPage({super.key});

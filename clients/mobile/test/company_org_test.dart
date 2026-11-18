@@ -1,12 +1,10 @@
 import 'package:aurelius_mobile/app/shell.dart';
 import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
-import 'package:aurelius_mobile/core/widgets/ios.dart';
 import 'package:aurelius_mobile/data/company.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
-import 'package:aurelius_mobile/features/more/more_page.dart';
 import 'package:aurelius_mobile/features/project/new_task_page.dart';
 import 'package:aurelius_mobile/features/tasks/tasks_page.dart';
 import 'package:bloc_test/bloc_test.dart';
@@ -145,8 +143,8 @@ void main() {
     });
   });
 
-  test('the bottom tabs: Sessions, Inbox, Board, More (ticket #71)', () {
-    expect(shellTabs.map((t) => t.label), ['Sessions', 'Inbox', 'Board', 'More']);
+  test('the bottom tabs: Sessions, Inbox, Board, Profile (tickets #71, #72)', () {
+    expect(shellTabs.map((t) => t.label), ['Sessions', 'Inbox', 'Board', 'Profile']);
     expect(inboxTab, 1, reason: 'the inbox badge follows the Inbox tab');
   });
 
@@ -188,18 +186,6 @@ void main() {
         taskOf(id: 'd', projectId: 'p', employeeId: 'ceo', employeeName: 'Ada', title: 'Shipped', goal: '', status: TaskStatus.succeeded),
       ],
     );
-
-    testWidgets('More lists only Employees and Settings', (tester) async {
-      await show(tester, state, const MorePage());
-      expect(find.byType(GroupRow), findsNWidgets(2), reason: 'Employees and Settings');
-      for (final key in ['projects', 'tasks', 'ideas', 'company', 'vault', 'guidelines']) {
-        expect(find.byKey(ValueKey('more-$key')), findsNothing, reason: key);
-      }
-      expect(find.byKey(const ValueKey('more-settings')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('more-employees')));
-      await tester.pumpAndSettle();
-      expect(find.text('company page'), findsOneWidget, reason: 'the list of employees, where a chat starts');
-    });
 
     testWidgets('Tasks: every project, by state, with lead and project, filtered by employee', (tester) async {
       await show(tester, state, const TasksPage());

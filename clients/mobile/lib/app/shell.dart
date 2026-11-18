@@ -13,22 +13,23 @@ import '../features/inbox/inbox_bloc.dart';
 import '../features/sessions/sessions_page.dart' show openNewSession;
 
 /// The route pattern of each tab, in the order of [shellTabs]; what the screen counter counts a tab by.
-const shellTabPatterns = ['/sessions', '/inbox', '/board', '/more'];
+const shellTabPatterns = ['/sessions', '/inbox', '/board', '/profile'];
 
 /// The bottom tabs, in this order (branch indices of the router's shell).
 /// Sessions comes first and is where the app opens (ticket #71: the Team chat
-/// is gone); the way to the chat with an employee is More › Employees.
+/// is gone); the way to the chat with an employee is Profile › Employees.
+/// Profile replaced More (ticket #72): account and settings on one page.
 const shellTabs = [
   GlassTab(CupertinoIcons.chat_bubble_2, 'Sessions'),
   GlassTab(CupertinoIcons.tray, 'Inbox'),
   GlassTab(CupertinoIcons.square_split_2x1, 'Board'),
-  GlassTab(CupertinoIcons.ellipsis_circle, 'More'),
+  GlassTab(CupertinoIcons.person_crop_circle, 'Profile'),
 ];
 
 /// The inbox tab, with the badge of what waits for you (its index in [shellTabs]).
 const inboxTab = 1;
 
-/// Tabs: Sessions · Inbox · Board · More in a floating glass tab bar,
+/// Tabs: Sessions · Inbox · Board · Profile in a floating glass tab bar,
 /// with the connection banner on top. Hardware keyboards (iPad, Android with a
 /// keyboard): ⌘/Ctrl+1…4 switch tabs, ⌘/Ctrl+N opens New session.
 class HomeShell extends StatefulWidget {

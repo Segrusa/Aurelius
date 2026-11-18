@@ -11,18 +11,15 @@ import '../../core/net/protocol.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/dialogs.dart' show confirm;
 import '../../core/widgets/ios.dart';
-import '../../core/widgets/widgets.dart' show Monogram, toast;
+import '../../core/widgets/widgets.dart' show toast;
 import '../../data/aurelius_repository.dart';
 import '../../data/protocol/protocol.dart';
 import '../connection/connection_bloc.dart';
 import '../onboarding/onboarding.dart' show BoardMemberRules, OtherServer;
-import 'claude_login.dart' show claudeLoginLine;
 
 // Protocol 5 on the phone (ui-ontwerp Fase 3 §1–§2): the sign-in screen, the
-// change of a (temporary) password, More → Account and its Sessions. Passwords
+// change of a (temporary) password, Profile › Sessions. Passwords
 // live in these pages' fields only: never logged, kept or shown in a toast.
-
-String _monogram(String name) => name.isEmpty ? '?' : String.fromCharCode(name.runes.first).toUpperCase();
 
 /// The one answer for a wrong username or password (MU3-02 AC3).
 const wrongSignIn = 'Username or password is wrong.';
@@ -241,7 +238,7 @@ class _SignInPageState extends State<SignInPage> {
 
 /// Change a password (MU3-05 AC1). [required]: the board member signed in
 /// with a temporary one (B10) and nothing else opens first (the gate keeps
-/// the phone here); otherwise from More → Account.
+/// the phone here); otherwise from Profile.
 class ChangePasswordPage extends StatefulWidget {
   const ChangePasswordPage({super.key, this.required = false});
 
@@ -463,75 +460,6 @@ class _TemporaryPasswordPageState extends State<TemporaryPasswordPage> {
       );
 }
 
-/// More → Account (ui-ontwerp §1–§2, §4): Sessions, Claude login, Change
-/// password and Sign out.
-class AccountPage extends StatelessWidget {
-  const AccountPage({super.key});
-
-  Future<void> _signOut(BuildContext context) async {
-    final repository = context.read<AureliusRepository>();
-    final ok = await confirm(context, title: 'Sign out on this phone?', body: 'You need your password to come back.', action: 'Sign out', danger: true);
-    if (!ok) return;
-    try {
-      await repository.signOut();
-    } catch (e) {
-      if (context.mounted) toast(context, '$e');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final link = context.watch<ConnectionBloc>().state;
-    final user = link.user;
-    return LargeTitleScaffold(
-      title: 'Account',
-      children: [
-        if (user != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-            child: Row(children: [
-              Monogram(_monogram(user.username), active: true, size: 48),
-              const SizedBox(width: 14),
-              Expanded(child: Text(user.username, style: Tokens.title(size: 22))),
-            ]),
-          ),
-        const SizedBox(height: 12),
-        InsetGroup(children: [
-          GroupRow(
-            key: const ValueKey('account-sessions'),
-            leading: const Icon(CupertinoIcons.device_phone_portrait),
-            title: 'Sessions',
-            onTap: () => context.push('/account/sessions'),
-          ),
-          GroupRow(
-            key: const ValueKey('account-claude'),
-            leading: const Icon(CupertinoIcons.sparkles),
-            title: 'Claude login',
-            value: claudeLoginLine(link.claudeLogin),
-            onTap: () => context.push('/account/claude'),
-          ),
-          GroupRow(
-            key: const ValueKey('account-password'),
-            leading: const Icon(CupertinoIcons.lock),
-            title: 'Change password',
-            onTap: () => context.push('/account/password'),
-          ),
-        ]),
-        const SizedBox(height: 20),
-        InsetGroup(children: [
-          GroupRow(
-            key: const ValueKey('account-sign-out'),
-            title: 'Sign out',
-            titleStyle: TextStyle(fontSize: 17, color: Tokens.negative),
-            chevron: false,
-            onTap: () => _signOut(context),
-          ),
-        ]),
-      ],
-    );
-  }
-}
-
 /// "Signed in Oct 31 · active now" for a session row (ui-ontwerp §2).
 String sessionLine(SessionView s, {DateTime? now}) {
   final at = now ?? DateTime.now();
@@ -548,7 +476,7 @@ String sessionLine(SessionView s, {DateTime? now}) {
   return 'Signed in ${DateFormat('MMM d').format(since)} · $active';
 }
 
-/// More → Account → Sessions (MU3-04): the devices signed in as a board
+/// Profile → Sessions (MU3-04): the devices signed in as a board
 /// member, newest activity first; this phone is marked and signs out with
 /// Sign out instead. Swipe left (or Revoke) ends another, after a
 /// confirmation. [userId]: another board member's (AC4, one role).

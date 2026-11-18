@@ -24,15 +24,14 @@ import '../features/board/ticket_page.dart';
 import '../features/company/projects_page.dart';
 import '../features/company_org/company_org_page.dart';
 import '../features/company_org/employee_page.dart';
-import '../features/more/more_page.dart';
 import '../features/links/link_actions.dart' show openAureliusLink, openMessageAt;
 import '../features/tasks/tasks_page.dart';
 import '../features/team/channel_link_page.dart';
 import '../features/inbox/approval_page.dart';
 import '../features/inbox/inbox_page.dart';
 import '../features/inbox/inbox_rows.dart' show pushPlace;
-import '../features/more/hosts_page.dart';
-import '../features/more/settings_page.dart';
+import '../features/profile/hosts_page.dart';
+import '../features/profile/profile_page.dart';
 import '../features/onboarding/onboarding.dart';
 import '../features/pairing/pair_page.dart';
 import '../features/pairing/pairing_bloc.dart';
@@ -71,7 +70,8 @@ class AppRouter {
       GoRoute(
         parentNavigatorKey: _root,
         path: '/account',
-        pageBuilder: (context, state) => routePage(state, const AccountPage()),
+        // Account is part of Profile (ticket #72); its subpages stay here.
+        redirect: (context, state) => state.uri.path == '/account' ? '/profile' : null,
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'sessions', pageBuilder: (context, state) => routePage(state, const SessionsPage())),
           GoRoute(parentNavigatorKey: _root, path: 'password', pageBuilder: (context, state) => routePage(state, const ChangePasswordPage())),
@@ -97,12 +97,14 @@ class AppRouter {
             GoRoute(path: '/board', pageBuilder: (context, state) => routePage(state, const BoardTab())),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/more', pageBuilder: (context, state) => routePage(state, const MorePage())),
+            GoRoute(path: '/profile', pageBuilder: (context, state) => routePage(state, const ProfilePage())),
           ]),
         ],
       ),
       // The Team tab is gone (ticket #71): an old place of it opens Sessions.
       GoRoute(path: '/team', redirect: (context, state) => '/sessions'),
+      // More became Profile (ticket #72).
+      GoRoute(path: '/more', redirect: (context, state) => '/profile'),
       GoRoute(
         parentNavigatorKey: _root,
         path: '/session/:cid',
@@ -167,7 +169,8 @@ class AppRouter {
       GoRoute(
         parentNavigatorKey: _root,
         path: '/settings',
-        pageBuilder: (context, state) => routePage(state, const SettingsPage()),
+        // Settings is part of Profile (ticket #72); its subpages stay here.
+        redirect: (context, state) => state.uri.path == '/settings' ? '/profile' : null,
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'board', pageBuilder: (context, state) => routePage(state, const BoardSettingsPage())),
           GoRoute(parentNavigatorKey: _root, path: 'employee-runs', pageBuilder: (context, state) => routePage(state, const EmployeeRunsPage())),
