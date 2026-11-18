@@ -10,7 +10,6 @@ import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/protocol/protocol.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
-import 'package:aurelius_mobile/features/more/more_page.dart';
 import 'package:aurelius_mobile/features/onboarding/onboarding.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/cupertino.dart' show CupertinoIcons;
@@ -276,7 +275,7 @@ void main() {
         routes: [
           GoRoute(path: '/team', builder: (_, _) => const Scaffold(body: Text('page team'))),
           GoRoute(path: '/hosts', builder: (_, _) => const Scaffold(body: Text('page hosts'))),
-          GoRoute(path: '/more', builder: (_, _) => const MorePage()),
+          GoRoute(path: '/profile', builder: (_, _) => const Scaffold(body: Text('page profile'))),
           GoRoute(path: '/onboarding', builder: (_, _) => const OnboardingPage(), routes: [
             GoRoute(path: 'new', builder: (_, _) => const NewBoardMemberPage()),
           ]),
@@ -381,15 +380,6 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('onboarding-other-server')));
       await tester.pumpAndSettle();
       expect(find.text('page hosts'), findsOneWidget);
-    });
-
-    testWidgets('More shows who you are and opens Account (MU1-21 AC4)', (tester) async {
-      final router = await pump(tester, const LinkState(status: LinkStatus.online, boardMembersExist: true, user: ada), at: '/more');
-      expect(find.byKey(const ValueKey('more-board-member')), findsOneWidget);
-      expect(find.text('ada'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('more-board-member')));
-      await tester.pumpAndSettle();
-      expect(router.state.matchedLocation, '/account');
     });
 
     testWidgets('Settings → Board members: the list with "you", and a second board member (MU1-22)', (tester) async {

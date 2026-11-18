@@ -319,7 +319,7 @@ class OtherServer extends StatelessWidget {
   }
 }
 
-/// More → Settings → Board members (MU1-22, MU3-04 AC4, MU3-05): who they
+/// Profile → Board members (MU1-22, MU3-04 AC4, MU3-05): who they
 /// are, "you", disabled ones, and per board member their sessions, a
 /// temporary password (B10) and Disable. One role: anyone may do this.
 class BoardMembersPage extends StatefulWidget {
@@ -374,7 +374,7 @@ class _BoardMembersPageState extends State<BoardMembersPage> {
                 subtitle: m.disabledAtMs != null ? 'Disabled · cannot sign in' : null,
                 value: m.id == me ? 'you' : null,
                 chevron: true,
-                onTap: () => m.id == me ? context.push('/account') : showBoardMemberActions(context, m, _members),
+                onTap: () => m.id == me ? context.go('/profile') : showBoardMemberActions(context, m, _members),
               ),
           ],
         ),
@@ -459,29 +459,4 @@ Future<bool> disableBoardMember(BuildContext context, UserView member) async {
     if (context.mounted) toast(context, '$e');
   }
   return false;
-}
-
-/// The signed-in board member at the top of More (MU1-21 AC4); › Account
-/// (sessions, Claude login, password, Sign out).
-class ActiveBoardMemberRow extends StatelessWidget {
-  const ActiveBoardMemberRow({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final user = context.select<ConnectionBloc, UserView?>((b) => b.state.user);
-    if (user == null) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 20),
-      child: InsetGroup(children: [
-        GroupRow(
-          key: const ValueKey('more-board-member'),
-          leading: Monogram(_monogram(user.username), active: true),
-          title: user.username,
-          subtitle: 'Account · Sessions · Claude login',
-          chevron: true,
-          onTap: () => context.push('/account'),
-        ),
-      ]),
-    );
-  }
 }

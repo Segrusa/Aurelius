@@ -5,6 +5,7 @@ import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
+import 'package:aurelius_mobile/features/hosts/hosts_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:bloc_test/bloc_test.dart';
@@ -29,6 +30,8 @@ class MockConnectionBloc extends MockBloc<ConnectionEvent, LinkState> implements
 class MockInboxBloc extends MockBloc<InboxEvent, InboxState> implements InboxBloc {}
 
 class MockRuntimeBloc extends MockBloc<RuntimeEvent, RuntimeState> implements RuntimeBloc {}
+
+class MockHostsBloc extends MockBloc<HostsEvent, HostsState> implements HostsBloc {}
 
 const testUser = UserView(id: 'u-1', username: 'ada', createdAtMs: 0);
 /// The test board member's own Claude login, connected (a login not read yet counts as missing, R3 m5).

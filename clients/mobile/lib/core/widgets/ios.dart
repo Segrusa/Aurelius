@@ -438,7 +438,7 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold> {
                               duration: const Duration(milliseconds: 160),
                               child: Text(widget.title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: Tokens.label)),
                             ),
-                            // Pushed (Settings from More): a way back.
+                            // Pushed (a page from Profile): a way back.
                             if (ModalRoute.of(context)?.canPop ?? false)
                               Align(
                                 alignment: Alignment.centerLeft,

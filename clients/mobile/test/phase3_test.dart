@@ -10,6 +10,10 @@ import 'package:aurelius_mobile/data/tickets.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/account/account.dart';
 import 'package:aurelius_mobile/features/account/claude_login.dart';
+import 'package:aurelius_mobile/core/push/push_service.dart';
+import 'package:aurelius_mobile/features/company/company_bloc.dart';
+import 'package:aurelius_mobile/features/hosts/hosts_bloc.dart';
+import 'package:aurelius_mobile/features/profile/profile_page.dart';
 import 'package:aurelius_mobile/features/board/ticket_page.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/onboarding/onboarding.dart';
@@ -303,6 +307,8 @@ void main() {
       when(() => repo.claudeLogin()).thenAnswer((_) async => null);
       when(() => repo.dismissSignedOut()).thenReturn(null);
       when(() => repo.boardMemberChanges).thenAnswer((_) => const Stream.empty());
+      when(() => repo.serverNameChanges).thenAnswer((_) => const Stream.empty());
+      when(() => repo.online).thenAnswer((_) => const Stream.empty());
       whenListen(link, links.stream, initialState: alexIn);
     });
 
@@ -322,9 +328,16 @@ void main() {
         GoRoute(path: '/settings/board-members/:uid/password', builder: (_, s) => Scaffold(body: Text('password of ${s.uri.queryParameters['name']}'))),
       ]);
       addTearDown(router.dispose);
-      await tester.pumpWidget(RepositoryProvider<AureliusRepository>.value(
-        value: repo,
-        child: BlocProvider<ConnectionBloc>.value(value: link, child: MaterialApp.router(theme: aureliusTheme(), routerConfig: router)),
+      final company = MockCompanyBloc();
+      whenListen(company, const Stream<CompanyState>.empty(), initialState: const CompanyState(loading: false));
+      final hosts = MockHostsBloc();
+      whenListen(hosts, const Stream<HostsState>.empty(), initialState: const HostsState(loading: false));
+      await tester.pumpWidget(MultiRepositoryProvider(
+        providers: [RepositoryProvider<AureliusRepository>.value(value: repo), RepositoryProvider<PushService>.value(value: PushService())],
+        child: MultiBlocProvider(
+          providers: [BlocProvider<ConnectionBloc>.value(value: link), BlocProvider<CompanyBloc>.value(value: company), BlocProvider<HostsBloc>.value(value: hosts)],
+          child: MaterialApp.router(theme: aureliusTheme(), routerConfig: router),
+        ),
       ));
       await tester.pumpAndSettle();
       return router;
@@ -408,11 +421,13 @@ void main() {
       expect(boardMemberRedirect(BoardMemberStep.changePassword, '/onboarding'), isNull);
     });
 
-    testWidgets('MU3-04 AC3: More → Account → Sign out asks first, then signs out', (tester) async {
+    testWidgets('MU3-04 AC3: Profile → Sign out asks first, then signs out', (tester) async {
       when(() => repo.signOut()).thenAnswer((_) async {});
-      await pump(tester, const AccountPage(), state: alexNoLogin);
-      expect(find.text('alex'), findsOneWidget);
-      expect(find.text('Not connected'), findsOneWidget, reason: 'the Claude login row says its status');
+      await pump(tester, const ProfilePage(), state: alexNoLogin);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('profile-name'))).data, 'alex');
+      expect(find.descendant(of: find.byKey(const ValueKey('account-claude')), matching: find.text('Not connected')), findsOneWidget, reason: 'the Claude login row says its status');
+      // Sign out is the last row of Profile, below the fold.
+      await tester.scrollUntilVisible(find.byKey(const ValueKey('account-sign-out')), 300, scrollable: find.byType(Scrollable).first);
       await tapKey(tester, 'account-sign-out');
       expect(find.text('Sign out on this phone?'), findsOneWidget);
       await tester.tap(find.text('Sign out').last);
@@ -630,7 +645,7 @@ void main() {
       verifyNever(() => repo.cancelClaudeLogin(any()));
     });
 
-    testWidgets('QA3 M1: a good code the server confirms later closes the sheet with success; page and Account row say Connected', (tester) async {
+    testWidgets('QA3 M1: a good code the server confirms later closes the sheet with success; page and Profile row say Connected', (tester) async {
       final every = connectCheckEvery;
       connectCheckEvery = const Duration(milliseconds: 50);
       addTearDown(() => connectCheckEvery = every);
@@ -652,8 +667,8 @@ void main() {
       });
       await tester.binding.setSurfaceSize(const Size(900, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      await pump(tester, const Row(children: [Expanded(child: AccountPage()), Expanded(child: ClaudeLoginPage())]), state: alexNoLogin);
-      expect(find.text('Not connected'), findsOneWidget, reason: 'the Account row');
+      await pump(tester, const Row(children: [Expanded(child: ProfilePage()), Expanded(child: ClaudeLoginPage())]), state: alexNoLogin);
+      expect(find.text('Not connected'), findsOneWidget, reason: 'the Claude login row on Profile');
       await tapStep(tester, 'claude-connect');
       prompts.add(const ClaudeLoginPrompt(linkId: 'link-1', url: 'https://claude.com/cai/oauth/authorize?code=true&state=x', asksCode: true));
       await settleBoard(tester);
@@ -664,7 +679,8 @@ void main() {
       await settleBoard(tester);
       expect(find.byType(ConnectSheet), findsNothing, reason: 'the sheet closed');
       expect(find.text('Your Claude login is connected.'), findsWidgets, reason: 'a snackbar on each of the two scaffolds');
-      expect(find.text('Connected'), findsNWidgets(2), reason: 'the page and the Account row, without opening them again');
+      expect(find.descendant(of: find.byType(ClaudeLoginPage), matching: find.text('Connected')), findsOneWidget, reason: 'the page, without opening it again');
+      expect(find.descendant(of: find.byKey(const ValueKey('account-claude')), matching: find.text('Connected')), findsOneWidget, reason: 'the Claude login row on Profile, without opening it again');
       expect(find.text('Checking the code with Claude…'), findsNothing);
       verifyNever(() => repo.cancelClaudeLogin(any()));
     });

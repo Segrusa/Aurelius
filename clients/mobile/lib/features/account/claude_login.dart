@@ -89,7 +89,7 @@ bool claudeLoginMissing(LinkState link) => link.user != null && link.claudeLogin
 /// "max" → "Max".
 String _plan(String plan) => plan.isEmpty ? plan : plan[0].toUpperCase() + plan.substring(1);
 
-/// More → Account → Claude login (MU3-09 AC1/AC2/AC4, ui-ontwerp §4): the
+/// Profile → Claude login (MU3-09 AC1/AC2/AC4, ui-ontwerp §4): the
 /// status with words and a shape, never colour alone, and its actions.
 class ClaudeLoginPage extends StatefulWidget {
   const ClaudeLoginPage({super.key});

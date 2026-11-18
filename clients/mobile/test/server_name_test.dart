@@ -7,9 +7,10 @@ import 'package:aurelius_mobile/core/theme/theme.dart';
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/core/push/push_service.dart';
+import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/hosts/hosts_bloc.dart';
-import 'package:aurelius_mobile/features/more/settings_page.dart';
+import 'package:aurelius_mobile/features/profile/profile_page.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:aurelius_mobile/features/server_name/server_name_bloc.dart';
@@ -24,6 +25,8 @@ import 'support/fake_daemon.dart';
 class MockRepository extends Mock implements AureliusRepository {}
 
 class MockRuntimeBloc extends MockBloc<RuntimeEvent, RuntimeState> implements RuntimeBloc {}
+
+class MockCompanyBloc extends MockBloc<CompanyEvent, CompanyState> implements CompanyBloc {}
 
 
 const _owner = ['read', 'chat', 'task_control', 'approve', 'owner'];
@@ -179,7 +182,7 @@ void main() {
     });
   });
 
-  group('Settings follows server.renamed live (SN-02 AC1)', () {
+  group('Profile follows server.renamed live (SN-02 AC1)', () {
     testWidgets('the title, and the server name row show the new name', (tester) async {
       tester.view.physicalSize = const Size(1170, 2532);
       tester.view.devicePixelRatio = 3;
@@ -199,6 +202,8 @@ void main() {
       final repository = AureliusRepository(connection);
       final runtime = MockRuntimeBloc();
       when(() => runtime.state).thenReturn(const RuntimeState());
+      final company = MockCompanyBloc();
+      whenListen(company, const Stream<CompanyState>.empty(), initialState: const CompanyState(loading: false));
       await tester.pumpWidget(
         MultiRepositoryProvider(
           providers: [
@@ -210,8 +215,9 @@ void main() {
               BlocProvider(create: (_) => ConnectionBloc(repository)),
               BlocProvider(create: (_) => HostsBloc(store)..add(const HostsStarted())),
               BlocProvider<RuntimeBloc>.value(value: runtime),
+              BlocProvider<CompanyBloc>.value(value: company),
             ],
-            child: MaterialApp(theme: aureliusTheme(), home: const SettingsPage()),
+            child: MaterialApp(theme: aureliusTheme(), home: const ProfilePage()),
           ),
         ),
       );

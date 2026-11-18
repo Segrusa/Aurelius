@@ -227,16 +227,35 @@ void main() {
     setUp(() => router = AppRouter(host));
     tearDown(() => router.dispose());
 
-    test('Sessions is the first tab, then Inbox, Board and More; the app opens on Sessions (ticket #71)', () {
+    test('Sessions is the first tab, then Inbox, Board and Profile; the app opens on Sessions (tickets #71, #72)', () {
       final shell = router.config.configuration.routes.whereType<StatefulShellRoute>().single;
       final first = [for (final b in shell.branches) (b.routes.first as GoRoute).path];
-      expect(first, ['/sessions', '/inbox', '/board', '/more']);
+      expect(first, ['/sessions', '/inbox', '/board', '/profile']);
       expect(first, shellTabPatterns);
-      expect(shellTabs.map((t) => t.label), ['Sessions', 'Inbox', 'Board', 'More']);
+      expect(shellTabs.map((t) => t.label), ['Sessions', 'Inbox', 'Board', 'Profile']);
       expect(router.config.routeInformationProvider.value.uri.path, '/sessions', reason: 'the app opens on Sessions');
       final paths = pathsOf(router.config.configuration.routes);
       expect(paths, containsAll(['/sessions/new', '/session/:cid', '/board/new', '/ticket/:tid', '/ticket/:tid/plan', '/settings/board', '/channel/:cid']));
       expect(first.length, shellTabs.length, reason: 'one tab per branch');
+    });
+
+    testWidgets('More, Account and Settings open Profile; their subpages stay (ticket #72)', (tester) async {
+      await tester.pumpWidget(const SizedBox());
+      final context = tester.element(find.byType(SizedBox));
+      final routes = router.config.configuration.routes.whereType<GoRoute>();
+      String? redirect(String path, String location) {
+        final route = routes.singleWhere((r) => r.path == path);
+        final state = GoRouterState(router.config.configuration, uri: Uri.parse(location), matchedLocation: path, fullPath: path, pathParameters: const {}, pageKey: const ValueKey('k'));
+        return route.redirect!(context, state) as String?;
+      }
+
+      expect(redirect('/more', '/more'), '/profile');
+      expect(redirect('/account', '/account'), '/profile');
+      expect(redirect('/settings', '/settings'), '/profile');
+      expect(redirect('/account', '/account/sessions'), isNull);
+      expect(redirect('/settings', '/settings/board-members'), isNull);
+      final paths = pathsOf(router.config.configuration.routes);
+      expect(paths, containsAll(['/profile', '/account/sessions', '/account/password', '/account/claude', '/settings/board', '/settings/employee-runs', '/settings/board-members', '/hosts']));
     });
 
     test('an old place of the Team tab opens Sessions', () {
