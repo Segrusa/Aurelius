@@ -17,8 +17,9 @@ void openNewSession(BuildContext context) {
   context.push(sessions ? '/sessions/new' : '/board/new');
 }
 
-/// The Sessions tab (ticket #71): the reader's work sessions, newest activity
-/// first. A pulsing dot while one works, a warning dot while the dispatcher
+/// The Sessions tab (ticket #71): the reader's work sessions in sections
+/// (Active, Today, Yesterday, This week, This month, Older), newest activity
+/// first in each. A pulsing dot while one works, a warning dot while the dispatcher
 /// chose nobody; the header counts how many work right now.
 class WorkSessionsPage extends StatelessWidget {
   const WorkSessionsPage({super.key});
@@ -117,7 +118,10 @@ class _WorkSessionsBody extends StatelessWidget {
       child: ListView(
         padding: EdgeInsets.fromLTRB(0, 8, 0, listBottom(context)),
         children: [
-          InsetGroup(children: [for (final s in state.sessions) SessionRow(session: s)]),
+          for (final (period, sessions) in sessionSections(state.sessions, DateTime.now())) ...[
+            GroupHeader(period.label, key: ValueKey('sessions-section-${period.name}'), count: sessions.length),
+            InsetGroup(children: [for (final s in sessions) SessionRow(session: s)]),
+          ],
         ],
       ),
     );

@@ -36,6 +36,32 @@ void main() {
     expect(sorted.map((s) => s.conversationId), ['b', 'c', 'a']);
   });
 
+  group('sessionPeriod', () {
+    // Wednesday 18 November 2026, 15:00 local.
+    final now = DateTime(2026, 11, 18, 15);
+    int at(int year, int month, int day, [int hour = 0]) => DateTime(year, month, day, hour).millisecondsSinceEpoch;
+
+    test('a working session is Active whenever it last moved', () => expect(sessionPeriod(session(running: true, at: at(2025, 1, 1)), now), SessionPeriod.active));
+    test('a session waiting for your choice is Active', () => expect(sessionPeriod(session(dispatch: SessionDispatch.nobody, at: at(2025, 1, 1)), now), SessionPeriod.active));
+    test('since midnight is Today', () => expect(sessionPeriod(session(at: at(2026, 11, 18)), now), SessionPeriod.today));
+    test('the day before is Yesterday', () => expect(sessionPeriod(session(at: at(2026, 11, 17, 23)), now), SessionPeriod.yesterday));
+    test('Monday of this week is This week', () => expect(sessionPeriod(session(at: at(2026, 11, 16)), now), SessionPeriod.thisWeek));
+    test('the Sunday before is This month', () => expect(sessionPeriod(session(at: at(2026, 11, 15, 23)), now), SessionPeriod.thisMonth));
+    test('before the first of the month is Older', () => expect(sessionPeriod(session(at: at(2026, 10, 31, 23)), now), SessionPeriod.older));
+    test('on a Monday, Yesterday wins over This week', () => expect(sessionPeriod(session(at: at(2026, 11, 15, 12)), DateTime(2026, 11, 16, 9)), SessionPeriod.yesterday));
+
+    test('sessionSections keeps the order and drops empty sections', () {
+      final sections = sessionSections([
+        session(id: 'old', at: at(2026, 9, 1)),
+        session(id: 'today2', at: at(2026, 11, 18, 10)),
+        session(id: 'run', running: true, at: at(2026, 11, 1)),
+        session(id: 'today1', at: at(2026, 11, 18, 9)),
+      ], now);
+      expect(sections.map((s) => s.$1), [SessionPeriod.active, SessionPeriod.today, SessionPeriod.older]);
+      expect(sections[1].$2.map((s) => s.conversationId), ['today2', 'today1']);
+    });
+  });
+
   group('words', () {
     test('sessionWho says who works in it', () {
       expect(sessionWho(session()), 'Forge');

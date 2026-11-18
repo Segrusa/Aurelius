@@ -5,6 +5,7 @@ import 'package:aurelius_mobile/core/widgets/widgets.dart' show StatusDot;
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/protocol/protocol.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
+import 'package:aurelius_mobile/features/company_org/employee_page.dart' show ConversationPage;
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
@@ -114,6 +115,23 @@ void main() {
       expect(find.descendant(of: find.byKey(const ValueKey('session-c1')), matching: find.byType(StatusDot)), findsNothing);
       expect(find.textContaining('Forge · Atlas'), findsNWidgets(2));
       expect(find.textContaining('Nobody yet · Atlas'), findsOneWidget);
+    });
+
+    testWidgets('sessions stand in sections: Active, then by the day of their last activity', (tester) async {
+      final now = DateTime.now();
+      final repo = repoWith(sessions: [
+        sessionOf('c1', title: 'From long ago', at: 1),
+        sessionOf('c2', title: 'Busy one', at: 1, running: true),
+        sessionOf('c3', title: 'Earlier today', at: DateTime(now.year, now.month, now.day).millisecondsSinceEpoch),
+      ]);
+      await pumpSessions(tester, repo, const WorkSessionsPage());
+      final active = tester.getTopLeft(find.byKey(const ValueKey('sessions-section-active'))).dy;
+      final today = tester.getTopLeft(find.byKey(const ValueKey('sessions-section-today'))).dy;
+      final older = tester.getTopLeft(find.byKey(const ValueKey('sessions-section-older'))).dy;
+      expect(active < tester.getTopLeft(find.text('Busy one')).dy, isTrue);
+      expect(tester.getTopLeft(find.text('Busy one')).dy < today && today < tester.getTopLeft(find.text('Earlier today')).dy, isTrue);
+      expect(tester.getTopLeft(find.text('Earlier today')).dy < older && older < tester.getTopLeft(find.text('From long ago')).dy, isTrue);
+      expect(find.byKey(const ValueKey('sessions-section-yesterday')), findsNothing, reason: 'an empty section is left out');
     });
 
     testWidgets('a tap opens the session', (tester) async {
@@ -283,6 +301,32 @@ void main() {
       await pumpSessions(tester, repo, const SessionPage(conversationId: 'c1'));
       expect(find.text('Could not load this session.'), findsOneWidget);
       expect(find.byKey(const ValueKey('session-retry')), findsOneWidget);
+    });
+  });
+
+  group('a conversation link to a session', () {
+    testWidgets('an Inbox Running row of a session (/conversation/:cid) opens the session, not "no longer exists"', (tester) async {
+      final repo = repoWith(sessions: [sessionOf('s1')]);
+      await pumpSessions(tester, repo, const ConversationPage(conversationId: 's1'));
+      expect(find.text('session s1'), findsOneWidget);
+      expect(find.text('This conversation no longer exists'), findsNothing);
+    });
+
+    testWidgets('a conversation that is not a session still says it no longer exists', (tester) async {
+      final repo = repoWith(sessions: [sessionOf('s1')]);
+      await pumpSessions(tester, repo, const ConversationPage(conversationId: 'gone'));
+      expect(find.byKey(const ValueKey('conversation-gone')), findsOneWidget);
+    });
+
+    testWidgets('a failed session read shows what failed and Try again', (tester) async {
+      final repo = repoWith();
+      when(() => repo.workSessions()).thenThrow(const ProtocolException(ErrorCode.internal, 'The server broke.'));
+      await pumpSessions(tester, repo, const ConversationPage(conversationId: 's1'));
+      expect(find.byKey(const ValueKey('conversation-load-failed')), findsOneWidget);
+      when(() => repo.workSessions()).thenAnswer((_) async => [sessionOf('s1')]);
+      await tester.tap(find.text('Try again'));
+      await settleBoard(tester);
+      expect(find.text('session s1'), findsOneWidget);
     });
   });
 }

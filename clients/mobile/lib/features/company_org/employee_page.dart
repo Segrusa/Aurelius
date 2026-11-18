@@ -19,6 +19,7 @@ import '../chat/chat_view.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_banner.dart';
 import '../dashboard/give_work.dart';
+import '../sessions/session_rules.dart' show workSessionsFeature;
 import 'employee_run_sheet.dart';
 import '../project/tasks_tab.dart';
 import 'employee_widgets.dart';
@@ -507,6 +508,7 @@ class ConversationPage extends StatelessWidget {
       });
       return const Scaffold(body: SizedBox.shrink());
     }
+    if (m == null && !company.loading) return _UnknownConversation(conversationId: conversationId);
     return Scaffold(
       appBar: GlassAppBar(
         titleSpacing: 0,
@@ -536,7 +538,7 @@ class ConversationPage extends StatelessWidget {
           const ConnectionBanner(),
           Expanded(
             child: m == null
-                ? (company.loading ? const Center(child: CircularProgressIndicator()) : const EmptyState('This conversation no longer exists'))
+                ? const Center(child: CircularProgressIndicator())
                 // Messages go to its employee; one bloc per conversation.
                 : BlocProvider(
                     key: ValueKey(conversationId),
@@ -553,6 +555,65 @@ class ConversationPage extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A conversation that is neither a task's nor an employee's thread. A work
+/// session's (an Inbox "Running" row, a link) opens as that session; anything
+/// else says it no longer exists.
+class _UnknownConversation extends StatefulWidget {
+  const _UnknownConversation({required this.conversationId});
+
+  final String conversationId;
+
+  @override
+  State<_UnknownConversation> createState() => _UnknownConversationState();
+}
+
+class _UnknownConversationState extends State<_UnknownConversation> {
+  bool _looking = true;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _look();
+  }
+
+  Future<void> _look() async {
+    final repository = context.read<AureliusRepository>();
+    setState(() {
+      _looking = true;
+      _failed = false;
+    });
+    var session = false;
+    var failed = false;
+    if (repository.linkState.has(workSessionsFeature)) {
+      try {
+        session = (await repository.workSessions()).any((s) => s.conversationId == widget.conversationId);
+      } on Object {
+        failed = true;
+      }
+    }
+    if (!mounted) return;
+    if (session) {
+      context.replace('/session/${widget.conversationId}');
+      return;
+    }
+    setState(() {
+      _looking = false;
+      _failed = failed;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: const GlassAppBar(title: Text('Conversation')),
+        body: _looking
+            ? const Center(child: CircularProgressIndicator())
+            : _failed
+                ? EmptyState('Could not open this conversation.', key: const ValueKey('conversation-load-failed'), action: OutlinedButton(onPressed: _look, child: const Text('Try again')))
+                : const EmptyState('This conversation no longer exists', key: ValueKey('conversation-gone')),
+      );
 }
 
 /// What runs for this employee now: its own steps, workers, subagents and the

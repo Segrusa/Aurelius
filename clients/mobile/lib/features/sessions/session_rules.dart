@@ -33,6 +33,43 @@ int activeSessions(Iterable<WorkSessionView> sessions) => sessions.where((s) => 
 /// The newest activity first; the server sends them so, this keeps it so after a local change.
 List<WorkSessionView> sessionsByActivity(Iterable<WorkSessionView> sessions) => [...sessions]..sort((a, b) => b.lastActivityMs.compareTo(a.lastActivityMs));
 
+/// The sections of the Sessions tab, in their order: what works or waits for
+/// your choice now, then by the day of the last activity (the week starts on Monday).
+enum SessionPeriod {
+  active('Active'),
+  today('Today'),
+  yesterday('Yesterday'),
+  thisWeek('This week'),
+  thisMonth('This month'),
+  older('Older');
+
+  const SessionPeriod(this.label);
+
+  /// The section's header.
+  final String label;
+}
+
+/// The section of [s] at [now] (local time): Active while it has a signal, else by its last activity.
+SessionPeriod sessionPeriod(WorkSessionView s, DateTime now) {
+  if (sessionSignal(s) != null) return SessionPeriod.active;
+  final at = DateTime.fromMillisecondsSinceEpoch(s.lastActivityMs);
+  final today = DateTime(now.year, now.month, now.day);
+  if (!at.isBefore(today)) return SessionPeriod.today;
+  if (!at.isBefore(DateTime(now.year, now.month, now.day - 1))) return SessionPeriod.yesterday;
+  if (!at.isBefore(DateTime(now.year, now.month, now.day - (now.weekday - DateTime.monday)))) return SessionPeriod.thisWeek;
+  if (!at.isBefore(DateTime(now.year, now.month))) return SessionPeriod.thisMonth;
+  return SessionPeriod.older;
+}
+
+/// The non-empty sections in their order, each with its sessions newest activity first.
+List<(SessionPeriod, List<WorkSessionView>)> sessionSections(Iterable<WorkSessionView> sessions, DateTime now) {
+  final by = <SessionPeriod, List<WorkSessionView>>{};
+  for (final s in sessionsByActivity(sessions)) {
+    by.putIfAbsent(sessionPeriod(s, now), () => []).add(s);
+  }
+  return [for (final p in SessionPeriod.values) if (by[p] case final list?) (p, list)];
+}
+
 /// Who works in a session: its employee, the dispatcher at it while it chooses, or nobody yet.
 String sessionWho(WorkSessionView s) => switch (s.dispatch) {
       SessionDispatch.choosing => '${s.employeeName} is choosing who takes it',
