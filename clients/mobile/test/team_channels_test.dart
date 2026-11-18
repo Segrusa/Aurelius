@@ -11,7 +11,6 @@ import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:aurelius_mobile/features/team/channels_bloc.dart';
-import 'package:aurelius_mobile/features/team/team_page.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +20,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'support/builders.dart';
+import 'support/channel_opener.dart';
 import 'support/tickets.dart' as board;
 import 'ticket_discussion_test.dart' show lineOf, postOf;
 
@@ -64,7 +64,7 @@ void main() {
 
   late MockRepository repo;
 
-  /// The Team page under a router that shows what "Create ticket" opens.
+  /// A channel opener under a router that shows what "Create ticket" opens.
   Future<void> pump(WidgetTester tester, {bool channels = true, Map<String?, List<MessageView>> messages = const {}}) async {
     tester.view.physicalSize = const Size(390, 844) * 3;
     tester.view.devicePixelRatio = 3;
@@ -96,7 +96,7 @@ void main() {
     final runtime = MockRuntimeBloc();
     whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: const RuntimeState());
     final router = GoRouter(initialLocation: '/', routes: [
-      GoRoute(path: '/', builder: (_, _) => const TeamPage()),
+      GoRoute(path: '/', builder: (_, _) => const ChannelOpener()),
       GoRoute(
         path: '/board/new',
         builder: (_, s) {
@@ -123,32 +123,13 @@ void main() {
     await board.settleBoard(tester);
   }
 
+  /// Opens [channel] as a link does (ticket #71: no Team tab, no picker).
   Future<void> pick(WidgetTester tester, String channel) async {
-    await tester.tap(find.byKey(const ValueKey('channel-picker')));
-    await board.settleBoard(tester);
     await tester.tap(find.byKey(ValueKey('channel-$channel')));
     await board.settleBoard(tester);
   }
 
   group('channels (MU2-08)', () {
-    testWidgets('the picker: General first, then the projects by name, the archived ones apart; unread and @ (AC1, B8, §5)', (tester) async {
-      await pump(tester);
-      expect(find.text('#general'), findsOneWidget);
-      expect(find.text('● 4 unread'), findsOneWidget, reason: 'unread elsewhere');
-      await tester.tap(find.byKey(const ValueKey('channel-picker')));
-      await board.settleBoard(tester);
-      final general = tester.getTopLeft(find.byKey(const ValueKey('channel-c-general'))).dy;
-      final atlas = tester.getTopLeft(find.byKey(const ValueKey('channel-c-atlas'))).dy;
-      final web = tester.getTopLeft(find.byKey(const ValueKey('channel-c-web'))).dy;
-      expect(general < atlas && atlas < web, isTrue);
-      expect(find.text('@ 1'), findsOneWidget, reason: 'a mention is an @, never a colour alone');
-      expect(find.bySemanticsLabel('web, 1 unread, 1 mention'), findsOneWidget);
-      expect(find.byKey(const ValueKey('channel-c-old')), findsNothing, reason: 'Archived is folded');
-      await tester.tap(find.byKey(const ValueKey('channels-archived')));
-      await board.settleBoard(tester);
-      expect(find.byKey(const ValueKey('channel-c-old')), findsOneWidget);
-    });
-
     testWidgets("a project's channel is read and written with its channel (AC3)", (tester) async {
       await pump(tester, messages: {
         'c-atlas': [messageOf('a1', MessageRole.assistant, 'The vault design is ready.', update: 'group', author: 'Orion')],
@@ -168,32 +149,12 @@ void main() {
 
     testWidgets("an archived project's channel can only be read (AC2)", (tester) async {
       await pump(tester);
-      await tester.tap(find.byKey(const ValueKey('channel-picker')));
-      await board.settleBoard(tester);
-      await tester.tap(find.byKey(const ValueKey('channels-archived')));
-      await board.settleBoard(tester);
-      await tester.tap(find.byKey(const ValueKey('channel-c-old')));
-      await board.settleBoard(tester);
-      expect(find.text('This project is archived: its channel can only be read.'), findsOneWidget);
+      await pick(tester, 'c-old');
+      expect(find.text('This project is archived · read-only.'), findsOneWidget);
       expect(find.byKey(const Key('composer-send')), findsNothing);
     });
 
-    testWidgets('General is the Team chat as before; an older server has no picker (AC5)', (tester) async {
-      await pump(tester, channels: false);
-      expect(find.byKey(const ValueKey('channel-picker')), findsNothing);
-      verify(() => repo.groupChat()).called(greaterThan(0));
-      verifyNever(() => repo.channels());
-      await tester.enterText(find.byType(TextField).last, 'Hello');
-      await tester.pump();
-      await tester.tap(find.byKey(const Key('composer-send')));
-      await board.settleBoard(tester);
-      expect(paramsOf(writesOf(repo).single).containsKey('channel'), isFalse, reason: 'no channel on the wire: General');
-    });
-
-    test("the Team tab's badge counts mentions only, with a dot for anything unread (B8, P-24)", () {
-      expect(teamBadge(_channels), (mentions: 1, unread: true));
-      expect(teamBadge([channelOf('g', 'General', unread: 2)]), (mentions: 0, unread: true));
-      expect(teamBadge([channelOf('g', 'General')]), (mentions: 0, unread: false));
+    test('a channel is labelled #name', () {
       expect(channelLabel(channelOf('x', 'Segrusa Web', projectId: 'p')), '#segrusa-web');
     });
 
@@ -216,7 +177,7 @@ void main() {
       });
       await pick(tester, 'c-atlas');
       expect(find.text('lena · board member'), findsOneWidget);
-      await tester.longPress(find.text('Add an audit export\nWith dates.'));
+      await tester.longPress(find.textContaining('Add an audit export', findRichText: true).first);
       await board.settleBoard(tester);
       await tester.tap(find.text('Create ticket'));
       await board.settleBoard(tester);
@@ -227,6 +188,7 @@ void main() {
       await pump(tester, messages: {
         null: [messageOf('a1', MessageRole.assistant, 'We should rotate the keys.', update: 'group', author: 'Orion')],
       });
+      await pick(tester, 'c-general');
       await tester.longPress(find.text('We should rotate the keys.'));
       await board.settleBoard(tester);
       await tester.tap(find.byKey(const Key('message-create-ticket')));
@@ -241,7 +203,8 @@ void main() {
           lineOf('s1', SystemLineKind.ticketCreated, 'ada created #52 from a message', ticketId: 'k52', messageId: 'm1'),
         ],
       });
-      expect(find.text('ada created #52 from a message'), findsOneWidget);
+      await pick(tester, 'c-general');
+      expect(find.textContaining('ada created #52 from a message'), findsOneWidget);
       expect(find.text('→ #52'), findsOneWidget);
       await tester.longPress(find.text('Ship the export'));
       await board.settleBoard(tester);
@@ -260,6 +223,7 @@ void main() {
           lineOf('s1', SystemLineKind.ticketCreated, 'ada created #52 from a message', ticketId: 'k52', messageId: 'm1'),
         ],
       });
+      await pick(tester, 'c-general');
       await tester.tap(find.text('→ #52'));
       await board.settleBoard(tester);
       expect(find.text('ticket k52'), findsOneWidget);

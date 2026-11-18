@@ -82,14 +82,14 @@ Future<void> _otherServer(BuildContext context, AureliusLink link, String raw) a
 }
 
 /// A message's place comes from the server (`message.locate`): its ticket's
-/// discussion, or its channel; a reply in a thread opens the thread too, which
-/// only the channel of a ticket has.
+/// discussion (also a reply in one of its threads: ticket #71 has no ticket
+/// channels), or its channel, with its thread when it is a reply.
 Future<void> openMessageAt(BuildContext context, AureliusRepository repository, String messageId) async {
   try {
     final at = await repository.messageLocation(messageId);
     if (!context.mounted) return;
     final thread = at.threadRoot;
-    if (at.ticketId != null && thread == null) {
+    if (at.ticketId != null) {
       context.push('/ticket/${at.ticketId}?tab=discussion&message=$messageId');
     } else {
       context.push('/channel/${at.conversationId}?message=$messageId${thread == null ? '' : '&thread=$thread'}');

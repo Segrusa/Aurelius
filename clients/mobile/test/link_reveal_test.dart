@@ -15,6 +15,7 @@ import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:aurelius_mobile/features/team/channel_link_page.dart';
+import 'package:aurelius_mobile/features/team/channel_screen.dart';
 import 'package:aurelius_mobile/features/team/channels_bloc.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
@@ -111,6 +112,7 @@ void main() {
     final router = GoRouter(initialLocation: '/', routes: [
       GoRoute(path: '/', builder: (_, _) => page),
       GoRoute(path: '/board', builder: (_, _) => const Scaffold(body: Text('the board'))),
+      GoRoute(path: '/ticket/:tid', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['tid']} ${s.uri.query}'))),
     ]);
     addTearDown(router.dispose);
     await tester.pumpWidget(RepositoryProvider<AureliusRepository>.value(
@@ -207,16 +209,39 @@ void main() {
 
     testWidgets('names who is responsible', (tester) async {
       final ticket = board.ticketOf(id: 'k1', number: 42, column: ColumnKind.review, responsible: board.bo);
-      await pump(tester, const ChannelLinkPage(conversationId: 'c-42'), channels: const [ticketChannel], messages: const [], detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []));
+      await pump(tester, const ChannelScreen(channel: ticketChannel), channels: const [ticketChannel], messages: const [], detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []));
       await settle(tester, frames: 8);
       expect(find.text('bo · responsible'), findsOneWidget);
     });
 
     testWidgets('a server without a responsible shows no such line', (tester) async {
       final ticket = board.ticketOf(id: 'k1', number: 42, column: ColumnKind.review);
-      await pump(tester, const ChannelLinkPage(conversationId: 'c-42'), channels: const [ticketChannel], messages: const [], detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []));
+      await pump(tester, const ChannelScreen(channel: ticketChannel), channels: const [ticketChannel], messages: const [], detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []));
       await settle(tester, frames: 8);
       expect(find.byKey(const ValueKey('channel-ticket-responsible')), findsNothing);
+    });
+  });
+
+  group("a link to a ticket's channel (ticket #71: no ticket channels on the phone)", () {
+    const ticketChannel = ChannelView(archived: false, conversationId: 'c-42', kind: ChannelKind.ticket, mentions: 0, name: '#42-login', projectId: 'p1', ticketColumn: ColumnKind.review, ticketId: 'k1', ticketNumber: 42, unread: 0);
+
+    test('opens the ticket\'s discussion, at the message when there is one; General and a project\'s channel stay', () {
+      expect(channelLinkPlace(ticketChannel), '/ticket/k1?tab=discussion');
+      expect(channelLinkPlace(ticketChannel, message: 'm3'), '/ticket/k1?tab=discussion&message=m3');
+      expect(channelLinkPlace(_channel, message: 'm3'), isNull);
+    });
+
+    testWidgets('the link page opens the ticket in its place, with the message', (tester) async {
+      await pump(tester, const ChannelLinkPage(conversationId: 'c-42', message: 'm3'), channels: const [ticketChannel], messages: const []);
+      await settle(tester, frames: 8);
+      expect(find.text('ticket k1 tab=discussion&message=m3'), findsOneWidget);
+      expect(find.byKey(const ValueKey('channel-title')), findsNothing);
+    });
+
+    testWidgets("a project's channel still opens as a channel", (tester) async {
+      await pump(tester, const ChannelLinkPage(conversationId: 'c-42'), messages: const []);
+      await settle(tester, frames: 8);
+      expect(find.byKey(const ValueKey('channel-title')), findsOneWidget);
     });
   });
 

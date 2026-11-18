@@ -14,7 +14,6 @@ import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:aurelius_mobile/features/team/channels_bloc.dart';
-import 'package:aurelius_mobile/features/team/team_page.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -23,6 +22,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'support/builders.dart';
+import 'support/channel_opener.dart';
 import 'support/phase2_wire.dart';
 import 'support/tickets.dart';
 
@@ -227,13 +227,13 @@ void main() {
     });
   });
 
-  group('the Team page with the server\'s channels', () {
+  group('a channel from the server, opened as a link opens it (ticket #71)', () {
     late MockRepository repo;
     late StreamController<Event> changes;
     late List<Map<String, dynamic>> Function(bool generalRead) counts;
     var generalRead = false;
 
-    /// The Team page; [shown] is its tab's TickerMode (the shell turns it off when hidden).
+    /// The channels as links open them; [shown] is the TickerMode above them.
     Future<ValueNotifier<bool>> pump(WidgetTester tester) async {
       tester.view.physicalSize = const Size(390, 844) * 3;
       tester.view.devicePixelRatio = 3;
@@ -269,7 +269,7 @@ void main() {
       final shown = ValueNotifier(true);
       addTearDown(shown.dispose);
       final router = GoRouter(initialLocation: '/', routes: [
-        GoRoute(path: '/', builder: (_, _) => ValueListenableBuilder<bool>(valueListenable: shown, builder: (_, on, child) => TickerMode(enabled: on, child: child!), child: const TeamPage())),
+        GoRoute(path: '/', builder: (_, _) => ValueListenableBuilder<bool>(valueListenable: shown, builder: (_, on, child) => TickerMode(enabled: on, child: child!), child: const ChannelOpener())),
         GoRoute(path: '/ticket/:tid', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['tid']}'))),
       ]);
       addTearDown(router.dispose);
@@ -291,42 +291,16 @@ void main() {
     }
 
     Future<void> openOrbit(WidgetTester tester) async {
-      await tester.tap(find.byKey(const ValueKey('channel-picker')));
-      await settleBoard(tester);
       await tester.tap(find.byKey(const ValueKey('channel-$orbitChannelId')));
       await settleBoard(tester);
     }
-
-    testWidgets('after reading a channel the counts are asked again: the server\'s, no tally of the phone', (tester) async {
-      counts = (read) => [channelJson(generalId, 'General', unread: read ? 0 : 2, mentions: read ? 0 : 1), channelJson(orbitChannelId, 'Orbit', projectId: orbitProjectId, unread: 3, mentions: 1)];
-      await pump(tester);
-      expect(find.text('● 3 unread'), findsOneWidget, reason: 'Orbit, by the server');
-      verifyInOrder([() => repo.groupChat(channel: null), () => repo.channels()]);
-      final bloc = tester.element(find.byType(TeamPage)).read<ChannelsBloc>();
-      expect(bloc.state.byId(generalId)!.unread, 0, reason: 'General was read: the server says 0 now');
-      expect(bloc.state.badge, (mentions: 1, unread: true));
-    });
-
-    testWidgets('a hidden Team tab does not read (and so does not mark read) what comes in', (tester) async {
-      counts = (_) => [channelJson(generalId, 'General'), channelJson(orbitChannelId, 'Orbit', projectId: orbitProjectId)];
-      final shown = await pump(tester);
-      verify(() => repo.groupChat(channel: null)).called(1);
-      shown.value = false;
-      await settleBoard(tester);
-      changes.add(_posted(generalId));
-      await settleBoard(tester);
-      verifyNever(() => repo.groupChat(channel: any(named: 'channel')));
-      shown.value = true;
-      await settleBoard(tester);
-      verify(() => repo.groupChat(channel: null)).called(1);
-    });
 
     testWidgets('the message a ticket was made from has "→ #12"; it opens that ticket (MU2-10 AC3)', (tester) async {
       counts = (_) => [channelJson(generalId, 'General'), channelJson(orbitChannelId, 'Orbit', projectId: orbitProjectId)];
       await pump(tester);
       await openOrbit(tester);
       expect(find.text('The export button does nothing on Safari.'), findsOneWidget);
-      expect(find.text('ada created #12 from a message'), findsOneWidget, reason: 'the server\'s sentence');
+      expect(find.textContaining('ada created #12 from a message'), findsOneWidget, reason: 'the server\'s sentence');
       expect(find.byKey(const ValueKey('ticket-pill-$madeTicketId')), findsOneWidget);
       expect(find.text('→ #12'), findsOneWidget);
       await tester.tap(find.text('→ #12'));

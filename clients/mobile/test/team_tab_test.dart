@@ -5,7 +5,9 @@ import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/views.dart';
+import 'package:aurelius_mobile/features/chat/chat_bloc.dart';
 import 'package:aurelius_mobile/features/chat/chat_view.dart';
+import 'package:aurelius_mobile/features/chat/run_author.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/company_org/employee_page.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
@@ -13,7 +15,6 @@ import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/project/task_page.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:aurelius_mobile/features/team/mentions.dart';
-import 'package:aurelius_mobile/features/team/team_page.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -63,7 +64,8 @@ void main() {
     when(() => repo.appends).thenAnswer((_) => const Stream.empty());
   });
 
-  group('the Team chat', () {
+  // Ticket #71 took the Team tab away; General opens from a link, as this group chat view.
+  group('a group chat (General)', () {
     // Orion answers the group in its own chat 'own-orion', in run r-orion.
     final orion = employeeOf(id: 'o', name: 'Orion', role: 'Project Manager', conversationId: 'own-orion', agents: const [AgentView(kind: 'conversation', name: 'Conversation', detail: '', sinceMs: 1, steps: 0, runId: 'r-orion', conversationId: 'own-orion')]);
     final atlas = employeeOf(id: 'a', name: 'Atlas', conversationId: 'own-atlas');
@@ -90,7 +92,10 @@ void main() {
             BlocProvider<ConnectionBloc>.value(value: connection),
             BlocProvider<RuntimeBloc>.value(value: runtime),
           ],
-          child: MaterialApp(theme: aureliusTheme(), home: const TeamPage()),
+          child: MaterialApp(
+            theme: aureliusTheme(),
+            home: Scaffold(body: BlocProvider(create: (_) => ChatBloc.group(repo, runAuthor: (runId) => runAuthorOf(company.state, runId)), child: const ChatView())),
+          ),
         ),
       ));
       await tester.pump(const Duration(milliseconds: 200));
@@ -194,7 +199,7 @@ void main() {
     expect(isSystemLine(messageOf('u', MessageRole.user, 'hi', update: 'system'), inGroup: true), isFalse);
   });
 
-  testWidgets("an employee's own chat typed in as a conversation opens Team", (tester) async {
+  testWidgets("an employee's own chat typed in as a conversation opens /team (Sessions since ticket #71)", (tester) async {
     final company = MockCompanyBloc();
     whenListen(company, const Stream<CompanyState>.empty(), initialState: CompanyState(loading: false, employees: [employeeOf(id: 'mgr', name: 'Iris', conversationId: 'own')]));
     final connection = MockConnectionBloc();
@@ -222,15 +227,21 @@ void main() {
     setUp(() => router = AppRouter(host));
     tearDown(() => router.dispose());
 
-    test('Team chat is the first tab and the Board the second', () {
+    test('Sessions is the first tab, then Inbox, Board and More; the app opens on Sessions (ticket #71)', () {
       final shell = router.config.configuration.routes.whereType<StatefulShellRoute>().single;
       final first = [for (final b in shell.branches) (b.routes.first as GoRoute).path];
-      expect(first, ['/team', '/board', '/inbox', '/more']);
+      expect(first, ['/sessions', '/inbox', '/board', '/more']);
       expect(first, shellTabPatterns);
-      expect(router.config.routeInformationProvider.value.uri.path, '/team', reason: 'the app opens on the Team chat');
+      expect(shellTabs.map((t) => t.label), ['Sessions', 'Inbox', 'Board', 'More']);
+      expect(router.config.routeInformationProvider.value.uri.path, '/sessions', reason: 'the app opens on Sessions');
       final paths = pathsOf(router.config.configuration.routes);
-      expect(paths, containsAll(['/board/new', '/ticket/:tid', '/ticket/:tid/plan', '/settings/board']));
+      expect(paths, containsAll(['/sessions/new', '/session/:cid', '/board/new', '/ticket/:tid', '/ticket/:tid/plan', '/settings/board', '/channel/:cid']));
       expect(first.length, shellTabs.length, reason: 'one tab per branch');
+    });
+
+    test('an old place of the Team tab opens Sessions', () {
+      final team = router.config.configuration.routes.whereType<GoRoute>().singleWhere((r) => r.path == '/team');
+      expect(team.redirect, isNotNull);
     });
 
     test("an employee's own chat has no route any more; conversations have their own", () {
@@ -244,19 +255,22 @@ void main() {
   });
 
   group('HomeShell', () {
-    Future<void> pump(WidgetTester tester, InboxState inbox) async {
+    Future<void> pump(WidgetTester tester, InboxState inbox, {LinkState link = online}) async {
+      when(() => repo.linkState).thenReturn(link);
       final inboxBloc = MockInboxBloc();
       whenListen(inboxBloc, const Stream<InboxState>.empty(), initialState: inbox);
       final connection = MockConnectionBloc();
-      whenListen(connection, const Stream<LinkState>.empty(), initialState: online);
-      final router = GoRouter(initialLocation: '/team', routes: [
+      whenListen(connection, const Stream<LinkState>.empty(), initialState: link);
+      final router = GoRouter(initialLocation: '/sessions', routes: [
         StatefulShellRoute.indexedStack(
           builder: (context, state, shell) => HomeShell(shell: shell),
           branches: [
-            for (final name in ['team', 'board', 'inbox', 'more'])
+            for (final name in ['sessions', 'inbox', 'board', 'more'])
               StatefulShellBranch(routes: [GoRoute(path: '/$name', builder: (_, _) => Scaffold(body: Center(child: Text('page $name'))))]),
           ],
         ),
+        GoRoute(path: '/sessions/new', builder: (_, _) => const Scaffold(body: Text('page new session'))),
+        GoRoute(path: '/board/new', builder: (_, _) => const Scaffold(body: Text('page new ticket'))),
       ]);
       addTearDown(router.dispose);
       await tester.pumpWidget(RepositoryProvider<AureliusRepository>.value(
@@ -272,21 +286,20 @@ void main() {
       await tester.pump();
     }
 
-    testWidgets('the inbox badge stays on the Inbox tab, not on Team', (tester) async {
+    testWidgets('the inbox badge stays on the Inbox tab; there is no Team tab', (tester) async {
       await pump(tester, InboxState(loading: false, approvals: [approvalOf('a1'), approvalOf('a2')]));
       final badge = find.ancestor(of: find.text('2'), matching: find.byType(Badge));
       expect(badge, findsOneWidget);
       final x = tester.getCenter(badge).dx;
       expect((x - tester.getCenter(find.text('Inbox')).dx).abs(), lessThan(1));
-      expect((x - tester.getCenter(find.text('Team')).dx).abs(), greaterThan(10));
+      expect(find.text('Team'), findsNothing);
     });
 
-    testWidgets('the shell opens on the group chat; ⌘3 opens the inbox, ⌘1 the chat again; the Board is a tab', (tester) async {
+    testWidgets('the shell opens on Sessions; ⌘2 opens the inbox, ⌘1 Sessions again; the Board is a tab', (tester) async {
       await pump(tester, const InboxState(loading: false));
-      expect(find.text('page team'), findsOneWidget);
-      expect(find.text('Home'), findsNothing, reason: 'the Home tab is gone');
+      expect(find.text('page sessions'), findsOneWidget);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
       expect(find.text('page inbox'), findsOneWidget);
@@ -294,10 +307,28 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pumpAndSettle();
-      expect(find.text('page team'), findsOneWidget);
+      expect(find.text('page sessions'), findsOneWidget);
       await tester.tap(find.text('Board'));
       await tester.pumpAndSettle();
       expect(find.text('page board'), findsOneWidget);
+    });
+
+    testWidgets('⌘N opens New session on a server with work sessions', (tester) async {
+      await pump(tester, const InboxState(loading: false), link: const LinkState(status: LinkStatus.online, capabilities: ['read', 'chat'], features: ['work_sessions']));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      expect(find.text('page new session'), findsOneWidget);
+    });
+
+    testWidgets('⌘N without work sessions opens New ticket', (tester) async {
+      await pump(tester, const InboxState(loading: false));
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+      expect(find.text('page new ticket'), findsOneWidget);
     });
   });
 

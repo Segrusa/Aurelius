@@ -9,9 +9,10 @@ import '../../data/discussion.dart';
 import '../../data/views.dart';
 import '../chat/chat_bloc.dart';
 import '../chat/chat_view.dart';
+import '../chat/run_author.dart';
 import '../company/company_bloc.dart';
 import 'channels_bloc.dart';
-import 'team_page.dart';
+import 'chat_shown_watcher.dart';
 
 /// One thread of a Team chat channel (AUR-CHAT-002 §5, feature
 /// `chat_threads`): its own pushed screen "Thread · #channel" with the root

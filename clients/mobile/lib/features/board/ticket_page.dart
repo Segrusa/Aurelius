@@ -24,7 +24,7 @@ import '../connection/connection_bloc.dart';
 import '../project/new_task_page.dart' show maxTaskFiles;
 import '../links/link_actions.dart';
 import '../markdown/links.dart';
-import '../team/team_page.dart' show runAuthorOf;
+import '../chat/run_author.dart';
 import 'ticket_actions.dart';
 import 'ticket_bloc.dart';
 import 'ticket_text_dialog.dart';

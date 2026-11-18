@@ -12,11 +12,11 @@ import '../../data/tickets.dart' show responsibleLabel;
 import '../../data/views.dart';
 import '../chat/chat_bloc.dart';
 import '../chat/chat_view.dart';
+import '../chat/run_author.dart';
 import '../company/company_bloc.dart';
-import 'channel_list.dart';
 import 'channel_ticket_bloc.dart';
 import 'channels_bloc.dart';
-import 'team_page.dart';
+import 'chat_shown_watcher.dart';
 import 'thread_screen.dart';
 
 /// One channel of the Slack-style Team chat (AUR-CHAT-001 §2–§4, §6): its
@@ -234,4 +234,18 @@ class _TicketLine extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// A ticket's status: its column's name in the small pill of the board (§6).
+class ChannelStatusPill extends StatelessWidget {
+  const ChannelStatusPill({super.key, required this.column});
+
+  final ColumnKind column;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+        decoration: BoxDecoration(color: Tokens.cell2, borderRadius: BorderRadius.circular(999)),
+        child: Text(columnName(column), style: TextStyle(fontSize: 11.5, color: Tokens.label2)),
+      );
 }

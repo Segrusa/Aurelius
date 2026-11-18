@@ -14,7 +14,6 @@ import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:aurelius_mobile/features/team/channels_bloc.dart';
-import 'package:aurelius_mobile/features/team/team_page.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,11 +23,13 @@ import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'support/builders.dart';
+import 'support/channel_opener.dart';
 import 'support/tickets.dart' as board;
 
-// AUR-CHAT-001-M1: the Slack-style Team chat on a phone and a tablet, with a
-// server of `ticket_channels` (ui-ontwerp §1–§4, §6, §8). Neutral names: board
-// members ada (signed in) and lena; employees Orion and Forge.
+// AUR-CHAT-001-M1: a channel of the Slack-style Team chat, with a server of
+// `ticket_channels` (ui-ontwerp §2–§4, §8). Ticket #71 took the Team tab and
+// its channel list away; a channel opens from a link, as [ChannelOpener] does here.
+// Neutral names: board members ada (signed in) and lena; employees Orion and Forge.
 
 class MockRepository extends Mock implements AureliusRepository {}
 
@@ -132,7 +133,6 @@ void main() {
     when(() => repo.loadChanges).thenAnswer((_) => const Stream.empty());
     when(() => repo.load()).thenAnswer((_) async => loadOf());
     when(() => repo.channels()).thenAnswer((_) async => channels);
-    when(() => repo.searchChannels(any())).thenAnswer((i) async => [for (final c in channels) if (c.name.contains(i.positionalArguments.first as String)) c]);
     when(() => repo.boardMembers()).thenAnswer((_) async => const [_ada, _lena]);
     when(() => repo.ticket(any())).thenAnswer((i) async => TicketDetail(asOfSeq: 1, ticket: board.ticketOf(id: i.positionalArguments.first as String, column: ColumnKind.done), tasks: const []));
     when(() => repo.ticket('k42')).thenAnswer((_) async => TicketDetail(
@@ -157,7 +157,7 @@ void main() {
     final runtime = MockRuntimeBloc();
     whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: const RuntimeState());
     final router = GoRouter(initialLocation: '/', routes: [
-      GoRoute(path: '/', builder: (_, _) => const TeamPage()),
+      GoRoute(path: '/', builder: (_, _) => const ChannelOpener()),
       GoRoute(path: '/ticket/:tid', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['tid']}'))),
     ]);
     addTearDown(router.dispose);
@@ -179,93 +179,12 @@ void main() {
 
   double top(WidgetTester tester, String key) => tester.getTopLeft(find.byKey(ValueKey(key))).dy;
 
+  ChannelsBloc channelsOf(WidgetTester tester) => ChannelOpener.channelsOf(tester);
+
   Future<void> open(WidgetTester tester, String id) async {
     await tester.tap(find.byKey(ValueKey('channel-$id')));
     await board.settleBoard(tester);
   }
-
-  group('the channel list (§1, §6)', () {
-    testWidgets('the Team tab opens on Channels, then the open tickets by latest activity, Archived folded', (tester) async {
-      await pump(tester);
-      expect(find.text('CHANNELS'), findsOneWidget);
-      expect(find.text('TICKETS'), findsOneWidget);
-      expect(find.byKey(const ValueKey('channel-picker')), findsNothing, reason: 'the pill is gone with ticket channels');
-      expect(top(tester, 'channel-c-general') < top(tester, 'channel-c-atlas'), isTrue);
-      expect(top(tester, 'channel-c-atlas') < top(tester, 'channel-c-web'), isTrue);
-      expect(top(tester, 'channel-c-web') < top(tester, 'channel-c-52'), isTrue);
-      expect(top(tester, 'channel-c-52') < top(tester, 'channel-c-42'), isTrue, reason: '#52 has the latest activity');
-      expect(find.text('ARCHIVED (1)'), findsOneWidget);
-      expect(find.byKey(const ValueKey('channel-c-47')), findsNothing, reason: 'Archived is folded by default');
-      await tester.tap(find.byKey(const ValueKey('channels-archived')));
-      await board.settleBoard(tester);
-      expect(find.byKey(const ValueKey('channel-c-47')), findsOneWidget);
-    });
-
-    testWidgets('an unread channel is bold with its count; a mention is an @ pill in place of the count', (tester) async {
-      await pump(tester);
-      final atlas = tester.widget<Text>(find.text('#atlas'));
-      final general = tester.widget<Text>(find.text('#general'));
-      expect(atlas.style?.fontWeight, FontWeight.w700);
-      expect(general.style?.fontWeight, FontWeight.w400);
-      expect(find.descendant(of: find.byKey(const ValueKey('channel-unread-c-atlas')), matching: find.text('3')), findsOneWidget);
-      expect(find.descendant(of: find.byKey(const ValueKey('channel-mentions-c-web')), matching: find.text('@ 1')), findsOneWidget);
-      expect(find.byKey(const ValueKey('channel-unread-c-web')), findsNothing);
-      expect(find.bySemanticsLabel('Ticket 42, 42-login-per-board-member, 5 unread'), findsOneWidget);
-      expect(find.text('Review'), findsOneWidget, reason: "a ticket row shows its column's status");
-    });
-
-    testWidgets('Tickets shows fifteen rows, then Show more brings the rest', (tester) async {
-      await pump(tester, list: [
-        _general,
-        for (var i = 1; i <= 18; i++) _channel('c-t$i', '#$i-t', projectId: 'p1', kind: ChannelKind.ticket, number: i, column: ColumnKind.doing, at: i),
-      ]);
-      await tester.scrollUntilVisible(find.text('Show more (3)'), 200, scrollable: find.descendant(of: find.byKey(const ValueKey('channel-list')), matching: find.byType(Scrollable)).first);
-      expect(find.byKey(const ValueKey('channel-c-t3')), findsNothing, reason: 'the three oldest wait behind Show more');
-      await tester.tap(find.text('Show more (3)'));
-      await board.settleBoard(tester);
-      await tester.scrollUntilVisible(find.byKey(const ValueKey('channel-c-t1')), 200, scrollable: find.descendant(of: find.byKey(const ValueKey('channel-list')), matching: find.byType(Scrollable)).first);
-      expect(find.byKey(const ValueKey('channel-c-t1')), findsOneWidget, reason: 'the oldest one shows now');
-    });
-
-    testWidgets('search asks channel.search and lists what it found', (tester) async {
-      await pump(tester);
-      await tester.enterText(find.byKey(const ValueKey('channel-search')), 'audit');
-      await board.settleBoard(tester);
-      verify(() => repo.searchChannels('audit')).called(1);
-      expect(find.byKey(const ValueKey('channel-c-52')), findsOneWidget);
-      expect(find.byKey(const ValueKey('channel-c-atlas')), findsNothing);
-      await tester.enterText(find.byKey(const ValueKey('channel-search')), '');
-      await board.settleBoard(tester);
-      expect(find.byKey(const ValueKey('channel-c-atlas')), findsOneWidget, reason: 'an empty search is the whole list again');
-    });
-
-    testWidgets('a server without ticket_channels keeps the Team chat of before, without ticket channels', (tester) async {
-      await pump(tester, tickets: false);
-      expect(find.byKey(const ValueKey('channel-picker')), findsOneWidget);
-      expect(find.text('TICKETS'), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('channel-picker')));
-      await board.settleBoard(tester);
-      expect(find.byKey(const ValueKey('channel-c-42')), findsNothing);
-      expect(find.byKey(const ValueKey('channel-c-atlas')), findsOneWidget);
-    });
-
-    testWidgets('the Team badge still counts the mentions of every channel, ticket channels too', (tester) async {
-      await pump(tester, list: [_general, _web, _channel('c-9', '#9-x', projectId: 'p1', kind: ChannelKind.ticket, number: 9, mentions: 2)]);
-      final element = tester.element(find.byType(TeamPage));
-      expect(element.read<ChannelsBloc>().state.badge, (mentions: 3, unread: true));
-    });
-
-    testWidgets('on a tablet the list and the channel stand side by side, General open first', (tester) async {
-      await pump(tester, size: const Size(1024, 768));
-      expect(find.byKey(const ValueKey('channel-list')), findsOneWidget);
-      expect(find.byKey(const ValueKey('channel-title')), findsOneWidget);
-      expect(find.byWidgetPredicate((w) => w is Text && w.key == const ValueKey('channel-title') && w.data == '#general'), findsOneWidget);
-      await open(tester, 'c-atlas');
-      expect(find.byWidgetPredicate((w) => w is Text && w.key == const ValueKey('channel-title') && w.data == '#atlas'), findsOneWidget);
-      expect(find.byKey(const ValueKey('channel-unread-c-atlas')), findsNothing, reason: 'the open channel has no badge');
-      verify(() => repo.groupChat(channel: 'c-atlas')).called(greaterThan(0));
-    });
-  });
 
   group('a ticket channel (§2, §3)', () {
     final messages = {
@@ -337,7 +256,7 @@ void main() {
     });
   });
 
-  group('a line in General opens its ticket channel (Q1-B1)', () {
+  group('a line in General opens its ticket (Q1-B1; ticket #71: no ticket channels on the phone)', () {
     Map<String?, List<MessageView>> general({String channel = 'c-42'}) => {
           null: [
             _msg('s1', 'lena opened #42 "Login per board member"', at: _today(0), ordinal: 1, system: SystemLine(kind: SystemLineKind.ticketCreated, by: 'lena', ticketId: 'k42', channelId: channel)),
@@ -345,38 +264,8 @@ void main() {
           ],
         };
 
-    testWidgets('a tap on an opened line pushes the channel of its channel_id, not the ticket page', (tester) async {
+    testWidgets('a tap on an opened line opens the ticket page, also for a channel the list knows', (tester) async {
       await pump(tester, messages: general());
-      await open(tester, 'c-general');
-      await tester.tap(find.textContaining('lena opened #42'));
-      await board.settleBoard(tester);
-      expect(find.byWidgetPredicate((w) => w is Text && w.key == const ValueKey('channel-title') && w.data == '#42-login-per-board-member'), findsOneWidget);
-      expect(find.text('ticket k42'), findsNothing);
-      verify(() => repo.groupChat(channel: 'c-42')).called(1);
-      // Back goes to General.
-      await tester.pageBack();
-      await board.settleBoard(tester);
-      expect(find.textContaining('lena opened #42'), findsOneWidget);
-    });
-
-    testWidgets("a closed line opens its archived channel, read-only", (tester) async {
-      await pump(tester, messages: general());
-      await open(tester, 'c-general');
-      await tester.tap(find.textContaining('ada closed #47'));
-      await board.settleBoard(tester);
-      expect(find.text('#47 is Done · read-only.'), findsOneWidget);
-    });
-
-    testWidgets('on a tablet the channel takes the place of General beside the list', (tester) async {
-      await pump(tester, messages: general(), size: const Size(1024, 768));
-      await tester.tap(find.textContaining('lena opened #42'));
-      await board.settleBoard(tester);
-      expect(find.byWidgetPredicate((w) => w is Text && w.key == const ValueKey('channel-title') && w.data == '#42-login-per-board-member'), findsOneWidget);
-      expect(find.byKey(const ValueKey('channel-list')), findsOneWidget);
-    });
-
-    testWidgets('a channel the list does not know yet opens the ticket page instead', (tester) async {
-      await pump(tester, messages: general(channel: 'c-unknown'));
       await open(tester, 'c-general');
       await tester.tap(find.textContaining('lena opened #42'));
       await board.settleBoard(tester);
@@ -425,7 +314,7 @@ void main() {
       await pump(tester, messages: messages);
       await open(tester, 'c-42');
       messages['c-42'] = [_msg('s1', '#42 is closed · Login per board member', at: _today(1), ordinal: 1, system: const SystemLine(kind: SystemLineKind.done, by: 'ada'))];
-      final bloc = tester.element(find.byType(TeamPage, skipOffstage: false)).read<ChannelsBloc>();
+      final bloc = channelsOf(tester);
       channels = [_general, _channel('c-42', '#42-login-per-board-member', projectId: 'p1', kind: ChannelKind.ticket, number: 42, column: ColumnKind.done, archived: true)];
       bloc.add(const ChannelsRefreshed());
       await board.settleBoard(tester);
@@ -486,8 +375,6 @@ void main() {
   group('read-only and reopen (§3, §8)', () {
     testWidgets('a Done ticket shows the read-only bar with Open ticket instead of the composer', (tester) async {
       await pump(tester);
-      await tester.tap(find.byKey(const ValueKey('channels-archived')));
-      await board.settleBoard(tester);
       await open(tester, 'c-47');
       expect(find.text('#47 is Done · read-only.'), findsOneWidget);
       expect(find.byKey(const Key('composer-send')), findsNothing);
@@ -508,7 +395,7 @@ void main() {
       expect(find.textContaining('channel_archived'), findsNothing, reason: 'never the raw error');
       expect(find.byType(SnackBar), findsNothing);
       // The server closed it: the list says archived; then the ticket leaves Done.
-      final bloc = tester.element(find.byType(TeamPage, skipOffstage: false)).read<ChannelsBloc>();
+      final bloc = channelsOf(tester);
       channels = [_general, _channel('c-42', '#42-login-per-board-member', projectId: 'p1', kind: ChannelKind.ticket, number: 42, column: ColumnKind.done, archived: true)];
       bloc.add(const ChannelsRefreshed());
       await board.settleBoard(tester);
