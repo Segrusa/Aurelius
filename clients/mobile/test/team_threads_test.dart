@@ -15,7 +15,6 @@ import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:aurelius_mobile/features/team/channels_bloc.dart';
-import 'package:aurelius_mobile/features/team/team_page.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -24,6 +23,7 @@ import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'support/builders.dart';
+import 'support/channel_opener.dart';
 import 'support/tickets.dart' as board;
 
 // AUR-CHAT-002-M1: threads and reactions in the Team chat on a phone, with a
@@ -181,7 +181,7 @@ void main() {
     final runtime = MockRuntimeBloc();
     whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: const RuntimeState());
     final router = GoRouter(initialLocation: '/', routes: [
-      GoRoute(path: '/', builder: (_, _) => const TeamPage()),
+      GoRoute(path: '/', builder: (_, _) => const ChannelOpener()),
       GoRoute(path: '/ticket/:tid', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['tid']}'))),
     ]);
     addTearDown(router.dispose);
@@ -206,11 +206,7 @@ void main() {
     await board.settleBoard(tester);
   }
 
-  Future<void> openArchived(WidgetTester tester, String id) async {
-    await tester.tap(find.byKey(const ValueKey('channels-archived')));
-    await board.settleBoard(tester);
-    await open(tester, id);
-  }
+  Future<void> openArchived(WidgetTester tester, String id) => open(tester, id);
 
   Future<void> openThread(WidgetTester tester) async {
     await tester.tap(find.byKey(const ValueKey('thread-line-m1')));

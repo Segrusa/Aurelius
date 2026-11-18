@@ -390,7 +390,7 @@ Future<void> showCardMenu(BuildContext context, TicketView ticket, CardContext b
     }),
     if (board.links) ('Copy link', CupertinoIcons.link, () => copyTicketLink(context, ticket.id, ticket.number)),
     if (ticket.column != ColumnKind.backlog && ticket.column != ColumnKind.done && board.online)
-      (ticket.column == ColumnKind.planReview ? 'Afwijzen' : 'Back to Backlog', CupertinoIcons.arrow_uturn_left, () => backToBacklog(context, ticket)),
+      (ticket.column == ColumnKind.planReview ? 'Reject plan' : 'Back to Backlog', CupertinoIcons.arrow_uturn_left, () => backToBacklog(context, ticket)),
     if ((ticket.column == ColumnKind.backlog || ticket.column == ColumnKind.done) && board.online)
       ('Archive', CupertinoIcons.archivebox, () async {
         await ticketWrite(context, ticketArchive(ticketId: ticket.id), expectedVersion: ticket.version, retry: false, done: '#${ticket.number} is archived.');

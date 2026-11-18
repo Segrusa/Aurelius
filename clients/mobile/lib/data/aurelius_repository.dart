@@ -188,6 +188,9 @@ class AureliusRepository {
   Future<MessagesSnapshot> messages(String conversationId) async =>
       (await _ask<ResponseBodyMessages>(conversationGet(conversationId: conversationId))).value;
 
+  /// The reader's work sessions, the latest activity first (feature `work_sessions`).
+  Future<List<WorkSessionView>> workSessions() async => (await _ask<ResponseBodyWorkSessions>(workSessionList())).value.sessions;
+
   /// The company's group chat (Team): the user and every employee. With
   /// [channel] (feature `team_channels`) a project's channel, or (feature
   /// `ticket_channels`) a ticket's; none: General.

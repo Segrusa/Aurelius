@@ -6,8 +6,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/bloc/transformers.dart';
 import '../../core/net/protocol.dart';
 import '../../data/aurelius_repository.dart';
+import '../../data/channels.dart' show ticketChannelsFeature;
 import '../../data/tickets.dart';
 import '../../data/views.dart';
+import 'ticket_session_rules.dart';
 
 sealed class TicketEvent {
   const TicketEvent();
@@ -18,7 +20,7 @@ class TicketRefreshed extends TicketEvent {
 }
 
 class TicketPageState extends Equatable {
-  const TicketPageState({this.loading = true, this.detail, this.error, this.activity = const [], this.activityFailed = false, this.plan, this.modeNow, this.followers, this.followersFailed = false, this.notFound = false, this.denied = false});
+  const TicketPageState({this.loading = true, this.detail, this.error, this.activity = const [], this.activityFailed = false, this.plan, this.modeNow, this.followers, this.followersFailed = false, this.notFound = false, this.denied = false, this.number, this.stopped});
 
   final bool loading;
   final TicketDetail? detail;
@@ -49,12 +51,19 @@ class TicketPageState extends Equatable {
   /// The server refuses this reader the ticket.
   final bool denied;
 
+  /// The number in the route (`/ticket/70`), for "Ticket #70 not found."; null for an id.
+  final int? number;
+
+  /// Doing, and the main task stopped for input ([mainTaskStopped]): its last
+  /// failure, if it failed, and the question Try again sends again. Null otherwise.
+  final ({String? failure, String retry})? stopped;
+
   TicketView? get ticket => detail?.ticket;
   TaskView? get root => detail?.rootTask;
   bool get gaveUp => dispatcherGaveUp(activity);
 
   @override
-  List<Object?> get props => [loading, detail?.asOfSeq, detail?.ticket.version, detail?.ticket.responsibleUserId, detail?.tasks.map((t) => (t.id, t.status, t.updatedAtMs)).toList(), error, activity.map((c) => c.seq).toList(), activityFailed, plan, modeNow, followers?.map((f) => (f.userId, f.reason, f.disabled)).toList(), followersFailed, notFound, denied];
+  List<Object?> get props => [loading, detail?.asOfSeq, detail?.ticket.version, detail?.ticket.responsibleUserId, detail?.tasks.map((t) => (t.id, t.status, t.updatedAtMs)).toList(), error, activity.map((c) => c.seq).toList(), activityFailed, plan, modeNow, followers?.map((f) => (f.userId, f.reason, f.disabled)).toList(), followersFailed, notFound, denied, number, stopped];
 }
 
 /// One ticket (`ticket.get`), its activity, its followers and, in Plan review,
@@ -71,35 +80,72 @@ class TicketBloc extends Bloc<TicketEvent, TicketPageState> {
   }
 
   final AureliusRepository _repository;
+
+  /// The ticket's id, or its number as the route has it (`/ticket/70`).
   final String ticketId;
+
+  /// The id [ticketId] resolved to; the same as it unless it is a number.
+  String? _id;
   late final List<StreamSubscription<void>> _subs;
 
   Future<void> _refresh(TicketRefreshed event, Emitter<TicketPageState> emit) async {
+    final number = routeNumber(ticketId);
     try {
-      final detail = await _repository.ticket(ticketId);
+      final id = _id ??= await _resolve(number);
+      if (id == null) {
+        emit(TicketPageState(loading: false, notFound: true, number: number));
+        return;
+      }
+      final detail = await _repository.ticket(id);
       var activity = state.activity;
       var activityFailed = false;
       try {
-        activity = (await _repository.timeline(correlationId: ticketId, activity: true, limit: 60)).cards;
+        activity = (await _repository.timeline(correlationId: id, activity: true, limit: 60)).cards;
       } on Object {
         // The ticket still shows; the page says what is unknown.
         activityFailed = true;
       }
-      final (followers, followersFailed) = await _followers();
-      emit(TicketPageState(loading: false, detail: detail, activity: activity, activityFailed: activityFailed, plan: await _plan(detail), modeNow: await _modeNow(detail, activity), followers: followers, followersFailed: followersFailed));
+      final (followers, followersFailed) = await _followers(id);
+      emit(TicketPageState(loading: false, detail: detail, activity: activity, activityFailed: activityFailed, plan: await _plan(detail), modeNow: await _modeNow(detail, activity), followers: followers, followersFailed: followersFailed, number: number, stopped: await _stopped(detail)));
     } on DisconnectedException catch (e) {
-      emit(TicketPageState(loading: false, detail: state.detail, activity: state.activity, activityFailed: state.activityFailed, plan: state.plan, modeNow: state.modeNow, followers: state.followers, followersFailed: state.followersFailed, error: state.detail == null ? e.message : null));
+      emit(_kept(error: state.detail == null ? e.message : null, number: number));
     } on ProtocolException catch (e) {
-      emit(TicketPageState(loading: false, detail: state.detail, activity: state.activity, activityFailed: state.activityFailed, plan: state.plan, modeNow: state.modeNow, followers: state.followers, followersFailed: state.followersFailed, error: e.shown, notFound: e.code == ErrorCode.notFound, denied: e.isForbidden));
+      emit(_kept(error: e.shown, notFound: e.code == ErrorCode.notFound, denied: e.isForbidden, number: number));
+    }
+  }
+
+  /// The last good read, with what went wrong since.
+  TicketPageState _kept({String? error, bool notFound = false, bool denied = false, int? number}) => TicketPageState(loading: false, detail: state.detail, activity: state.activity, activityFailed: state.activityFailed, plan: state.plan, modeNow: state.modeNow, followers: state.followers, followersFailed: state.followersFailed, error: error, notFound: notFound, denied: denied, number: number, stopped: state.stopped);
+
+  /// The id of the ticket the route names: an id as it is; a number through
+  /// the ticket channels (`channel.search "#70"`, archived ones too). Null:
+  /// no such number, or a server without ticket channels cannot say.
+  Future<String?> _resolve(int? number) async {
+    if (number == null) return ticketId;
+    if (!_repository.linkState.has(ticketChannelsFeature)) return null;
+    final found = await _repository.searchChannels('#$number');
+    return found.where((c) => c.ticketNumber == number && c.ticketId != null).firstOrNull?.ticketId;
+  }
+
+  /// A main task that stopped for input: its last failure and what Try again
+  /// sends (as the desktop's status box); the last known when its conversation cannot be read.
+  Future<({String? failure, String retry})?> _stopped(TicketDetail detail) async {
+    final conversation = detail.rootTask?.conversationId;
+    if (!mainTaskStopped(detail.ticket, detail.rootTask) || conversation == null) return null;
+    try {
+      final messages = (await _repository.messages(conversation)).messages;
+      return (failure: lastFailure(messages), retry: retryText(messages));
+    } on Object {
+      return state.stopped;
     }
   }
 
   /// Who follows the ticket, when the server keeps that; on a failure the last
   /// known list stays, marked as failed.
-  Future<(List<FollowerView>?, bool)> _followers() async {
+  Future<(List<FollowerView>?, bool)> _followers(String id) async {
     if (!_repository.linkState.has(ticketFollowFeature)) return (null, false);
     try {
-      return ((await _repository.followers(ticketId)).followers, false);
+      return ((await _repository.followers(id)).followers, false);
     } on Object {
       return (state.followers, true);
     }

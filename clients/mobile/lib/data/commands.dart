@@ -52,6 +52,11 @@ abstract final class Commands {
         text: text,
       ));
 
+  /// A message in an existing conversation (`chat.send`): a work session's
+  /// (feature `work_sessions`). [files] need feature `chat_files`.
+  static Map<String, dynamic> sendChatMessage(String conversationId, String text, {List<String> images = const [], List<String> files = const [], bool interrupt = false, bool confirmSecret = false}) =>
+      chatSend(SendChatMessage(confirmSecret: confirmSecret ? true : null, conversationId: conversationId, files: files, images: images, interrupt: interrupt ? true : null, text: text));
+
   /// A message of the user in the group chat (Team): `@Name` wakes those
   /// employees, else the CEO answers (in a project's [channel]: its dispatcher).
   /// With [threadParent] (feature `chat_threads`) a reply in that message's thread.

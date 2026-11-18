@@ -797,7 +797,6 @@ void main() {
       final repo = boardRepository(detail: detailOf(ticket));
       await pumpBoardPage(tester, repo, const TicketPage(ticketId: 'k1'));
       expect(find.text("⏸ Waiting for Robin's Claude login"), findsOneWidget);
-      expect(find.text("Robin's Claude login"), findsOneWidget, reason: 'MU3-10 AC4: whose subscription it runs on');
       await tapKey(tester, 'bar-use-my-login');
       expect(find.text('Run #42 on your Claude login?'), findsOneWidget);
       await tester.tap(find.text('Run on my login').last);
@@ -808,14 +807,22 @@ void main() {
       expect(find.text('#42 runs on your Claude login now.'), findsOneWidget);
     });
 
+    testWidgets("MU3-10 AC4: the properties say whose subscription it runs on", (tester) async {
+      final ticket = ticketOf(id: 'k1', number: 42, column: ColumnKind.doing, creator: robinUser, needs: TicketNeed.login);
+      await pumpBoardPage(tester, boardRepository(detail: detailOf(ticket)), const TicketPage(ticketId: 'k1'));
+      await openTicketProperties(tester);
+      expect(find.text("Robin's Claude login"), findsOneWidget);
+    });
+
     testWidgets('MU3-12 AC2: my own ticket without a login is a Needs you with Connect', (tester) async {
       final ticket = ticketOf(id: 'k1', column: ColumnKind.doing, needs: TicketNeed.login);
       final repo = boardRepository(detail: detailOf(ticket));
       await pumpBoardPage(tester, repo, const TicketPage(ticketId: 'k1'));
       expect(find.text('◆ Waiting for your Claude login'), findsWidgets);
-      expect(find.text('Your Claude login'), findsOneWidget);
       expect(find.byKey(const ValueKey('bar-connect')), findsOneWidget);
       expect(find.byKey(const ValueKey('bar-use-my-login')), findsNothing, reason: 'nothing to take over from yourself');
+      await openTicketProperties(tester);
+      expect(find.text('Your Claude login'), findsOneWidget);
     });
 
     testWidgets('MU3-11: a ticket parked on Robin\'s limit shows the time and no action', (tester) async {

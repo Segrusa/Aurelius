@@ -157,14 +157,14 @@ void main() {
 
     // A link to a message far back, on a channel of hundreds of messages, and to none.
     final repository = pageContext(tester).read<AureliusRepository>();
-    go(tester, '/team');
+    go(tester, '/sessions');
     await tester.pump(const Duration(seconds: 1));
     await openAureliusLink(pageContext(tester), 'aurelius://${repository.host.hostId}/message/$oldMessage');
     await waitFor(tester, find.byKey(const ValueKey('flash-$oldMessage')), timeout: const Duration(seconds: 90), what: 'the oldest message, marked');
     expect(find.text('That message no longer exists.'), findsNothing);
     step('links: the oldest of 700+ messages opens and is marked; not called gone');
     await tester.pump(const Duration(seconds: 2));
-    go(tester, '/team');
+    go(tester, '/sessions');
     await tester.pump(const Duration(seconds: 1));
     await openAureliusLink(pageContext(tester), 'aurelius://${repository.host.hostId}/message/01a19c13-3944-7338-8824-1be479d451ff');
     await waitFor(tester, find.text('That message no longer exists.'), what: 'the not found of the server');

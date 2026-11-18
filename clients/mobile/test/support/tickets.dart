@@ -234,3 +234,14 @@ Future<void> settleBoard(WidgetTester tester) async {
     await tester.pump(const Duration(milliseconds: 100));
   }
 }
+
+/// Opens the sheet "Ticket properties" of a ticket's session (ticket #71); with
+/// [activity] on its Activity tab.
+Future<void> openTicketProperties(WidgetTester tester, {bool activity = false}) async {
+  await tester.tap(find.byKey(const ValueKey('ticket-properties')));
+  await settleBoard(tester);
+  if (activity) {
+    await tester.tap(find.descendant(of: find.byKey(const ValueKey('ticket-segments')), matching: find.text('Activity')));
+    await settleBoard(tester);
+  }
+}

@@ -28,7 +28,6 @@ import '../features/more/more_page.dart';
 import '../features/links/link_actions.dart' show openAureliusLink, openMessageAt;
 import '../features/tasks/tasks_page.dart';
 import '../features/team/channel_link_page.dart';
-import '../features/team/team_page.dart';
 import '../features/inbox/approval_page.dart';
 import '../features/inbox/inbox_page.dart';
 import '../features/inbox/inbox_rows.dart' show pushPlace;
@@ -39,6 +38,9 @@ import '../features/pairing/pair_page.dart';
 import '../features/pairing/pairing_bloc.dart';
 import '../features/project/project_page.dart';
 import '../features/project/task_page.dart';
+import '../features/sessions/new_session_page.dart';
+import '../features/sessions/session_page.dart';
+import '../features/sessions/sessions_page.dart' show WorkSessionsPage;
 import 'shell.dart';
 
 /// Routes for one host. Detail screens cover the tab bar (root navigator).
@@ -54,7 +56,7 @@ class AppRouter {
 
   late final GoRouter config = GoRouter(
     navigatorKey: _root,
-    initialLocation: '/team',
+    initialLocation: '/sessions',
     refreshListenable: boardMember,
     redirect: (context, state) => boardMember == null ? null : boardMemberRedirect(boardMember!.value, state.matchedLocation),
     routes: [
@@ -80,18 +82,31 @@ class AppRouter {
         builder: (context, state, shell) => HomeShell(shell: shell),
         branches: [
           StatefulShellBranch(routes: [
-            GoRoute(path: '/team', pageBuilder: (context, state) => routePage(state, const TeamPage())),
-          ]),
-          StatefulShellBranch(routes: [
-            GoRoute(path: '/board', pageBuilder: (context, state) => routePage(state, const BoardTab())),
+            GoRoute(
+              path: '/sessions',
+              pageBuilder: (context, state) => routePage(state, const WorkSessionsPage()),
+              routes: [
+                GoRoute(parentNavigatorKey: _root, path: 'new', pageBuilder: (context, state) => routePage(state, const NewSessionPage())),
+              ],
+            ),
           ]),
           StatefulShellBranch(routes: [
             GoRoute(path: '/inbox', pageBuilder: (context, state) => routePage(state, const InboxPage())),
           ]),
           StatefulShellBranch(routes: [
+            GoRoute(path: '/board', pageBuilder: (context, state) => routePage(state, const BoardTab())),
+          ]),
+          StatefulShellBranch(routes: [
             GoRoute(path: '/more', pageBuilder: (context, state) => routePage(state, const MorePage())),
           ]),
         ],
+      ),
+      // The Team tab is gone (ticket #71): an old place of it opens Sessions.
+      GoRoute(path: '/team', redirect: (context, state) => '/sessions'),
+      GoRoute(
+        parentNavigatorKey: _root,
+        path: '/session/:cid',
+        pageBuilder: (context, state) => routePage(state, SessionPage(conversationId: state.pathParameters['cid']!)),
       ),
       GoRoute(
         parentNavigatorKey: _root,
@@ -142,7 +157,7 @@ class AppRouter {
         path: '/company',
         pageBuilder: (context, state) => routePage(state, CompanyOrgPage(initial: state.uri.queryParameters['view'])),
       ),
-      // Where a link to a message in a channel lands (A5a).
+      // Where a link to a message in a channel lands (A5a); a ticket's channel opens the ticket.
       GoRoute(
         parentNavigatorKey: _root,
         path: '/channel/:cid',
@@ -210,7 +225,7 @@ class AppRouter {
     } else if (_openPersonal(data, repository)) {
       return;
     } else if (taskId != null && projectId != null) {
-      config.go('/team');
+      config.go('/sessions');
       config.push('/project/$projectId/task/$taskId');
     } else {
       config.go('/inbox');
@@ -223,7 +238,7 @@ class AppRouter {
     final messageId = data['message_id'] as String?;
     final place = pushPlace(data);
     if (place == null) return false;
-    config.go(data['ticket_id'] != null ? '/board' : '/team');
+    config.go(data['ticket_id'] != null ? '/board' : '/sessions');
     // A reply in a thread has its own place; only the server knows it.
     final context = _root.currentContext;
     if (messageId != null && context != null && context.mounted && repository.linkState.has(messageLocateFeature)) {

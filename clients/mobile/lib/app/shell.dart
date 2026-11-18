@@ -9,39 +9,28 @@ import '../core/theme/tokens.dart';
 import '../core/widgets/ios.dart';
 import '../features/connection/connection_banner.dart';
 import '../features/connection/connection_bloc.dart';
-import '../features/dashboard/give_work.dart';
 import '../features/inbox/inbox_bloc.dart';
-import '../features/team/channels_bloc.dart';
+import '../features/sessions/sessions_page.dart' show openNewSession;
 
 /// The route pattern of each tab, in the order of [shellTabs]; what the screen counter counts a tab by.
-const shellTabPatterns = ['/team', '/board', '/inbox', '/more'];
+const shellTabPatterns = ['/sessions', '/inbox', '/board', '/more'];
 
 /// The bottom tabs, in this order (branch indices of the router's shell).
-/// Team chat comes first and is where the app opens (ticket #19); the way to the chat with an employee is More › Employees.
+/// Sessions comes first and is where the app opens (ticket #71: the Team chat
+/// is gone); the way to the chat with an employee is More › Employees.
 const shellTabs = [
-  GlassTab(CupertinoIcons.chat_bubble_2, 'Team'),
-  GlassTab(CupertinoIcons.square_split_2x1, 'Board'),
+  GlassTab(CupertinoIcons.chat_bubble_2, 'Sessions'),
   GlassTab(CupertinoIcons.tray, 'Inbox'),
+  GlassTab(CupertinoIcons.square_split_2x1, 'Board'),
   GlassTab(CupertinoIcons.ellipsis_circle, 'More'),
 ];
 
 /// The inbox tab, with the badge of what waits for you (its index in [shellTabs]).
-const inboxTab = 2;
+const inboxTab = 1;
 
-/// The Team tab: the mentions of a board member over the channels, a dot for anything unread (B8).
-const teamTab = 0;
-
-({int mentions, bool unread}) _teamBadge(BuildContext context) {
-  try {
-    return context.select<ChannelsBloc, ({int mentions, bool unread})>((b) => b.state.badge);
-  } on ProviderNotFoundException {
-    return (mentions: 0, unread: false);
-  }
-}
-
-/// Tabs: Team · Board · Inbox · More in a floating glass tab bar,
+/// Tabs: Sessions · Inbox · Board · More in a floating glass tab bar,
 /// with the connection banner on top. Hardware keyboards (iPad, Android with a
-/// keyboard): ⌘/Ctrl+1…4 switch tabs, ⌘/Ctrl+N gives work (a new task).
+/// keyboard): ⌘/Ctrl+1…4 switch tabs, ⌘/Ctrl+N opens New session.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.shell});
 
@@ -59,7 +48,6 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final badge = context.select<InboxBloc, int>((b) => b.state.badge);
-    final team = _teamBadge(context);
     final bannerVisible = context.select<ConnectionBloc, bool>((b) => ConnectionBanner.visible(b.state));
     final activityOn = context.select<ConnectionBloc, bool>((b) => b.state.has(activityOverviewFeature));
     final digits = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3, LogicalKeyboardKey.digit4];
@@ -68,8 +56,8 @@ class _HomeShellState extends State<HomeShell> {
         SingleActivator(key, meta: true): () => _go(i),
         SingleActivator(key, control: true): () => _go(i),
       },
-      const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () => giveWork(context),
-      const SingleActivator(LogicalKeyboardKey.keyN, control: true): () => giveWork(context),
+      const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () => openNewSession(context),
+      const SingleActivator(LogicalKeyboardKey.keyN, control: true): () => openNewSession(context),
     };
     return CallbackShortcuts(
       bindings: shortcuts,
@@ -84,12 +72,7 @@ class _HomeShellState extends State<HomeShell> {
             onTap: _go,
             fade: Tokens.bg,
             tabs: [
-              for (final (i, t) in shellTabs.indexed)
-                i == inboxTab
-                    ? GlassTab(t.icon, t.label, badge: badge)
-                    : i == teamTab
-                        ? GlassTab(t.icon, t.label, badge: team.mentions, dot: team.unread)
-                        : t,
+              for (final (i, t) in shellTabs.indexed) i == inboxTab ? GlassTab(t.icon, t.label, badge: badge) : t,
             ],
           ),
           child: shell,

@@ -239,10 +239,17 @@ void main() {
       expect(router.state.uri.toString(), '/ticket/$_ticket?tab=discussion&message=$_message');
     });
 
-    testWidgets('a reply in a thread opens the channel with its thread', (tester) async {
+    testWidgets("a reply in a ticket's thread opens the ticket's discussion at it (ticket #71: no ticket channels)", (tester) async {
       final repo = repoFor();
       when(() => repo.messageLocation(_message)).thenAnswer((_) async => const MessageLocation(conversationId: 'c1', messageId: _message, ticketId: _ticket, ticketNumber: 42, threadRoot: 'root'));
       final router = await tapShown(tester, repo, 'See $_messageLink', 'Message in #42');
+      expect(router.state.uri.toString(), '/ticket/$_ticket?tab=discussion&message=$_message');
+    });
+
+    testWidgets('a reply in a thread of a channel opens the channel with its thread', (tester) async {
+      final repo = repoFor();
+      when(() => repo.messageLocation(_message)).thenAnswer((_) async => const MessageLocation(conversationId: 'c1', messageId: _message, threadRoot: 'root'));
+      final router = await tapShown(tester, repo, 'See $_messageLink', 'Message');
       expect(router.state.uri.toString(), '/channel/c1?message=$_message&thread=root');
     });
 

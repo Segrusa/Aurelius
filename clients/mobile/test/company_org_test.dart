@@ -145,10 +145,9 @@ void main() {
     });
   });
 
-  test('the bottom tabs: Team, Board, Inbox, More (Team chat first, ticket #19)', () {
-    expect(shellTabs.map((t) => t.label), ['Team', 'Board', 'Inbox', 'More']);
-    expect(inboxTab, 2, reason: 'the inbox badge follows the Inbox tab');
-    expect(teamTab, 0, reason: 'the Team badge follows the Team tab');
+  test('the bottom tabs: Sessions, Inbox, Board, More (ticket #71)', () {
+    expect(shellTabs.map((t) => t.label), ['Sessions', 'Inbox', 'Board', 'More']);
+    expect(inboxTab, 1, reason: 'the inbox badge follows the Inbox tab');
   });
 
   group('company-wide pages', () {

@@ -352,6 +352,7 @@ void main() {
       await settleBoard(tester);
       expect(find.text("⏸ Waiting for Robin's Claude login"), findsNothing);
       expect(find.byKey(const ValueKey('bar-use-my-login')), findsNothing);
+      await openTicketProperties(tester);
       expect(find.text('Your Claude login'), findsOneWidget, reason: 'Runs on: the own login now');
     });
 

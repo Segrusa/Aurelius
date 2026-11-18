@@ -34,11 +34,14 @@ void main() {
     final repo = boardRepository(detail: detailOf(ticket), link: link);
     when(() => repo.followers(any())).thenAnswer((_) async => TicketFollowersView(followers: followers));
     await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id), link: link);
+    // The ticket's data is in its properties (ticket #71).
+    await openTicketProperties(tester);
     return repo;
   }
 
   Future<void> toggle(WidgetTester tester) async {
     await tester.ensureVisible(find.byKey(const ValueKey('ticket-following')));
+    await tester.pump();
     await tester.tap(find.byType(Switch));
     await settleBoard(tester);
   }
@@ -83,6 +86,7 @@ void main() {
       expect(shownSwitch(tester).onChanged, isNull);
       expect(find.text("You're responsible for #42. Hand it to someone else to stop following."), findsOneWidget);
       await tester.ensureVisible(find.byKey(const ValueKey('ticket-following')));
+      await tester.pump();
       await tester.tap(find.byType(Switch));
       await settleBoard(tester);
       verifyNever(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')));
@@ -118,11 +122,13 @@ void main() {
       final repo = boardRepository(detail: detailOf(ticketOf(number: 42)), link: phaseALink);
       when(() => repo.followers(any())).thenThrow(const ProtocolException(ErrorCode.validation, 'This server does not do this yet.'));
       await pumpBoardPage(tester, repo, const TicketPage(ticketId: 'k1'), link: phaseALink);
+      await openTicketProperties(tester);
       expect(find.text('Could not load · Try again'), findsOneWidget);
       expect(shownSwitch(tester).onChanged, isNull);
       clearInteractions(repo);
       when(() => repo.followers(any())).thenAnswer((_) async => TicketFollowersView(followers: [_follower(bo, 'created')]));
       await tester.ensureVisible(find.byKey(const ValueKey('ticket-row-followers')));
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey('ticket-row-followers')));
       await settleBoard(tester);
       expect(find.text('Could not load · Try again'), findsNothing);
@@ -132,6 +138,7 @@ void main() {
     testWidgets('the list of followers: names, reasons, disabled in words, and empty', (tester) async {
       await open(tester, ticketOf(number: 42), [_follower(testUser, 'created'), _follower(bo, 'mentioned', disabled: true), _follower(const UserView(id: 'u-3', username: 'cy', createdAtMs: 0), 'a_future_reason')]);
       await tester.ensureVisible(find.byKey(const ValueKey('ticket-row-followers')));
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey('ticket-row-followers')));
       await settleBoard(tester);
       expect(find.text('ada'), findsOneWidget);
@@ -144,6 +151,7 @@ void main() {
     testWidgets('nobody follows: the sheet says it', (tester) async {
       await open(tester, ticketOf(number: 42), const []);
       await tester.ensureVisible(find.byKey(const ValueKey('ticket-row-followers')));
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey('ticket-row-followers')));
       await settleBoard(tester);
       expect(find.text('No one follows this ticket.'), findsOneWidget);
@@ -158,6 +166,7 @@ void main() {
     testWidgets('an older server: no switch, no row, and no read of a method it lacks', (tester) async {
       final repo = boardRepository(detail: detailOf(ticketOf(number: 42)));
       await pumpBoardPage(tester, repo, const TicketPage(ticketId: 'k1'));
+      await openTicketProperties(tester);
       expect(find.byKey(const ValueKey('ticket-following')), findsNothing);
       expect(find.byKey(const ValueKey('ticket-row-followers')), findsNothing);
       verifyNever(() => repo.followers(any()));
