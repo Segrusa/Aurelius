@@ -134,18 +134,19 @@ test("a workspace and a ticket show their Claude Design link, and an older serve
 test("switching narrows the board, the inbox and the chat, and All projects shows everything", async ({ page }) => {
   const site = await open(page, "/board");
   try {
-    await expect(page.getByText("Atlas ticket")).toBeVisible();
-    await expect(page.getByText("Zephyr ticket")).toBeVisible();
+    await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
+    await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeVisible();
 
     await choose(page, "Atlas");
-    await expect(page.getByText("Atlas ticket")).toBeVisible();
-    await expect(page.getByText("Zephyr ticket")).toBeHidden();
+    await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
+    await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeHidden();
 
     await page.getByRole("link", { name: "Inbox" }).click();
     await expect(page.getByText("Atlas news").first()).toBeVisible();
     await expect(page.getByText("Zephyr news")).toBeHidden();
 
-    await page.getByRole("link", { name: "Team chat" }).click();
+    // The Team chat has no sidebar row any more; its shortcut still opens it.
+    await page.keyboard.press("Control+8");
     const channels = page.getByRole("region", { name: "Channels" });
     await expect(channels.getByText("Atlas", { exact: true })).toBeVisible();
     // A ticket opens as its session, never as a channel in this list (ticket #70).
@@ -200,11 +201,11 @@ test("new work starts in the workspace", async ({ page }) => {
 test("the switcher works from the collapsed rail and from the palette", async ({ page }) => {
   const site = await open(page, "/board");
   try {
-    await expect(page.getByText("Zephyr ticket")).toBeVisible();
+    await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeVisible();
     await page.keyboard.press("Control+b");
     await expect(page.locator("[data-sidebar]").first()).toHaveJSProperty("offsetWidth", 48);
     await choose(page, "Atlas");
-    await expect(page.getByText("Zephyr ticket")).toBeHidden();
+    await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeHidden();
 
     await page.keyboard.press("Control+k");
     await page.getByRole("combobox", { name: "Command palette" }).fill("Zephyr");
@@ -220,7 +221,7 @@ test("a card opens its ticket's session instead of a panel beside the columns", 
   await page.setViewportSize({ width: 1200, height: 800 });
   const site = await open(page, "/board");
   try {
-    await page.getByText("Zephyr ticket").click();
+    await page.getByRole("main").getByText("Zephyr ticket").click();
     await expect(page).toHaveURL(/\/ticket\/\d+$/);
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Zephyr ticket");
     await expect(page.locator("[data-board-columns]")).toHaveCount(0);
@@ -239,7 +240,7 @@ for (const theme of ["dark", "light"] as const) {
       }, theme);
       await page.reload();
       await choose(page, "Atlas");
-      await expect(page.getByText("Atlas ticket")).toBeVisible();
+      await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
       await page.screenshot({ path: join(SHOTS as string, `workspace-${theme}.png`), animations: "disabled" });
     } finally {

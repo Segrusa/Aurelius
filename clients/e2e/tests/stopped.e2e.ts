@@ -98,7 +98,7 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
     await expect(p.getByText("Assignment", { exact: true })).toBeVisible();
 
     // In the Team chat the server says so itself.
-    await nav("Team chat").click();
+    await p.keyboard.press("Control+8");
     const box = p.getByPlaceholder(/Message the team/);
     await box.fill("Anyone there?");
     await box.press("Enter");

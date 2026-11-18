@@ -468,7 +468,7 @@ test("the Team chat over a real daemon: send, and a diagram under the strict pag
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-    await page.getByRole("navigation").getByRole("link", { name: "Team chat" }).first().click();
+    await page.keyboard.press("Control+8");
     const box = page.getByRole("textbox", { name: /^Message/ });
     await box.fill("```mermaid\ngraph TD\n  A[Start] --> B[Finish]\n```");
     await box.press("Enter");

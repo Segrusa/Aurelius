@@ -321,6 +321,24 @@ test.describe("a ticket's session", () => {
     await expect(list.getByRole("button", { name: /Archived/ })).toHaveCount(0);
   });
 
+  test("the sidebar lists the open tickets and no Team chat row; a row opens the session", async ({ page }) => {
+    const world: World = {
+      tickets: {
+        t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }),
+        t12: ticket("t12", 12, "done", { ...owned, title: "An old ticket", conversation_id: "d12" }),
+      },
+      feeds: { general: feedOf("g", []), d70: feedOf("d70", []), d12: feedOf("d12", []) },
+    };
+    await scriptServer(page, scripted(world));
+    await page.goto(`${site.origin}/inbox`);
+    const side = page.getByRole("navigation", { name: "Main" });
+    await expect(side.getByText("Tickets", { exact: true })).toBeVisible();
+    await expect(side.getByRole("link", { name: /Team chat/ })).toHaveCount(0);
+    await expect(side.getByRole("link", { name: /#12 An old ticket/ })).toHaveCount(0);
+    await side.getByRole("link", { name: /#70 A ticket opens as its own session/ }).click();
+    await expect(page).toHaveURL(/\/ticket\/70$/);
+  });
+
   test("a Board card and a Team chat search hit open the session", async ({ page }) => {
     const world: World = {
       tickets: { t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }) },

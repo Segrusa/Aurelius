@@ -5,6 +5,7 @@
 import type { ChannelView, ColumnKind, TicketView, TokenUsage } from "@aurelius/protocol";
 import { ownerAnswers as ownerAnswersText } from "./chat-logic";
 import type { UsageTotals } from "./run-logic";
+import type { SessionSignal } from "./session-logic";
 import { filesWritten } from "./tasks-logic";
 
 /** The ticket of a number, the search still to do, or none. */
@@ -178,6 +179,34 @@ export function ticketPlace(
 export function gateKeyAllowed(focused: { tagName: string; value?: string } | null): boolean {
   if (!focused || (focused.tagName !== "TEXTAREA" && focused.tagName !== "INPUT")) return true;
   return (focused.value ?? "").trim() === "";
+}
+
+/** How many tickets the sidebar lists at most, besides the ones that work or need you. */
+export const SIDEBAR_TICKETS = 8;
+
+/** The columns of a ticket that is under way: not waiting in the Backlog and not done yet. */
+const OPEN_COLUMNS: readonly ColumnKind[] = ["todo", "doing", "plan_review", "testing", "review"];
+
+/** A ticket's dot in the sidebar: it needs you first, else it works while its main task runs. */
+export function ticketSignal(t: Pick<TicketView, "root_task_status">, needsYou: boolean): SessionSignal | null {
+  if (needsYou) return "needs_you";
+  return t.root_task_status === "running" || t.root_task_status === "queued" ? "working" : null;
+}
+
+/**
+ * The sidebar's tickets: the open ones of the workspace's project (all when none is chosen), the last
+ * changed first, at most `SIDEBAR_TICKETS` plus any older one with a signal, so none that needs you hides.
+ */
+export function sidebarTickets<
+  T extends Pick<TicketView, "project_id" | "column" | "archived_at_ms" | "updated_at_ms">,
+>(tickets: T[], workspaceId: string | null, signal: (t: T) => SessionSignal | null): T[] {
+  return tickets
+    .filter(
+      (t) =>
+        (workspaceId === null || t.project_id === workspaceId) && !t.archived_at_ms && OPEN_COLUMNS.includes(t.column),
+    )
+    .sort((a, b) => b.updated_at_ms - a.updated_at_ms)
+    .filter((t, i) => i < SIDEBAR_TICKETS || signal(t) !== null);
 }
 
 /** The first `#N` a line names (a system line, the "→ #N" chip), so its link opens the session directly. */

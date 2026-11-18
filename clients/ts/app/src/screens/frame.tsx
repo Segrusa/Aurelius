@@ -4,14 +4,13 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { expectBody } from "@aurelius/client";
-import type { NotificationView, TaskView } from "@aurelius/protocol";
+import type { NotificationView, TaskView, TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import {
   useAllTasks,
-  useChannels,
   useEmployees,
   useLiveQueries,
   useNotifications,
@@ -38,7 +37,6 @@ import { ToastBridge, toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { ActivityBar } from "./activity-bar";
 import { ChatDock } from "./chat-dock";
-import { chatBadge } from "./chat-logic";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
 import { pinKey, usePins } from "./employees";
 import { useInbox } from "./inbox";
@@ -48,6 +46,7 @@ import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
 import { activeSessions, type SessionSignal, sessionSignal, sidebarSessions } from "./session-logic";
 import { SettingsSidebar } from "./settings";
+import { sidebarTickets, ticketSignal } from "./ticket-session-logic";
 import { useTicketNeeds } from "./tickets-kit";
 import { subscriptionFor } from "./usage-logic";
 import { useOpenedWorkspace, WorkspaceSwitcher } from "./workspace-kit";
@@ -166,7 +165,6 @@ const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Featu
   { to: "/tasks", label: "Tasks", icon: "tasks", feature: "TasksInSidebar" },
   { to: "/scheduled", label: "Scheduled", icon: "clock", feature: "ScheduledInSidebar" },
   { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
-  { to: "/chat", label: "Team chat", icon: "chat" },
   { to: "/employees", label: "Employees", icon: "team" },
   { to: "/knowledge", label: "Knowledge", icon: "know" },
 ];
@@ -279,6 +277,40 @@ function RecentSessions() {
           label={s.title || "Session"}
           icon={markIcon(initial(s.employee_name), markColor(s.employee_id), 15, 4)}
           end={<SessionMark signal={sessionSignal(s)} />}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** The open tickets (ticket #70: each opens as its own session), the workspace's when one is chosen. */
+function OpenTickets() {
+  const workspace = useWorkspace().id;
+  const all = useTickets().data ?? [];
+  const need = useTicketNeeds(all);
+  const signal = (t: TicketView) => ticketSignal(t, need.mine(t));
+  const tickets = sidebarTickets(all, workspace, signal);
+  if (tickets.length === 0) return null;
+  const waiting = tickets.filter((t) => signal(t) === "needs_you").length;
+  return (
+    <div {...stylex.props(styles.group)}>
+      <Link to="/board" {...stylex.props(styles.sectionLink)}>
+        <SectionLabel>
+          Tickets
+          {waiting > 0 ? (
+            <>
+              <span {...stylex.props(styles.dot, styles.dotNeedsYou)} /> {waiting} need you
+            </>
+          ) : null}
+        </SectionLabel>
+      </Link>
+      {tickets.map((t) => (
+        <NavRow
+          key={t.id}
+          to={`/ticket/${t.number}`}
+          label={`#${t.number} ${t.title}`}
+          icon={markIcon(initial(t.owner_name ?? "?"), markColor(t.owner_employee_id ?? t.id), 15, 4)}
+          end={<SessionMark signal={signal(t)} />}
         />
       ))}
     </div>
@@ -480,9 +512,6 @@ function useScreenCounter(): void {
 }
 
 function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (collapsed: boolean) => void }) {
-  const channels = useChannels();
-  const workspace = useWorkspace().id;
-  const chat = useMemo(() => chatBadge(narrow(channels.data ?? [], workspace)), [channels.data, workspace]);
   const { open } = overlays;
   const { groups } = useInbox();
   const { hostName, status, features } = useLinkState();
@@ -547,13 +576,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
       ))}
       <SideNavSection title="Workspace">
         {offered(shown(NAV_WORKSPACE), features).map((n) => (
-          <NavRow
-            key={n.to}
-            to={n.to}
-            label={n.label}
-            icon={NAV_ICONS[n.icon]}
-            end={n.to === "/chat" ? <Counted count={chat.mentions} dot={chat.unread} /> : undefined}
-          />
+          <NavRow key={n.to} to={n.to} label={n.label} icon={NAV_ICONS[n.icon]} />
         ))}
       </SideNavSection>
       {/* What only fits written out: the rail keeps the rows above. */}
@@ -575,6 +598,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
             </div>
           ) : null}
           <RecentSessions />
+          <OpenTickets />
           <Live />
         </>
       )}

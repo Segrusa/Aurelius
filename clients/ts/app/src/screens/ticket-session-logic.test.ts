@@ -12,9 +12,11 @@ import {
   readOnly,
   resolveNumber,
   sessionRedirect,
+  sidebarTickets,
   ticketConversations,
   ticketNumberIn,
   ticketPlace,
+  ticketSignal,
   ticketUsage,
 } from "./ticket-session-logic";
 
@@ -308,5 +310,43 @@ describe("ticketNumberIn", () => {
     expect(ticketNumberIn("Sam opened #12 Fix the login")).toBe(12);
     expect(ticketNumberIn("#7")).toBe(7);
     expect(ticketNumberIn("a ticket")).toBeNull();
+  });
+});
+
+describe("the sidebar's tickets", () => {
+  const none = () => null;
+
+  it("lists the open tickets of the workspace, the last changed first", () => {
+    const tickets = [
+      tv({ id: "old", updated_at_ms: 1 }),
+      tv({ id: "new", updated_at_ms: 3, column: "review" }),
+      tv({ id: "other", updated_at_ms: 2, project_id: "q" }),
+    ];
+    expect(sidebarTickets(tickets, "p", none).map((t) => t.id)).toEqual(["new", "old"]);
+    expect(sidebarTickets(tickets, null, none).map((t) => t.id)).toEqual(["new", "other", "old"]);
+  });
+
+  it("leaves out the Backlog, Done and archived tickets", () => {
+    const tickets = [
+      tv({ id: "backlog", column: "backlog" }),
+      tv({ id: "done", column: "done" }),
+      tv({ id: "archived", archived_at_ms: 5 }),
+      tv({ id: "todo", column: "todo" }),
+    ];
+    expect(sidebarTickets(tickets, null, none).map((t) => t.id)).toEqual(["todo"]);
+  });
+
+  it("keeps an older ticket past the limit when it needs you or works", () => {
+    const tickets = Array.from({ length: 10 }, (_, i) => tv({ id: `t${i}`, updated_at_ms: 100 - i }));
+    const shown = sidebarTickets(tickets, null, (t) => (t.id === "t9" ? "needs_you" : null));
+    expect(shown.map((t) => t.id)).toEqual(["t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t9"]);
+  });
+
+  it("marks a ticket that needs you before one whose main task runs", () => {
+    expect(ticketSignal({ root_task_status: "running" }, true)).toBe("needs_you");
+    expect(ticketSignal({ root_task_status: "running" }, false)).toBe("working");
+    expect(ticketSignal({ root_task_status: "queued" }, false)).toBe("working");
+    expect(ticketSignal({ root_task_status: "review" }, false)).toBeNull();
+    expect(ticketSignal({}, false)).toBeNull();
   });
 });
