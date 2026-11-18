@@ -41,6 +41,7 @@ void main() {
 
   Future<void> tapKey(WidgetTester tester, String key) async {
     await tester.ensureVisible(find.byKey(ValueKey(key)));
+    await tester.pump();
     await tester.tap(find.byKey(ValueKey(key)));
     await settleBoard(tester);
   }
@@ -215,17 +216,24 @@ void main() {
       return repo;
     }
 
-    testWidgets('the who-strip and the block Who: Responsible with its explanation, then Owner, Runs on, Created by', (tester) async {
+    Future<MockRepository> openProperties(WidgetTester tester, TicketView ticket, {LinkState link = phaseALink}) async {
+      final repo = await open(tester, ticket, link: link);
+      await openTicketProperties(tester);
+      return repo;
+    }
+
+    testWidgets('the head names the responsible; the properties have Owner, then Responsible with its explanation, then Runs on (ticket #71)', (tester) async {
       await open(tester, ticketOf(number: 42, responsible: bo));
-      expect(find.byKey(const ValueKey('who-responsible-strip')), findsOneWidget);
+      expect(find.text('No owner · responsible bo · Atlas'), findsOneWidget);
+      await openTicketProperties(tester);
       expect(find.byKey(const ValueKey('ticket-row-responsible')), findsOneWidget);
       expect(find.text(responsibleExplained), findsOneWidget);
-      final rows = ['ticket-row-responsible', 'ticket-row-owner', 'ticket-row-login'].map((k) => tester.getTopLeft(find.byKey(ValueKey(k))).dy).toList();
+      final rows = ['ticket-row-owner', 'ticket-row-responsible', 'ticket-row-login'].map((k) => tester.getTopLeft(find.byKey(ValueKey(k))).dy).toList();
       expect(rows[0] < rows[1] && rows[1] < rows[2], isTrue);
     });
 
     testWidgets('choosing in the row writes it', (tester) async {
-      final repo = await open(tester, ticketOf(number: 42));
+      final repo = await openProperties(tester, ticketOf(number: 42));
       await tapKey(tester, 'ticket-row-responsible');
       await tester.tap(find.byKey(const ValueKey('responsible-u-2')));
       await settleBoard(tester);
@@ -234,20 +242,21 @@ void main() {
     });
 
     testWidgets('nobody responsible offers Make me responsible', (tester) async {
-      final repo = await open(tester, ticketOf(number: 42));
+      final repo = await openProperties(tester, ticketOf(number: 42));
       await tapKey(tester, 'ticket-make-me-responsible');
       expect(paramsOf(writesOf(repo).single), {'ticket_id': 'k1', 'responsible_user_id': 'u-1'});
     });
 
     testWidgets('a handover sends no version: the last one wins', (tester) async {
-      final repo = await open(tester, ticketOf(number: 42));
+      final repo = await openProperties(tester, ticketOf(number: 42));
       await tapKey(tester, 'ticket-make-me-responsible');
       verify(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: null, retry: any(named: 'retry'))).called(1);
     });
 
     testWidgets('on Done it is read-only and says why', (tester) async {
-      await open(tester, ticketOf(number: 42, column: ColumnKind.done, responsible: bo));
+      await openProperties(tester, ticketOf(number: 42, column: ColumnKind.done, responsible: bo));
       await tester.ensureVisible(find.byKey(const ValueKey('ticket-row-responsible')));
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey('ticket-row-responsible')));
       await settleBoard(tester);
       expect(find.byKey(const ValueKey('responsible-u-2')), findsNothing);
@@ -255,7 +264,7 @@ void main() {
     });
 
     testWidgets('a disabled responsible asks to choose someone else', (tester) async {
-      await open(tester, ticketOf(number: 42, responsible: bo, responsibleDisabled: true));
+      await openProperties(tester, ticketOf(number: 42, responsible: bo, responsibleDisabled: true));
       expect(find.text('bo is disabled and gets no updates. Choose someone else.'), findsOneWidget);
     });
 
@@ -274,9 +283,8 @@ void main() {
       expect(find.byKey(const ValueKey('bar-others-note')), findsNothing);
     });
 
-    testWidgets('an older server shows no who-strip or block, and its rows stay in Details', (tester) async {
-      await open(tester, ticketOf(number: 42), link: onlineLink);
-      expect(find.byKey(const ValueKey('who-responsible-strip')), findsNothing);
+    testWidgets('an older server shows no Responsible row, and Owner stays', (tester) async {
+      await openProperties(tester, ticketOf(number: 42), link: onlineLink);
       expect(find.byKey(const ValueKey('ticket-row-responsible')), findsNothing);
       expect(find.text('WHO'), findsNothing);
       expect(find.byKey(const ValueKey('ticket-row-owner')), findsOneWidget);

@@ -165,16 +165,24 @@ void main() {
   });
 
   group('the ticket page in Testing', () {
-    testWidgets('only Back to Backlog: no Done or Send back; it says who tests', (tester) async {
+    testWidgets('no Done or Send back; it says who tests and opens the test task; Back to Backlog is in More', (tester) async {
       final root = taskOf(id: 'root', status: TaskStatus.review, result: 'Hashing done.');
-      final repo = boardRepository(detail: TicketDetail(asOfSeq: 1, ticket: tested, rootTask: root, tasks: [root]), link: testingLink);
-      await pumpBoardPage(tester, repo, TicketPage(ticketId: tested.id), company: withTester(), link: testingLink);
+      final test = taskOf(id: 'test-1', status: TaskStatus.running, employeeId: 'pulse', employeeName: 'Pulse', parentTaskId: 'root', updatedAtMs: 5);
+      final repo = boardRepository(detail: TicketDetail(asOfSeq: 1, ticket: tested, rootTask: root, tasks: [root, test]), link: testingLink);
+      final router = await pumpBoardPage(tester, repo, TicketPage(ticketId: tested.id), company: withTester(), link: testingLink);
       expect(find.text('Testing'), findsOneWidget, reason: 'the column');
       expect(find.text('Pulse is testing…'), findsOneWidget);
       expect(find.byKey(const ValueKey('ticket-testing')), findsOneWidget);
       expect(find.byKey(const ValueKey('bar-done')), findsNothing);
       expect(find.byKey(const ValueKey('bar-send-back')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('bar-backlog')));
+      await tester.tap(find.byKey(const ValueKey('bar-open-test-task')));
+      await settleBoard(tester);
+      expect(find.text('task test-1'), findsOneWidget);
+      router.pop();
+      await settleBoard(tester);
+      await tester.tap(find.byTooltip('Ticket actions'));
+      await settleBoard(tester);
+      await tester.tap(find.text('Back to Backlog').last);
       await settleBoard(tester);
       expect(find.text('This stops the tests and the work on the ticket.'), findsOneWidget);
       await tester.tap(find.widgetWithText(TextButton, 'Back to Backlog'));

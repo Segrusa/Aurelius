@@ -99,6 +99,7 @@ class ChatView extends StatefulWidget {
     this.taskProjectId,
     this.composerText,
     this.composerActions,
+    this.aboveComposer,
     this.draftSlot,
     this.channel,
     this.readOnlyAction,
@@ -132,6 +133,9 @@ class ChatView extends StatefulWidget {
 
   /// Under the composer: the decisions of a ticket's discussion (Plan review, Review).
   final Widget Function(BuildContext context, TextEditingController text)? composerActions;
+
+  /// Right above the composer: the decision of the moment in a ticket's session (its gate).
+  final Widget? aboveComposer;
 
   /// A channel of the Slack-style Team chat (AUR-CHAT-001): flat rows, days,
   /// "New messages", compact system lines and Enter sends. Null: as before.
@@ -240,6 +244,7 @@ class _ChatViewState extends State<ChatView> {
                 ],
               ),
               ),
+            ?widget.aboveComposer,
             if (composer) _QuickRepliesCard(draft: _draft),
             if (composer) _Composer(draft: _draft, config: widget),
             if (!composer && readOnlyNote != null)

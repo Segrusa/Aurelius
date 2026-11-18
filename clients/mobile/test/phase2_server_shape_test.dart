@@ -121,12 +121,12 @@ void main() {
       expect(find.text('The table is in.'), findsOneWidget, reason: 'an employee\'s copied answer');
     });
 
-    testWidgets('Goedkeuren with text in the composer: one ticket.approve_plan with the feedback, no ticket.post; the server\'s copy shows once (MU2-05 AC3)', (tester) async {
+    testWidgets('Approve, accept edits with text in the input: one ticket.approve_plan with the feedback, no ticket.post; the server\'s copy shows once (MU2-05 AC3)', (tester) async {
       final upToPlan = discussionLife().take(3).toList();
       await open(tester, ColumnKind.planReview, upToPlan);
       await tester.enterText(find.byType(TextField).last, 'Smaller steps');
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('discussion-approve')));
+      await tester.tap(find.byKey(const ValueKey('gate-approve-edits')));
       await settleBoard(tester);
       final write = writesOf(repo).single;
       expect(write['method'], 'ticket.approve_plan');
@@ -144,7 +144,7 @@ void main() {
       await open(tester, ColumnKind.review, discussionLife().take(7).toList());
       await tester.enterText(find.byType(TextField).last, 'Add a test for the cost.');
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('discussion-send-back')));
+      await tester.tap(find.byKey(const ValueKey('bar-send-back')));
       await settleBoard(tester);
       expect(writesOf(repo).map((w) => w['method']), ['ticket.send_back']);
     });
