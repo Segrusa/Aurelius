@@ -342,6 +342,19 @@ describe("the sidebar's tickets", () => {
     expect(shown.map((t) => t.id)).toEqual(["t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7", "t9"]);
   });
 
+  it("by default keeps today's tickets and the ones that need you or work, with no limit", () => {
+    const today = 1000;
+    const tickets = [
+      ...Array.from({ length: 10 }, (_, i) => tv({ id: `today${i}`, updated_at_ms: today + i })),
+      tv({ id: "yesterday", updated_at_ms: today - 1 }),
+      tv({ id: "waiting", updated_at_ms: 5 }),
+    ];
+    const shown = sidebarTickets(tickets, null, (t) => (t.id === "waiting" ? "needs_you" : null), today);
+    expect(shown).toHaveLength(11);
+    expect(shown.map((t) => t.id)).not.toContain("yesterday");
+    expect(shown.at(-1)?.id).toBe("waiting");
+  });
+
   it("marks a ticket that needs you before one whose main task runs", () => {
     expect(ticketSignal({ root_task_status: "running" }, true)).toBe("needs_you");
     expect(ticketSignal({ root_task_status: "running" }, false)).toBe("working");

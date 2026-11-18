@@ -48,18 +48,42 @@ export function activeSessions(sessions: SignalFields[]): number {
   return sessions.filter((s) => sessionSignal(s) === "working").length;
 }
 
+/** Midnight of the day `now` falls in, local time: where the sidebar's "today" starts. */
+export function startOfDay(now: number): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 /**
  * The sidebar's sessions: the workspace's project only when one is chosen, the latest `SIDEBAR_SESSIONS`,
- * plus any older one that still has a signal, so an active session is never out of sight.
+ * plus any older one that still has a signal, so an active session is never out of sight. With `since`,
+ * only the active ones and those with activity from then on: the default view, today's work.
  */
-export function sidebarSessions<T extends Pick<WorkSessionView, "project_id"> & Partial<SignalFields>>(
-  sessions: T[],
-  workspaceId: string | null,
-): T[] {
+export function sidebarSessions<
+  T extends Pick<WorkSessionView, "project_id"> & Partial<SignalFields> & { last_activity_ms?: number },
+>(sessions: T[], workspaceId: string | null, since: number | null = null): T[] {
   const here = workspaceId ? sessions.filter((s) => s.project_id === workspaceId) : sessions;
-  return here.filter(
-    (s, i) => i < SIDEBAR_SESSIONS || sessionSignal({ running: s.running ?? false, dispatch: s.dispatch }) !== null,
-  );
+  const active = (s: T) => sessionSignal({ running: s.running ?? false, dispatch: s.dispatch }) !== null;
+  if (since !== null) return here.filter((s) => active(s) || (s.last_activity_ms ?? 0) >= since);
+  return here.filter((s, i) => i < SIDEBAR_SESSIONS || active(s));
+}
+
+/**
+ * A sidebar list by default (`today`) or with "Show earlier" (`today` plus the latest from before, in the
+ * order of `ordered`), and whether there is anything earlier to show at all.
+ */
+export function withEarlier<T>(
+  ordered: T[],
+  today: T[],
+  latest: T[],
+  id: (item: T) => string,
+  earlier: boolean,
+): { list: T[]; hasEarlier: boolean } {
+  const inToday = new Set(today.map(id));
+  const before = new Set(latest.map(id).filter((i) => !inToday.has(i)));
+  if (!earlier) return { list: today, hasEarlier: before.size > 0 };
+  return { list: ordered.filter((item) => inToday.has(id(item)) || before.has(id(item))), hasEarlier: before.size > 0 };
 }
 
 /** What the Model and Effort chips of a session say: the chosen one, or the employee's own. */

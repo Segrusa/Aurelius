@@ -196,17 +196,19 @@ export function ticketSignal(t: Pick<TicketView, "root_task_status">, needsYou: 
 /**
  * The sidebar's tickets: the open ones of the workspace's project (all when none is chosen), the last
  * changed first, at most `SIDEBAR_TICKETS` plus any older one with a signal, so none that needs you hides.
+ * With `since`, only the ones with a signal and those changed from then on: the default view, today's work.
  */
 export function sidebarTickets<
   T extends Pick<TicketView, "project_id" | "column" | "archived_at_ms" | "updated_at_ms">,
->(tickets: T[], workspaceId: string | null, signal: (t: T) => SessionSignal | null): T[] {
-  return tickets
+>(tickets: T[], workspaceId: string | null, signal: (t: T) => SessionSignal | null, since: number | null = null): T[] {
+  const open = tickets
     .filter(
       (t) =>
         (workspaceId === null || t.project_id === workspaceId) && !t.archived_at_ms && OPEN_COLUMNS.includes(t.column),
     )
-    .sort((a, b) => b.updated_at_ms - a.updated_at_ms)
-    .filter((t, i) => i < SIDEBAR_TICKETS || signal(t) !== null);
+    .sort((a, b) => b.updated_at_ms - a.updated_at_ms);
+  if (since !== null) return open.filter((t) => signal(t) !== null || t.updated_at_ms >= since);
+  return open.filter((t, i) => i < SIDEBAR_TICKETS || signal(t) !== null);
 }
 
 /** The first `#N` a line names (a system line, the "→ #N" chip), so its link opens the session directly. */

@@ -11,6 +11,8 @@ import {
   sessionStatus,
   sessionWho,
   sidebarSessions,
+  startOfDay,
+  withEarlier,
 } from "./session-logic";
 
 describe("the session's side panel", () => {
@@ -80,6 +82,44 @@ describe("sidebarSessions", () => {
     const shown = sidebarSessions(many, null);
     expect(shown).toHaveLength(SIDEBAR_SESSIONS + 1);
     expect(shown.at(-1)?.id).toBe(SIDEBAR_SESSIONS + 1);
+  });
+
+  it("by default keeps today's sessions and the active ones, with no limit", () => {
+    const today = 1000;
+    const list = [
+      ...Array.from({ length: SIDEBAR_SESSIONS + 2 }, (_, i) => ({
+        id: i,
+        project_id: "a",
+        last_activity_ms: today + i,
+      })),
+      { id: "yesterday", project_id: "a", last_activity_ms: today - 1 },
+      { id: "running", project_id: "a", last_activity_ms: 1, running: true },
+      { id: "choose", project_id: "a", last_activity_ms: 1, dispatch: "nobody" as const },
+    ];
+    const shown = sidebarSessions(list, null, today).map((s) => s.id);
+    expect(shown).toHaveLength(SIDEBAR_SESSIONS + 4);
+    expect(shown).not.toContain("yesterday");
+    expect(shown).toContain("running");
+    expect(shown).toContain("choose");
+  });
+
+  it("shows earlier ones only on request, keeping all of today's and the list's order", () => {
+    const id = (s: string) => s;
+    const ordered = ["t1", "t2", "y1", "y2", "y3"];
+    expect(withEarlier(ordered, ["t1", "t2"], ["t1", "y1"], id, false)).toEqual({
+      list: ["t1", "t2"],
+      hasEarlier: true,
+    });
+    expect(withEarlier(ordered, ["t1", "t2"], ["t1", "y1"], id, true)).toEqual({
+      list: ["t1", "t2", "y1"],
+      hasEarlier: true,
+    });
+    expect(withEarlier(ordered, ["t1", "t2"], ["t1"], id, false).hasEarlier).toBe(false);
+  });
+
+  it("starts today at local midnight", () => {
+    const noon = new Date(2026, 10, 18, 12, 30).getTime();
+    expect(startOfDay(noon)).toBe(new Date(2026, 10, 18).getTime());
   });
 });
 

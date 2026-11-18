@@ -31,7 +31,7 @@ import {
   screenKey,
   screenUseJson,
 } from "../screen-use";
-import { Logo, NAV_ICONS, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
+import { Icon, Logo, NAV_ICONS, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/marks";
 import { ToastBridge, toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
@@ -44,7 +44,14 @@ import { needsYouCount, newNotes, notificationHeading, ticketPlace } from "./inb
 import { useOpenNewSession } from "./new-session";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
-import { activeSessions, type SessionSignal, sessionSignal, sidebarSessions } from "./session-logic";
+import {
+  activeSessions,
+  type SessionSignal,
+  sessionSignal,
+  sidebarSessions,
+  startOfDay,
+  withEarlier,
+} from "./session-logic";
 import { SettingsSidebar } from "./settings";
 import { sidebarTickets, ticketSignal } from "./ticket-session-logic";
 import { useTicketNeeds } from "./tickets-kit";
@@ -104,6 +111,20 @@ const styles = stylex.create({
     color: "var(--precision-text3)",
   },
   sectionLink: { textDecoration: "none", color: "var(--precision-text3)" },
+  sectionButton: {
+    border: "none",
+    background: "none",
+    paddingBlock: 0,
+    paddingInlineStart: 4,
+    font: "inherit",
+    fontSize: 12,
+    textAlign: "start",
+    cursor: "pointer",
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
+  },
+  chevron: { display: "flex", transition: "transform 120ms ease" },
+  chevronFolded: { transform: "rotate(-90deg)" },
+  more: { marginBlockStart: 2, paddingInlineStart: 22, fontWeight: 400 },
   group: { display: "flex", flexDirection: "column", gap: 1, marginBlockStart: 14 },
   count: { fontSize: 12, color: "var(--color-text-primary)" },
   dot: { display: "block", width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
@@ -254,22 +275,103 @@ function SessionMark({ signal }: { signal: SessionSignal | null }) {
   );
 }
 
-/** The board member's latest work sessions (server feature `work_sessions`), the workspace's when one is chosen. */
-function RecentSessions() {
-  const workspace = useWorkspace().id;
-  const sessions = sidebarSessions(useWorkSessions().data ?? [], workspace);
-  if (sessions.length === 0) return null;
-  const active = activeSessions(sessions);
+/** Whether a sidebar section is folded, kept per section across starts. */
+function useFolded(section: string): [boolean, () => void] {
+  const { storage } = usePlatform();
+  const key = `${SIDEBAR_KEY}.${section}`;
+  const [folded, setFolded] = useState(() => storage.get(key) === "folded");
+  const toggle = () =>
+    setFolded((was) => {
+      storage.set(key, was ? "open" : "folded");
+      return !was;
+    });
+  return [folded, toggle];
+}
+
+/**
+ * A sidebar list that folds under its header. By default it shows today's work and what is active;
+ * "Show earlier" brings back the latest ones from before today, for this start only.
+ */
+function FoldingSection({
+  id,
+  title,
+  summary,
+  earlier,
+  onEarlier,
+  hasEarlier,
+  children,
+}: {
+  id: string;
+  title: string;
+  summary: ReactNode;
+  earlier: boolean;
+  onEarlier: () => void;
+  hasEarlier: boolean;
+  children: ReactNode;
+}) {
+  const [folded, toggle] = useFolded(id);
   return (
     <div {...stylex.props(styles.group)}>
-      <SectionLabel>
-        Sessions
-        {active > 0 ? (
+      <button
+        type="button"
+        aria-expanded={!folded}
+        onClick={toggle}
+        {...stylex.props(styles.section, styles.sectionButton)}
+      >
+        <span {...stylex.props(styles.chevron, folded && styles.chevronFolded)}>
+          <Icon name="chevronDown" size={12} />
+        </span>
+        {title}
+        {summary}
+      </button>
+      {folded ? null : (
+        <>
+          {children}
+          {hasEarlier || earlier ? (
+            <button
+              type="button"
+              onClick={onEarlier}
+              {...stylex.props(styles.section, styles.sectionButton, styles.more)}
+            >
+              {earlier ? "Show today only" : "Show earlier"}
+            </button>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** The board member's work sessions (server feature `work_sessions`), the workspace's when one is chosen. */
+function RecentSessions() {
+  const workspace = useWorkspace().id;
+  const [earlier, setEarlier] = useState(false);
+  const all = useWorkSessions().data ?? [];
+  const today = sidebarSessions(all, workspace, startOfDay(Date.now()));
+  const { list: sessions, hasEarlier } = withEarlier(
+    sidebarSessions(all, workspace, 0),
+    today,
+    sidebarSessions(all, workspace),
+    (s) => s.conversation_id,
+    earlier,
+  );
+  if (sessions.length === 0 && !hasEarlier) return null;
+  const active = activeSessions(sessions);
+  return (
+    <FoldingSection
+      id="sessions"
+      title="Sessions"
+      earlier={earlier}
+      onEarlier={() => setEarlier((e) => !e)}
+      hasEarlier={hasEarlier}
+      summary={
+        active > 0 ? (
           <>
             <span {...stylex.props(styles.dot, styles.dotLive)} /> {active} working
           </>
-        ) : null}
-      </SectionLabel>
+        ) : null
+      }
+    >
       {sessions.map((s) => (
         <NavRow
           key={s.conversation_id}
@@ -279,31 +381,42 @@ function RecentSessions() {
           end={<SessionMark signal={sessionSignal(s)} />}
         />
       ))}
-    </div>
+    </FoldingSection>
   );
 }
 
 /** The open tickets (ticket #70: each opens as its own session), the workspace's when one is chosen. */
 function OpenTickets() {
   const workspace = useWorkspace().id;
+  const [earlier, setEarlier] = useState(false);
   const all = useTickets().data ?? [];
   const need = useTicketNeeds(all);
   const signal = (t: TicketView) => ticketSignal(t, need.mine(t));
-  const tickets = sidebarTickets(all, workspace, signal);
-  if (tickets.length === 0) return null;
+  const today = sidebarTickets(all, workspace, signal, startOfDay(Date.now()));
+  const { list: tickets, hasEarlier } = withEarlier(
+    sidebarTickets(all, workspace, signal, 0),
+    today,
+    sidebarTickets(all, workspace, signal),
+    (t) => t.id,
+    earlier,
+  );
+  if (tickets.length === 0 && !hasEarlier) return null;
   const waiting = tickets.filter((t) => signal(t) === "needs_you").length;
   return (
-    <div {...stylex.props(styles.group)}>
-      <Link to="/board" {...stylex.props(styles.sectionLink)}>
-        <SectionLabel>
-          Tickets
-          {waiting > 0 ? (
-            <>
-              <span {...stylex.props(styles.dot, styles.dotNeedsYou)} /> {waiting} need you
-            </>
-          ) : null}
-        </SectionLabel>
-      </Link>
+    <FoldingSection
+      id="tickets"
+      title="Tickets"
+      earlier={earlier}
+      onEarlier={() => setEarlier((e) => !e)}
+      hasEarlier={hasEarlier}
+      summary={
+        waiting > 0 ? (
+          <>
+            <span {...stylex.props(styles.dot, styles.dotNeedsYou)} /> {waiting} need you
+          </>
+        ) : null
+      }
+    >
       {tickets.map((t) => (
         <NavRow
           key={t.id}
@@ -313,7 +426,7 @@ function OpenTickets() {
           end={<SessionMark signal={signal(t)} />}
         />
       ))}
-    </div>
+    </FoldingSection>
   );
 }
 

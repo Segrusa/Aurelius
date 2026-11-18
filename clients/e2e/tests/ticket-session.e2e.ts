@@ -339,6 +339,46 @@ test.describe("a ticket's session", () => {
     await expect(page).toHaveURL(/\/ticket\/70$/);
   });
 
+  test("the sidebar shows today's tickets, the earlier ones on request, and its section folds", async ({ page }) => {
+    const yesterday = Date.now() - 2 * 24 * 3600_000;
+    const world: World = {
+      tickets: {
+        t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }),
+        t60: ticket("t60", 60, "doing", {
+          ...owned,
+          title: "An older open ticket",
+          conversation_id: "d60",
+          updated_at_ms: yesterday,
+        }),
+      },
+      feeds: { general: feedOf("g", []), d70: feedOf("d70", []), d60: feedOf("d60", []) },
+    };
+    await scriptServer(page, scripted(world));
+    await page.goto(`${site.origin}/inbox`);
+    const side = page.getByRole("navigation", { name: "Main" });
+    const today = side.getByRole("link", { name: /#70 A ticket opens/ });
+    const older = side.getByRole("link", { name: /#60 An older open ticket/ });
+    await expect(today).toBeVisible();
+    await expect(older).toHaveCount(0);
+
+    await side.getByRole("button", { name: "Show earlier" }).click();
+    await expect(older).toBeVisible();
+    await side.getByRole("button", { name: "Show today only" }).click();
+    await expect(older).toHaveCount(0);
+
+    const header = side.getByRole("button", { name: /^Tickets/ });
+    await expect(header).toHaveAttribute("aria-expanded", "true");
+    await header.click();
+    await expect(header).toHaveAttribute("aria-expanded", "false");
+    await expect(today).toHaveCount(0);
+    // Folded stays folded after a reload.
+    await page.reload();
+    await expect(side.getByRole("button", { name: /^Tickets/ })).toHaveAttribute("aria-expanded", "false");
+    await expect(today).toHaveCount(0);
+    await side.getByRole("button", { name: /^Tickets/ }).click();
+    await expect(today).toBeVisible();
+  });
+
   test("a Board card and a Team chat search hit open the session", async ({ page }) => {
     const world: World = {
       tickets: { t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }) },
