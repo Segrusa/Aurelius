@@ -8,6 +8,9 @@ import 'views.dart';
 /// instructions, memories and paths stay refused, even with the flag.
 const confirmSecretMethods = {
   Methods.employeeSendMessage,
+  Methods.chatSend,
+  Methods.workSessionStart,
+  Methods.workSessionDispatch,
   Methods.groupChatSend,
   Methods.ticketPost,
   Methods.messageEdit,

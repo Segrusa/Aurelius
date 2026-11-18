@@ -415,9 +415,12 @@ class ChatState extends Equatable {
 /// (messages then go to the employee), a project conversation when [projectId]
 /// is set (messages go to `project_conversation.send`), or the company's group
 /// chat with [ChatBloc.group] (`group_chat.get` / `group_chat.send`).
+/// [session]: a work session's conversation (feature `work_sessions`); its
+/// messages go in with `chat.send`, as on the desktop.
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
-  ChatBloc(this._repository, {String? conversationId, this.employeeId, this.projectId})
+  ChatBloc(this._repository, {String? conversationId, this.employeeId, this.projectId, this.session = false})
       : assert(employeeId != null || projectId != null, 'a conversation belongs to an employee or a project'),
+        assert(!session || conversationId != null, 'a session has its conversation'),
         group = false,
         channel = null,
         channelTicket = null,
@@ -443,6 +446,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         projectId = null,
         ticketId = null,
         threadRoot = null,
+        session = false,
         group = true,
         super(const ChatState()) {
     _init(true);
@@ -458,6 +462,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         channelTicket = null,
         threadRoot = null,
         onRead = null,
+        session = false,
         group = true,
         super(ChatState(conversationId: conversationId)) {
     _init(true);
@@ -472,6 +477,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       : employeeId = null,
         projectId = null,
         ticketId = null,
+        session = false,
         group = true,
         super(const ChatState()) {
     _init(true);
@@ -527,6 +533,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final AureliusRepository _repository;
   final String? employeeId;
   final String? projectId;
+
+  /// A work session's conversation: sent with `chat.send`.
+  final bool session;
 
   /// The company's group chat: messages carry their author, answers stream
   /// before they are messages there (see [_live]).
@@ -817,6 +826,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         ? Commands.postTicketMessage(ticketId!, unsent.text, images: images, files: files, confirmSecret: unsent.confirmSecret, threadParent: threadRoot)
         : group
         ? Commands.sendGroupMessage(unsent.text, images: images, files: files, channel: channel, confirmSecret: unsent.confirmSecret, threadParent: threadRoot)
+        : session
+        ? Commands.sendChatMessage(state.conversationId!, unsent.text, images: images, files: files, interrupt: unsent.interrupt, confirmSecret: unsent.confirmSecret)
         : employeeId != null
         ? Commands.sendEmployeeMessage(employeeId!, unsent.text, conversationId: state.conversationId!, images: images, files: files, interrupt: unsent.interrupt, confirmSecret: unsent.confirmSecret)
         : Commands.sendProjectMessage(
