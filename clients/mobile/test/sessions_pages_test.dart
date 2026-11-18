@@ -257,7 +257,7 @@ void main() {
       );
       await pumpSessions(tester, repo, const SessionPage(conversationId: 'c1'));
       expect(find.text('Working'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('session-stop')));
+      await tester.tap(find.byKey(const Key('composer-stop')));
       await settleBoard(tester);
       expect(writesOf(repo).single['method'], 'run.stop');
     });

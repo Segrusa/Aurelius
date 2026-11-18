@@ -112,7 +112,7 @@ class _Missing extends StatelessWidget {
   }
 }
 
-/// The session's status (desktop's Status row) and, while an answer runs, Stop.
+/// The session's status (desktop's Status row). Stop is the chat view's own, on the answer and in the composer.
 class SessionStatusLine extends StatelessWidget {
   const SessionStatusLine({super.key, required this.session});
 
@@ -124,19 +124,12 @@ class SessionStatusLine extends StatelessWidget {
     final running = session.running || runId != null;
     return Container(
       key: const ValueKey('session-status'),
-      padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Tokens.border, width: 0.5))),
       child: Row(children: [
         SessionMark(signal: runId != null ? SessionSignal.working : sessionSignal(session)),
         const SizedBox(width: 8),
         Expanded(child: Text(sessionStatus(running, session.dispatch), key: const ValueKey('session-status-text'), style: TextStyle(fontSize: 13, color: Tokens.label2))),
-        if (runId != null)
-          TextButton.icon(
-            key: const ValueKey('session-stop'),
-            onPressed: () => context.read<ChatBloc>().add(ChatStopRequested(runId)),
-            icon: const Icon(Icons.stop_circle_outlined, size: 18),
-            label: const Text('Stop'),
-          ),
       ]),
     );
   }
