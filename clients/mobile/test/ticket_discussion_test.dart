@@ -141,7 +141,7 @@ void main() {
     });
   });
 
-  group('the Discussion tab', () {
+  group('the session of a ticket (ticket #71: its conversation is the main view)', () {
     late MockRepository repo;
 
     Future<void> open(WidgetTester tester, TicketView ticket, List<MessageView> messages, {TaskView? root, LinkState link = _phase2}) async {
@@ -196,10 +196,11 @@ void main() {
       expect(find.textContaining('was not woken'), findsNothing, reason: 'the server\'s own text, not a made-up one');
     });
 
-    testWidgets('a message goes out with ticket.post; without @ the hint names the owner (MU2-02 AC1/AC3, P-21)', (tester) async {
+    testWidgets('a message goes out with ticket.post; without @ the placeholder names the owner (BR1, MU2-02 AC1/AC3)', (tester) async {
       await open(tester, discussed(), const []);
       expect(find.text('Discuss the ticket here'), findsOneWidget);
-      expect(find.text('Message Forge (owner) · @ to mention someone else'), findsOneWidget);
+      expect(find.text('Message Forge (owner)…'), findsOneWidget);
+      expect(find.text('@Name asks that employee; without a name, Forge (owner) answers.'), findsWidgets);
       await send(tester, 'Use the config file.');
       final post = writesOf(repo).single;
       expect(post['method'], 'ticket.post');
@@ -240,16 +241,18 @@ void main() {
     testWidgets('an archived ticket: the discussion can only be read, also in Review (R1 c3, B7)', (tester) async {
       await open(tester, discussed(column: ColumnKind.review, archivedAtMs: 5), [postOf('m1', 'Parked.', author: 'Forge')]);
       expect(find.byKey(const Key('chat-read-only')), findsOneWidget);
-      expect(find.text('Archived: the discussion can only be read.'), findsOneWidget);
+      expect(find.text('#1 is archived · read-only.'), findsOneWidget);
       expect(find.byKey(const Key('composer-send')), findsNothing);
-      expect(find.byKey(const ValueKey('discussion-send-back')), findsNothing, reason: 'no decisions under a composer that is not there');
+      expect(find.byKey(const ValueKey('bar-send-back')), findsNothing, reason: 'no gate on an archived ticket (BR5)');
+      expect(find.byKey(const ValueKey('chip-mode')), findsNothing);
       expect(find.text('Parked.'), findsOneWidget);
     });
 
     testWidgets('a failed main task: the hint says nobody is woken; the server\'s Nobody line after the post is a system line, and no one is named as reached (R1 m1/m3, F3)', (tester) async {
       await open(tester, discussed(rootTaskStatus: TaskStatus.failed), const [], root: taskOf(id: 'root', status: TaskStatus.failed));
-      expect(find.text('The main task failed: no one is woken. Start makes a new one · @mention to ask someone.'), findsOneWidget);
-      expect(find.text('Message Forge (owner) · @ to mention someone else'), findsNothing);
+      expect(find.text('Message #1…'), findsOneWidget);
+      expect(find.text('@Name asks that employee; without a name, no one is woken.'), findsWidgets);
+      expect(find.text('Message Forge (owner)…'), findsNothing);
       when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
           .thenAnswer((_) async => receiptOf(const CommandResultTicketMessagePosted(conversationId: 'disc-1', messageId: 'm1', runIds: [], ticketId: 'k1', to: [])));
       const nobody = 'Nobody was woken: the main task of #1 failed. Start makes a new one, or name a colleague with @Name.';
@@ -266,11 +269,15 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('Plan review: the plan is a card with Review plan; Pas aan takes the composer text (MU2-05 AC1/AC3)', (tester) async {
+    testWidgets('Plan review: the gate above the input; Request changes takes the input\'s text (MU2-05 AC1/AC3, TS-04)', (tester) async {
       await open(tester, discussed(column: ColumnKind.planReview), [lineOf('s1', SystemLineKind.plan, 'Forge handed in a plan.', taskId: 'root', from: 'Forge')]);
       expect(find.text('◆ PLAN · FORGE'), findsOneWidget);
-      final revise = find.byKey(const ValueKey('discussion-revise'));
-      expect(tester.widget<OutlinedButton>(revise).onPressed, isNull, reason: 'Pas aan needs words');
+      expect(find.text('Plan review · your decision'), findsOneWidget);
+      final revise = find.byKey(const ValueKey('gate-revise'));
+      await tester.tap(revise);
+      await settleBoard(tester);
+      expect(find.text('Write what needs to change below, then Request changes.'), findsOneWidget, reason: 'Request changes needs words (B2)');
+      verifyNever(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')));
       await tester.enterText(find.byType(TextField).last, 'Split the migration in two.');
       await tester.pump();
       await tester.tap(revise);
@@ -284,9 +291,9 @@ void main() {
       expect(find.text('plan k1'), findsOneWidget);
     });
 
-    testWidgets('Plan review: Goedkeuren + Auto approves from the discussion (MU2-05 AC2)', (tester) async {
-      await open(tester, discussed(column: ColumnKind.planReview), const []);
-      await tester.tap(find.byKey(const ValueKey('discussion-approve-auto')));
+    testWidgets('Plan review: Approve approves from the gate (MU2-05 AC2)', (tester) async {
+      await open(tester, discussed(column: ColumnKind.planReview), [lineOf('s1', SystemLineKind.plan, 'Forge handed in a plan.', taskId: 'root', from: 'Forge')]);
+      await tester.tap(find.byKey(const ValueKey('gate-approve')));
       await settleBoard(tester);
       final write = writesOf(repo).single;
       expect(write['method'], 'ticket.approve_plan');
@@ -295,18 +302,19 @@ void main() {
 
     testWidgets('Review: Send back needs words, then ticket.send_back; Done asks first (MU2-06 AC1/AC2)', (tester) async {
       await open(tester, discussed(column: ColumnKind.review), [lineOf('s1', SystemLineKind.review, 'Forge reported.', taskId: 'root', from: 'Forge')]);
-      await tester.tap(find.byKey(const ValueKey('discussion-done')));
+      expect(find.text('In review · your decision'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('bar-done')));
       await settleBoard(tester);
       expect(find.text('Mark #1 as Done?'), findsOneWidget, reason: 'the confirmation of Phase 1 (B6 unchanged)');
       await tester.tap(find.text('Cancel'));
       await settleBoard(tester);
-      await tester.tap(find.byKey(const ValueKey('discussion-send-back')));
+      await tester.tap(find.byKey(const ValueKey('bar-send-back')));
       await settleBoard(tester);
-      expect(find.text('Write what needs to change first.'), findsOneWidget);
+      expect(find.text('Write what needs to change below, then Send back.'), findsOneWidget);
       verifyNever(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')));
       await tester.enterText(find.byType(TextField).last, 'Add a test for the cost.');
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('discussion-send-back')));
+      await tester.tap(find.byKey(const ValueKey('bar-send-back')));
       await settleBoard(tester);
       final write = writesOf(repo).single;
       expect(write['method'], 'ticket.send_back');
@@ -315,9 +323,9 @@ void main() {
 
     testWidgets('Testing: a word goes to the owner as in Review, without Send back or Done (ticket #5)', (tester) async {
       await open(tester, discussed(column: ColumnKind.testing, rootTaskStatus: TaskStatus.review), const []);
-      expect(find.text('Message Forge (owner) · @ to mention someone else'), findsOneWidget);
-      expect(find.byKey(const ValueKey('discussion-send-back')), findsNothing);
-      expect(find.byKey(const ValueKey('discussion-done')), findsNothing);
+      expect(find.text('Message Forge (owner)…'), findsOneWidget);
+      expect(find.byKey(const ValueKey('bar-send-back')), findsNothing);
+      expect(find.byKey(const ValueKey('bar-done')), findsNothing);
       await send(tester, 'Which suite fails?');
       expect(writesOf(repo).single['method'], 'ticket.post');
     });
@@ -329,19 +337,14 @@ void main() {
       expect(find.text('report k1'), findsOneWidget);
     });
 
-    testWidgets('Send back on the Ticket tab goes to the composer of the discussion (P-27, MU2-05 AC4)', (tester) async {
-      final ticket = discussed(column: ColumnKind.review);
-      repo = boardRepository(detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []), messages: snapshotOf('disc-1'));
-      when(() => repo.chatChanges).thenAnswer((_) => const Stream.empty());
-      when(() => repo.appends).thenAnswer((_) => const Stream.empty());
-      when(() => repo.loadChanges).thenAnswer((_) => const Stream.empty());
-      when(() => repo.load()).thenAnswer((_) async => loadOf());
-      await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id), link: _phase2);
-      expect(find.byKey(const ValueKey('discussion-decisions')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('bar-send-back')));
-      await settleBoard(tester);
-      expect(find.text('Write what needs to change, then Send back.'), findsOneWidget);
-      expect(find.byKey(const ValueKey('discussion-decisions')), findsOneWidget);
+    testWidgets('the gate sits right above the input, the run chips and the hint under it (ui-ontwerp §3.1)', (tester) async {
+      await open(tester, discussed(column: ColumnKind.review), const []);
+      final gate = tester.getRect(find.byKey(const ValueKey('gate-review')));
+      final input = tester.getRect(find.byType(TextField).last);
+      final chips = tester.getRect(find.byKey(const ValueKey('chip-mode')));
+      expect(gate.bottom <= input.top, isTrue, reason: 'the gate is above the input');
+      expect(input.top - gate.bottom < 40, isTrue, reason: 'directly above it');
+      expect(chips.top >= input.bottom, isTrue, reason: 'Mode and Model are under the input');
       expect(find.text('Send #1 back to Doing'), findsNothing, reason: 'no separate feedback sheet (MU2-05 AC4)');
     });
 
@@ -375,7 +378,7 @@ void main() {
       expect(find.text('Ticket #1 “Write the release notes” is done: the notes are in docs/.'), findsOneWidget);
     });
 
-    testWidgets('a new message while the Ticket tab is open puts a dot on Discussion', (tester) async {
+    testWidgets('a new message shows in the session without a reload', (tester) async {
       // Its own conversation: what this phone saw is kept per conversation while the app runs.
       final ticket = TicketView.fromJson({...discussed().toJson(), 'conversation_id': 'disc-dot'});
       final online = StreamController<void>.broadcast();
@@ -389,15 +392,11 @@ void main() {
       when(() => repo.loadChanges).thenAnswer((_) => const Stream.empty());
       when(() => repo.load()).thenAnswer((_) async => loadOf());
       await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id), link: _phase2);
-      expect(find.text('Discussion'), findsOneWidget);
+      expect(find.text('First.'), findsOneWidget);
       messages = [...messages, postOf('m2', 'Second.', author: 'Forge')];
       online.add(null);
       await settleBoard(tester);
-      expect(find.text('Discussion ●'), findsOneWidget);
-      await tester.tap(find.text('Discussion ●'));
-      await settleBoard(tester);
       expect(find.text('Second.'), findsOneWidget);
-      expect(find.text('Discussion ●'), findsNothing);
     });
 
     testWidgets('the plan page sends Pas aan to the discussion, without a field of its own (MU2-05 AC4)', (tester) async {
@@ -427,11 +426,15 @@ void main() {
       verifyNever(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')));
     });
 
-    testWidgets('an older server (no ticket_discussion): no Discussion tab, the Phase 1 page', (tester) async {
+    testWidgets('an older server (no ticket conversation): head, gate and properties, and it says so (ticket #71)', (tester) async {
       final ticket = discussed(column: ColumnKind.review);
       repo = boardRepository(detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []));
       await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id, discussion: true));
-      expect(find.text('Discussion'), findsNothing);
+      expect(find.text('This server has no ticket conversation.'), findsOneWidget);
+      expect(find.byKey(const Key('composer-send')), findsNothing);
+      expect(find.byKey(const ValueKey('chip-mode')), findsNothing, reason: 'no input, no run chips');
+      expect(find.byKey(const ValueKey('gate-review')), findsOneWidget);
+      expect(find.byKey(const ValueKey('ticket-properties')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('bar-send-back')));
       await settleBoard(tester);
       expect(find.text('Send #1 back to Doing'), findsOneWidget, reason: 'the feedback sheet of Phase 1');

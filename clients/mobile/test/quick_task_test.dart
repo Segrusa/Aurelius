@@ -347,6 +347,7 @@ void main() {
 
     testWidgets('after Done the page shows the short merge commit', (tester) async {
       await open(tester, quickIn(ColumnKind.done, mergeCommit: '1a2b3c4d5e6f7a8b9c0d', doneAtMs: 0));
+      await openTicketProperties(tester);
       expect(find.text("Merged into the project's main as 1a2b3c4. Nothing was pushed."), findsOneWidget);
     });
 
@@ -361,13 +362,20 @@ void main() {
 
     testWidgets('Back to Backlog of a quick task asks first; Cancel keeps it, confirming sends ticket.cancel', (tester) async {
       final repo = await open(tester, quickIn(ColumnKind.doing));
-      await tapKey(tester, 'bar-backlog');
+      Future<void> backlog() async {
+        await tester.tap(find.byTooltip('Ticket actions'));
+        await settleBoard(tester);
+        await tester.tap(find.text('Back to Backlog').last);
+        await settleBoard(tester);
+      }
+
+      await backlog();
       expect(find.text(quickCancelTitle), findsOneWidget);
       expect(find.text(quickCancelBody), findsOneWidget);
       await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
       await settleBoard(tester);
       verifyNever(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')));
-      await tapKey(tester, 'bar-backlog');
+      await backlog();
       await tester.tap(find.widgetWithText(TextButton, 'Back to Backlog'));
       await settleBoard(tester);
       expect(writesOf(repo).single['method'], 'ticket.cancel');
@@ -385,7 +393,10 @@ void main() {
 
     testWidgets('a normal ticket keeps its own question', (tester) async {
       await open(tester, ticketOf(column: ColumnKind.doing, ownerEmployeeId: 'forge', ownerName: 'Forge'));
-      await tapKey(tester, 'bar-backlog');
+      await tester.tap(find.byTooltip('Ticket actions'));
+      await settleBoard(tester);
+      await tester.tap(find.text('Back to Backlog').last);
+      await settleBoard(tester);
       expect(find.text(quickCancelTitle), findsNothing);
       expect(find.text('Back to Backlog?'), findsOneWidget);
     });

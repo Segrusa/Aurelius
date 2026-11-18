@@ -1,4 +1,3 @@
-import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/board/ticket_session_rules.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -54,6 +53,13 @@ void main() {
       expect(ownerAnswers(ticketOf(column: ColumnKind.todo)), isNull);
     });
 
+    test('nobody while the main task ended: the server says "Nobody was woken" then (R1 m1)', () {
+      for (final s in [TaskStatus.failed, TaskStatus.cancelled, TaskStatus.succeeded, TaskStatus.draft]) {
+        expect(ownerAnswers(ticketOf(column: ColumnKind.doing, ownerEmployeeId: 'forge', ownerName: 'Forge', rootTaskStatus: s)), isNull, reason: s.wire);
+      }
+      expect(ownerAnswers(ticketOf(column: ColumnKind.review, ownerEmployeeId: 'forge', ownerName: 'Forge', rootTaskStatus: TaskStatus.review)), 'Forge');
+    });
+
     test("the owner's name from the company when the ticket has only the id", () {
       expect(ownerAnswers(ticketOf(column: ColumnKind.doing, ownerEmployeeId: 'forge'), owner: 'Forge'), 'Forge');
       expect(ownerAnswers(ticketOf(column: ColumnKind.doing, ownerEmployeeId: 'forge')), 'the owner');
@@ -61,10 +67,10 @@ void main() {
 
     test('the placeholder and the hint say who answers, as the desktop', () {
       final owned = ticketOf(number: 70, column: ColumnKind.doing, ownerEmployeeId: 'pixel', ownerName: 'Pixel');
-      expect(sessionPlaceholder(owned), 'Message Pixel (owner)… · @ to mention');
+      expect(sessionPlaceholder(owned), 'Message Pixel (owner)…');
       expect(sessionHint(owned), '@Name asks that employee; without a name, Pixel (owner) answers.');
       final nobody = ticketOf(number: 70, column: ColumnKind.backlog, ownerEmployeeId: 'pixel', ownerName: 'Pixel');
-      expect(sessionPlaceholder(nobody), 'Message #70 · @ to mention');
+      expect(sessionPlaceholder(nobody), 'Message #70…');
       expect(sessionHint(nobody), '@Name asks that employee; without a name, no one is woken.');
     });
   });

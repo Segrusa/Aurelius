@@ -171,7 +171,7 @@ Future<void> _undoStart(BuildContext context, TicketView started) async {
 }
 
 /// Back to Backlog: stops the work (`ticket.cancel`), after a confirmation
-/// where work runs; in Plan review it is "Afwijzen". A quick task always asks
+/// where work runs; in Plan review it is "Reject". A quick task always asks
 /// first: its branch and worktree go, and unmerged work with them (BR4).
 Future<bool> backToBacklog(BuildContext context, TicketView ticket) async {
   final rule = moveRule(ticket.column, ColumnKind.backlog);
@@ -182,12 +182,19 @@ Future<bool> backToBacklog(BuildContext context, TicketView ticket) async {
     return ticketWrite(context, ticketCancel(ticketId: ticket.id), expectedVersion: ticket.version, retry: false, done: '#${ticket.number} is back in Backlog. Its branch is removed.');
   }
   if (rule.confirm != null) {
-    // In Plan review this is rejecting the plan; it says so, as the plan page's button does.
+    // In Plan review this is rejecting the plan; it says so, as the desktop's gate does.
     final reject = ticket.column == ColumnKind.planReview;
-    final ok = await confirm(context, title: reject ? 'Afwijzen?' : 'Back to Backlog?', body: rule.confirm, action: reject ? 'Afwijzen' : 'Back to Backlog', danger: true);
+    final ok = await confirm(context, title: reject ? 'Reject the plan of #${ticket.number}?' : 'Back to Backlog?', body: rule.confirm, action: reject ? 'Reject' : 'Back to Backlog', danger: true);
     if (!ok || !context.mounted) return false;
   }
   return ticketWrite(context, ticketCancel(ticketId: ticket.id), expectedVersion: ticket.version, retry: false, done: '#${ticket.number} is back in Backlog.');
+}
+
+/// Delete a ticket in Backlog (the desktop's status box): it is archived, after a confirmation.
+Future<bool> deleteTicket(BuildContext context, TicketView ticket) async {
+  final ok = await confirm(context, title: 'Delete #${ticket.number}?', body: 'It leaves the board and stays readable for the record.', action: 'Delete', danger: true);
+  if (!ok || !context.mounted) return false;
+  return ticketWrite(context, ticketArchive(ticketId: ticket.id), expectedVersion: ticket.version, retry: false, done: '#${ticket.number} is deleted.');
 }
 
 /// A card moved to [target] (Move to…, a drop on a tablet, a reorder): what

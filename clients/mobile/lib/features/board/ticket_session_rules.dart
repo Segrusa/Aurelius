@@ -1,3 +1,4 @@
+import '../../data/discussion.dart' show mainTaskEnded;
 import '../../data/run_config.dart' show ModelCatalog;
 import '../../data/views.dart';
 
@@ -48,18 +49,20 @@ const _ownerColumns = {ColumnKind.todo, ColumnKind.doing, ColumnKind.planReview,
 
 /// Who answers a message without an @Name (BR1, the server's `owner_answers`):
 /// the owner while there is one, the ticket is not archived and its column is
-/// Todo, Doing, Plan review, Testing or Review; null: nobody. [owner] is the
-/// owner's name from the company when the ticket has only its id.
+/// Todo, Doing, Plan review, Testing or Review; null: nobody. Nobody either
+/// while its main task ended (R1 m1): the server then answers "Nobody was
+/// woken". [owner] is the owner's name from the company when the ticket has only its id.
 String? ownerAnswers(TicketView t, {String? owner}) {
-  if (t.ownerEmployeeId == null || t.archivedAtMs != null || !_ownerColumns.contains(t.column)) return null;
+  if (t.ownerEmployeeId == null || t.archivedAtMs != null || !_ownerColumns.contains(t.column) || mainTaskEnded(t)) return null;
   return owner ?? t.ownerName ?? 'the owner';
 }
 
-/// The input's placeholder: "Message Pixel (owner)… · @ to mention", or the
-/// ticket when nobody answers without a name.
+/// The input's placeholder: "Message Pixel (owner)…", or the ticket when
+/// nobody answers without a name. Shorter than the desktop's: on a phone a
+/// longer one wraps the input; the hint under it says what @Name does.
 String sessionPlaceholder(TicketView t, {String? owner}) {
   final to = ownerAnswers(t, owner: owner);
-  return to == null ? 'Message #${t.number} · @ to mention' : 'Message $to (owner)… · @ to mention';
+  return to == null ? 'Message #${t.number}…' : 'Message $to (owner)…';
 }
 
 /// The line under the input that says what a name does (as the desktop's hint).

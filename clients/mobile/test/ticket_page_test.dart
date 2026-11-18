@@ -23,26 +23,29 @@ void main() {
 
   Future<void> tapKey(WidgetTester tester, String key) async {
     await tester.ensureVisible(find.byKey(ValueKey(key)));
+    await tester.pump();
     await tester.tap(find.byKey(ValueKey(key)));
     await settleBoard(tester);
   }
 
   group('a ticket in Backlog', () {
-    testWidgets('the details: priority, owner (the dispatcher), mode, labels, created by (MU1-07)', (tester) async {
+    testWidgets('the details: priority, owner (the dispatcher), mode, labels, created by (MU1-07), in the properties', (tester) async {
       await open(tester, detailOf(ticketOf(number: 51, title: 'Vault UI', priority: TicketPriority.urgent, labels: const ['ui', 'vault'], description: 'Board members log in.')));
       expect(find.text('#51 · Atlas'), findsOneWidget);
       expect(find.text('Vault UI'), findsWidgets);
+      expect(find.text('This server has no ticket conversation.'), findsOneWidget, reason: 'a server without ticket conversations');
+      await openTicketProperties(tester);
       expect(find.text('▲▲ Urgent'), findsOneWidget);
       expect(find.text('Dispatcher (Orion)'), findsOneWidget);
       expect(find.text('ui, vault'), findsOneWidget);
-      expect(find.text('Board members log in.'), findsOneWidget);
       expect(find.textContaining('ada ·'), findsOneWidget, reason: 'the creator, never editable');
-      await tester.scrollUntilVisible(find.text('Arrives in a later version. Until then, use the conversation.'), 300, scrollable: find.descendant(of: find.byKey(const ValueKey('ticket-page')), matching: find.byType(Scrollable)).first);
-      expect(find.text('Arrives in a later version. Until then, use the conversation.'), findsOneWidget, reason: 'the place of the discussion (Fase 2)');
+      await tester.scrollUntilVisible(find.text('Board members log in.'), 200, scrollable: find.descendant(of: find.byKey(const ValueKey('ticket-page')), matching: find.byType(Scrollable)).first);
+      expect(find.text('Board members log in.'), findsOneWidget);
     });
 
     testWidgets('choose an owner, and give it back to the dispatcher (ticket.assign without employee_id)', (tester) async {
       final repo = await open(tester, detailOf(ticketOf(ownerEmployeeId: 'forge', ownerName: 'Forge')));
+      await openTicketProperties(tester);
       await tapKey(tester, 'ticket-row-owner');
       expect(find.text('Dispatcher (Orion)'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('owner-dispatcher')));
@@ -72,6 +75,7 @@ void main() {
 
     testWidgets('priority (B9): a sheet with the four, saved with the version', (tester) async {
       final repo = await open(tester, detailOf(ticketOf()));
+      await openTicketProperties(tester);
       await tapKey(tester, 'ticket-row-priority');
       await tester.tap(find.byKey(const ValueKey('priority-high')));
       await settleBoard(tester);
@@ -82,6 +86,7 @@ void main() {
 
     testWidgets('labels: one field, split on commas', (tester) async {
       final repo = await open(tester, detailOf(ticketOf(labels: const ['ui'])));
+      await openTicketProperties(tester);
       await tapKey(tester, 'ticket-row-labels');
       await tester.enterText(find.byType(TextField), 'ui, backend ,security');
       await tester.tap(find.text('Save'));
@@ -112,6 +117,7 @@ void main() {
       expect(find.byKey(const ValueKey('ticket-needs-owner')), findsOneWidget, reason: 'no timeline needed: nobody chooses');
       expect(find.textContaining('is choosing an employee'), findsNothing);
       expect(find.text('Vesta is archived. Started tickets wait in Todo until you choose an owner.'), findsOneWidget);
+      await openTicketProperties(tester);
       expect(find.text('None · Vesta is archived'), findsOneWidget);
       expect(find.textContaining('Orion'), findsNothing);
     });
@@ -129,6 +135,7 @@ void main() {
       final root = taskOf(id: 'root', title: 'Login per board member', status: TaskStatus.running, employeeName: 'Forge', conversationId: 'conv-root');
       final sub = taskOf(id: 'sub', title: 'Users table', status: TaskStatus.succeeded, parentTaskId: 'root', employeeName: 'Schema');
       final repo = await open(tester, detailOf(ticketOf(column: ColumnKind.doing, rootTaskId: 'root', ownerEmployeeId: 'forge', ownerName: 'Forge', run: const TaskRun(mode: AgentMode.auto)), root: root, tasks: [sub]));
+      await openTicketProperties(tester);
       await tapKey(tester, 'ticket-row-mode');
       expect(find.text('Locked while the main task runs.'), findsOneWidget);
       verifyNever(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')));
@@ -158,10 +165,14 @@ void main() {
       expect(find.text('Undo'), findsNothing);
     });
 
-    testWidgets('Back to Backlog asks first, then cancels', (tester) async {
+    testWidgets('while the work runs the gate says nothing; Back to Backlog in More asks first, then cancels', (tester) async {
       final root = taskOf(id: 'root', status: TaskStatus.running);
       final repo = await open(tester, detailOf(ticketOf(column: ColumnKind.doing, rootTaskId: 'root', ownerEmployeeId: 'forge'), root: root));
-      await tapKey(tester, 'bar-backlog');
+      expect(find.byKey(const ValueKey('bar-backlog')), findsNothing, reason: 'the desktop session: the timeline says what runs');
+      await tester.tap(find.byTooltip('Ticket actions'));
+      await settleBoard(tester);
+      await tester.tap(find.text('Back to Backlog'));
+      await settleBoard(tester);
       expect(find.text('Back to Backlog?'), findsOneWidget);
       await tester.tap(find.text('Cancel'));
       await settleBoard(tester);
@@ -324,6 +335,8 @@ void main() {
 
   testWidgets('Done: read only, with what did not happen (MU1-16 AC1, MU1-17)', (tester) async {
     await open(tester, detailOf(ticketOf(column: ColumnKind.done, doneAtMs: DateTime(2026, 10, 31, 11, 2).millisecondsSinceEpoch)));
+    expect(find.text('#1 is Done · read-only.'), findsOneWidget);
+    await openTicketProperties(tester);
     expect(find.byKey(const ValueKey('ticket-done')), findsOneWidget);
     expect(find.text('Nothing was merged, pushed or deployed.'), findsOneWidget);
     expect(find.byKey(const ValueKey('bar-start')), findsNothing);
@@ -334,8 +347,7 @@ void main() {
 
   testWidgets('Activity: who did what, in words (MU1-15 AC4, MU1-14 AC3)', (tester) async {
     await open(tester, detailOf(ticketOf(column: ColumnKind.doing)), activity: [cardOf('ticket.plan_approved', seq: 3), cardOf('ticket.dispatched', actor: 'employee', seq: 2), cardOf('ticket.started', seq: 1)]);
-    await tester.tap(find.text('Activity'));
-    await settleBoard(tester);
+    await openTicketProperties(tester, activity: true);
     expect(find.text('A board member approved the plan'), findsOneWidget);
     expect(find.text('The dispatcher chose an owner'), findsOneWidget);
     expect(find.text('A board member started it'), findsOneWidget);
@@ -350,14 +362,16 @@ void main() {
     ]);
     TicketDetail planned() => detailOf(ticketOf(number: 42, column: ColumnKind.planReview, rootTaskId: 'root', ownerEmployeeId: 'forge', ownerName: 'Forge', run: const TaskRun(mode: AgentMode.plan)), root: root);
 
-    testWidgets('the ticket points to its plan', (tester) async {
+    testWidgets('the gate shows the plan and opens the whole plan', (tester) async {
       await open(tester, planned(), messages: plan);
-      expect(find.text('◆ A plan waits for you'), findsOneWidget);
-      await tapKey(tester, 'bar-review-plan');
+      expect(find.text('Plan review · your decision'), findsOneWidget);
+      expect(find.text('◆ Plan to review'), findsOneWidget);
+      expect(find.textContaining('Hash with argon2'), findsOneWidget);
+      await tapKey(tester, 'gate-whole-plan');
       expect(find.text('plan k1'), findsOneWidget);
     });
 
-    testWidgets("the plan is the main task's plan update; Goedkeuren + Auto approves it (D-07)", (tester) async {
+    testWidgets("the plan is the main task's plan update; Approve approves it in Auto (D-07)", (tester) async {
       final repo = await open(tester, planned(), messages: plan, plan: true);
       expect(find.textContaining('Hash with argon2'), findsOneWidget);
       expect(find.text('I stop here.'), findsNothing);
@@ -371,29 +385,35 @@ void main() {
     testWidgets('after the approval Mode reads "Plan → Auto" (D-07), from the main task\'s conversation', (tester) async {
       final doing = detailOf(ticketOf(number: 42, column: ColumnKind.doing, rootTaskId: 'root', ownerEmployeeId: 'forge', ownerName: 'Forge', run: const TaskRun(mode: AgentMode.plan)), root: taskOf(id: 'root', status: TaskStatus.queued, conversationId: 'conv-root'));
       await open(tester, doing, messages: snapshotOf('conv-root', agentMode: AgentMode.auto), activity: [cardOf('ticket.plan_approved', seq: 4), cardOf('ticket.started', seq: 2)]);
+      await openTicketProperties(tester);
       await tester.ensureVisible(find.byKey(const ValueKey('ticket-row-mode')));
+      await tester.pump();
       expect(find.text('Plan → Auto'), findsOneWidget);
     });
 
     testWidgets('Approve with edits reads "Plan → Accept edits"; before any approval it stays "Plan"', (tester) async {
       final doing = detailOf(ticketOf(number: 42, column: ColumnKind.doing, rootTaskId: 'root', ownerEmployeeId: 'forge', run: const TaskRun(mode: AgentMode.plan)), root: taskOf(id: 'root', status: TaskStatus.running, conversationId: 'conv-root'));
       await open(tester, doing, messages: snapshotOf('conv-root', agentMode: AgentMode.acceptEdits), activity: [cardOf('ticket.plan_approved', seq: 4)]);
+      await openTicketProperties(tester);
       await tester.ensureVisible(find.byKey(const ValueKey('ticket-row-mode')));
+      await tester.pump();
       expect(find.text('Plan → Accept edits'), findsOneWidget);
 
       await open(tester, doing, messages: snapshotOf('conv-root', agentMode: AgentMode.auto), activity: [cardOf('ticket.started', seq: 2)]);
+      await openTicketProperties(tester);
       await tester.ensureVisible(find.byKey(const ValueKey('ticket-row-mode')));
+      await tester.pump();
       expect(find.text('Plan'), findsOneWidget, reason: 'no approval in the timeline yet');
     });
 
-    testWidgets('Goedkeuren is approve_edits', (tester) async {
+    testWidgets('Approve, accept edits is approve_edits', (tester) async {
       final repo = await open(tester, planned(), messages: plan, plan: true);
       await tester.tap(find.byKey(const ValueKey('ticket-plan-approve-edits')));
       await settleBoard(tester);
       expect(paramsOf(writesOf(repo).single)['decision'], 'approve_edits');
     });
 
-    testWidgets('Pas aan needs feedback (B2), then ticket.revise_plan', (tester) async {
+    testWidgets('Request changes needs feedback (B2), then ticket.revise_plan', (tester) async {
       final repo = await open(tester, planned(), messages: plan, plan: true);
       expect(tester.widget<OutlinedButton>(find.byKey(const ValueKey('ticket-plan-revise'))).onPressed, isNull);
       await tester.enterText(find.byKey(const ValueKey('ticket-plan-feedback')), 'Add a migration test.');
@@ -405,14 +425,14 @@ void main() {
       expect(paramsOf(revise), {'ticket_id': 'k1', 'feedback': 'Add a migration test.'});
     });
 
-    testWidgets('Afwijzen asks, then puts it back in Backlog (ticket.cancel)', (tester) async {
+    testWidgets('Reject asks, then puts it back in Backlog (ticket.cancel)', (tester) async {
       final repo = await open(tester, planned(), messages: plan, plan: true);
       await tester.tap(find.byKey(const ValueKey('ticket-plan-reject')));
       await settleBoard(tester);
       expect(find.text('This rejects the plan and stops the work.'), findsOneWidget);
-      expect(find.text('Afwijzen?'), findsOneWidget);
+      expect(find.text('Reject the plan of #42?'), findsOneWidget);
       expect(find.widgetWithText(TextButton, 'Back to Backlog'), findsNothing, reason: 'the button says what it does here');
-      await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.widgetWithText(TextButton, 'Afwijzen')));
+      await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.widgetWithText(TextButton, 'Reject')));
       await settleBoard(tester);
       expect(writesOf(repo).single['method'], 'ticket.cancel');
     });
