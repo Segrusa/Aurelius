@@ -39,6 +39,8 @@ export const precisionTheme = defineTheme({
     "--precision-card-shadow": ["0 1px 2px rgb(0 0 0 / 0.05)", "none"],
     "--precision-amber-soft": ["rgb(196 122 0 / 0.08)", "rgb(229 162 58 / 0.1)"],
     "--precision-violet": ["#6d4ac9", "#b39dfa"],
+    // A small mark that must read as orange on both themes (a session's finished, unopened answer).
+    "--precision-dot-orange": ["#e8730c", "#ff9e55"],
   },
   tokens: {
     "--color-background-body": ["#f3f3f2", "#08090a"],

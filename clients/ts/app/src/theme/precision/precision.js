@@ -234,7 +234,8 @@ export const precisionTheme = {
     "--precision-panel-shadow": "light-dark(0 1px 2px rgb(0 0 0 / 0.04), none)",
     "--precision-card-shadow": "light-dark(0 1px 2px rgb(0 0 0 / 0.05), none)",
     "--precision-amber-soft": "light-dark(rgb(196 122 0 / 0.08), rgb(229 162 58 / 0.1))",
-    "--precision-violet": "light-dark(#6d4ac9, #b39dfa)"
+    "--precision-violet": "light-dark(#6d4ac9, #b39dfa)",
+    "--precision-dot-orange": "light-dark(#e8730c, #ff9e55)"
   },
   __localTokenOwners: {
     "--astryx-theme-neutral-color-status-fill-accent": "neutral",
@@ -249,7 +250,8 @@ export const precisionTheme = {
     "--precision-panel-shadow": "precision",
     "--precision-card-shadow": "precision",
     "--precision-amber-soft": "precision",
-    "--precision-violet": "precision"
+    "--precision-violet": "precision",
+    "--precision-dot-orange": "precision"
   },
   __localTokenLineage: ["neutral","precision"],
   components: {
