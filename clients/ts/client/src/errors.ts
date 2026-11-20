@@ -28,18 +28,53 @@ export class DisconnectedError extends Error {
   }
 }
 
+/** The link stayed, but no answer came in time: the server may still be working on it. */
+export class TimedOutError extends DisconnectedError {
+  constructor() {
+    super("The server did not answer in time.");
+    this.name = "TimedOutError";
+  }
+}
+
+/** Why a write ended without its answer. */
+export type NotSentReason = "unreachable" | "dropped" | "timed_out";
+
 /** A write that will not be retried. Resend with the same key to apply it at most once. */
 export class NotSentError extends Error {
   readonly idempotencyKey: string;
   /** It went out before the connection dropped: the server may have applied it. */
   readonly sent: boolean;
+  readonly reason: NotSentReason;
+  /** What the server said when asked afterwards (`command.applied`); null: it could not be asked. */
+  readonly applied: boolean | null;
 
-  constructor(idempotencyKey: string, sent = false) {
-    super(sent ? "The connection dropped before the server answered." : "Not sent. The server was not reachable.");
+  constructor(idempotencyKey: string, sent = false, reason?: NotSentReason, applied: boolean | null = null) {
+    const why = reason ?? (sent ? "dropped" : "unreachable");
+    super(notSentMessage(why, applied));
     this.name = "NotSentError";
     this.idempotencyKey = idempotencyKey;
     this.sent = sent;
+    this.reason = why;
+    this.applied = applied;
   }
+}
+
+function notSentMessage(reason: NotSentReason, applied: boolean | null): string {
+  if (reason === "unreachable") return "Not sent. The server was not reachable.";
+  if (applied === true) return "This arrived, but the server's answer was lost.";
+  if (reason === "timed_out") {
+    return applied === false
+      ? "Not sent. The server did not answer in time; try again."
+      : "The server did not answer in time. It may still have arrived.";
+  }
+  return applied === false
+    ? "Not sent. The connection dropped before the server got it; try again."
+    : "The connection dropped before the server answered. It may still have arrived.";
+}
+
+/** The write took effect, even though its own answer was lost on the way back. */
+export function arrived(error: unknown): boolean {
+  return error instanceof NotSentError && error.applied === true;
 }
 
 /** Opening the connection failed. */

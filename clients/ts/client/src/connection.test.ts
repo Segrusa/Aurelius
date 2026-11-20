@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { boardMemberStep, Connection, type Link, uuidv7 } from "./connection";
-import { LinkError, NotSentError, ProtocolError } from "./errors";
+import { arrived, LinkError, NotSentError, ProtocolError } from "./errors";
 
 const hello = (over: Record<string, unknown> = {}) => ({
   host_id: "h",
@@ -167,6 +167,96 @@ describe("Connection", () => {
     await settle();
     link.drop();
     await failed;
+    conn.dispose();
+  });
+
+  it("asks after a reconnect whether a no-retry write arrived before calling it failed", async () => {
+    const withFeature = (r: Record<string, unknown>) =>
+      r.method === "session.hello"
+        ? { ok: { type: "hello", value: hello({ features: ["command_applied"] }) } }
+        : undefined;
+    const first = new FakeLink();
+    const second = new FakeLink();
+    first.answers = withFeature;
+    const { conn } = connection([first, second]);
+    conn.start();
+    await settle();
+    const write = conn.write("power.cancel", undefined, { retry: false });
+    const failed = write.catch((e: unknown) => e);
+    await settle();
+    const key = first.sent.find((r) => r.method === "power.cancel")?.idempotency_key;
+    second.answers = (r) =>
+      r.method === "command.applied" ? { ok: { type: "command_applied", value: { applied: true } } } : withFeature(r);
+    first.drop();
+    await vi.advanceTimersByTimeAsync(1000);
+    const error = (await failed) as NotSentError;
+    expect(second.sent.find((r) => r.method === "command.applied")?.params).toEqual({ idempotency_key: key });
+    expect(second.methods()).not.toContain("power.cancel");
+    expect(error).toMatchObject({ reason: "dropped", applied: true });
+    expect(arrived(error)).toBe(true);
+    expect(error.message).toBe("This arrived, but the server's answer was lost.");
+    conn.dispose();
+  });
+
+  it("says a dropped write did not arrive when the server has no receipt for it", async () => {
+    const withFeature = (r: Record<string, unknown>) =>
+      r.method === "session.hello"
+        ? { ok: { type: "hello", value: hello({ features: ["command_applied"] }) } }
+        : undefined;
+    const first = new FakeLink();
+    const second = new FakeLink();
+    first.answers = withFeature;
+    second.answers = (r) =>
+      r.method === "command.applied" ? { ok: { type: "command_applied", value: { applied: false } } } : withFeature(r);
+    const { conn } = connection([first, second]);
+    conn.start();
+    await settle();
+    const failed = conn.write("power.cancel", undefined, { retry: false }).catch((e: unknown) => e);
+    await settle();
+    first.drop();
+    await vi.advanceTimersByTimeAsync(1000);
+    const error = (await failed) as NotSentError;
+    expect(error).toMatchObject({ reason: "dropped", applied: false });
+    expect(arrived(error)).toBe(false);
+    expect(error.message).toContain("Not sent.");
+    conn.dispose();
+  });
+
+  it("tells a timeout from a dropped link and asks on the same link", async () => {
+    const link = new FakeLink();
+    link.answers = (r) =>
+      r.method === "session.hello"
+        ? { ok: { type: "hello", value: hello({ features: ["command_applied"] }) } }
+        : r.method === "command.applied"
+          ? { ok: { type: "command_applied", value: { applied: true } } }
+          : undefined;
+    const { conn } = connection([link]);
+    conn.start();
+    await settle();
+    const failed = conn.write("power.cancel", undefined, { retry: false, timeoutMs: 5000 }).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(5000);
+    const error = (await failed) as NotSentError;
+    expect(error).toMatchObject({ reason: "timed_out", applied: true });
+    expect(link.closed).toBe(false);
+    conn.dispose();
+  });
+
+  it("says a lost write may have arrived when the server cannot be asked", async () => {
+    const link = new FakeLink();
+    link.answers = (r) =>
+      r.method === "session.hello"
+        ? { ok: { type: "hello", value: hello({ features: ["command_applied"] }) } }
+        : undefined;
+    const { conn } = connection([link]);
+    conn.start();
+    await settle();
+    const failed = conn.write("power.cancel", undefined, { retry: false }).catch((e: unknown) => e);
+    await settle();
+    link.drop();
+    await vi.advanceTimersByTimeAsync(20_000);
+    const error = (await failed) as NotSentError;
+    expect(error).toMatchObject({ reason: "dropped", applied: null });
+    expect(error.message).toBe("The connection dropped before the server answered. It may still have arrived.");
     conn.dispose();
   });
 
