@@ -214,6 +214,60 @@ pub async fn run_summary(shared: Arc<Shared>, job: queries::JobRow) {
     }
 }
 
+/// A work session's summary for the History (feature `session_history`): what was
+/// done and decided in it, from the messages since its previous summary. A failure
+/// ends the job at once and shows in the History (a board member tries again).
+pub async fn run_session_summary(shared: Arc<Shared>, job: queries::JobRow) {
+    let Some(conversation) = job.payload["conversation_id"].as_str().and_then(|t| ConversationId::parse(t).ok()) else {
+        close(&shared, &job).await;
+        return;
+    };
+    let run = job.payload["run_id"].as_str().and_then(|r| RunId::parse(r).ok());
+    let s = shared.clone();
+    let input = match blocking(move || s.service.session_summary_input(conversation, run)).await {
+        Some(Ok(Some(input))) => input,
+        Some(Ok(None)) => {
+            let (s, id, epoch) = (shared.clone(), job.id.clone(), job.lease_epoch);
+            let _ = blocking(move || s.service.session_summary_skipped(&id, epoch, conversation)).await;
+            return;
+        }
+        Some(Err(e)) => return session_summary_failed(&shared, &job, conversation, e.to_string()).await,
+        None => return,
+    };
+    let system = format!(
+        "{SUMMARY_MARKER}\nSay what was done and decided in this work session between a board member and {employee}, in 2 to 4 sentences, \
+         for a history of the team's work. Write it in the language of the conversation. If there is an earlier summary, give one \
+         summary of the whole session. Only what is in the text; no secrets, no greeting.",
+        employee = input.employee_name
+    );
+    let mut prompt = format!("Session: {} (project {})\n", input.title, input.project_name);
+    if let Some(previous) = &input.previous {
+        prompt.push_str(&format!("Earlier summary:\n{previous}\n\n"));
+    }
+    prompt.push_str("New messages:\n");
+    for (who, text) in &input.turns {
+        prompt.push_str(&format!("[{who}] {text}\n"));
+    }
+    let text = match complete_text(&shared, &input.config, RunId::new(), system, prompt).await {
+        Err(crate::tasks::StepError::Login) => return wait_for_login(&shared, &job, input.config.login_user).await,
+        Ok((text, _)) => text,
+        Err(e) => return session_summary_failed(&shared, &job, conversation, e.to_string()).await,
+    };
+    let (s, id, epoch) = (shared.clone(), job.id.clone(), job.lease_epoch);
+    if let Some(Ok(notices)) = blocking(move || s.service.record_session_summary(&id, epoch, &input, &text)).await {
+        shared.publish(notices);
+    }
+}
+
+/// The error goes to the server's log only; the History shows "Summary not available".
+async fn session_summary_failed(shared: &Arc<Shared>, job: &queries::JobRow, conversation: ConversationId, error: String) {
+    tracing::warn!(job = %job.id, %conversation, %error, "the summary of a work session failed");
+    let (s, id, epoch) = (shared.clone(), job.id.clone(), job.lease_epoch);
+    if let Some(Ok(notices)) = blocking(move || s.service.session_summary_failed(&id, epoch, conversation)).await {
+        shared.publish(notices);
+    }
+}
+
 /// Merge a scope's memories into short points.
 /// The model only proposes; `validate_consolidation` decides what is applied.
 pub async fn run_consolidation(shared: Arc<Shared>, job: queries::JobRow) {

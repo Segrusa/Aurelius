@@ -902,6 +902,107 @@ test.describe("states a test daemon cannot produce", () => {
       .toMatchObject({ id: "n1" });
   });
 
+  test("the History lists work sessions next to tickets, and another's session opens read-only", async ({ page }) => {
+    mkdirSync(`${REPO}/target/session-history`, { recursive: true });
+    const now = Date.now();
+    const done = {
+      ticket_id: "t9",
+      number: 9,
+      title: "Export to CSV",
+      project_id: "p",
+      project_name: "Northwind API",
+      owner_name: "Flux",
+      done_at_ms: now - 120_000,
+      summary: "The export writes CSV.",
+      summary_state: "ready",
+    };
+    const base = {
+      project_id: "p",
+      project_name: "Northwind API",
+      employee_id: "e1",
+      employee_name: "Flux",
+      created_at_ms: now - 3_600_000,
+    };
+    const mine = {
+      ...base,
+      conversation_id: "s1",
+      title: "Fix the login page",
+      started_by: "u",
+      started_by_name: "sam",
+      branch: "session/ab12",
+      last_activity_ms: now - 60_000,
+      summary: "Flux fixed the login page and added a test.",
+      summary_state: "ready",
+    };
+    const theirs = {
+      ...base,
+      conversation_id: "s2",
+      title: "Release notes",
+      started_by: "u2",
+      started_by_name: "ada",
+      last_activity_ms: now - 180_000,
+      summary_state: "before_history",
+    };
+    const { writes } = await scriptServer(page, {
+      ...script,
+      features: ["ticket_history", "session_history", "work_sessions"],
+      conversations: {
+        ...script.conversations,
+        s2: {
+          ...messages("s2", [message("m1", "user", "Write the release notes.")]),
+          employee_id: "e1",
+          project_id: "p",
+        },
+      },
+      reads: {
+        "ticket.history": () => ({ type: "history", value: { entries: [done], has_more: false, as_of_seq: 1 } }),
+        "work_session.history": () => ({
+          type: "session_history",
+          value: { entries: [mine, theirs], has_more: false, as_of_seq: 1 },
+        }),
+        "work_session.list": () => ({
+          type: "work_sessions",
+          value: { sessions: [{ ...mine, running: false }], as_of_seq: 1 },
+        }),
+      },
+    });
+    await page.goto(`${site.origin}/history`);
+    const today = page.getByRole("region", { name: "Today" });
+    // One list, newest first: my session, the ticket, then Ada's session.
+    await expect(today.getByRole("button", { name: /Fix the login page/ })).toBeVisible();
+    const titles = await today
+      .getByRole("button", { name: /Fix the login page|Export to CSV|Release notes/ })
+      .allTextContents();
+    expect(titles.map((t) => t.replace(/^(Session|#9)/, "").trim())).toEqual([
+      "Fix the login page",
+      "Export to CSV",
+      "Release notes",
+    ]);
+    await expect(today.getByText("Flux fixed the login page and added a test.")).toBeVisible();
+    await expect(today.getByText(/started by ada/)).toBeVisible();
+    await expect(today.getByText("No summary yet")).toBeVisible();
+    await page.screenshot({ path: `${REPO}/target/session-history/history.png` });
+
+    // Ada's session has no summary yet: Summarize asks for it.
+    await today.getByRole("button", { name: "Summarize" }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "work_session.retry_summary")?.params)
+      .toMatchObject({ conversation_id: "s2" });
+
+    // Only sessions; the filter is in the URL.
+    await page.getByRole("radio", { name: "Sessions" }).click();
+    await expect(page).toHaveURL(/type=sessions/);
+    await expect(page.getByRole("button", { name: /Export to CSV/ })).toHaveCount(0);
+
+    // Ada's session opens to read, not to write.
+    await page.getByRole("button", { name: /Release notes/ }).click();
+    await expect(page).toHaveURL(/\/session\/s2$/);
+    await expect(page.getByText("Write the release notes.")).toBeVisible();
+    await expect(page.getByText(/Another board member started this session/)).toBeVisible();
+    await expect(page.getByLabel("Message Flux")).toHaveCount(0);
+    await page.screenshot({ path: `${REPO}/target/session-history/others-session.png` });
+  });
+
   test("a board with a thousand tickets opens and filters quickly", async ({ page }) => {
     const many = Array.from({ length: 1000 }, (_, i) =>
       ticket(`x${i}`, i + 1, i % 2 ? "backlog" : "todo", {

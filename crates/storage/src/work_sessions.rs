@@ -3,8 +3,10 @@
 //! `aurelius_application::conversation::work_session`.
 
 use crate::{StorageError, now_ms};
+use aurelius_domain::history::{self, HistorySummaryState, SessionHistoryEntry};
 use aurelius_domain::work_session::{SessionDispatch, WorkSessionView};
 use aurelius_domain::{ConversationId, EmployeeId, ProjectId, RunId, UserId};
+use rusqlite::types::ToSql;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 /// Where a session works besides the project: its own worktree and branch, if any.
@@ -165,6 +167,172 @@ pub fn end_unfinished_dispatch_runs(tx: &Transaction<'_>, conversation: Conversa
         params![conversation.to_string(), now_ms()],
     )?;
     Ok(())
+}
+
+/// A summary of the session is asked for (`migrations/0046`); a summary already
+/// there stays until the new one replaces it.
+pub fn mark_summary_pending(tx: &Transaction<'_>, conversation: ConversationId) -> Result<(), StorageError> {
+    tx.execute(
+        "UPDATE work_sessions SET summary_state = ?2 WHERE conversation_id = ?1 AND summary_text IS NULL",
+        params![conversation.to_string(), history::stored::PENDING],
+    )?;
+    Ok(())
+}
+
+/// The session's summary, already through the vault redactor and
+/// `history::history_summary`; `through_ms`: the newest message it covers.
+pub fn set_summary(tx: &Transaction<'_>, conversation: ConversationId, text: &str, through_ms: i64) -> Result<bool, StorageError> {
+    let changed = tx.execute(
+        "UPDATE work_sessions SET summary_state = ?2, summary_text = ?3, summary_through_ms = ?4 WHERE conversation_id = ?1",
+        params![conversation.to_string(), history::stored::READY, text, through_ms],
+    )?;
+    Ok(changed > 0)
+}
+
+/// The summary failed or gave nothing. An older summary stays as it is. Whether it changed.
+pub fn set_summary_failed(tx: &Transaction<'_>, conversation: ConversationId) -> Result<bool, StorageError> {
+    let changed = tx.execute(
+        "UPDATE work_sessions SET summary_state = ?2 WHERE conversation_id = ?1 AND summary_text IS NULL",
+        params![conversation.to_string(), history::stored::FAILED],
+    )?;
+    Ok(changed > 0)
+}
+
+/// What a session's summary goes on: the summary so far and the moment it covers.
+pub fn summary_so_far(conn: &Connection, conversation: ConversationId) -> Result<(Option<String>, Option<i64>), StorageError> {
+    Ok(conn
+        .query_row("SELECT summary_text, summary_through_ms FROM work_sessions WHERE conversation_id = ?1", [conversation.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?
+        .unwrap_or((None, None)))
+}
+
+/// What `work_session.history` narrows on; every given one applies.
+#[derive(Debug, Clone, Default)]
+pub struct HistoryFilter {
+    pub project: Option<ProjectId>,
+    /// The employee who works in it.
+    pub employee: Option<EmployeeId>,
+    /// Last active at or after this moment.
+    pub from_ms: Option<i64>,
+    /// Last active before this moment.
+    pub to_ms: Option<i64>,
+    /// In the title or the summary, case-insensitive.
+    pub query: Option<String>,
+    /// Keyset: only rows after this one (`last_activity_ms`, conversation id) in the order of the read.
+    pub before: Option<(i64, ConversationId)>,
+}
+
+/// Every board member's sessions that were not deleted, the latest activity
+/// first (then the higher id), at most `limit`, and whether there are more.
+/// `job_kind`: the summary job's kind, whose ready or leased job for a session
+/// makes its row "summarizing". The text comes as stored; the daemon redacts it.
+pub fn history(conn: &Connection, filter: &HistoryFilter, limit: u32, job_kind: &str) -> Result<(Vec<SessionHistoryEntry>, bool), StorageError> {
+    let mut clauses = vec!["c.kind = 'session'".to_owned(), "c.archived_at_ms IS NULL".to_owned()];
+    let mut values: Vec<Box<dyn ToSql>> = vec![Box::new(job_kind.to_owned())];
+    let mut add = |clause: &dyn Fn(usize) -> String, value: Box<dyn ToSql>| {
+        values.push(value);
+        clauses.push(clause(values.len()));
+    };
+    if let Some(project) = filter.project {
+        add(&|n| format!("c.project_id = ?{n}"), Box::new(project.to_string()));
+    }
+    if let Some(employee) = filter.employee {
+        add(&|n| format!("c.employee_id = ?{n}"), Box::new(employee.to_string()));
+    }
+    if let Some(from) = filter.from_ms {
+        add(&|n| format!("x.last >= ?{n}"), Box::new(from));
+    }
+    if let Some(to) = filter.to_ms {
+        add(&|n| format!("x.last < ?{n}"), Box::new(to));
+    }
+    // Folded like SQLite's lower() (ASCII only), as the ticket History does.
+    let needle = filter.query.as_deref().map(str::trim).filter(|q| !q.is_empty()).map(|q| q.chars().take(history::HISTORY_QUERY_MAX_CHARS).collect::<String>().to_ascii_lowercase());
+    if let Some(needle) = needle {
+        add(&|n| format!("(instr(lower(c.title), ?{n}) > 0 OR instr(lower(COALESCE(s.summary_text, '')), ?{n}) > 0)"), Box::new(needle));
+    }
+    if let Some((last, id)) = filter.before {
+        values.push(Box::new(last));
+        let l = values.len();
+        values.push(Box::new(id.to_string()));
+        let i = values.len();
+        clauses.push(format!("(x.last < ?{l} OR (x.last = ?{l} AND c.id < ?{i}))"));
+    }
+    let sql = format!(
+        "SELECT c.id, c.title, p.id, p.name, e.id, e.name, s.started_by, u.username, s.branch, s.created_at_ms, x.last, s.summary_text, s.summary_state,
+                EXISTS(SELECT 1 FROM jobs j WHERE j.kind = ?1 AND j.state IN ('ready','leased') AND json_extract(j.payload_json, '$.conversation_id') = c.id)
+         FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
+         JOIN (SELECT ws.conversation_id AS id, COALESCE((SELECT MAX(m.created_at_ms) FROM messages m WHERE m.conversation_id = ws.conversation_id), ws.created_at_ms) AS last
+               FROM work_sessions ws) x ON x.id = c.id
+         JOIN projects p ON p.id = c.project_id JOIN employees e ON e.id = c.employee_id
+         LEFT JOIN users u ON u.id = s.started_by
+         WHERE {} ORDER BY x.last DESC, c.id DESC LIMIT {}",
+        clauses.join(" AND "),
+        limit + 1
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(values.iter().map(|v| v.as_ref())), |r| {
+        Ok(HistoryRow {
+            id: r.get(0)?,
+            title: r.get(1)?,
+            project: r.get(2)?,
+            project_name: r.get(3)?,
+            employee: r.get(4)?,
+            employee_name: r.get(5)?,
+            started_by: r.get(6)?,
+            started_by_name: r.get(7)?,
+            branch: r.get(8)?,
+            created_at_ms: r.get(9)?,
+            last_activity_ms: r.get(10)?,
+            summary: r.get(11)?,
+            state: r.get(12)?,
+            pending: r.get(13)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let row = row?;
+        let (Ok(conversation_id), Ok(project_id), Ok(employee_id), Ok(started_by)) =
+            (ConversationId::parse(&row.id), ProjectId::parse(&row.project), EmployeeId::parse(&row.employee), UserId::parse(&row.started_by))
+        else {
+            continue;
+        };
+        out.push(SessionHistoryEntry {
+            conversation_id,
+            title: row.title,
+            project_id,
+            project_name: row.project_name,
+            employee_id,
+            employee_name: row.employee_name,
+            started_by,
+            started_by_name: row.started_by_name,
+            branch: row.branch,
+            created_at_ms: row.created_at_ms,
+            last_activity_ms: row.last_activity_ms,
+            summary_state: HistorySummaryState::of(row.summary.is_some(), row.pending, row.state.as_deref()),
+            summary: row.summary,
+        });
+    }
+    let more = out.len() > limit as usize;
+    out.truncate(limit as usize);
+    Ok((out, more))
+}
+
+/// One row of `history` as SQLite gives it.
+struct HistoryRow {
+    id: String,
+    title: String,
+    project: String,
+    project_name: String,
+    employee: String,
+    employee_name: String,
+    started_by: String,
+    started_by_name: Option<String>,
+    branch: Option<String>,
+    created_at_ms: i64,
+    last_activity_ms: i64,
+    summary: Option<String>,
+    state: Option<String>,
+    pending: bool,
 }
 
 fn bad(e: impl std::fmt::Display) -> StorageError {

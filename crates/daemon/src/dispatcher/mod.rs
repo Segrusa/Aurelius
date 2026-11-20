@@ -127,6 +127,9 @@ pub async fn run(shared: Arc<Shared>) {
             Ok(Ok(Some(job))) if job.kind == aurelius_application::memory::SUMMARY_JOB_KIND => {
                 tokio::spawn(crate::memory::run_summary(shared.clone(), job));
             }
+            Ok(Ok(Some(job))) if job.kind == aurelius_application::conversation::session_history::SESSION_SUMMARY_JOB_KIND => {
+                tokio::spawn(crate::memory::run_session_summary(shared.clone(), job));
+            }
             Ok(Ok(Some(job))) if job.kind == aurelius_application::memory::CONSOLIDATE_JOB_KIND => {
                 tokio::spawn(crate::memory::run_consolidation(shared.clone(), job));
             }

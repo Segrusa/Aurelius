@@ -545,9 +545,19 @@ abstract final class Methods {
   static const String vaultUpdate = 'vault.update';
   static const String workSessionAssign = 'work_session.assign';
   static const String workSessionDispatch = 'work_session.dispatch';
+  /// Work sessions in the History (feature `session_history`): every board member's
+  /// sessions that were not deleted, the latest activity first, each with the summary
+  /// of what was done in it. Every given filter applies: `employee_id` is the employee
+  /// who works in it, `from_ms`/`to_ms` the period of its last activity (`to_ms`
+  /// excluded), `query` looks in the title and the summary. Keyset paging: the next
+  /// page passes the last row's `last_activity_ms` and `conversation_id` as
+  /// `before_last_activity_ms`/`before_conversation_id`. `limit`: at most 100, default
+  /// 50. The same rights as `ticket.history`.
+  static const String workSessionHistory = 'work_session.history';
   /// The reader's work sessions, the latest activity first (feature `work_sessions`);
   /// `project_id`: only those of that project.
   static const String workSessionList = 'work_session.list';
+  static const String workSessionRetrySummary = 'work_session.retry_summary';
   static const String workSessionStart = 'work_session.start';
 }
 
@@ -1307,6 +1317,28 @@ Map<String, dynamic> vaultReveal({required String itemId, required RevealPurpose
   'params': <String, dynamic>{
     'item_id': itemId,
     'purpose': purpose.toJson(),
+  },
+};
+
+/// Work sessions in the History (feature `session_history`): every board member's
+/// sessions that were not deleted, the latest activity first, each with the summary
+/// of what was done in it. Every given filter applies: `employee_id` is the employee
+/// who works in it, `from_ms`/`to_ms` the period of its last activity (`to_ms`
+/// excluded), `query` looks in the title and the summary. Keyset paging: the next
+/// page passes the last row's `last_activity_ms` and `conversation_id` as
+/// `before_last_activity_ms`/`before_conversation_id`. `limit`: at most 100, default
+/// 50. The same rights as `ticket.history`.
+Map<String, dynamic> workSessionHistory({String? beforeConversationId, int? beforeLastActivityMs, String? employeeId, int? fromMs, int? limit, String? projectId, String? query, int? toMs}) => <String, dynamic>{
+  'method': Methods.workSessionHistory,
+  'params': <String, dynamic>{
+    if (beforeConversationId != null) 'before_conversation_id': beforeConversationId,
+    if (beforeLastActivityMs != null) 'before_last_activity_ms': beforeLastActivityMs,
+    if (employeeId != null) 'employee_id': employeeId,
+    if (fromMs != null) 'from_ms': fromMs,
+    if (limit != null) 'limit': limit,
+    if (projectId != null) 'project_id': projectId,
+    if (query != null) 'query': query,
+    if (toMs != null) 'to_ms': toMs,
   },
 };
 
@@ -2301,6 +2333,11 @@ Map<String, dynamic> workSessionAssign(AssignWorkSession params) => <String, dyn
 
 Map<String, dynamic> workSessionDispatch(DispatchWorkSession params) => <String, dynamic>{
   'method': Methods.workSessionDispatch,
+  'params': params.toJson(),
+};
+
+Map<String, dynamic> workSessionRetrySummary(RetrySessionSummary params) => <String, dynamic>{
+  'method': Methods.workSessionRetrySummary,
   'params': params.toJson(),
 };
 

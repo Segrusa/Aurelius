@@ -3,7 +3,7 @@
 //! Done for the project's memory (MU1-18); it is kept on the ticket too
 //! (`tickets.summary_text`), so the History needs no second model call.
 
-use crate::{EmployeeId, ProjectId, TicketId};
+use crate::{ConversationId, EmployeeId, ProjectId, TicketId, UserId};
 use serde::{Deserialize, Serialize};
 
 /// A ticket's summary on the ticket is cut here (the memory's is cut at the same length).
@@ -84,6 +84,53 @@ pub struct HistoryPage {
     pub as_of_seq: u64,
     pub entries: Vec<HistoryEntry>,
     /// There are older rows: ask again with the last row's `done_at_ms` and `number`.
+    #[serde(default)]
+    pub has_more: bool,
+}
+
+/// A session's summary is made once it has been quiet this long after an answer
+/// (feature `session_history`): one model call per stretch of work, not per answer.
+pub const SESSION_SUMMARY_QUIET_MS: i64 = 10 * 60_000;
+/// How much of a session's new messages one summary reads (the newest win).
+pub const SESSION_SUMMARY_INPUT_MAX_CHARS: usize = 24_000;
+/// One message in a session summary's input is cut here.
+pub const SESSION_SUMMARY_MESSAGE_MAX_CHARS: usize = 4_000;
+
+/// One work session in the History (feature `session_history`): on the day of its
+/// last activity, with a summary of what was done in it. Every board member's
+/// session is in it; only the one who started it writes in it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionHistoryEntry {
+    pub conversation_id: ConversationId,
+    pub title: String,
+    pub project_id: ProjectId,
+    pub project_name: String,
+    pub employee_id: EmployeeId,
+    pub employee_name: String,
+    /// The board member who started it (the only one who writes in it).
+    pub started_by: UserId,
+    /// Their name; none when the user is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by_name: Option<String>,
+    /// The session's own branch, when it works in a worktree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub created_at_ms: i64,
+    /// The newest message (else its start): the day it shows on.
+    pub last_activity_ms: i64,
+    /// What was done in it (through the vault redactor), when `summary_state` is `ready`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// `before_history` here: no summary was asked for yet ("No summary yet").
+    pub summary_state: HistorySummaryState,
+}
+
+/// `work_session.history`: sessions, the latest activity first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionHistoryPage {
+    pub as_of_seq: u64,
+    pub entries: Vec<SessionHistoryEntry>,
+    /// There are older rows: ask again with the last row's `last_activity_ms` and `conversation_id`.
     #[serde(default)]
     pub has_more: bool,
 }

@@ -1598,6 +1598,8 @@ sealed class Command {
         );
       case 'retry_reply':
         return CommandRetryReply(value: RetryReply.fromJson(json as Map<String, dynamic>));
+      case 'retry_session_summary':
+        return CommandRetrySessionSummary(value: RetrySessionSummary.fromJson(json as Map<String, dynamic>));
       case 'retry_ticket_summary':
         return CommandRetryTicketSummary(
           ticketId: (json['ticket_id'] as String),
@@ -2603,6 +2605,20 @@ final class CommandRetryReply extends Command {
     };
 }
 
+final class CommandRetrySessionSummary extends Command {
+  const CommandRetrySessionSummary({
+    required this.value,
+  });
+
+  final RetrySessionSummary value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'retry_session_summary',
+      ...value.toJson(),
+    };
+}
+
 /// Try the summary of a ticket on Done again after it failed (`SystemLineKind::SummaryFailed`).
 /// Only a board member; refused when the summary is already there or still being made.
 final class CommandRetryTicketSummary extends Command {
@@ -3568,6 +3584,10 @@ sealed class CommandResult {
         return CommandResultServerNameSet(
           name: (json['name'] as String),
           version: (json['version'] as num).toInt(),
+        );
+      case 'session_summary_asked':
+        return CommandResultSessionSummaryAsked(
+          conversationId: (json['conversation_id'] as String),
         );
       case 'starter_guidelines_added':
         return CommandResultStarterGuidelinesAdded(
@@ -4536,6 +4556,21 @@ final class CommandResultServerNameSet extends CommandResult {
       'type': 'server_name_set',
       'name': name,
       'version': version,
+    };
+}
+
+/// A work session's summary for the History was asked for (`work_session.retry_summary`).
+final class CommandResultSessionSummaryAsked extends CommandResult {
+  const CommandResultSessionSummaryAsked({
+    required this.conversationId,
+  });
+
+  final String conversationId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'session_summary_asked',
+      'conversation_id': conversationId,
     };
 }
 
@@ -11067,6 +11102,20 @@ sealed class Method {
           purpose: RevealPurpose.fromJson(src['purpose'] as String),
         );
         }
+      case 'work_session.history':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodWorkSessionHistory(
+          beforeConversationId: (src['before_conversation_id'] == null ? null : (src['before_conversation_id'] as String)),
+          beforeLastActivityMs: (src['before_last_activity_ms'] == null ? null : (src['before_last_activity_ms'] as num).toInt()),
+          employeeId: (src['employee_id'] == null ? null : (src['employee_id'] as String)),
+          fromMs: (src['from_ms'] == null ? null : (src['from_ms'] as num).toInt()),
+          limit: (src['limit'] == null ? null : (src['limit'] as num).toInt()),
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+          query: (src['query'] == null ? null : (src['query'] as String)),
+          toMs: (src['to_ms'] == null ? null : (src['to_ms'] as num).toInt()),
+        );
+        }
       case 'work_session.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -12628,6 +12677,51 @@ final class MethodVaultReveal extends Method {
     };
 }
 
+/// Work sessions in the History (feature `session_history`): every board member's
+/// sessions that were not deleted, the latest activity first, each with the summary
+/// of what was done in it. Every given filter applies: `employee_id` is the employee
+/// who works in it, `from_ms`/`to_ms` the period of its last activity (`to_ms`
+/// excluded), `query` looks in the title and the summary. Keyset paging: the next
+/// page passes the last row's `last_activity_ms` and `conversation_id` as
+/// `before_last_activity_ms`/`before_conversation_id`. `limit`: at most 100, default
+/// 50. The same rights as `ticket.history`.
+final class MethodWorkSessionHistory extends Method {
+  const MethodWorkSessionHistory({
+    this.beforeConversationId,
+    this.beforeLastActivityMs,
+    this.employeeId,
+    this.fromMs,
+    this.limit,
+    this.projectId,
+    this.query,
+    this.toMs,
+  });
+
+  final String? beforeConversationId;
+  final int? beforeLastActivityMs;
+  final String? employeeId;
+  final int? fromMs;
+  final int? limit;
+  final String? projectId;
+  final String? query;
+  final int? toMs;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'work_session.history',
+      'params': <String, dynamic>{
+      if (beforeConversationId != null) 'before_conversation_id': beforeConversationId,
+      if (beforeLastActivityMs != null) 'before_last_activity_ms': beforeLastActivityMs,
+      if (employeeId != null) 'employee_id': employeeId,
+      if (fromMs != null) 'from_ms': fromMs,
+      if (limit != null) 'limit': limit,
+      if (projectId != null) 'project_id': projectId,
+      if (query != null) 'query': query,
+      if (toMs != null) 'to_ms': toMs,
+    },
+    };
+}
+
 /// The reader's work sessions, the latest activity first (feature `work_sessions`);
 /// `project_id`: only those of that project.
 final class MethodWorkSessionList extends Method {
@@ -14036,6 +14130,8 @@ sealed class ResponseBody {
         }
       case 'server_name':
         return ResponseBodyServerName(value: ServerNameView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'session_history':
+        return ResponseBodySessionHistory(value: SessionHistoryPage.fromJson(json['value'] as Map<String, dynamic>));
       case 'sessions':
         return ResponseBodySessions(value: SessionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'starter_set':
@@ -15053,6 +15149,21 @@ final class ResponseBodyServerName extends ResponseBody {
     };
 }
 
+/// `work_session.history`.
+final class ResponseBodySessionHistory extends ResponseBody {
+  const ResponseBodySessionHistory({
+    required this.value,
+  });
+
+  final SessionHistoryPage value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'session_history',
+      'value': value.toJson(),
+    };
+}
+
 final class ResponseBodySessions extends ResponseBody {
   const ResponseBodySessions({
     required this.value,
@@ -15470,6 +15581,25 @@ final class RetryReply {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'conversation_id': conversationId,
     'user_message_id': userMessageId,
+  };
+}
+
+/// A board member asks for a session's summary in the History now (feature
+/// `session_history`): after it failed, for a session without one, or to bring
+/// it up to date. Any board member may, as the History shows every session.
+final class RetrySessionSummary {
+  const RetrySessionSummary({
+    required this.conversationId,
+  });
+
+  final String conversationId;
+
+  factory RetrySessionSummary.fromJson(Map<String, dynamic> json) => RetrySessionSummary(
+    conversationId: (json['conversation_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'conversation_id': conversationId,
   };
 }
 
@@ -16417,6 +16547,105 @@ enum SessionDispatch {
       );
 
   String toJson() => wire;
+}
+
+/// One work session in the History (feature `session_history`): on the day of its
+/// last activity, with a summary of what was done in it. Every board member's
+/// session is in it; only the one who started it writes in it.
+final class SessionHistoryEntry {
+  const SessionHistoryEntry({
+    this.branch,
+    required this.conversationId,
+    required this.createdAtMs,
+    required this.employeeId,
+    required this.employeeName,
+    required this.lastActivityMs,
+    required this.projectId,
+    required this.projectName,
+    required this.startedBy,
+    this.startedByName,
+    this.summary,
+    required this.summaryState,
+    required this.title,
+  });
+
+  /// The session's own branch, when it works in a worktree.
+  final String? branch;
+  final String conversationId;
+  final int createdAtMs;
+  final String employeeId;
+  final String employeeName;
+  /// The newest message (else its start): the day it shows on.
+  final int lastActivityMs;
+  final String projectId;
+  final String projectName;
+  /// The board member who started it (the only one who writes in it).
+  final String startedBy;
+  /// Their name; none when the user is gone.
+  final String? startedByName;
+  /// What was done in it (through the vault redactor), when `summary_state` is `ready`.
+  final String? summary;
+  /// `before_history` here: no summary was asked for yet ("No summary yet").
+  final HistorySummaryState summaryState;
+  final String title;
+
+  factory SessionHistoryEntry.fromJson(Map<String, dynamic> json) => SessionHistoryEntry(
+    branch: (json['branch'] == null ? null : (json['branch'] as String)),
+    conversationId: (json['conversation_id'] as String),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    employeeId: (json['employee_id'] as String),
+    employeeName: (json['employee_name'] as String),
+    lastActivityMs: (json['last_activity_ms'] as num).toInt(),
+    projectId: (json['project_id'] as String),
+    projectName: (json['project_name'] as String),
+    startedBy: (json['started_by'] as String),
+    startedByName: (json['started_by_name'] == null ? null : (json['started_by_name'] as String)),
+    summary: (json['summary'] == null ? null : (json['summary'] as String)),
+    summaryState: HistorySummaryState.fromJson(json['summary_state'] as String),
+    title: (json['title'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (branch != null) 'branch': branch,
+    'conversation_id': conversationId,
+    'created_at_ms': createdAtMs,
+    'employee_id': employeeId,
+    'employee_name': employeeName,
+    'last_activity_ms': lastActivityMs,
+    'project_id': projectId,
+    'project_name': projectName,
+    'started_by': startedBy,
+    if (startedByName != null) 'started_by_name': startedByName,
+    if (summary != null) 'summary': summary,
+    'summary_state': summaryState.toJson(),
+    'title': title,
+  };
+}
+
+/// `work_session.history`: sessions, the latest activity first.
+final class SessionHistoryPage {
+  const SessionHistoryPage({
+    required this.asOfSeq,
+    required this.entries,
+    this.hasMore = false,
+  });
+
+  final int asOfSeq;
+  final List<SessionHistoryEntry> entries;
+  /// There are older rows: ask again with the last row's `last_activity_ms` and `conversation_id`.
+  final bool hasMore;
+
+  factory SessionHistoryPage.fromJson(Map<String, dynamic> json) => SessionHistoryPage(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    entries: (json['entries'] as List<dynamic>).map((x0) => SessionHistoryEntry.fromJson(x0 as Map<String, dynamic>)).toList(),
+    hasMore: (json['has_more'] == null ? false : (json['has_more'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'entries': entries.map((x0) => x0.toJson()).toList(),
+    'has_more': hasMore,
+  };
 }
 
 /// One signed-in device of a board member (`session.list`).

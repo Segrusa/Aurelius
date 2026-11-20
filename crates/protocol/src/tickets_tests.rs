@@ -215,3 +215,23 @@ fn the_history_is_additive_a_bare_read_has_no_params_and_the_server_says_it_has_
     let state = serde_json::to_value(aurelius_domain::history::HistorySummaryState::BeforeHistory).unwrap();
     assert_eq!(state, "before_history");
 }
+
+#[test]
+fn the_session_history_is_additive_and_has_the_ticket_historys_rights() {
+    let bare: Method = crate::rpc::from_method_value(serde_json::json!({ "method": "work_session.history" })).unwrap();
+    assert_eq!(
+        bare,
+        Method::WorkSessionHistory { project_id: None, employee_id: None, from_ms: None, to_ms: None, query: None, before_last_activity_ms: None, before_conversation_id: None, limit: None }
+    );
+    assert_eq!(serde_json::to_value(&bare).unwrap(), serde_json::json!({ "method": "work_session.history", "params": {} }));
+    assert!(crate::rpc::FEATURES.contains(&crate::rpc::feature::SESSION_HISTORY));
+    assert_eq!(required(&Call::Read(bare)), required(&Call::Read(history())));
+
+    let retry = Command::RetrySessionSummary(aurelius_domain::work_session::RetrySessionSummary { conversation_id: aurelius_domain::ConversationId::new() });
+    let request = Request::write(1, CommandId::new(), WriteMethod::Domain(retry.clone()));
+    let json = serde_json::to_value(&request).unwrap();
+    assert_eq!(json["method"], "work_session.retry_summary");
+    assert_eq!(serde_json::from_value::<Request>(json).unwrap(), request);
+    let ticket_retry = Command::RetryTicketSummary(RetryTicketSummary { ticket_id: TicketId::new() });
+    assert_eq!(required(&Call::Write(WriteMethod::Domain(retry))), required(&Call::Write(WriteMethod::Domain(ticket_retry))));
+}

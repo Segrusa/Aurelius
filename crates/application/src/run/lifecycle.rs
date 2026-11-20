@@ -634,6 +634,8 @@ pub(crate) fn commit_end(tx: &aurelius_storage::Tx<'_>, store: &aurelius_storage
     }
     if end.outcome == RunOutcome::Completed {
         crate::memory::maybe_schedule_summary(tx, conversation_id, message_event_id, run_id)?;
+        // A work session's summary for the History, once it has gone quiet.
+        crate::conversation::session_history::schedule_session_summary(tx, conversation_id, message_event_id, run_id)?;
     }
     // Woken by the group chat: the answer goes there too, under the employee's name.
     let group_failure = match &end.outcome {

@@ -192,10 +192,33 @@ pub fn insert_job(
     dedupe_key: &str,
     payload: &serde_json::Value,
 ) -> Result<(), StorageError> {
+    insert_job_at(tx, job_id, kind, source_event_id, dedupe_key, payload, now_ms())
+}
+
+/// `insert_job`, but the job is not taken before `not_before_ms`.
+pub fn insert_job_at(
+    tx: &Transaction<'_>,
+    job_id: &str,
+    kind: &str,
+    source_event_id: EventId,
+    dedupe_key: &str,
+    payload: &serde_json::Value,
+    not_before_ms: i64,
+) -> Result<(), StorageError> {
     tx.execute(
         "INSERT INTO jobs(id, kind, subject_id, source_event_id, dedupe_key, payload_json, state, not_before_ms)
          VALUES (?1, ?2, ?1, ?3, ?4, ?5, 'ready', ?6)",
-        params![job_id, kind, source_event_id.to_string(), dedupe_key, serde_json::to_string(payload)?, now_ms()],
+        params![job_id, kind, source_event_id.to_string(), dedupe_key, serde_json::to_string(payload)?, not_before_ms],
     )?;
     Ok(())
+}
+
+/// Move a job of `kind` whose payload has `field` = `value` and that nobody took yet
+/// to `not_before_ms` (a debounce). Whether there was one.
+pub fn postpone_ready_job(tx: &Transaction<'_>, kind: &str, field: &str, value: &str, not_before_ms: i64) -> Result<bool, StorageError> {
+    let changed = tx.execute(
+        "UPDATE jobs SET not_before_ms = ?4 WHERE kind = ?1 AND state = 'ready' AND json_extract(payload_json, '$.' || ?2) = ?3",
+        params![kind, field, value, not_before_ms],
+    )?;
+    Ok(changed > 0)
 }

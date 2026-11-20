@@ -195,6 +195,33 @@ pub enum Method {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         limit: Option<u32>,
     },
+    /// Work sessions in the History (feature `session_history`): every board member's
+    /// sessions that were not deleted, the latest activity first, each with the summary
+    /// of what was done in it. Every given filter applies: `employee_id` is the employee
+    /// who works in it, `from_ms`/`to_ms` the period of its last activity (`to_ms`
+    /// excluded), `query` looks in the title and the summary. Keyset paging: the next
+    /// page passes the last row's `last_activity_ms` and `conversation_id` as
+    /// `before_last_activity_ms`/`before_conversation_id`. `limit`: at most 100, default
+    /// 50. The same rights as `ticket.history`.
+    #[serde(rename = "work_session.history")]
+    WorkSessionHistory {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<ProjectId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        employee_id: Option<EmployeeId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from_ms: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to_ms: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before_last_activity_ms: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before_conversation_id: Option<aurelius_domain::ConversationId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+    },
     /// Who follows a ticket (feature `ticket_follow`). Not for apps.
     #[serde(rename = "ticket.followers")]
     TicketFollowers { ticket_id: aurelius_domain::TicketId },

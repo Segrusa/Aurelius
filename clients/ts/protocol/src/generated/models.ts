@@ -884,6 +884,7 @@ export type Command =
    */
   | ({ type: "restore_guideline_version"; guideline_id: string; version: number })
   | ({ type: "retry_reply" } & RetryReply)
+  | ({ type: "retry_session_summary" } & RetrySessionSummary)
   /**
    * Try the summary of a ticket on Done again after it failed (`SystemLineKind::SummaryFailed`).
    * Only a board member; refused when the summary is already there or still being made.
@@ -1083,6 +1084,10 @@ export type CommandResult =
    * when the name was the same).
    */
   | ({ type: "server_name_set"; name: string; version: number })
+  /**
+   * A work session's summary for the History was asked for (`work_session.retry_summary`).
+   */
+  | ({ type: "session_summary_asked"; conversation_id: string })
   /**
    * `guideline.add_starter_set`: the guidelines made (keys already in the library are skipped).
    */
@@ -3967,6 +3972,17 @@ export type Method =
    */
   | ({ method: "vault.reveal"; params: { item_id: string; purpose: RevealPurpose } })
   /**
+   * Work sessions in the History (feature `session_history`): every board member's
+   * sessions that were not deleted, the latest activity first, each with the summary
+   * of what was done in it. Every given filter applies: `employee_id` is the employee
+   * who works in it, `from_ms`/`to_ms` the period of its last activity (`to_ms`
+   * excluded), `query` looks in the title and the summary. Keyset paging: the next
+   * page passes the last row's `last_activity_ms` and `conversation_id` as
+   * `before_last_activity_ms`/`before_conversation_id`. `limit`: at most 100, default
+   * 50. The same rights as `ticket.history`.
+   */
+  | ({ method: "work_session.history"; params: { before_conversation_id?: string | null; before_last_activity_ms?: number | null; employee_id?: string | null; from_ms?: number | null; limit?: number | null; project_id?: string | null; query?: string | null; to_ms?: number | null } })
+  /**
    * The reader's work sessions, the latest activity first (feature `work_sessions`);
    * `project_id`: only those of that project.
    */
@@ -4633,6 +4649,10 @@ export type ResponseBody =
    * `server.get_name`.
    */
   | ({ type: "server_name"; value: ServerNameView })
+  /**
+   * `work_session.history`.
+   */
+  | ({ type: "session_history"; value: SessionHistoryPage })
   | ({ type: "sessions"; value: SessionsSnapshot })
   /**
    * `guideline.starter_set`.
@@ -4707,6 +4727,15 @@ export interface RestoreEmployeeInstructions {
 export interface RetryReply {
   conversation_id: string;
   user_message_id: string;
+}
+
+/**
+ * A board member asks for a session's summary in the History now (feature
+ * `session_history`): after it failed, for a session without one, or to bring
+ * it up to date. Any board member may, as the History shows every session.
+ */
+export interface RetrySessionSummary {
+  conversation_id: string;
 }
 
 /**
@@ -5173,6 +5202,57 @@ export type SessionDispatch =
    */
   | "nobody"
 ;
+
+/**
+ * One work session in the History (feature `session_history`): on the day of its
+ * last activity, with a summary of what was done in it. Every board member's
+ * session is in it; only the one who started it writes in it.
+ */
+export interface SessionHistoryEntry {
+  /**
+   * The session's own branch, when it works in a worktree.
+   */
+  branch?: string | null;
+  conversation_id: string;
+  created_at_ms: number;
+  employee_id: string;
+  employee_name: string;
+  /**
+   * The newest message (else its start): the day it shows on.
+   */
+  last_activity_ms: number;
+  project_id: string;
+  project_name: string;
+  /**
+   * The board member who started it (the only one who writes in it).
+   */
+  started_by: string;
+  /**
+   * Their name; none when the user is gone.
+   */
+  started_by_name?: string | null;
+  /**
+   * What was done in it (through the vault redactor), when `summary_state` is `ready`.
+   */
+  summary?: string | null;
+  /**
+   * `before_history` here: no summary was asked for yet ("No summary yet").
+   */
+  summary_state: HistorySummaryState;
+  title: string;
+}
+
+/**
+ * `work_session.history`: sessions, the latest activity first.
+ */
+export interface SessionHistoryPage {
+  as_of_seq: number;
+  entries: SessionHistoryEntry[];
+  /**
+   * There are older rows: ask again with the last row's `last_activity_ms` and `conversation_id`.
+   */
+  has_more?: boolean;
+}
 
 /**
  * One signed-in device of a board member (`session.list`).
