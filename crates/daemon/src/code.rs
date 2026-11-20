@@ -409,6 +409,10 @@ fn merge(repo: &Path, state: &RepoState, branch: &str, busy: &Busy) -> Result<()
     if branch == state.main {
         return Err(invalid(format!("{branch} is the main branch; there is nothing to merge into it from itself.")));
     }
+    // The client hides Merge for a working branch, but its view can be seconds old.
+    if busy.branch(branch) {
+        return Err(invalid(format!("An employee works on {branch} now; wait until they are done.")));
+    }
     let message = match busy.links.get(branch).and_then(|l| l.ticket.as_ref()) {
         Some(ticket) => format!("Merge {branch} (ticket #{})", ticket.number),
         None => format!("Merge {branch}"),

@@ -5,11 +5,16 @@ mod common;
 
 use aurelius_client::{Client, envelope};
 use aurelius_domain::code::CodeView;
+use aurelius_domain::employee::CreateEmployee;
+use aurelius_domain::ticket::CreateTicket;
 use aurelius_domain::{Command, ErrorCode, ProjectId, project::CreateProject};
 use aurelius_protocol::{CommandResult, HostResult, HostWrite, Method, ProtocolError, ResponseBody, WriteMethod, WriteResult};
+use aurelius_runtime::{AgentRuntime, RunHandle, RunRequest, RuntimeCapabilities, RuntimeError, RuntimeEvent, fake};
 use common::*;
 use std::path::Path;
 use std::process::Command as Process;
+use std::sync::Arc;
+use std::time::Duration;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Process::new("git").args(args).current_dir(dir).env_remove("GIT_DIR").env_remove("GIT_WORK_TREE").env_remove("GIT_INDEX_FILE").output().unwrap();
@@ -182,5 +187,129 @@ async fn the_code_tab_reads_a_repository_and_changes_it_only_as_asked() {
     assert_eq!(view.branches.len(), 1);
     assert_eq!(git(&repo, &["rev-parse", "main"]), git(&repo, &["rev-parse", "HEAD"]), "main is checked out as it was");
 
+    stop(dir.path(), daemon).await;
+}
+
+/// The fake runtime, holding a run live while its request says HOLD-MAIN until the gate opens.
+struct Held {
+    gate: tokio::sync::watch::Sender<bool>,
+}
+
+#[async_trait::async_trait]
+impl AgentRuntime for Held {
+    async fn probe(&self) -> RuntimeCapabilities {
+        fake::FakeRuntime::default().probe().await
+    }
+    async fn start(&self, request: RunRequest) -> Result<RunHandle, RuntimeError> {
+        let mut gate = self.gate.subscribe();
+        if !request.turns.iter().any(|t| t.text.contains("HOLD-MAIN")) || *gate.borrow() {
+            return fake::FakeRuntime { delay: Duration::from_millis(1), ..Default::default() }.start(request).await;
+        }
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+        let (input_tx, _input_rx) = tokio::sync::mpsc::channel(8);
+        let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(async move {
+            let _ = tx.send(RuntimeEvent::Started).await;
+            while !*gate.borrow() {
+                tokio::select! {
+                    changed = gate.changed() => if changed.is_err() { break },
+                    _ = cancel_rx.changed() => {
+                        let _ = tx.send(RuntimeEvent::Interrupted).await;
+                        return;
+                    }
+                }
+            }
+            let _ = tx.send(RuntimeEvent::TextDelta("Report: done.".into())).await;
+            let _ = tx.send(RuntimeEvent::Completed).await;
+        });
+        Ok(RunHandle::new(request.run_id, rx, input_tx, cancel_tx))
+    }
+}
+
+/// A repository on main with one commit, owned by `dir`.
+fn repository(dir: &Path) -> std::path::PathBuf {
+    let repo = dir.join("hermes");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "--quiet", "--initial-branch=main"]);
+    git(&repo, &["config", "user.name", "Test"]);
+    git(&repo, &["config", "user.email", "test@example.com"]);
+    git(&repo, &["config", "core.autocrlf", "false"]);
+    commit(&repo, "readme.md", "hello\n", "first");
+    repo
+}
+
+/// Ask `code.get` until `branch` says `working`.
+async fn until_working(client: &Client, project_id: ProjectId, branch: &str, working: bool) {
+    for _ in 0..400 {
+        if get(client, project_id).await.branches.iter().any(|b| b.name == branch && b.working == working) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("{branch} never had working = {working}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_branch_an_employee_works_on_now_is_never_merged_deleted_or_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let held = Arc::new(Held { gate: tokio::sync::watch::channel(false).0 });
+    let daemon = start_with(dir.path(), held.clone()).await;
+    let client = connect(dir.path()).await;
+    let repo = repository(dir.path());
+    let hermes = project(&client, "Hermes", &repo).await;
+    let create = CreateEmployee {
+        access_level: None,
+        tool_policy: None,
+        start_profile: None,
+        description: None,
+        name: "Dev".into(),
+        role: "Engineer".into(),
+        title: None,
+        reports_to: None,
+        instructions: None,
+        folder: None,
+    };
+    let CommandResult::EmployeeCreated { employee_id, .. } = client.execute(envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
+    let made = client
+        .create_ticket(CreateTicket {
+            responsible_user_id: None,
+            confirm_secret: false,
+            project_id: hermes,
+            title: "Busy work".into(),
+            description: Some("HOLD-MAIN".into()),
+            priority: Default::default(),
+            labels: vec![],
+            deadline_ms: None,
+            owner_employee_id: Some(employee_id),
+            run: Default::default(),
+            files: vec![],
+            start: true,
+            from_message: None,
+            from_idea: None,
+            kind: None,
+        })
+        .await
+        .unwrap();
+    let CommandResult::TicketCreated { ticket_id, .. } = made.result else { panic!("{:?}", made.result) };
+    let number = client.ticket(ticket_id).await.unwrap().ticket.number;
+
+    // The ticket's branch in its worktree, and a second branch of it that no worktree has.
+    let feature = format!("feat/ticket-{number}-busy");
+    let worktree = dir.path().join("wt-busy");
+    git(&repo, &["worktree", "add", "--quiet", "-b", &feature, &worktree.to_string_lossy(), "main"]);
+    commit(&worktree, "busy.txt", "half done\n", "half of the work");
+    let extra = format!("fix/{number}-extra");
+    git(&repo, &["branch", &extra, &feature]);
+    until_working(&client, hermes, &feature, true).await;
+
+    let main_before = git(&repo, &["rev-parse", "main"]);
+    refused(host(&client, HostWrite::CodeMerge { project_id: hermes, branch: feature.clone() }).await, ErrorCode::Validation, &format!("An employee works on {feature} now"));
+    refused(host(&client, HostWrite::CodeDeleteBranch { project_id: hermes, branch: extra.clone(), force: true }).await, ErrorCode::Validation, &format!("An employee works on {extra} now"));
+    refused(host(&client, HostWrite::CodeRemoveWorktree { project_id: hermes, path: worktree.display().to_string() }).await, ErrorCode::Validation, "An employee works in this worktree now");
+    assert_eq!(git(&repo, &["rev-parse", "main"]), main_before, "main unchanged");
+    assert!(worktree.exists() && !git(&repo, &["branch", "--list", &extra]).is_empty(), "worktree and branch stay");
+
+    held.gate.send_replace(true);
+    until_working(&client, hermes, &feature, false).await;
     stop(dir.path(), daemon).await;
 }
