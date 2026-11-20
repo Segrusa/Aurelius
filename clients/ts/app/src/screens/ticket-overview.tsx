@@ -229,7 +229,7 @@ export function useTicketProgress(
   };
 }
 
-function TodoMark({ state }: { state: Todo["state"] }) {
+export function TodoMark({ state }: { state: Todo["state"] }) {
   return (
     <span {...stylex.props(styles.mark)}>
       {state === "done" ? (

@@ -64,6 +64,8 @@ import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
 import { OVERVIEW_KEY, OverviewPanel, ProgressCard, useTicketProgress } from "./ticket-overview";
+import { ActivityHead } from "./ticket-page";
+import { type ActivityFilter, inFilter } from "./ticket-page-logic";
 import { ticketPlace } from "./ticket-session-logic";
 import { ColumnGlyph } from "./tickets-kit";
 
@@ -73,6 +75,7 @@ const enter = stylex.keyframes({
 
 const styles = stylex.create({
   feedTop: { height: 14 },
+  feedEmpty: { margin: 0, paddingBlock: 16, fontSize: 13, color: "var(--precision-text3)" },
   feedEnd: { height: 16 },
   hash: { color: "var(--precision-text3)" },
   composer: {
@@ -331,9 +334,22 @@ const styles = stylex.create({
 const FEED_COLUMN = stylex.props(styles.feedColumn);
 const TOP_GAP = stylex.props(styles.topGap);
 
+/** What a ticket's page puts above its talk; a channel's own chat has none. */
+interface FeedContext {
+  top: ReactNode | null;
+  empty: string | null;
+}
+
 const FEED_PARTS = {
-  Header: function FeedTop() {
-    return <div {...stylex.props(styles.feedTop)} />;
+  Header: function FeedTop({ context }: { context?: FeedContext }) {
+    return context?.top ? <div {...FEED_COLUMN}>{context.top}</div> : <div {...stylex.props(styles.feedTop)} />;
+  },
+  EmptyPlaceholder: function FeedEmpty({ context }: { context?: FeedContext }) {
+    return context?.empty ? (
+      <div {...FEED_COLUMN}>
+        <p {...stylex.props(styles.feedEmpty)}>{context.empty}</p>
+      </div>
+    ) : null;
   },
   Footer: function FeedEnd() {
     return <div {...stylex.props(styles.feedEnd)} />;
@@ -781,6 +797,13 @@ interface ChannelProps {
 export interface SessionSlots {
   /** In place of the channel's head; a ticket's session puts its own head above the whole body. */
   head?: ReactNode;
+  /**
+   * Above the talk, scrolling with it (ticket #74): the ticket's description and what its tasks do
+   * now. With it the talk gets an Activity heading with a filter.
+   */
+  top?: ReactNode;
+  /** In place of the progress card above the composer: what runs this second. */
+  live?: ReactNode;
   /** Between the progress and the composer: the decision of the moment. */
   gate: ReactNode;
   /** Beside Send: the next run's mode and model. */
@@ -868,7 +891,13 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
     () => (isTicket ? foldUpdates(talk, unfolded) : { shown: talk, earlier: new Map<string, number>() }),
     [isTicket, talk, unfolded],
   );
-  const list2 = folded.shown;
+  // The ticket page's Activity filter; a channel's own chat shows everything.
+  const [filter, setFilter] = useState<ActivityFilter>("all");
+  const filtering = session?.top !== undefined;
+  const list2 = useMemo(
+    () => (filtering && filter !== "all" ? folded.shown.filter((m) => inFilter(m, filter)) : folded.shown),
+    [filtering, filter, folded.shown],
+  );
   const handle = useRef<VirtuosoHandle>(null);
   // The message a link led to: into view, and marked for a moment.
   const [flash, setFlash] = useState<string | null>(null);
@@ -932,13 +961,15 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
         earlier: folded.earlier.get(m.id) ?? 0,
       };
     });
+    // What streams and what waits on you is talk, not a change.
+    if (filter === "changes") return out;
     for (const u of live) {
       if (!inList.has(u.message_id) && streamTo(u.thread_parent, null) === "channel")
         out.push({ kind: "live", id: u.message_id, run: u.run_id });
     }
     for (const a of pending) if (!onCard.has(a.id)) out.push({ kind: "approval", id: a.id });
     return out;
-  }, [list2, folded.earlier, newAt, live, inList, pending, onCard]);
+  }, [list2, folded.earlier, newAt, live, inList, pending, onCard, filter]);
 
   const readOnly = session ? session.readOnly : (c?.archived ?? false) || feed.data?.read_only === true;
   const caps = useMemo<Caps>(
@@ -1033,6 +1064,26 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
       : `@Name asks that employee; without a name, ${first ?? "the top of the org chart"} answers.`;
   const answering = [...new Set(live.flatMap((u) => runAuthor(employeesData ?? [], u.run_id) ?? []))];
   const loading = useDelayed(feed.isPending);
+  const feedContext = useMemo<FeedContext>(
+    () =>
+      filtering
+        ? {
+            top: (
+              <>
+                {session?.top}
+                <ActivityHead filter={filter} onFilter={setFilter} />
+              </>
+            ),
+            empty:
+              filter === "all"
+                ? `Nothing said yet. Write @Name to ask an employee${t ? ownerAnswers(owner) : " about this ticket"}.`
+                : filter === "changes"
+                  ? "No changes yet."
+                  : "No messages yet.",
+          }
+        : { top: null, empty: null },
+    [filtering, session?.top, filter, t, owner],
+  );
 
   return (
     <section aria-label={`#${name}`} {...stylex.props(styles.channel)}>
@@ -1114,7 +1165,7 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
                 ) : (
                   <p {...stylex.props(styles.waiting)}>Waiting for the server…</p>
                 )
-              ) : rows.length === 0 ? (
+              ) : rows.length === 0 && !filtering ? (
                 <EmptyState
                   title={isTicket ? "Discuss the ticket here." : "Talk with your whole team here."}
                   description={
@@ -1138,6 +1189,7 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
                   followOutput={(bottom) => (bottom ? "auto" : false)}
                   computeItemKey={(_, row) => (row.kind === "message" ? row.m.id : row.id)}
                   components={FEED_PARTS}
+                  context={feedContext}
                   itemContent={(_, row) => (
                     <div {...FEED_COLUMN}>
                       {row.kind === "message" ? (
@@ -1174,7 +1226,7 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
               )}
             </div>
           </FeedIdsProvider>
-          {isTicket && !readOnly ? <ProgressCard p={progress} /> : null}
+          {isTicket && !readOnly ? session?.live !== undefined ? session.live : <ProgressCard p={progress} /> : null}
           {session?.gate}
           {readOnly ? (
             <div {...stylex.props(styles.readOnlyRow)}>

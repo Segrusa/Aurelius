@@ -238,11 +238,13 @@ test.describe("a ticket's session", () => {
     // The ticket's data is beside the talk.
     const aside = page.getByRole("complementary", { name: "Ticket properties" });
     await expect(aside.getByText("ui, desktop")).toBeVisible();
-    await aside.getByRole("button", { name: /Files written/ }).click();
-    await expect(aside.getByText("screens/ticket-session-logic.ts")).toBeVisible();
     await expect(aside.getByText("Guidelines in the runs")).toHaveCount(0);
     await aside.getByRole("button", { name: "Usage" }).hover();
     await expect(page.getByRole("tooltip")).toContainText("182k in · 24k out");
+    // What the runs wrote is on the Files tab (ticket #74).
+    await aside.getByRole("tab", { name: /Files/ }).click();
+    await aside.getByRole("button", { name: /Files written/ }).click();
+    await expect(aside.getByText("screens/ticket-session-logic.ts")).toBeVisible();
   });
 
   test("3. Review → Accept → the session is read-only", async ({ page }) => {
