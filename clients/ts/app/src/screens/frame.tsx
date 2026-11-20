@@ -125,6 +125,8 @@ const styles = stylex.create({
   },
   chevron: { display: "flex", transition: "transform 120ms ease" },
   chevronFolded: { transform: "rotate(-90deg)" },
+  // The "1 working" / "2 need you" count sits at the right end of the section header.
+  summary: { display: "flex", alignItems: "center", gap: 6, marginInlineStart: "auto" },
   more: { marginBlockStart: 2, paddingInlineStart: 22, fontWeight: 400 },
   group: { display: "flex", flexDirection: "column", gap: 1, marginBlockStart: 14 },
   count: { fontSize: 12, color: "var(--color-text-primary)" },
@@ -316,7 +318,7 @@ function FoldingSection({
           <Icon name="chevronDown" size={12} />
         </span>
         {title}
-        {summary}
+        {summary ? <span {...stylex.props(styles.summary)}>{summary}</span> : null}
       </button>
       {folded ? null : (
         <>
