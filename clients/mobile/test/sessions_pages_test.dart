@@ -463,6 +463,18 @@ void main() {
       expect(paramsOf(send)['text'], 'Also the logout');
     });
 
+    testWidgets('the composer input is exactly as high as its buttons', (tester) async {
+      final repo = repoWith(sessions: [sessionOf('c1')], messages: snapshotOf('c1', messages: [messageOf('m1', MessageRole.user, 'Fix the login')]));
+      await pumpSessions(tester, repo, const SessionPage(conversationId: 'c1'));
+      final pill = find.byKey(const Key('composer-pill'));
+      final input = tester.getSize(find.descendant(of: pill, matching: find.byType(TextField))).height;
+      final attach = tester.getSize(find.ancestor(of: find.byKey(const Key('composer-plus')), matching: find.byType(SizedBox)).first).height;
+      final send = tester.getSize(find.descendant(of: find.byKey(const Key('composer-send')), matching: find.byType(Material)).first).height;
+      expect(attach, 40);
+      expect(send, 40);
+      expect(input, 40);
+    });
+
     testWidgets('while an answer runs it says Working and offers Stop', (tester) async {
       final repo = repoWith(
         sessions: [sessionOf('c1', running: true)],

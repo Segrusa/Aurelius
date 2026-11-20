@@ -1746,13 +1746,16 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                       allowedMimeTypes: pastedImageMimeTypes,
                       onContentInserted: _insert,
                     ),
-                    style: floating ? TextStyle(fontSize: 16, color: Tokens.label) : null,
+                    // Floating: a 20 pt line plus 2 × 10 padding makes one line as high as the 40 pt buttons.
+                    style: floating ? TextStyle(fontSize: 16, height: 1.25, color: Tokens.label) : null,
                     decoration: InputDecoration(
                       hintText: state.history ? 'Read-only: an earlier chat' : readOnly ? 'Read-only: this phone may not chat' : widget.config.hint ?? (group ? 'Message the team · @Name asks someone' : 'Message'),
-                      hintStyle: floating ? TextStyle(fontSize: 16, color: Tokens.label2) : null,
+                      hintStyle: floating ? TextStyle(fontSize: 16, height: 1.25, color: Tokens.label2) : null,
+                      // A long hint would wrap and make the empty field taller than the buttons.
+                      hintMaxLines: 1,
                       isDense: true,
                       fillColor: floating ? Colors.transparent : Tokens.cell2,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                      contentPadding: EdgeInsets.symmetric(horizontal: floating ? 12 : 16, vertical: floating ? 10 : 11),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(21), borderSide: BorderSide.none),
                       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(21), borderSide: BorderSide.none),
                       disabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(21), borderSide: BorderSide.none),
