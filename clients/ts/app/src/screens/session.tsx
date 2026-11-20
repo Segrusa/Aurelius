@@ -116,7 +116,11 @@ function SessionDetails({
           </SideRow>
         ) : null}
       </SideProperties>
-      <SubagentsAtWork conversationId={conversationId} live={running} />
+      <SubagentsAtWork
+        conversationId={conversationId}
+        live={running}
+        {...(session ? { askedBy: session.employee_name } : {})}
+      />
       <FilesWritten files={files} />
       <RunGuidelines runId={lastRunOf(list)} />
     </PropertiesPanel>

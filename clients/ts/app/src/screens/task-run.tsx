@@ -729,7 +729,9 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
               })}
             </SideSection>
           ) : null}
-          {task.conversation_id ? <SubagentsAtWork conversationId={task.conversation_id} live={live} /> : null}
+          {task.conversation_id ? (
+            <SubagentsAtWork conversationId={task.conversation_id} live={live} askedBy={name} />
+          ) : null}
           <FilesWritten files={files} />
           <RunGuidelines runId={lastRun} />
         </PropertiesPanel>
