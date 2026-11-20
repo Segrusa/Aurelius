@@ -95,9 +95,10 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
     final company = context.watch<CompanyBloc>().state;
     final me = context.select<ConnectionBloc, String?>((b) => b.state.user?.id);
     bool mine(TicketView t) => needsMeOf(t, company, board, me: me);
+    String? rootWaiting(TicketView t) => rootWaitingOf(t, company);
     final now = DateTime.now();
     final sessions = state.supported ? sessionSections(state.sessions, now) : <(SessionPeriod, List<WorkSessionView>)>[];
-    final tickets = board.board == null ? <(SessionPeriod, List<TicketView>)>[] : ticketSections(board.tickets, now, needsYou: mine);
+    final tickets = board.board == null ? <(SessionPeriod, List<TicketView>)>[] : ticketSections(board.tickets, now, needsYou: mine, rootWaiting: rootWaiting);
     final runningSessions = [for (final (p, list) in sessions) if (p == SessionPeriod.active) ...list];
     final runningTickets = [for (final (p, list) in tickets) if (p == SessionPeriod.active) ...list];
     final running = runningSessions.length + runningTickets.length;
@@ -114,7 +115,7 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
           GroupHeader('Running', key: const ValueKey('sessions-running'), count: running),
           InsetGroup(children: [
             for (final s in runningSessions) SessionRow(session: s),
-            for (final t in runningTickets) TicketRow(ticket: t, needsYou: mine(t)),
+            for (final t in runningTickets) TicketRow(ticket: t, needsYou: mine(t), rootWaiting: rootWaiting(t)),
           ]),
         ],
         Padding(
@@ -129,7 +130,7 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
         ),
       ],
       fill: _tickets ? _ticketFill(context, board) : _fill(context, state),
-      children: _tickets ? _ticketList(tickets, mine) : _list(sessions),
+      children: _tickets ? _ticketList(tickets, mine, rootWaiting) : _list(sessions),
     );
   }
 
@@ -155,11 +156,11 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
   }
 
   /// The sections below the switch; the active ones stand under Running on top.
-  List<Widget> _ticketList(List<(SessionPeriod, List<TicketView>)> sections, bool Function(TicketView) mine) => [
+  List<Widget> _ticketList(List<(SessionPeriod, List<TicketView>)> sections, bool Function(TicketView) mine, String? Function(TicketView) rootWaiting) => [
         for (final (period, tickets) in sections)
           if (period != SessionPeriod.active) ...[
           GroupHeader(period.label, key: ValueKey('tickets-section-${period.name}'), count: tickets.length),
-          InsetGroup(children: [for (final t in tickets) TicketRow(ticket: t, needsYou: mine(t))]),
+          InsetGroup(children: [for (final t in tickets) TicketRow(ticket: t, needsYou: mine(t), rootWaiting: rootWaiting(t))]),
         ],
       ];
 
@@ -201,17 +202,31 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
       ];
 }
 
+/// The `waiting_reason` of [t]'s main task, from the company's tasks; null when it is not loaded.
+String? rootWaitingOf(TicketView t, CompanyState company) {
+  final root = t.rootTaskId;
+  if (root == null) return null;
+  for (final task in company.tasks) {
+    if (task.id == root) return task.waitingReason;
+  }
+  return null;
+}
+
 /// The bold-ish title of a session or ticket row.
 TextStyle _rowTitle() => TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Tokens.label);
 
 /// One ticket: its number and title, owner and project (and Done once it is), and its signal.
 class TicketRow extends StatelessWidget {
-  const TicketRow({super.key, required this.ticket, required this.needsYou});
+  const TicketRow({super.key, required this.ticket, required this.needsYou, this.rootWaiting});
 
   final TicketView ticket;
 
   /// The reader's ◆ ([needsMe]).
   final bool needsYou;
+
+  /// The `waiting_reason` of its main task, when known: waiting for its
+  /// delegated parts still counts as working.
+  final String? rootWaiting;
 
   @override
   Widget build(BuildContext context) {
@@ -221,7 +236,7 @@ class TicketRow extends StatelessWidget {
       title: '#${t.number} ${t.title}',
       titleStyle: _rowTitle(),
       subtitle: '${t.column == ColumnKind.done ? 'Done · ' : ''}${t.ownerName ?? 'No owner yet'} · ${t.projectName} · ${Fmt.ago(t.updatedAtMs)}',
-      leading: SessionMark.lead(ticketSignal(t, needsYou: needsYou)),
+      leading: SessionMark.lead(ticketSignal(t, needsYou: needsYou, rootWaiting: rootWaiting)),
       chevron: true,
       onTap: () => context.push('/ticket/${t.id}'),
     );
