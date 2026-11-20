@@ -295,7 +295,7 @@ test.describe("a ticket's session", () => {
     await expect(page).toHaveURL(/\/ticket\/70$/);
   });
 
-  test("the sidebar lists the open tickets; a row opens the session", async ({ page }) => {
+  test("the sidebar lists the open tickets among the sessions; a row opens the session", async ({ page }) => {
     const world: World = {
       tickets: {
         t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }),
@@ -306,13 +306,15 @@ test.describe("a ticket's session", () => {
     await scriptServer(page, scripted(world));
     await page.goto(`${site.origin}/new`);
     const side = page.getByRole("navigation", { name: "Main" });
-    await expect(side.getByText("Tickets", { exact: true })).toBeVisible();
+    await expect(side.getByText("Sessions", { exact: true })).toBeVisible();
     await expect(side.getByRole("link", { name: /#12 An old ticket/ })).toHaveCount(0);
     await side.getByRole("link", { name: /#70 A ticket opens as its own session/ }).click();
     await expect(page).toHaveURL(/\/ticket\/70$/);
   });
 
-  test("the sidebar shows today's tickets, the earlier ones on request, and its section folds", async ({ page }) => {
+  test("the sidebar shows today's tickets, the earlier ones folded under Earlier, and remembers a fold", async ({
+    page,
+  }) => {
     const yesterday = Date.now() - 2 * 24 * 3600_000;
     const world: World = {
       tickets: {
@@ -334,21 +336,16 @@ test.describe("a ticket's session", () => {
     await expect(today).toBeVisible();
     await expect(older).toHaveCount(0);
 
-    await side.getByRole("button", { name: "Show earlier" }).click();
+    // Earlier starts folded; opened, it stays open after a reload.
+    const earlier = side.getByRole("button", { name: /^Earlier/ });
+    await expect(earlier).toHaveAttribute("aria-expanded", "false");
+    await earlier.click();
     await expect(older).toBeVisible();
-    await side.getByRole("button", { name: "Show today only" }).click();
-    await expect(older).toHaveCount(0);
-
-    const header = side.getByRole("button", { name: /^Tickets/ });
-    await expect(header).toHaveAttribute("aria-expanded", "true");
-    await header.click();
-    await expect(header).toHaveAttribute("aria-expanded", "false");
-    await expect(today).toHaveCount(0);
-    // Folded stays folded after a reload.
     await page.reload();
-    await expect(side.getByRole("button", { name: /^Tickets/ })).toHaveAttribute("aria-expanded", "false");
-    await expect(today).toHaveCount(0);
-    await side.getByRole("button", { name: /^Tickets/ }).click();
+    await expect(side.getByRole("button", { name: /^Earlier/ })).toHaveAttribute("aria-expanded", "true");
+    await expect(older).toBeVisible();
+    await side.getByRole("button", { name: /^Earlier/ }).click();
+    await expect(older).toHaveCount(0);
     await expect(today).toBeVisible();
   });
 

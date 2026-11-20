@@ -1,11 +1,11 @@
-// Switching workspace: the switcher, what narrows, where a link takes it, and the reads a fake server
+// Switching workspace: the rail, what narrows, where a link takes it, and the reads a fake server
 // would accept whatever they said, once against a real daemon.
 
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
-import { openCompanyPage, openSettings } from "./company";
+import { chooseWorkspace, expectWorkspace, openCompanyPage, openSettings } from "./company";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
 import { boardOf, channel, messages, notification, scriptServer, task, ticket } from "./fake-server";
 import { expectNewSession } from "./new-session";
@@ -67,13 +67,7 @@ const script = {
   },
 };
 
-const switcher = (page: Page) => page.getByRole("button", { name: /^Workspace: / });
-
-async function choose(page: Page, name: string) {
-  await switcher(page).click();
-  await page.getByRole("menuitem", { name }).click();
-  await expect(switcher(page)).toHaveAccessibleName(`Workspace: ${name}`);
-}
+const choose = chooseWorkspace;
 
 async function open(page: Page, path: string, workspace?: string) {
   const site = await serveStatic(WEB_DIST);
@@ -126,7 +120,7 @@ test("a workspace and a ticket show their Claude Design link, and an older serve
   }
 });
 
-test("switching narrows the board and the inbox, and All projects shows everything", async ({ page }) => {
+test("switching narrows the board and the inbox, and All workspaces shows everything", async ({ page }) => {
   const site = await open(page, "/board");
   try {
     await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
@@ -148,7 +142,11 @@ test("switching narrows the board and the inbox, and All projects shows everythi
     // Remembered per device.
     await choose(page, "Zephyr");
     await page.reload();
-    await expect(switcher(page)).toHaveAccessibleName("Workspace: Zephyr");
+    await expectWorkspace(page, "Zephyr");
+
+    await choose(page, "All workspaces");
+    await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
+    await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeVisible();
   } finally {
     site.close();
   }
@@ -157,9 +155,9 @@ test("switching narrows the board and the inbox, and All projects shows everythi
 test("a link to another project's ticket moves the workspace there", async ({ page }) => {
   const site = await open(page, "/new", ZEPHYR);
   try {
-    await expect(switcher(page)).toHaveAccessibleName("Workspace: Zephyr");
+    await expectWorkspace(page, "Zephyr");
     await page.goto(`${new URL(page.url()).origin}/board?ticket=t1`);
-    await expect(switcher(page)).toHaveAccessibleName("Workspace: Atlas");
+    await expectWorkspace(page, "Atlas");
     await expect(page.getByText("Atlas ticket").first()).toBeVisible();
   } finally {
     site.close();
@@ -185,19 +183,21 @@ test("new work starts in the workspace", async ({ page }) => {
   }
 });
 
-test("the switcher works from the collapsed rail and from the palette", async ({ page }) => {
+test("the rail switches with the sidebar folded, and the palette switches too", async ({ page }) => {
   const site = await open(page, "/board");
   try {
     await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeVisible();
     await page.keyboard.press("Control+b");
-    await expect(page.locator("[data-sidebar]").first()).toHaveJSProperty("offsetWidth", 48);
+    // Folded, only the rail stays.
+    await expect(page.locator("[data-sidebar]").first()).toHaveJSProperty("offsetWidth", 56);
+    await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
     await choose(page, "Atlas");
     await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeHidden();
 
     await page.keyboard.press("Control+k");
     await page.getByRole("combobox", { name: "Command palette" }).fill("Zephyr");
     await page.getByRole("option", { name: /Zephyr.*Switch workspace/ }).click();
-    await expect(switcher(page)).toHaveAccessibleName("Workspace: Zephyr");
+    await expectWorkspace(page, "Zephyr");
   } finally {
     site.close();
   }

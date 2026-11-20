@@ -1,54 +1,17 @@
-// The switcher at the top of the sidebar, switching from anywhere, and following a link into its
-// project. The state itself is in workspace.tsx; the rules are in workspace-logic.ts.
+// Switching workspace (the sidebar's rail and the palette do it), the Switch workspace key, and following a
+// link into its project. The state itself is in workspace.tsx; the rules are in workspace-logic.ts.
 
-import { Icon } from "@astryxdesign/core/Icon";
 import type { ProjectSummary } from "@aurelius/protocol";
-import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useAllTasks, useProjects, useTicket } from "../data";
 import { useAction } from "../keys/provider";
 import { initial, Mark, markColor } from "../ui/marks";
-import { Menu } from "../ui/menu";
 import { useWorkspace } from "../workspace";
-import { pinnedFirst } from "./employee-logic";
-import { useProjectPins } from "./projects";
-import { openProjects, pathAfterSwitch, targetOf, type Workspace, workspaceAfterOpening } from "./workspace-logic";
+import { overlays } from "./overlays-store";
+import { pathAfterSwitch, targetOf, type Workspace, workspaceAfterOpening } from "./workspace-logic";
 
-const ALL_KEY = "all";
-const SETTINGS_KEY = "workspace-settings";
-const LIST_KEY = "project-list";
-
-const styles = stylex.create({
-  slot: { display: "flex", flexDirection: "column", paddingBlockEnd: 4 },
-  trigger: {
-    display: "flex",
-    minWidth: 0,
-    width: "100%",
-    height: 30,
-    cursor: "pointer",
-    alignItems: "center",
-    gap: 8,
-    borderWidth: 0,
-    borderRadius: 6,
-    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
-    paddingInline: 8,
-    fontSize: 13,
-    fontWeight: 500,
-    color: "var(--color-text-primary)",
-  },
-  rail: { width: 32, height: 32, justifyContent: "center", marginInline: "auto", paddingInline: 0 },
-  name: {
-    minWidth: 0,
-    flex: 1,
-    overflow: "hidden",
-    textAlign: "start",
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-  },
-});
-
-const ALL_NAME = "All projects";
+const ALL_NAME = "All workspaces";
 
 export function WorkspaceMark({ project, size = 18 }: { project: ProjectSummary | null; size?: number }) {
   return project ? (
@@ -70,58 +33,10 @@ export function useSwitchWorkspace(): (next: Workspace) => void {
   };
 }
 
-export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
-  const { id, project, available, locked } = useWorkspace();
-  const projects = useProjects();
-  const [pins] = useProjectPins();
-  const switchTo = useSwitchWorkspace();
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  useAction("SwitchWorkspace", () => setOpen(true), available && !locked);
-  if (!available || locked) return null;
-  const list = pinnedFirst(openProjects(projects.data ?? []), pins);
-  const name = project?.name ?? ALL_NAME;
-  const pick = (key: string) => {
-    if (key === SETTINGS_KEY && id) void navigate({ to: "/projects/$id", params: { id } });
-    else if (key === LIST_KEY) void navigate({ to: "/projects" });
-    else switchTo(key === ALL_KEY ? null : key);
-  };
-  return (
-    <div {...stylex.props(styles.slot)} data-workspace-switcher>
-      <Menu
-        label={`Workspace: ${name}`}
-        open={open}
-        onOpenChange={setOpen}
-        value={id ?? ALL_KEY}
-        options={[
-          { key: ALL_KEY, label: ALL_NAME, icon: <WorkspaceMark project={null} size={16} /> },
-          ...list.map((p) => ({
-            key: p.id,
-            label: p.status === "paused" ? `${p.name} · paused` : p.name,
-            icon: <WorkspaceMark project={p} size={16} />,
-          })),
-          ...(id ? [{ key: SETTINGS_KEY, label: "Workspace settings", dividerBefore: true }] : []),
-          { key: LIST_KEY, label: "All workspaces…", ...(id ? {} : { dividerBefore: true }) },
-        ]}
-        onPick={pick}
-        trigger={
-          <button
-            type="button"
-            title={collapsed ? name : undefined}
-            {...stylex.props(styles.trigger, collapsed && styles.rail)}
-          >
-            <WorkspaceMark project={project} size={collapsed ? 22 : 18} />
-            {collapsed ? null : (
-              <>
-                <span {...stylex.props(styles.name)}>{name}</span>
-                <Icon icon="chevronDown" size="sm" color="secondary" />
-              </>
-            )}
-          </button>
-        }
-      />
-    </div>
-  );
+/** The Switch workspace key opens the palette, whose first group is the workspaces: the rail shows them all. */
+export function useSwitchWorkspaceKey(): void {
+  const { available, locked } = useWorkspace();
+  useAction("SwitchWorkspace", () => overlays.open("palette"), available && !locked);
 }
 
 /** Opening a ticket or task of another project moves the workspace there, so nothing shows empty. */

@@ -766,7 +766,9 @@ test.describe("states a test daemon cannot produce", () => {
     await page.screenshot({ path: `${REPO}/target/subagent-log/done.png` });
   });
 
-  test("the sidebar's count of working sessions sits at the right of its header", async ({ page }) => {
+  test("the sidebar puts a working session under Running, and its workspace counts it at the right", async ({
+    page,
+  }) => {
     const working = {
       conversation_id: "s3",
       title: "Fix the login page",
@@ -786,16 +788,17 @@ test.describe("states a test daemon cannot produce", () => {
       },
     });
     await page.goto(site.origin);
-    const header = page.getByRole("button", { name: /^Sessions/ });
-    await expect(header).toContainText("1 working");
-    // Right-aligned: the text "working" ends at the header's padding, not just after the title.
+    const side = page.getByRole("navigation", { name: "Main" });
+    // All workspaces: the session's workspace says how many run, its total at the right; Running is under it.
+    await expect(side.getByRole("button", { name: /^Running/ })).toHaveText(/Running\s*1/);
+    const header = side.getByRole("button").filter({ has: page.getByTitle("1 running") });
+    await expect(header).toHaveAttribute("aria-expanded", "true");
+    await expect(side.getByRole("link", { name: /Fix the login page/ })).toBeVisible();
+    await expect(side.getByRole("img", { name: "Working" })).toBeVisible();
+    // Right-aligned: the count ends at the header's padding, not just after the title.
     const gap = await header.evaluate((button) => {
-      const walker = document.createTreeWalker(button, NodeFilter.SHOW_TEXT);
-      let node = walker.nextNode();
-      while (node && !node.textContent?.includes("working")) node = walker.nextNode();
-      const range = document.createRange();
-      range.selectNodeContents(node ?? button);
-      return button.getBoundingClientRect().right - range.getBoundingClientRect().right;
+      const count = button.lastElementChild as Element;
+      return button.getBoundingClientRect().right - count.getBoundingClientRect().right;
     });
     expect(gap).toBeLessThan(12);
     await header.screenshot({ path: `${REPO}/target/sidebar-summary/sessions-header.png` });

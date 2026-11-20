@@ -1,24 +1,11 @@
 import { AppShell } from "@astryxdesign/core/AppShell";
-import type { IconType } from "@astryxdesign/core/Icon";
-import { IconButton } from "@astryxdesign/core/IconButton";
-import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
-import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { expectBody } from "@aurelius/client";
-import type { NotificationView, TaskView, TicketView, WorkSessionView } from "@aurelius/protocol";
+import type { NotificationView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
-import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import {
-  useAllTasks,
-  useEmployees,
-  useLiveQueries,
-  useNotifications,
-  useOpenTasks,
-  useTickets,
-  useWorkSessions,
-} from "../data";
-import { type Feature, offered, shown } from "../hidden";
+import { useAllTasks, useLiveQueries, useNotifications, useTickets } from "../data";
 import { useAction, useFallbackAction, useKeys } from "../keys/provider";
 import { usePlatform } from "../platform";
 import {
@@ -30,40 +17,20 @@ import {
   screenKey,
   screenUseJson,
 } from "../screen-use";
-import { Icon, NAV_ICONS, type NavIcon, NewIcon } from "../ui/icons";
-import { initial, Mark, markColor } from "../ui/marks";
 import { ToastBridge, toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { ActivityBar } from "./activity-bar";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
-import { pinKey, usePins } from "./employees";
 import { openInboxBell } from "./inbox-bell";
-import { newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
+import { newNotes, notificationHeading } from "./inbox-logic";
 import { useOpenNewSession } from "./new-session";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
-import {
-  activeSessions,
-  type SessionSignal,
-  sessionSignal,
-  sidebarSessions,
-  startOfDay,
-  withEarlier,
-} from "./session-logic";
 import { SettingsSidebar } from "./settings";
 import { inSettingsArea } from "./settings-logic";
-import { sidebarTickets, ticketSignal } from "./ticket-session-logic";
+import { Sidebar } from "./sidebar";
 import { useTicketNeeds } from "./tickets-kit";
-import { UserMenu } from "./user-menu";
-import { useOpenedWorkspace, WorkspaceSwitcher } from "./workspace-kit";
-import { narrow } from "./workspace-logic";
-
-// A working session's dot breathes, so it reads as live next to the still unread dots.
-const pulse = stylex.keyframes({
-  "0%": { opacity: 1, transform: "scale(1)" },
-  "50%": { opacity: 0.35, transform: "scale(0.75)" },
-  "100%": { opacity: 1, transform: "scale(1)" },
-});
+import { useOpenedWorkspace, useSwitchWorkspaceKey } from "./workspace-kit";
 
 const styles = stylex.create({
   // What the screens were written against: a column that fills the shell and scrolls inside.
@@ -86,316 +53,7 @@ const styles = stylex.create({
     overflow: "hidden",
   },
   settingsSidebar: { display: "flex", height: "100%" },
-  head: { display: "flex", height: 32, alignItems: "center", gap: 8, paddingInline: 8 },
-  brand: {
-    fontSize: 14,
-    fontWeight: 600,
-    color: "var(--color-text-primary)",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    userSelect: "none",
-  },
-  section: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    margin: 0,
-    marginBlockEnd: 4,
-    paddingInline: 8,
-    fontSize: 12,
-    fontWeight: 500,
-    color: "var(--precision-text3)",
-  },
-  sectionLink: { textDecoration: "none", color: "var(--precision-text3)" },
-  sectionButton: {
-    border: "none",
-    background: "none",
-    paddingBlock: 0,
-    paddingInlineStart: 4,
-    font: "inherit",
-    fontSize: 12,
-    textAlign: "start",
-    cursor: "pointer",
-    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
-  },
-  chevron: { display: "flex", transition: "transform 120ms ease" },
-  chevronFolded: { transform: "rotate(-90deg)" },
-  // The "1 working" / "2 need you" count sits at the right end of the section header.
-  summary: { display: "flex", alignItems: "center", gap: 6, marginInlineStart: "auto" },
-  more: { marginBlockStart: 2, paddingInlineStart: 22, fontWeight: 400 },
-  group: { display: "flex", flexDirection: "column", gap: 1, marginBlockStart: 14 },
-  dot: { display: "block", width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
-  dotLive: { backgroundColor: "var(--color-text-accent)" },
-  dotWorking: {
-    width: 8,
-    height: 8,
-    backgroundColor: "var(--color-text-accent)",
-    animationName: pulse,
-    animationDuration: "1.6s",
-    animationIterationCount: "infinite",
-    animationTimingFunction: "ease-in-out",
-  },
-  dotNeedsYou: { width: 8, height: 8, backgroundColor: "var(--color-text-warning)" },
-  place: {
-    maxWidth: 90,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    color: "var(--precision-text3)",
-  },
-  liveEnd: { display: "flex", alignItems: "center", gap: 8 },
-  foot: { display: "flex", flexDirection: "column", gap: 8, paddingInline: 8 },
-  reconnect: { margin: 0, paddingInline: 8, fontSize: 12, color: "var(--color-text-warning)" },
 });
-
-const NAV_MAIN: { to: string; label: string; icon: IconType }[] = [{ to: "/new", label: "New session", icon: NewIcon }];
-// `server`: the row shows only when the server has that feature.
-const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Feature; server?: string }[] = [
-  { to: "/board", label: "Board", icon: "board" },
-  { to: "/history", label: "History", icon: "history", server: "ticket_history" },
-  { to: "/tasks", label: "Tasks", icon: "tasks", feature: "TasksInSidebar" },
-  { to: "/scheduled", label: "Scheduled", icon: "clock", feature: "ScheduledInSidebar" },
-  { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
-];
-
-// SideNavItem takes a component: one per mark, kept, or every render would remount the rows' icons.
-const MARK_ICONS = new Map<string, IconType>();
-
-function markIcon(letter: string, color: string, size: number, radius: number): IconType {
-  const key = `${letter}|${color}|${size}|${radius}`;
-  let icon = MARK_ICONS.get(key);
-  if (!icon) {
-    icon = () => <Mark letter={letter} color={color} size={size} radius={radius} />;
-    MARK_ICONS.set(key, icon);
-  }
-  return icon;
-}
-
-function NavRow({ to, label, icon, end }: { to: string; label: string; icon: IconType; end?: ReactNode }) {
-  const path = useRouterState({ select: (s) => s.location.pathname });
-  // A ticket's session counts as the Board, where it came from (ticket #70).
-  const on = path === to || path.startsWith(`${to}/`) || (to === "/board" && path.startsWith("/ticket/"));
-  return <SideNavItem label={label} href={to} icon={icon} size="sm" isSelected={on} endContent={end} />;
-}
-
-function SectionLabel({ children }: { children: ReactNode }) {
-  return <p {...stylex.props(styles.section)}>{children}</p>;
-}
-
-function liveColor(t: TaskView): string {
-  if (t.pending_approvals > 0 || t.status === "waiting") return "var(--color-text-warning)";
-  return t.status === "running" ? "var(--color-text-accent)" : "var(--precision-text3)";
-}
-
-function Live() {
-  const tasks = useOpenTasks();
-  const workspace = useWorkspace().id;
-  const live = narrow(tasks.data ?? [], workspace).filter((t) => t.live_run != null);
-  if (live.length === 0) return null;
-  return (
-    <div {...stylex.props(styles.group)}>
-      <SectionLabel>
-        Live <span {...stylex.props(styles.dot, styles.dotLive)} /> {live.length}
-      </SectionLabel>
-      {live.slice(0, 6).map((t) => {
-        const who = t.employee_name ?? "Task";
-        return (
-          <NavRow
-            key={t.id}
-            to={`/tasks/${t.id}`}
-            label={who}
-            icon={markIcon(initial(who), markColor(t.employee_id ?? t.id), 18, 5)}
-            end={
-              <span {...stylex.props(styles.liveEnd)}>
-                <span {...stylex.props(styles.place)}>{ticketPlace(t)}</span>
-                <span {...stylex.props(styles.dot)} style={{ background: liveColor(t) }} />
-              </span>
-            }
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-/** What the end of a session's row shows: a pulsing dot while it works, a warning dot while it needs you. */
-function SessionMark({ signal }: { signal: SessionSignal | null }) {
-  if (signal === null) return null;
-  const working = signal === "working";
-  return (
-    <Tooltip content={working ? "Working" : "Waiting for your choice"} delay={400} hasHoverIndication={false}>
-      <span
-        role="img"
-        aria-label={working ? "Working" : "Waiting for your choice"}
-        {...stylex.props(styles.dot, working ? styles.dotWorking : styles.dotNeedsYou)}
-      />
-    </Tooltip>
-  );
-}
-
-/** Whether a sidebar section is folded, kept per section across starts. */
-function useFolded(section: string): [boolean, () => void] {
-  const { storage } = usePlatform();
-  const key = `${SIDEBAR_KEY}.${section}`;
-  const [folded, setFolded] = useState(() => storage.get(key) === "folded");
-  const toggle = () =>
-    setFolded((was) => {
-      storage.set(key, was ? "open" : "folded");
-      return !was;
-    });
-  return [folded, toggle];
-}
-
-/**
- * A sidebar list that folds under its header. By default it shows today's work and what is active;
- * "Show earlier" brings back the latest ones from before today, for this start only.
- */
-function FoldingSection({
-  id,
-  title,
-  summary,
-  earlier,
-  onEarlier,
-  hasEarlier,
-  children,
-}: {
-  id: string;
-  title: string;
-  summary: ReactNode;
-  earlier: boolean;
-  onEarlier: () => void;
-  hasEarlier: boolean;
-  children: ReactNode;
-}) {
-  const [folded, toggle] = useFolded(id);
-  return (
-    <div {...stylex.props(styles.group)}>
-      <button
-        type="button"
-        aria-expanded={!folded}
-        onClick={toggle}
-        {...stylex.props(styles.section, styles.sectionButton)}
-      >
-        <span {...stylex.props(styles.chevron, folded && styles.chevronFolded)}>
-          <Icon name="chevronDown" size={12} />
-        </span>
-        {title}
-        {summary ? <span {...stylex.props(styles.summary)}>{summary}</span> : null}
-      </button>
-      {folded ? null : (
-        <>
-          {children}
-          {hasEarlier || earlier ? (
-            <button
-              type="button"
-              onClick={onEarlier}
-              {...stylex.props(styles.section, styles.sectionButton, styles.more)}
-            >
-              {earlier ? "Show today only" : "Show earlier"}
-            </button>
-          ) : null}
-        </>
-      )}
-    </div>
-  );
-}
-
-/**
- * The board member's work sessions (server feature `work_sessions`), the workspace's when one is chosen.
- * Ordered by their own activity only: opening one must not move it to the top.
- */
-function RecentSessions() {
-  const workspace = useWorkspace().id;
-  const [earlier, setEarlier] = useState(false);
-  const all = useWorkSessions().data ?? [];
-  const usedAt = (s: WorkSessionView) => s.last_activity_ms;
-  const today = sidebarSessions(all, workspace, startOfDay(Date.now()), usedAt);
-  const { list: sessions, hasEarlier } = withEarlier(
-    sidebarSessions(all, workspace, 0, usedAt),
-    today,
-    sidebarSessions(all, workspace, null, usedAt),
-    (s) => s.conversation_id,
-    earlier,
-  );
-  if (sessions.length === 0 && !hasEarlier) return null;
-  const active = activeSessions(sessions);
-  return (
-    <FoldingSection
-      id="sessions"
-      title="Sessions"
-      earlier={earlier}
-      onEarlier={() => setEarlier((e) => !e)}
-      hasEarlier={hasEarlier}
-      summary={
-        active > 0 ? (
-          <>
-            <span {...stylex.props(styles.dot, styles.dotLive)} /> {active} working
-          </>
-        ) : null
-      }
-    >
-      {sessions.map((s) => (
-        <NavRow
-          key={s.conversation_id}
-          to={`/session/${s.conversation_id}`}
-          label={s.title || "Session"}
-          icon={markIcon(initial(s.employee_name), markColor(s.employee_id), 15, 4)}
-          end={<SessionMark signal={sessionSignal(s)} />}
-        />
-      ))}
-    </FoldingSection>
-  );
-}
-
-/**
- * The open tickets (ticket #70: each opens as its own session), the workspace's when one is chosen.
- * Ordered by their own changes only: opening one must not move it to the top.
- */
-function OpenTickets() {
-  const workspace = useWorkspace().id;
-  const [earlier, setEarlier] = useState(false);
-  const all = useTickets().data ?? [];
-  const need = useTicketNeeds(all);
-  const signal = (t: TicketView) => ticketSignal(t, need.mine(t));
-  const usedAt = (t: TicketView) => t.updated_at_ms;
-  const today = sidebarTickets(all, workspace, signal, startOfDay(Date.now()), usedAt);
-  const { list: tickets, hasEarlier } = withEarlier(
-    sidebarTickets(all, workspace, signal, 0, usedAt),
-    today,
-    sidebarTickets(all, workspace, signal, null, usedAt),
-    (t) => t.id,
-    earlier,
-  );
-  if (tickets.length === 0 && !hasEarlier) return null;
-  const waiting = tickets.filter((t) => signal(t) === "needs_you").length;
-  return (
-    <FoldingSection
-      id="tickets"
-      title="Tickets"
-      earlier={earlier}
-      onEarlier={() => setEarlier((e) => !e)}
-      hasEarlier={hasEarlier}
-      summary={
-        waiting > 0 ? (
-          <>
-            <span {...stylex.props(styles.dot, styles.dotNeedsYou)} /> {waiting} need you
-          </>
-        ) : null
-      }
-    >
-      {tickets.map((t) => (
-        <NavRow
-          key={t.id}
-          to={`/ticket/${t.number}`}
-          label={`#${t.number} ${t.title}`}
-          icon={markIcon(initial(t.owner_name ?? "?"), markColor(t.owner_employee_id ?? t.id), 15, 4)}
-          end={<SessionMark signal={signal(t)} />}
-        />
-      ))}
-    </FoldingSection>
-  );
-}
 
 const SIDEBAR_KEY = "sidebar";
 
@@ -569,92 +227,13 @@ function useScreenCounter(): void {
   }, [path, storage]);
 }
 
-function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (collapsed: boolean) => void }) {
-  const { hostName, status, features, user } = useLinkState();
-  const employees = useEmployees();
-  const [employeePins] = usePins(pinKey(hostName, "pinned_employees"));
-  const pinnedEmployees = employeePins.flatMap(
-    (id) => employees.data?.filter((e) => e.id === id && e.status !== "archived") ?? [],
-  );
-  return (
-    <SideNav
-      aria-label="Main"
-      data-sidebar
-      // The fold button sits in the head, in place of the logo.
-      collapsible={{ hasButton: false }}
-      resizable={{ defaultWidth: 224, autoSaveId: "sidebar", isCollapsed: collapsed, onCollapseChange: onCollapse }}
-      header={
-        <div data-sidebar-drag {...stylex.props(styles.head)}>
-          <Tooltip content={collapsed ? "Show sidebar" : "Hide sidebar"} delay={400} hasHoverIndication={false}>
-            <IconButton
-              label={collapsed ? "Show sidebar" : "Hide sidebar"}
-              icon={<Icon name="sidebar" size={16} />}
-              variant="ghost"
-              size="sm"
-              onClick={() => onCollapse(!collapsed)}
-            />
-          </Tooltip>
-          {collapsed ? null : (
-            <span title={hostName ?? "Aurelius"} {...stylex.props(styles.brand)}>
-              Aurelius
-            </span>
-          )}
-        </div>
-      }
-      topContent={<WorkspaceSwitcher collapsed={collapsed} />}
-      footer={
-        <div {...stylex.props(styles.foot)}>
-          {status !== "online" && !collapsed ? (
-            <p role="status" {...stylex.props(styles.reconnect)}>
-              Reconnecting…
-            </p>
-          ) : null}
-          {/* Without a signed-in board member (an older server) Settings stays a row of its own. */}
-          {user ? <UserMenu collapsed={collapsed} /> : <NavRow to="/settings" label="Settings" icon={NAV_ICONS.settings} />}
-        </div>
-      }
-    >
-      {NAV_MAIN.map((n) => (
-        <NavRow key={n.to} to={n.to} label={n.label} icon={n.icon} />
-      ))}
-      <SideNavSection title="Workspace">
-        {offered(shown(NAV_WORKSPACE), features).map((n) => (
-          <NavRow key={n.to} to={n.to} label={n.label} icon={NAV_ICONS[n.icon]} />
-        ))}
-      </SideNavSection>
-      {/* What only fits written out: the rail keeps the rows above. */}
-      {collapsed ? null : (
-        <>
-          {pinnedEmployees.length > 0 ? (
-            <div {...stylex.props(styles.group)}>
-              <Link to="/employees" {...stylex.props(styles.sectionLink)}>
-                <SectionLabel>Employees</SectionLabel>
-              </Link>
-              {pinnedEmployees.map((e) => (
-                <NavRow
-                  key={e.id}
-                  to={`/employees/${e.id}`}
-                  label={e.name}
-                  icon={markIcon(initial(e.name), markColor(e.id), 15, 4)}
-                />
-              ))}
-            </div>
-          ) : null}
-          <RecentSessions />
-          <OpenTickets />
-          <Live />
-        </>
-      )}
-    </SideNav>
-  );
-}
-
 export function Frame({ children }: { children: ReactNode }) {
   useLiveQueries();
   // Employees and Knowledge sit under Settings › Company, so they show its sidebar.
   const inSettings = useRouterState({ select: (s) => inSettingsArea(s.location.pathname) });
   useGlobalActions();
   useOpenedWorkspace();
+  useSwitchWorkspaceKey();
   useScreenCounter();
   useUpdateNotice();
   useNoteToasts();

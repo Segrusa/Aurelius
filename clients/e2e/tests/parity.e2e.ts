@@ -8,7 +8,7 @@ import { Connection, expectBody } from "@aurelius/client";
 import { _electron, expect, type Locator, test } from "@playwright/test";
 import { daemonEndpoint, openPipe } from "../../electron/src/main/pipe";
 import { hidden } from "../../ts/app/src/hidden";
-import { openCompanyPage, openSettings } from "./company";
+import { chooseWorkspace, openCompanyPage, openSettings } from "./company";
 import { REPO, TestDaemon, until } from "./daemon";
 import { expectNewSession, openGiveWork } from "./new-session";
 
@@ -141,11 +141,8 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
 
     // One project at a time: the workspace, on the Board as everywhere.
     await page.getByRole("navigation").getByRole("link", { name: "Board" }).first().click();
-    await page.getByRole("button", { name: "Workspace: All projects" }).click();
-    await page.getByRole("menuitem", { name: "Northwind API" }).click();
-    await page.getByRole("button", { name: "Workspace: Northwind API" }).click();
-    await page.getByRole("menuitem", { name: "All projects" }).click();
-    await expect(page.getByRole("button", { name: "Workspace: All projects" })).toBeVisible();
+    await chooseWorkspace(page, "Northwind API");
+    await chooseWorkspace(page, "All workspaces");
 
     // Create and start with nobody to do it yet: says what happened.
     await page.keyboard.press("Control+t");
@@ -187,14 +184,12 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
       return all.find((t) => t.owner_name === "Ava");
     });
 
-    // A pinned employee stands in the sidebar.
+    // An employee can be pinned to the list (the sidebar no longer lists pins: it shows sessions only).
     await openCompanyPage(page, "Employees");
     await page.getByRole("link", { name: /Ava/ }).first().click();
     await page.getByRole("button", { name: "More for Ava" }).click();
     await page.getByRole("menuitem", { name: "Pin to the list" }).click();
-    // Employees sit under Settings; the pin shows in the app's own sidebar.
     await page.getByRole("link", { name: "Back to the app" }).click();
-    await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Ava" })).toBeVisible();
 
     // An idea takes files too.
     if (!hidden("Ideas")) {

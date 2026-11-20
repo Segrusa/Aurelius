@@ -1,18 +1,36 @@
 import { expect, type Page } from "@playwright/test";
 
 /**
- * Opens Settings from the sidebar: through the signed-in board member's menu at its foot, or the
- * plain Settings row when nobody is signed in.
+ * Opens Settings from the sidebar's rail: through the signed-in board member's menu at its foot, or the
+ * plain Settings button when nobody is signed in.
  */
 export async function openSettings(page: Page): Promise<void> {
-  const main = page.getByRole("navigation", { name: "Main" });
-  const menu = main.getByRole("button", { name: /settings and account$/ });
+  const rail = page.getByRole("navigation", { name: "Workspaces" });
+  const menu = rail.getByRole("button", { name: /settings and account$/ });
   if (await menu.isVisible()) {
     await menu.click();
     await page.getByRole("menuitem", { name: /^Settings/ }).click();
   } else {
-    await main.getByRole("link", { name: "Settings", exact: true }).click();
+    await rail.getByRole("button", { name: "Settings", exact: true }).click();
   }
+}
+
+/** The sidebar rail's tile of a workspace ("All workspaces" or a project's name). */
+export function workspaceTile(page: Page, name: string) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return page
+    .getByRole("navigation", { name: "Workspaces" })
+    .getByRole("button", { name: new RegExp(`^${escaped}(,|$)`) });
+}
+
+/** Switches the workspace on the rail and waits until it is the current one. */
+export async function chooseWorkspace(page: Page, name: string): Promise<void> {
+  await workspaceTile(page, name).click();
+  await expectWorkspace(page, name);
+}
+
+export async function expectWorkspace(page: Page, name: string): Promise<void> {
+  await expect(workspaceTile(page, name)).toHaveAttribute("aria-current", "true");
 }
 
 /**

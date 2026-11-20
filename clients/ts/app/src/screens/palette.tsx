@@ -154,7 +154,7 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
               items: [
                 {
                   id: "workspace:all",
-                  label: "All projects",
+                  label: "All workspaces",
                   detail: "Switch workspace",
                   mark: "",
                   run: () => switchRef.current(null),

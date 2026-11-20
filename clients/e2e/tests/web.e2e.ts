@@ -1,7 +1,7 @@
 import { Connection, expectBody } from "@aurelius/client";
 import { expect, type Page, test } from "@playwright/test";
 import { openPipe } from "../../electron/src/main/pipe";
-import { openSettings } from "./company";
+import { openSettings, workspaceTile } from "./company";
 import { serveStatic, TestDaemon, until, WEB_DIST } from "./daemon";
 import { approval, scriptServer } from "./fake-server";
 
@@ -70,9 +70,7 @@ test.describe("against a real daemon", () => {
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     await expect(page).toHaveURL(/\/new$/);
-    await page.getByRole("button", { name: "Workspace: All projects" }).click();
-    await expect(page.getByRole("menuitem", { name: "Northwind API" })).toBeVisible();
-    await page.keyboard.press("Escape");
+    await expect(workspaceTile(page, "Northwind API")).toBeVisible();
     await expect(page.getByRole("button", { name: "Inbox" }).first()).toBeVisible();
 
     // No credential for a script, and none in the address.
@@ -91,9 +89,7 @@ test.describe("against a real daemon", () => {
     // A change elsewhere reaches this page by an event.
     await owner.write("project.create", { name: "Seen live" });
     const projectInSwitcher = async () => {
-      await page.getByRole("button", { name: "Workspace: All projects" }).click();
-      await expect(page.getByRole("menuitem", { name: "Seen live" })).toBeVisible();
-      await page.keyboard.press("Escape");
+      await expect(workspaceTile(page, "Seen live")).toBeVisible();
     };
     await projectInSwitcher();
 

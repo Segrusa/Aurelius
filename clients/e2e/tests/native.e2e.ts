@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { Connection } from "@aurelius/client";
 import { _electron, chromium, expect, type Page, test } from "@playwright/test";
 import { openPipe } from "../../electron/src/main/pipe";
+import { workspaceTile } from "./company";
 import { freePort, REPO, TestDaemon, until } from "./daemon";
 
 const PASSWORD = "a-long-enough-password";
@@ -110,9 +111,7 @@ test("pairs with a server elsewhere, works there, comes back and forgets it", as
 
     // The app starts over on that server.
     await signIn(page);
-    await page.getByRole("button", { name: "Workspace: All projects" }).click();
-    await expect(page.getByRole("menuitem", { name: "Northwind API" })).toBeVisible();
-    await page.keyboard.press("Escape");
+    await expect(workspaceTile(page, "Northwind API")).toBeVisible();
     await expect(
       page.evaluate(() =>
         (window as unknown as { aurelius: { info(): Promise<{ target: unknown }> } }).aurelius
@@ -127,9 +126,7 @@ test("pairs with a server elsewhere, works there, comes back and forgets it", as
 
     // Followed the events over the WebSocket: what the server makes shows up here.
     await owner.write("project.create", { name: "Made on the server" });
-    await page.getByRole("button", { name: "Workspace: All projects" }).click();
-    await expect(page.getByRole("menuitem", { name: "Made on the server" })).toBeVisible();
-    await page.keyboard.press("Escape");
+    await expect(workspaceTile(page, "Made on the server")).toBeVisible();
 
     // A file from this computer reaches the server through its inbox.
     await app.evaluate(({ dialog }, file) => {
