@@ -1,7 +1,7 @@
 import type { ScheduledMessageView, ThreadWaiter } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import { areasOf } from "../data";
-import { outcomeText, scheduledLine, splitScheduled, waiterLine } from "./scheduled-logic";
+import { outcomeText, scheduledLine, shownWaiters, splitScheduled, waiterLine } from "./scheduled-logic";
 
 const waiter = (over: Partial<ThreadWaiter> = {}): ThreadWaiter => ({
   employee_id: "e1",
@@ -29,6 +29,13 @@ describe("the waiting line", () => {
     expect(waiterLine(waiter())).toBe("Flux is waiting to pick up this thread");
     expect(waiterLine(waiter({ behind: 1 }))).toBe("Flux is waiting to pick up this thread (behind 1 item)");
     expect(waiterLine(waiter({ behind: 2 }))).toBe("Flux is waiting to pick up this thread (behind 2 items)");
+  });
+
+  it("leaves out an employee already at work in the thread, whose next message only waits its turn", () => {
+    const busy = waiter({ behind: 1 });
+    const paused = waiter({ employee_name: "Bo", behind: 1, reason: "paused" });
+    const idle = waiter({ employee_name: "Ann" });
+    expect(shownWaiters([busy, paused, idle])).toEqual([paused, idle]);
   });
 
   it("names what holds it back other than its turn", () => {

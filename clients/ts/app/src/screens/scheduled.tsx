@@ -15,7 +15,7 @@ import { hidden } from "../hidden";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, Problem } from "./org-kit";
-import { outcomeText, scheduledLine, splitScheduled, waiterLine } from "./scheduled-logic";
+import { outcomeText, scheduledLine, shownWaiters, splitScheduled, waiterLine } from "./scheduled-logic";
 import { ScheduleDialog } from "./settings-advanced";
 import { Switch, when } from "./settings-kit";
 import { recurrenceText } from "./settings-logic";
@@ -273,7 +273,7 @@ export function ThreadWaiting({
     wanted,
   );
   const lines = [
-    ...(waiting.data?.waiters ?? []).map(waiterLine),
+    ...shownWaiters(waiting.data?.waiters ?? []).map(waiterLine),
     ...(waiting.data?.scheduled ?? []).map((m) => scheduledLine(m, when(m.due_at_ms))),
   ];
   if (lines.length === 0) return null;

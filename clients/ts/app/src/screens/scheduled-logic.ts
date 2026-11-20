@@ -10,6 +10,15 @@ export function waiterLine(w: ThreadWaiter): string {
   return `${w.employee_name} is waiting to pick up this thread${behind}`;
 }
 
+/**
+ * The waiters worth a line. `behind > 0` without a reason means the employee's own run in this thread
+ * goes first: it is at work here and the next message only waits its turn, which the thread shows itself
+ * (the run's live answer and the message marked Queued). Paused, a limit or an open question stay.
+ */
+export function shownWaiters(waiters: readonly ThreadWaiter[]): ThreadWaiter[] {
+  return waiters.filter((w) => w.reason || w.behind === 0);
+}
+
 /** What is scheduled in a thread: "Ann has a reminder for 14:30" or "Ann → Bo at 14:30". */
 export function scheduledLine(m: ScheduledMessageView, at: string): string {
   return m.from_employee === m.to_employee

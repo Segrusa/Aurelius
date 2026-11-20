@@ -728,7 +728,11 @@ test.describe("scripted organisation", () => {
             type: "thread_waiting",
             value: {
               as_of_seq: 1,
-              waiters: [{ employee_id: "e1", employee_name: "Orion", behind: 2 }],
+              // Busy here, so only its turn: no line. Held back by a limit: a line.
+              waiters: [
+                { employee_id: "e1", employee_name: "Orion", behind: 1 },
+                { employee_id: "e2", employee_name: "Bo", behind: 1, reason: "limit" },
+              ],
               scheduled: [],
             },
           }),
@@ -737,7 +741,7 @@ test.describe("scripted organisation", () => {
       "/session/c1",
     );
     await expect(page.getByLabel("Who waits for this thread")).toHaveText(
-      "Orion is waiting to pick up this thread (behind 2 items)",
+      "Bo is waiting for a usage limit to pick up this thread",
     );
     await stop();
   });
