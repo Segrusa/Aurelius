@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
-import { chooseWorkspace, expectWorkspace, openCompanyPage, openSettings } from "./company";
+import { chooseWorkspace, expectWorkspace, openCompanyPage, openSettings, workspaceTile } from "./company";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
 import { boardOf, channel, messages, notification, scriptServer, task, ticket } from "./fake-server";
 import { expectNewSession } from "./new-session";
@@ -68,6 +68,13 @@ const script = {
 };
 
 const choose = chooseWorkspace;
+
+interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 async function open(page: Page, path: string, workspace?: string) {
   const site = await serveStatic(WEB_DIST);
@@ -198,6 +205,29 @@ test("the rail switches with the sidebar folded, and the palette switches too", 
     await page.getByRole("combobox", { name: "Command palette" }).fill("Zephyr");
     await page.getByRole("option", { name: /Zephyr.*Switch workspace/ }).click();
     await expectWorkspace(page, "Zephyr");
+  } finally {
+    site.close();
+  }
+});
+
+// A tile is a circle until hovered, and the browser hit-tests the rounded shape: a click in the square's
+// corner, before the hover had turned it into a rounded square, fell through to the rail (ticket #73).
+test("a click in the corner of a workspace tile switches, also without hovering it first", async ({ page }) => {
+  const site = await open(page, "/board");
+  try {
+    await expectWorkspace(page, "All workspaces");
+    for (const [name, corner] of [
+      ["Atlas", (b: Box) => ({ x: b.x + 2, y: b.y + 2 })],
+      ["Zephyr", (b: Box) => ({ x: b.x + b.width - 2, y: b.y + b.height - 2 })],
+    ] as const) {
+      const box = await workspaceTile(page, name).boundingBox();
+      if (!box) throw new Error(`no tile for ${name}`);
+      // Straight from elsewhere to the corner, as a quick move does: no hover on the way.
+      await page.mouse.move(0, 0);
+      const { x, y } = corner(box);
+      await page.mouse.click(x, y);
+      await expectWorkspace(page, name);
+    }
   } finally {
     site.close();
   }
