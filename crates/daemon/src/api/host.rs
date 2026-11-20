@@ -112,6 +112,11 @@ pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite, user: Option
             HostResult::Done
         }
         HostWrite::FsCreateDir { parent, name } => HostResult::DirListing(crate::browse::create(shared, parent, name).await?),
+        write @ (HostWrite::CodeFetch { .. }
+        | HostWrite::CodeMerge { .. }
+        | HostWrite::CodeRemoveWorktree { .. }
+        | HostWrite::CodeDeleteBranch { .. }
+        | HostWrite::CodePruneMerged { .. }) => HostResult::Code(crate::code::write(shared, write).await?),
     })
 }
 

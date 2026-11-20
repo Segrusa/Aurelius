@@ -378,6 +378,12 @@ pub enum Method {
     /// run (the trace's "Guidelines: Rust v3, …"); also without trace mode.
     #[serde(rename = "run.guidelines")]
     RunGuidelines { run_id: RunId },
+    /// The Code tab of a workspace (feature `code_view`, ticket #77): the git state of
+    /// the project's folder (worktrees, local branches, recent commits). A folder that is
+    /// no git repository answers a view with `problem` set, not an error. The same
+    /// rights as `board.get`.
+    #[serde(rename = "code.get")]
+    CodeGet { project_id: ProjectId },
     /// The conversations of a project, most recently active first.
     #[serde(rename = "project_conversation.list")]
     ProjectConversationList { project_id: ProjectId },

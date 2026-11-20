@@ -77,6 +77,31 @@ abstract final class Methods {
   /// Disconnect the session's own Claude login (`claude auth logout`, its folder
   /// removed). Answers `ClaudeLogin`.
   static const String claudeLoginUnlink = 'claude_login.unlink';
+  /// Delete a local branch (not main, not one checked out in a worktree, not one an
+  /// employee works on now). A branch with commits main lacks needs `force` (the
+  /// client asked the board member first: that work is gone). Answers `Code`.
+  static const String codeDeleteBranch = 'code.delete_branch';
+  /// `git fetch --prune` of the project's repository (feature `code_view`, ticket #77);
+  /// answers `HostResult::Code`. Never a prompt for credentials: a remote that wants
+  /// one fails with git's reason.
+  static const String codeFetch = 'code.fetch';
+  /// The Code tab of a workspace (feature `code_view`, ticket #77): the git state of
+  /// the project's folder (worktrees, local branches, recent commits). A folder that is
+  /// no git repository answers a view with `problem` set, not an error. The same
+  /// rights as `board.get`.
+  static const String codeGet = 'code.get';
+  /// Merge a local branch into the project's main (`--no-ff`), in the project's folder.
+  /// Refused when the folder is not on main, main has uncommitted changes, is in another
+  /// merge, or the branch has nothing ahead; a conflict is aborted, so main stays as it
+  /// was (`validation` with git's reason and the conflicting files). Answers `Code`.
+  static const String codeMerge = 'code.merge';
+  /// Clean up merged: remove every clean worktree of a merged branch nobody works on,
+  /// then delete every merged branch without a worktree (never main), then
+  /// `git worktree prune`. Answers `Code`.
+  static const String codePruneMerged = 'code.prune_merged';
+  /// Remove a worktree (not the project's folder). Refused when it has uncommitted
+  /// changes or an employee works in it now. The branch stays. Answers `Code`.
+  static const String codeRemoveWorktree = 'code.remove_worktree';
   /// Whether the server committed the write sent with `idempotency_key` (feature
   /// `command_applied`), answered with `CommandApplied`. A client asks this after
   /// the connection dropped or timed out under a write it will not resend, so it
@@ -664,6 +689,17 @@ Map<String, dynamic> claudeLoginInput(ClaudeLoginInputParams params) => <String,
 /// The session's own Claude login (`ClaudeLoginView`). Feature of protocol 5.
 Map<String, dynamic> claudeLoginStatus() => <String, dynamic>{
   'method': Methods.claudeLoginStatus,
+};
+
+/// The Code tab of a workspace (feature `code_view`, ticket #77): the git state of
+/// the project's folder (worktrees, local branches, recent commits). A folder that is
+/// no git repository answers a view with `problem` set, not an error. The same
+/// rights as `board.get`.
+Map<String, dynamic> codeGet({required String projectId}) => <String, dynamic>{
+  'method': Methods.codeGet,
+  'params': <String, dynamic>{
+    'project_id': projectId,
+  },
 };
 
 /// Whether the server committed the write sent with `idempotency_key` (feature
@@ -1431,6 +1467,60 @@ Map<String, dynamic> claudeLoginLink() => <String, dynamic>{
 /// removed). Answers `ClaudeLogin`.
 Map<String, dynamic> claudeLoginUnlink() => <String, dynamic>{
   'method': Methods.claudeLoginUnlink,
+};
+
+/// Delete a local branch (not main, not one checked out in a worktree, not one an
+/// employee works on now). A branch with commits main lacks needs `force` (the
+/// client asked the board member first: that work is gone). Answers `Code`.
+Map<String, dynamic> codeDeleteBranch({required String branch, bool force = false, required String projectId}) => <String, dynamic>{
+  'method': Methods.codeDeleteBranch,
+  'params': <String, dynamic>{
+    'branch': branch,
+    'force': force,
+    'project_id': projectId,
+  },
+};
+
+/// `git fetch --prune` of the project's repository (feature `code_view`, ticket #77);
+/// answers `HostResult::Code`. Never a prompt for credentials: a remote that wants
+/// one fails with git's reason.
+Map<String, dynamic> codeFetch({required String projectId}) => <String, dynamic>{
+  'method': Methods.codeFetch,
+  'params': <String, dynamic>{
+    'project_id': projectId,
+  },
+};
+
+/// Merge a local branch into the project's main (`--no-ff`), in the project's folder.
+/// Refused when the folder is not on main, main has uncommitted changes, is in another
+/// merge, or the branch has nothing ahead; a conflict is aborted, so main stays as it
+/// was (`validation` with git's reason and the conflicting files). Answers `Code`.
+Map<String, dynamic> codeMerge({required String branch, required String projectId}) => <String, dynamic>{
+  'method': Methods.codeMerge,
+  'params': <String, dynamic>{
+    'branch': branch,
+    'project_id': projectId,
+  },
+};
+
+/// Clean up merged: remove every clean worktree of a merged branch nobody works on,
+/// then delete every merged branch without a worktree (never main), then
+/// `git worktree prune`. Answers `Code`.
+Map<String, dynamic> codePruneMerged({required String projectId}) => <String, dynamic>{
+  'method': Methods.codePruneMerged,
+  'params': <String, dynamic>{
+    'project_id': projectId,
+  },
+};
+
+/// Remove a worktree (not the project's folder). Refused when it has uncommitted
+/// changes or an employee works in it now. The branch stays. Answers `Code`.
+Map<String, dynamic> codeRemoveWorktree({required String path, required String projectId}) => <String, dynamic>{
+  'method': Methods.codeRemoveWorktree,
+  'params': <String, dynamic>{
+    'path': path,
+    'project_id': projectId,
+  },
 };
 
 /// Above how many tokens of context a session is compacted before its next turn

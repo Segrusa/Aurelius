@@ -406,6 +406,12 @@ pub mod feature {
     /// or fails), and the write `work_session.retry_summary`. A client without this
     /// feature shows only tickets in the History.
     pub const SESSION_HISTORY: &str = "session_history";
+    /// The Code tab (protocol 5, additive, ticket #77): the read `code.get` of a
+    /// project's git state and the host writes `code.fetch`, `code.merge`,
+    /// `code.remove_worktree`, `code.delete_branch` and `code.prune_merged`, each
+    /// answering the view as it is after it. Never a push. A client without this
+    /// feature does not show the Code tab.
+    pub const CODE_VIEW: &str = "code_view";
     /// Work sessions (protocol 5, additive): `work_session.start` starts one employee in one
     /// project's folder without a ticket (optionally in a worktree of its own), later messages
     /// go in with `chat.send`, and `work_session.list` lists the reader's sessions. A client
@@ -504,6 +510,7 @@ pub const FEATURES: &[&str] = &[
     feature::RUN_DECISIONS,
     feature::COMMAND_APPLIED,
     feature::TICKET_MADE_TITLE,
+    feature::CODE_VIEW,
 ];
 
 /// The answer of `command.applied`.
@@ -637,6 +644,8 @@ pub enum ResponseBody {
     History(aurelius_domain::history::HistoryPage),
     /// `work_session.history`.
     SessionHistory(aurelius_domain::history::SessionHistoryPage),
+    /// `code.get`.
+    Code(aurelius_domain::code::CodeView),
     /// `message.locate`.
     MessageLocation(aurelius_domain::views::MessageLocation),
     /// `message.history`.

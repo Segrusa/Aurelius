@@ -244,6 +244,36 @@ pub enum HostWrite {
     /// history stays. Answers `VaultItem`. Not for apps.
     #[serde(rename = "vault.archive")]
     VaultArchive { item_id: aurelius_domain::VaultItemId },
+    /// `git fetch --prune` of the project's repository (feature `code_view`, ticket #77);
+    /// answers `HostResult::Code`. Never a prompt for credentials: a remote that wants
+    /// one fails with git's reason.
+    #[serde(rename = "code.fetch")]
+    CodeFetch { project_id: ProjectId },
+    /// Merge a local branch into the project's main (`--no-ff`), in the project's folder.
+    /// Refused when the folder is not on main, main has uncommitted changes, is in another
+    /// merge, or the branch has nothing ahead; a conflict is aborted, so main stays as it
+    /// was (`validation` with git's reason and the conflicting files). Answers `Code`.
+    #[serde(rename = "code.merge")]
+    CodeMerge { project_id: ProjectId, branch: String },
+    /// Remove a worktree (not the project's folder). Refused when it has uncommitted
+    /// changes or an employee works in it now. The branch stays. Answers `Code`.
+    #[serde(rename = "code.remove_worktree")]
+    CodeRemoveWorktree { project_id: ProjectId, path: String },
+    /// Delete a local branch (not main, not one checked out in a worktree, not one an
+    /// employee works on now). A branch with commits main lacks needs `force` (the
+    /// client asked the board member first: that work is gone). Answers `Code`.
+    #[serde(rename = "code.delete_branch")]
+    CodeDeleteBranch {
+        project_id: ProjectId,
+        branch: String,
+        #[serde(default)]
+        force: bool,
+    },
+    /// Clean up merged: remove every clean worktree of a merged branch nobody works on,
+    /// then delete every merged branch without a worktree (never main), then
+    /// `git worktree prune`. Answers `Code`.
+    #[serde(rename = "code.prune_merged")]
+    CodePruneMerged { project_id: ProjectId },
 }
 
 /// `vault.create`. The value is never printed.
@@ -385,6 +415,11 @@ impl HostWrite {
         "vault.create",
         "vault.update",
         "vault.archive",
+        "code.fetch",
+        "code.merge",
+        "code.remove_worktree",
+        "code.delete_branch",
+        "code.prune_merged",
     ];
 
     pub fn name(&self) -> String {
@@ -437,12 +472,17 @@ pub enum HostResult {
     /// `vault.create` / `vault.update` / `vault.archive`: the item as it is now.
     /// A replayed receipt has no value: read it with `vault.list` or `vault.reveal`.
     VaultItem(aurelius_domain::vault::VaultItemView),
+    /// `code.*`: the project's git state after the write.
+    Code(aurelius_domain::code::CodeView),
 }
 
 impl HostResult {
-    /// What a receipt keeps: secrets blanked, so a replay never shows them again.
+    /// What a receipt keeps: secrets blanked, so a replay never shows them again, and a
+    /// Code view without its worktrees, branches and commits (they can be hundreds of KB and
+    /// are stale on a replay; the client reads them again with `code.get`).
     pub fn redacted(&self) -> HostResult {
         match self {
+            HostResult::Code(view) => HostResult::Code(aurelius_domain::code::CodeView { worktrees: vec![], branches: vec![], commits: vec![], ..view.clone() }),
             HostResult::PairingCode(code) => HostResult::PairingCode(PairingCode { code: String::new(), qr: String::new(), expires_at_ms: code.expires_at_ms, pairing_text: String::new() }),
             HostResult::VaultItem(item) => HostResult::VaultItem(aurelius_domain::vault::VaultItemView { value: None, ..item.clone() }),
             other => other.clone(),
@@ -507,5 +547,23 @@ mod tests {
         let pairing = HostResult::PairingCode(PairingCode { code: "ABCD2345".into(), qr: "{}".into(), expires_at_ms: 9, pairing_text: "aurelius-pair:x".into() });
         let kept = serde_json::to_string(&pairing.redacted()).unwrap();
         assert!(!kept.contains("ABCD2345") && !kept.contains("aurelius-pair"));
+    }
+
+    #[test]
+    fn a_code_receipt_keeps_the_head_of_the_view_and_none_of_its_lists() {
+        use aurelius_domain::code::{CodeCommit, CodeView, CodeWorktree};
+        let view = CodeView {
+            project_id: aurelius_domain::ProjectId::new(),
+            repo_path: "/repo".into(),
+            main_branch: Some("main".into()),
+            problem: Some("why".into()),
+            has_remote: true,
+            fetched_at_ms: Some(7),
+            worktrees: vec![CodeWorktree { path: "/repo".into(), branch: Some("main".into()), is_main: true, head: "h".into(), changed_files: vec![], changed_count: 0, missing: false, working: false }],
+            branches: vec![],
+            commits: vec![CodeCommit { hash: "h".into(), parents: vec![], subject: "first".into(), author: "Ann".into(), at_ms: 1, branches: vec!["main".into()] }],
+        };
+        let HostResult::Code(kept) = HostResult::Code(view.clone()).redacted() else { panic!("still a Code result") };
+        assert_eq!(kept, CodeView { worktrees: vec![], branches: vec![], commits: vec![], ..view });
     }
 }

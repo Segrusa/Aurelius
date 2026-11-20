@@ -1393,6 +1393,339 @@ final class ClaudeLoginView {
   };
 }
 
+/// One local branch.
+final class CodeBranch {
+  const CodeBranch({
+    required this.ahead,
+    required this.atMs,
+    required this.author,
+    required this.behind,
+    this.commits = const [],
+    this.deletions = 0,
+    this.filesChanged = 0,
+    required this.head,
+    this.insertions = 0,
+    this.isMain = false,
+    this.merged = false,
+    required this.name,
+    this.open = false,
+    this.owner,
+    required this.subject,
+    this.ticket,
+    this.upstream,
+    this.upstreamAhead = 0,
+    this.upstreamBehind = 0,
+    this.working = false,
+    this.worktreePath,
+  });
+
+  /// Commits on this branch that main lacks (`main..branch`); 0 for main.
+  final int ahead;
+  final int atMs;
+  final String author;
+  /// Commits on main this branch lacks (`branch..main`); 0 for main.
+  final int behind;
+  /// Its own commits (`main..branch`), newest first, at most `CODE_BRANCH_COMMITS_MAX`.
+  final List<CodeCommitLine> commits;
+  final int deletions;
+  /// The size of `main...branch` (what a merge would bring): files, lines added, removed.
+  final int filesChanged;
+  /// Its newest commit.
+  final String head;
+  final int insertions;
+  /// The repository's main branch.
+  final bool isMain;
+  /// Every commit of it is in main (git's view: a fresh branch at main counts too; see `open`).
+  final bool merged;
+  final String name;
+  /// Its ticket is not on Done (nor archived) or its work session is not deleted: work on
+  /// it may still come, also when nothing is ahead of main yet. The Code tab never offers to
+  /// remove or delete such a branch, and Clean up merged leaves it alone.
+  final bool open;
+  /// Who works on it: the ticket's owner, else the employee of the work session.
+  final CodeOwner? owner;
+  /// Its newest commit: subject, author name and time.
+  final String subject;
+  /// The ticket it belongs to: a quick task's branch, a work session's worktree, or a
+  /// ticket number in its name (`feat/ticket-77-…`, `fix/77-…`) of this project.
+  final CodeTicket? ticket;
+  /// Its upstream (`origin/…`); for main: how far it is from it after a fetch.
+  final String? upstream;
+  final int upstreamAhead;
+  final int upstreamBehind;
+  /// An employee works on it now: a run of its ticket or work session is live or queued.
+  final bool working;
+  /// The worktree it is checked out in; none: no worktree.
+  final String? worktreePath;
+
+  factory CodeBranch.fromJson(Map<String, dynamic> json) => CodeBranch(
+    ahead: (json['ahead'] as num).toInt(),
+    atMs: (json['at_ms'] as num).toInt(),
+    author: (json['author'] as String),
+    behind: (json['behind'] as num).toInt(),
+    commits: (json['commits'] == null ? const [] : (json['commits'] as List<dynamic>).map((x0) => CodeCommitLine.fromJson(x0 as Map<String, dynamic>)).toList()),
+    deletions: (json['deletions'] == null ? 0 : (json['deletions'] as num).toInt()),
+    filesChanged: (json['files_changed'] == null ? 0 : (json['files_changed'] as num).toInt()),
+    head: (json['head'] as String),
+    insertions: (json['insertions'] == null ? 0 : (json['insertions'] as num).toInt()),
+    isMain: (json['is_main'] == null ? false : (json['is_main'] as bool)),
+    merged: (json['merged'] == null ? false : (json['merged'] as bool)),
+    name: (json['name'] as String),
+    open: (json['open'] == null ? false : (json['open'] as bool)),
+    owner: (json['owner'] == null ? null : CodeOwner.fromJson(json['owner'] as Map<String, dynamic>)),
+    subject: (json['subject'] as String),
+    ticket: (json['ticket'] == null ? null : CodeTicket.fromJson(json['ticket'] as Map<String, dynamic>)),
+    upstream: (json['upstream'] == null ? null : (json['upstream'] as String)),
+    upstreamAhead: (json['upstream_ahead'] == null ? 0 : (json['upstream_ahead'] as num).toInt()),
+    upstreamBehind: (json['upstream_behind'] == null ? 0 : (json['upstream_behind'] as num).toInt()),
+    working: (json['working'] == null ? false : (json['working'] as bool)),
+    worktreePath: (json['worktree_path'] == null ? null : (json['worktree_path'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'ahead': ahead,
+    'at_ms': atMs,
+    'author': author,
+    'behind': behind,
+    'commits': commits.map((x0) => x0.toJson()).toList(),
+    'deletions': deletions,
+    'files_changed': filesChanged,
+    'head': head,
+    'insertions': insertions,
+    'is_main': isMain,
+    'merged': merged,
+    'name': name,
+    'open': open,
+    if (owner != null) 'owner': owner?.toJson(),
+    'subject': subject,
+    if (ticket != null) 'ticket': ticket?.toJson(),
+    if (upstream != null) 'upstream': upstream,
+    'upstream_ahead': upstreamAhead,
+    'upstream_behind': upstreamBehind,
+    'working': working,
+    if (worktreePath != null) 'worktree_path': worktreePath,
+  };
+}
+
+/// One commit of the graph.
+final class CodeCommit {
+  const CodeCommit({
+    required this.atMs,
+    required this.author,
+    this.branches = const [],
+    required this.hash,
+    this.parents = const [],
+    required this.subject,
+  });
+
+  final int atMs;
+  final String author;
+  /// The listed local branches whose newest commit this is.
+  final List<String> branches;
+  /// The full hash; the client shows the first seven characters.
+  final String hash;
+  /// Its parents' full hashes, the first parent first (two or more: a merge).
+  final List<String> parents;
+  final String subject;
+
+  factory CodeCommit.fromJson(Map<String, dynamic> json) => CodeCommit(
+    atMs: (json['at_ms'] as num).toInt(),
+    author: (json['author'] as String),
+    branches: (json['branches'] == null ? const [] : (json['branches'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    hash: (json['hash'] as String),
+    parents: (json['parents'] == null ? const [] : (json['parents'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    subject: (json['subject'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'at_ms': atMs,
+    'author': author,
+    'branches': branches,
+    'hash': hash,
+    'parents': parents,
+    'subject': subject,
+  };
+}
+
+/// A commit of a branch's own list.
+final class CodeCommitLine {
+  const CodeCommitLine({
+    required this.hash,
+    required this.subject,
+  });
+
+  final String hash;
+  final String subject;
+
+  factory CodeCommitLine.fromJson(Map<String, dynamic> json) => CodeCommitLine(
+    hash: (json['hash'] as String),
+    subject: (json['subject'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'hash': hash,
+    'subject': subject,
+  };
+}
+
+/// Who works on a branch.
+final class CodeOwner {
+  const CodeOwner({
+    required this.employeeId,
+    required this.name,
+  });
+
+  final String employeeId;
+  final String name;
+
+  factory CodeOwner.fromJson(Map<String, dynamic> json) => CodeOwner(
+    employeeId: (json['employee_id'] as String),
+    name: (json['name'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'employee_id': employeeId,
+    'name': name,
+  };
+}
+
+/// The ticket a branch belongs to.
+final class CodeTicket {
+  const CodeTicket({
+    required this.number,
+    required this.ticketId,
+    required this.title,
+  });
+
+  final int number;
+  final String ticketId;
+  final String title;
+
+  factory CodeTicket.fromJson(Map<String, dynamic> json) => CodeTicket(
+    number: (json['number'] as num).toInt(),
+    ticketId: (json['ticket_id'] as String),
+    title: (json['title'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'number': number,
+    'ticket_id': ticketId,
+    'title': title,
+  };
+}
+
+/// The git state of one project's folder.
+final class CodeView {
+  const CodeView({
+    this.branches = const [],
+    this.commits = const [],
+    this.fetchedAtMs,
+    this.hasRemote = false,
+    this.mainBranch,
+    this.problem,
+    required this.projectId,
+    required this.repoPath,
+    this.worktrees = const [],
+  });
+
+  /// The local branches, main first, then the newest last commit first.
+  final List<CodeBranch> branches;
+  /// The newest commits of main and every listed branch, newest first (date order),
+  /// at most `CODE_COMMITS_MAX`. A parent outside the list is cut off in the graph.
+  final List<CodeCommit> commits;
+  /// When the last `git fetch` ended (the time of `FETCH_HEAD`); none: never.
+  final int? fetchedAtMs;
+  /// Whether the repository has a remote at all (no remote: no Fetch).
+  final bool hasRemote;
+  /// The repository's main branch (`main`, else `master`); none: see `problem`.
+  final String? mainBranch;
+  /// Why there is nothing to show, in words a board member can act on (no folder,
+  /// not a git repository, git missing, no main branch). The lists are empty then.
+  final String? problem;
+  final String projectId;
+  /// The project's folder (the main checkout).
+  final String repoPath;
+  /// Every worktree git knows, the main checkout first.
+  final List<CodeWorktree> worktrees;
+
+  factory CodeView.fromJson(Map<String, dynamic> json) => CodeView(
+    branches: (json['branches'] == null ? const [] : (json['branches'] as List<dynamic>).map((x0) => CodeBranch.fromJson(x0 as Map<String, dynamic>)).toList()),
+    commits: (json['commits'] == null ? const [] : (json['commits'] as List<dynamic>).map((x0) => CodeCommit.fromJson(x0 as Map<String, dynamic>)).toList()),
+    fetchedAtMs: (json['fetched_at_ms'] == null ? null : (json['fetched_at_ms'] as num).toInt()),
+    hasRemote: (json['has_remote'] == null ? false : (json['has_remote'] as bool)),
+    mainBranch: (json['main_branch'] == null ? null : (json['main_branch'] as String)),
+    problem: (json['problem'] == null ? null : (json['problem'] as String)),
+    projectId: (json['project_id'] as String),
+    repoPath: (json['repo_path'] as String),
+    worktrees: (json['worktrees'] == null ? const [] : (json['worktrees'] as List<dynamic>).map((x0) => CodeWorktree.fromJson(x0 as Map<String, dynamic>)).toList()),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'branches': branches.map((x0) => x0.toJson()).toList(),
+    'commits': commits.map((x0) => x0.toJson()).toList(),
+    if (fetchedAtMs != null) 'fetched_at_ms': fetchedAtMs,
+    'has_remote': hasRemote,
+    if (mainBranch != null) 'main_branch': mainBranch,
+    if (problem != null) 'problem': problem,
+    'project_id': projectId,
+    'repo_path': repoPath,
+    'worktrees': worktrees.map((x0) => x0.toJson()).toList(),
+  };
+}
+
+/// One worktree of the repository.
+final class CodeWorktree {
+  const CodeWorktree({
+    this.branch,
+    this.changedCount = 0,
+    this.changedFiles = const [],
+    required this.head,
+    this.isMain = false,
+    this.missing = false,
+    required this.path,
+    this.working = false,
+  });
+
+  /// Its branch; none: a detached HEAD.
+  final String? branch;
+  /// How many files have uncommitted changes (may be more than `changed_files` names).
+  final int changedCount;
+  /// Uncommitted changes (tracked and untracked files), at most `CODE_FILES_MAX` named.
+  final List<String> changedFiles;
+  /// The commit it is on.
+  final String head;
+  /// The project's folder itself; never removed from here.
+  final bool isMain;
+  /// Git no longer finds its folder (`git worktree prune` removes it).
+  final bool missing;
+  final String path;
+  /// An employee works in it now: its branch is `working`, or (a detached HEAD) a run of
+  /// the work session in this folder is live or queued. It is not removed then.
+  final bool working;
+
+  factory CodeWorktree.fromJson(Map<String, dynamic> json) => CodeWorktree(
+    branch: (json['branch'] == null ? null : (json['branch'] as String)),
+    changedCount: (json['changed_count'] == null ? 0 : (json['changed_count'] as num).toInt()),
+    changedFiles: (json['changed_files'] == null ? const [] : (json['changed_files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    head: (json['head'] as String),
+    isMain: (json['is_main'] == null ? false : (json['is_main'] as bool)),
+    missing: (json['missing'] == null ? false : (json['missing'] as bool)),
+    path: (json['path'] as String),
+    working: (json['working'] == null ? false : (json['working'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (branch != null) 'branch': branch,
+    'changed_count': changedCount,
+    'changed_files': changedFiles,
+    'head': head,
+    'is_main': isMain,
+    'missing': missing,
+    'path': path,
+    'working': working,
+  };
+}
+
 /// What a column does. The seven kinds always exist, once each.
 enum ColumnKind {
   /// New tickets; nothing starts from here by itself.
@@ -7583,6 +7916,8 @@ sealed class HostResult {
         return HostResultClaudeLoginLink(
           linkId: (json['link_id'] as String),
         );
+      case 'code':
+        return HostResultCode(value: CodeView.fromJson(json as Map<String, dynamic>));
       case 'compaction_setting':
         return HostResultCompactionSetting(value: CompactionSetting.fromJson(json as Map<String, dynamic>));
       case 'count':
@@ -7702,6 +8037,21 @@ final class HostResultClaudeLoginLink extends HostResult {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'claude_login_link',
       'link_id': linkId,
+    };
+}
+
+/// `code.*`: the project's git state after the write.
+final class HostResultCode extends HostResult {
+  const HostResultCode({
+    required this.value,
+  });
+
+  final CodeView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'code',
+      ...value.toJson(),
     };
 }
 
@@ -8005,6 +8355,45 @@ sealed class HostWrite {
         return const HostWriteClaudeLoginLink();
       case 'claude_login.unlink':
         return const HostWriteClaudeLoginUnlink();
+      case 'code.delete_branch':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteCodeDeleteBranch(
+          branch: (src['branch'] as String),
+          force: (src['force'] == null ? false : (src['force'] as bool)),
+          projectId: (src['project_id'] as String),
+        );
+        }
+      case 'code.fetch':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteCodeFetch(
+          projectId: (src['project_id'] as String),
+        );
+        }
+      case 'code.merge':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteCodeMerge(
+          branch: (src['branch'] as String),
+          projectId: (src['project_id'] as String),
+        );
+        }
+      case 'code.prune_merged':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteCodePruneMerged(
+          projectId: (src['project_id'] as String),
+        );
+        }
+      case 'code.remove_worktree':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteCodeRemoveWorktree(
+          path: (src['path'] as String),
+          projectId: (src['project_id'] as String),
+        );
+        }
       case 'compaction.set_threshold':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -8325,6 +8714,113 @@ final class HostWriteClaudeLoginUnlink extends HostWrite {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'claude_login.unlink',
+    };
+}
+
+/// Delete a local branch (not main, not one checked out in a worktree, not one an
+/// employee works on now). A branch with commits main lacks needs `force` (the
+/// client asked the board member first: that work is gone). Answers `Code`.
+final class HostWriteCodeDeleteBranch extends HostWrite {
+  const HostWriteCodeDeleteBranch({
+    required this.branch,
+    this.force = false,
+    required this.projectId,
+  });
+
+  final String branch;
+  final bool force;
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'code.delete_branch',
+      'params': <String, dynamic>{
+      'branch': branch,
+      'force': force,
+      'project_id': projectId,
+    },
+    };
+}
+
+/// `git fetch --prune` of the project's repository (feature `code_view`, ticket #77);
+/// answers `HostResult::Code`. Never a prompt for credentials: a remote that wants
+/// one fails with git's reason.
+final class HostWriteCodeFetch extends HostWrite {
+  const HostWriteCodeFetch({
+    required this.projectId,
+  });
+
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'code.fetch',
+      'params': <String, dynamic>{
+      'project_id': projectId,
+    },
+    };
+}
+
+/// Merge a local branch into the project's main (`--no-ff`), in the project's folder.
+/// Refused when the folder is not on main, main has uncommitted changes, is in another
+/// merge, or the branch has nothing ahead; a conflict is aborted, so main stays as it
+/// was (`validation` with git's reason and the conflicting files). Answers `Code`.
+final class HostWriteCodeMerge extends HostWrite {
+  const HostWriteCodeMerge({
+    required this.branch,
+    required this.projectId,
+  });
+
+  final String branch;
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'code.merge',
+      'params': <String, dynamic>{
+      'branch': branch,
+      'project_id': projectId,
+    },
+    };
+}
+
+/// Clean up merged: remove every clean worktree of a merged branch nobody works on,
+/// then delete every merged branch without a worktree (never main), then
+/// `git worktree prune`. Answers `Code`.
+final class HostWriteCodePruneMerged extends HostWrite {
+  const HostWriteCodePruneMerged({
+    required this.projectId,
+  });
+
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'code.prune_merged',
+      'params': <String, dynamic>{
+      'project_id': projectId,
+    },
+    };
+}
+
+/// Remove a worktree (not the project's folder). Refused when it has uncommitted
+/// changes or an employee works in it now. The branch stays. Answers `Code`.
+final class HostWriteCodeRemoveWorktree extends HostWrite {
+  const HostWriteCodeRemoveWorktree({
+    required this.path,
+    required this.projectId,
+  });
+
+  final String path;
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'code.remove_worktree',
+      'params': <String, dynamic>{
+      'path': path,
+      'project_id': projectId,
+    },
     };
 }
 
@@ -10674,6 +11170,13 @@ sealed class Method {
         return MethodClaudeLoginInput(params: ClaudeLoginInputParams.fromJson(json['params'] as Map<String, dynamic>));
       case 'claude_login.status':
         return const MethodClaudeLoginStatus();
+      case 'code.get':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodCodeGet(
+          projectId: (src['project_id'] as String),
+        );
+        }
       case 'command.applied':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11353,6 +11856,26 @@ final class MethodClaudeLoginStatus extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'claude_login.status',
+    };
+}
+
+/// The Code tab of a workspace (feature `code_view`, ticket #77): the git state of
+/// the project's folder (worktrees, local branches, recent commits). A folder that is
+/// no git repository answers a view with `problem` set, not an error. The same
+/// rights as `board.get`.
+final class MethodCodeGet extends Method {
+  const MethodCodeGet({
+    required this.projectId,
+  });
+
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'code.get',
+      'params': <String, dynamic>{
+      'project_id': projectId,
+    },
     };
 }
 
@@ -14049,6 +14572,8 @@ sealed class ResponseBody {
         return ResponseBodyChannels(value: ChannelsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'claude_login':
         return ResponseBodyClaudeLogin(value: ClaudeLoginView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'code':
+        return ResponseBodyCode(value: CodeView.fromJson(json['value'] as Map<String, dynamic>));
       case 'command_applied':
         return ResponseBodyCommandApplied(value: CommandApplied.fromJson(json['value'] as Map<String, dynamic>));
       case 'compaction_setting':
@@ -14398,6 +14923,21 @@ final class ResponseBodyClaudeLogin extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'claude_login',
+      'value': value.toJson(),
+    };
+}
+
+/// `code.get`.
+final class ResponseBodyCode extends ResponseBody {
+  const ResponseBodyCode({
+    required this.value,
+  });
+
+  final CodeView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'code',
       'value': value.toJson(),
     };
 }

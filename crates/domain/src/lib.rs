@@ -8,6 +8,7 @@
 pub mod activity;
 pub mod approval;
 pub mod autonomy;
+pub mod code;
 pub mod command;
 pub mod company;
 pub mod connection;

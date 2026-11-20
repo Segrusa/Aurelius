@@ -24,34 +24,45 @@ pub const MAIN_BRANCHES: [&str; 2] = ["main", "master"];
 /// How many conflicting files a failed merge names at most.
 pub const FILES_MAX: usize = 20;
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     tokio::task::spawn_blocking(f).await.ok()
 }
 
-fn git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
-    Command::new("git")
+pub(crate) fn git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
+    command(dir, args).output()
+}
+
+/// git in `dir` as every caller here runs it, for one that adds to it before it runs.
+pub(crate) fn command(dir: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command
         .args(args)
         .current_dir(dir)
         // Never a prompt for credentials, and never the repository of the daemon's environment.
         .env("GIT_TERMINAL_PROMPT", "0")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
+        .env_remove("GIT_INDEX_FILE");
+    command
 }
 
-fn text(out: &Output) -> String {
+pub(crate) fn text(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
 /// The first line git wrote to stderr (or stdout), as the reason of a failure.
-fn why(out: &Output) -> String {
+pub(crate) fn why(out: &Output) -> String {
     let err = String::from_utf8_lossy(&out.stderr);
     let all = if err.trim().is_empty() { String::from_utf8_lossy(&out.stdout).into_owned() } else { err.into_owned() };
-    all.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("git failed").trim_start_matches("fatal: ").trim_start_matches("error: ").to_owned()
+    reason(&all)
 }
 
-fn ok(dir: &Path, args: &[&str]) -> Result<String, String> {
+/// The first line of what git wrote, without its "fatal: " or "error: ".
+pub(crate) fn reason(text: &str) -> String {
+    text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("git failed").trim_start_matches("fatal: ").trim_start_matches("error: ").to_owned()
+}
+
+pub(crate) fn ok(dir: &Path, args: &[&str]) -> Result<String, String> {
     match git(dir, args) {
         Ok(out) if out.status.success() => Ok(text(&out)),
         Ok(out) => Err(why(&out)),
@@ -59,8 +70,13 @@ fn ok(dir: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn branch_exists(repo: &Path, branch: &str) -> bool {
+pub(crate) fn branch_exists(repo: &Path, branch: &str) -> bool {
     git(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_ok_and(|o| o.status.success())
+}
+
+/// Hold the git lock of quick tasks and the Code tab's writes: one git write at a time.
+pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
+    GIT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The project's main branch: the first of `MAIN_BRANCHES` that exists.
@@ -112,7 +128,12 @@ pub fn ensure_worktree(repo: &Path, branch: &str, worktree: &Path) -> Result<(),
 /// Merge a quick task's branch into the project's main (`--no-ff`, the ticket's number in
 /// the message). Every failure leaves main as it was.
 pub fn merge(repo: &Path, branch: &str, message: &str) -> MergeOutcome {
-    let _one = GIT.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = lock();
+    merge_locked(repo, branch, message)
+}
+
+/// `merge` for a caller that holds `lock()` already (the Code tab's `code.merge`).
+pub(crate) fn merge_locked(repo: &Path, branch: &str, message: &str) -> MergeOutcome {
     let failed = |reason: String, files: Vec<String>| MergeOutcome::Failed { reason, files };
     let Some(main) = main_branch(repo) else { return failed(no_main_reason(repo), vec![]) };
     match ok(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]) {
@@ -131,10 +152,13 @@ pub fn merge(repo: &Path, branch: &str, message: &str) -> MergeOutcome {
         }
         Err(e) => return failed(e, vec![]),
     }
-    if !branch_exists(repo, branch) {
+    // The branch's commit, resolved once by its full ref: a branch named like an option
+    // (`-Xours`) or shadowed by a tag of the same name still means this branch, and git
+    // merges exactly the commit the checks saw.
+    let Ok(commit) = ok(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}^{{commit}}")]) else {
         return failed(format!("the branch {branch} does not exist"), vec![]);
-    }
-    match ok(repo, &["rev-list", "--count", &format!("{main}..{branch}")]) {
+    };
+    match ok(repo, &["rev-list", "--count", &format!("refs/heads/{main}..{commit}"), "--"]) {
         Ok(n) if n == "0" => return MergeOutcome::NoCommits,
         Ok(_) => {}
         Err(e) => return failed(e, vec![]),
@@ -145,7 +169,7 @@ pub fn merge(repo: &Path, branch: &str, message: &str) -> MergeOutcome {
     if ok(repo, &["config", "user.email"]).unwrap_or_default().is_empty() {
         args.extend(["-c".into(), "user.name=Aurelius".into(), "-c".into(), "user.email=aurelius@localhost".into()]);
     }
-    args.extend(["merge".into(), "--no-ff".into(), "--no-edit".into(), "-m".into(), message.into(), branch.into()]);
+    args.extend(["merge".into(), "--no-ff".into(), "--no-edit".into(), "-m".into(), message.into(), "--end-of-options".into(), commit]);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match git(repo, &args) {
         Ok(out) if out.status.success() => match ok(repo, &["rev-parse", "HEAD"]) {
