@@ -1219,7 +1219,10 @@ mod vault_delivery_tests {
         std::fs::create_dir_all(&dir).unwrap();
         let out = dir.join("env.txt");
         let script = dir.join("fake-claude");
-        std::fs::write(&script, format!("#!/bin/sh\nprintf '%s\\n' \"GITHUB_TOKEN=${{GITHUB_TOKEN:-none}}\" >> {}\n", out.display())).unwrap();
+        // It reads its prompt first, as `claude` does: exiting before the runtime has written it
+        // made that write fail with a broken pipe now and then.
+        let read_prompt = r#"case " $* " in *" --input-format stream-json "*) IFS= read -r _ ;; *) cat > /dev/null ;; esac"#;
+        std::fs::write(&script, format!("#!/bin/sh\n{read_prompt}\nprintf '%s\\n' \"GITHUB_TOKEN=${{GITHUB_TOKEN:-none}}\" >> {}\n", out.display())).unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
         let login = ClaudeLogin::of(&dir, aurelius_domain::UserId::new()).unwrap();
         let runtime = ClaudeCodeRuntime { executable: script, run_root: dir.join("runs"), model: None, login: Some(login), vault: vault(&[("GITHUB_TOKEN", FAKE)]) };
