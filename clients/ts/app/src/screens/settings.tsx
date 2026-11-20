@@ -11,7 +11,6 @@ import { usePlatform } from "../platform";
 import { Icon } from "../ui/icons";
 import { ActivitySection } from "./activity";
 import type { ActivityFilters } from "./activity-logic";
-import { InboxBell } from "./inbox-bell";
 import {
   BackupsSection,
   CompactionSection,
@@ -295,7 +294,6 @@ export function SettingsScreen({ section, filters }: { section: string; filters:
           <Heading level={1} xstyle={styles.title}>
             {found?.label ?? "Not found"}
           </Heading>
-          <InboxBell />
         </div>
       </LayoutHeader>
       <div {...stylex.props(styles.scroller)}>

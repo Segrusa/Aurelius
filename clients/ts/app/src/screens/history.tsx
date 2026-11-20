@@ -40,7 +40,6 @@ import {
   starterName,
   summaryShown,
 } from "./history-logic";
-import { InboxBell } from "./inbox-bell";
 import { failureOf, Hint, Loading, Page, Problem } from "./org-kit";
 import { ticketPlace } from "./ticket-session-logic";
 import { useTicketWrite } from "./tickets-kit";
@@ -330,7 +329,6 @@ export function HistoryScreen({ filters }: { filters: HistoryFilters }) {
           <Heading level={1} xstyle={styles.title}>
             History
           </Heading>
-          <InboxBell />
         </div>
       </LayoutHeader>
       <div {...stylex.props(styles.body)}>

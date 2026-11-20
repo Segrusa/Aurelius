@@ -18,7 +18,6 @@ import { KeysContext } from "../keys/provider";
 import { DialogHead } from "../ui/dialog-head";
 import { useDelayed } from "../ui/use-delayed";
 import { topCentered } from "./dialog-logic";
-import { InboxBell } from "./inbox-bell";
 
 const styles = stylex.create({
   page: { display: "flex", minHeight: 0, flex: 1, flexDirection: "column" },
@@ -74,10 +73,7 @@ export function PageHead({
         </Heading>
         {sub ? <span {...stylex.props(styles.sub)}>{sub}</span> : null}
         {tabs}
-        <div {...stylex.props(styles.actions)}>
-          {children}
-          <InboxBell />
-        </div>
+        <div {...stylex.props(styles.actions)}>{children}</div>
       </div>
     </LayoutHeader>
   );

@@ -1,5 +1,5 @@
-// The app's sidebar: a rail of workspaces on the left (All workspaces, one tile per project, the account
-// and the fold button), and beside it the workspace's panel with New session, Board and History and its
+// The app's sidebar: a rail of workspaces on the left (All workspaces, one tile per project, the Inbox
+// bell, the account and the fold button), and beside it the workspace's panel with New session, Board and History and its
 // sessions under Running, Today and Earlier. Under All workspaces those come per workspace.
 
 import type { IconType } from "@astryxdesign/core/Icon";
@@ -15,11 +15,13 @@ import { type Feature, offered, shown } from "../hidden";
 import { keysFor, SHORTCUTS, showChord } from "../keys/keymap";
 import { isMac, useKeys } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { Icon, NAV_ICONS, type NavIcon, NewIcon, PlusIcon } from "../ui/icons";
+import { Icon, NAV_ICONS, type NavIcon, NewIcon, PlusIcon, SearchIcon } from "../ui/icons";
 import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
 import { useWorkspace } from "../workspace";
 import { pinnedFirst } from "./employee-logic";
+import { InboxBell } from "./inbox-bell";
+import { overlays } from "./overlays-store";
 import { useProjectPins } from "./projects";
 import { type SessionSignal, sessionSignal, startOfDay } from "./session-logic";
 import {
@@ -137,6 +139,7 @@ const styles = stylex.create({
     backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
     borderWidth: 0,
   },
+  headButton: { width: 28, height: 28, borderRadius: 8 },
   newTile: { borderWidth: 1, borderStyle: "dashed", borderColor: "var(--color-border-emphasized)" },
   grow: { flexGrow: 1 },
   head: { display: "flex", alignItems: "center", gap: 4, height: 36 },
@@ -533,6 +536,7 @@ function Rail({
         </>
       ) : null}
       <span {...stylex.props(styles.grow)} />
+      <InboxBell />
       {user ? (
         <UserMenu collapsed />
       ) : (
@@ -578,6 +582,16 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
           <span title={title} {...stylex.props(styles.title)}>
             {title}
           </span>
+          <Tooltip content="Search and commands" delay={400} hasHoverIndication={false}>
+            <button
+              type="button"
+              aria-label="Search"
+              onClick={() => overlays.open("palette")}
+              {...stylex.props(styles.railButton, styles.headButton)}
+            >
+              <SearchIcon />
+            </button>
+          </Tooltip>
           {available ? (
             <Tooltip content={settingsLabel} delay={400} hasHoverIndication={false}>
               <button

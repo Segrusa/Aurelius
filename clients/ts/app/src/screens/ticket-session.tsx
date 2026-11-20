@@ -52,7 +52,6 @@ import { type SessionSlots, TicketSessionBody } from "./chat";
 import { readOnlyBar } from "./chat-logic";
 import { artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { parseDeadline, parseLabels, useModels } from "./dialogs";
-import { InboxBell } from "./inbox-bell";
 import { isQuick } from "./quick-logic";
 import {
   FilesWritten,
@@ -269,7 +268,6 @@ export function TicketSessionScreen({
           <Heading level={1} xstyle={styles.title}>
             <span {...stylex.props(styles.hash)}>#{number}</span>
           </Heading>
-          <InboxBell />
         </header>
         {failed ? (
           <div {...stylex.props(styles.problem)}>
@@ -418,7 +416,6 @@ function Head({
           trigger={<IconButton variant="ghost" size="sm" label="More" icon={<Icon icon="moreHorizontal" />} />}
         />
         <PropertiesToggle dock={dock} label="Ticket properties" />
-        <InboxBell />
       </div>
     </header>
   );

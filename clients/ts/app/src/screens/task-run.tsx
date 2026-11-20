@@ -23,7 +23,6 @@ import { ApprovalCard } from "./approval-card";
 import { ActivityOutput, ContextDialog } from "./chat-message";
 import { Held, useModels, useSend } from "./dialogs";
 import { nextMode } from "./employee-logic";
-import { InboxBell } from "./inbox-bell";
 import { Confirm, Page, Problem } from "./org-kit";
 import { boardOnlyReason, lastRunOf, usageTotals } from "./run-logic";
 import {
@@ -543,7 +542,6 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
             <Heading level={1} xstyle={styles.title}>
               Task
             </Heading>
-            <InboxBell />
           </div>
         </LayoutHeader>
         <p {...stylex.props(styles.loading)}>
@@ -618,7 +616,6 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
               <Button variant="destructive" label="Cancel task" onClick={() => void cancel(task)} />
             ) : null}
             <PropertiesToggle dock={dock} label="Run properties" />
-            <InboxBell />
           </div>
         </div>
       </LayoutHeader>

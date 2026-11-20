@@ -16,7 +16,6 @@ import { Composer } from "./chat";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import { before, localDay, quickReplies, streamTo } from "./chat-logic";
 import { type ChatContext, ChatProvider, DayLine, FeedIdsProvider, LiveRow, MessageRow } from "./chat-message";
-import { InboxBell } from "./inbox-bell";
 import { approvalsFor } from "./run-card-logic";
 import { ThreadWaiting } from "./scheduled";
 
@@ -197,7 +196,6 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
           {frame ? null : live.length > 0 ? `${name} answering` : employee ? (employee.title ?? employee.role) : ""}
         </span>
         {frame?.actions}
-        <InboxBell />
       </header>
       <div {...stylex.props(styles.body)}>
         <div {...stylex.props(styles.main)}>

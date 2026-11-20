@@ -1,4 +1,4 @@
-// The Inbox, behind a bell at the right of every screen's head: a count of what needs you, and a
+// The Inbox, behind a bell in the sidebar's rail above the account: a count of what needs you, and a
 // dropdown with every group's rows. There is no Inbox page: a row leads to where it is answered or
 // decided (its ticket, run, conversation or message), and an approval with no such place is decided
 // in the dropdown itself.
@@ -7,21 +7,19 @@ import { Button } from "@astryxdesign/core/Button";
 import { Icon as AstryxIcon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
-import { Tooltip } from "@astryxdesign/core/Tooltip";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useNotifications, useWorkSessions } from "../data";
-import { Icon, SearchIcon, StatusGlyph } from "../ui/icons";
+import { Icon, StatusGlyph } from "../ui/icons";
 import { toast } from "../ui/toast";
 import { ApprovalCard } from "./approval-card";
 import { INBOX_TONES, useInbox } from "./inbox-data";
 import { age, type InboxRow, needsYouCount, rowPlace } from "./inbox-logic";
 import { useFollowLink } from "./links";
 import { messageLink } from "./links-logic";
-import { overlays } from "./overlays-store";
 import { ticketPlace } from "./ticket-session-logic";
 
 /** Rows per group in the dropdown; Clear all makes room for older updates. */
@@ -30,15 +28,13 @@ const ROWS_PER_GROUP = 50;
 /** The bells that are on screen, so a key (Ctrl+I) can open one. */
 const openers = new Set<() => void>();
 
-/** Opens the bell's dropdown, wherever it stands in the head (the OpenNotifications action). */
+/** Opens the bell's dropdown (the OpenNotifications action). */
 export function openInboxBell(): void {
   for (const open of openers) open();
 }
 
 const styles = stylex.create({
-  // Right in the head, whatever else the head holds: Search, then the bell.
-  place: { display: "flex", flexShrink: 0, alignItems: "center", gap: 2, marginInlineStart: "auto" },
-  bell: { position: "relative", display: "flex" },
+  bell: { position: "relative", display: "flex", flexShrink: 0 },
   badge: {
     position: "absolute",
     top: -2,
@@ -202,141 +198,131 @@ export function InboxBell() {
   const now = Date.now();
   const label = needs > 0 ? `Inbox, ${needs} need you` : "Inbox";
   return (
-    <div {...stylex.props(styles.place)}>
-      <Tooltip content="Search and commands" delay={400} hasHoverIndication={false}>
-        <IconButton
-          label="Search"
-          icon={<SearchIcon />}
-          variant="ghost"
-          size="sm"
-          onClick={() => overlays.open("palette")}
-        />
-      </Tooltip>
-      <div {...stylex.props(styles.bell)}>
-        <Popover
-          label="Inbox"
-          isOpen={open}
-          onOpenChange={(next) => {
-            setOpen(next);
-            if (!next) {
-              setDeciding(null);
-              setClearing(false);
-            }
-          }}
-          width={400}
-          padding={0}
-          placement="below"
-          alignment="end"
-          xstyle={styles.surface}
-          // Drawn only while open: a closed dropdown in every head would repeat the Inbox's text on the page.
-          content={
-            open ? (
-              <div {...stylex.props(styles.panel)}>
-                <div {...stylex.props(styles.top)}>
-                  <p {...stylex.props(styles.heading)}>Inbox</p>
-                  <div {...stylex.props(styles.actions)}>
-                    {clearing ? (
-                      <>
-                        <span {...stylex.props(styles.ask)}>Clear every update?</span>
+    <div {...stylex.props(styles.bell)}>
+      <Popover
+        label="Inbox"
+        isOpen={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) {
+            setDeciding(null);
+            setClearing(false);
+          }
+        }}
+        width={400}
+        padding={0}
+        // Out of the rail to the right, its foot level with the bell's.
+        placement="end"
+        alignment="end"
+        xstyle={styles.surface}
+        // Drawn only while open: a closed dropdown in every head would repeat the Inbox's text on the page.
+        content={
+          open ? (
+            <div {...stylex.props(styles.panel)}>
+              <div {...stylex.props(styles.top)}>
+                <p {...stylex.props(styles.heading)}>Inbox</p>
+                <div {...stylex.props(styles.actions)}>
+                  {clearing ? (
+                    <>
+                      <span {...stylex.props(styles.ask)}>Clear every update?</span>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        label="Clear"
+                        onClick={() => {
+                          setClearing(false);
+                          void write("notification.dismiss_all");
+                        }}
+                      />
+                      <Button size="sm" variant="ghost" label="Keep" onClick={() => setClearing(false)} />
+                    </>
+                  ) : (
+                    <>
+                      {unread ? (
                         <Button
                           size="sm"
-                          variant="destructive"
-                          label="Clear"
-                          onClick={() => {
-                            setClearing(false);
-                            void write("notification.dismiss_all");
-                          }}
+                          variant="ghost"
+                          label="Mark all read"
+                          onClick={() => void write("notification.mark_all_read")}
                         />
-                        <Button size="sm" variant="ghost" label="Keep" onClick={() => setClearing(false)} />
-                      </>
-                    ) : (
-                      <>
-                        {unread ? (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            label="Mark all read"
-                            onClick={() => void write("notification.mark_all_read")}
-                          />
-                        ) : null}
-                        {clearable ? (
-                          <Button size="sm" variant="ghost" label="Clear all" onClick={() => setClearing(true)} />
-                        ) : null}
-                      </>
-                    )}
-                  </div>
+                      ) : null}
+                      {clearable ? (
+                        <Button size="sm" variant="ghost" label="Clear all" onClick={() => setClearing(true)} />
+                      ) : null}
+                    </>
+                  )}
                 </div>
-                {rows === 0 ? (
-                  <p {...stylex.props(styles.empty)}>Nothing here. You are up to date.</p>
-                ) : (
-                  <div {...stylex.props(styles.list)}>
-                    {groups
-                      .filter((g) => g.rows.length > 0)
-                      .map((g) => (
-                        <section key={g.key} aria-label={g.label}>
-                          <div {...stylex.props(styles.group)}>
-                            <span {...stylex.props(styles.dot)} style={{ background: INBOX_TONES[g.tone] }} />
-                            {g.label}
-                            <span {...stylex.props(styles.count)}>{g.rows.length}</span>
-                          </div>
-                          {g.rows.slice(0, ROWS_PER_GROUP).map((row) => {
-                            const note = row.source.kind === "notification" ? row.source.notification : null;
-                            const unseen = note !== null && !note.read;
-                            return (
-                              <div key={row.id} {...stylex.props(styles.line)}>
-                                <button
-                                  type="button"
-                                  aria-expanded={row.source.kind === "approval" ? deciding === row.id : undefined}
-                                  onClick={() => go(row)}
-                                  {...stylex.props(styles.row, note !== null && styles.roomForDismiss)}
-                                >
-                                  <span {...stylex.props(styles.glyph)}>
-                                    <StatusGlyph glyph={row.glyph} color={INBOX_TONES[row.tone]} />
-                                  </span>
-                                  <span {...stylex.props(styles.words)}>
-                                    <span {...stylex.props(styles.title, unseen && styles.unseen)}>{row.title}</span>
-                                    {row.meta ? <span {...stylex.props(styles.meta)}>{row.meta}</span> : null}
-                                  </span>
-                                  <span {...stylex.props(styles.age)}>{age(row.atMs, now)}</span>
-                                </button>
-                                {note ? (
-                                  <span {...stylex.props(styles.dismiss)}>
-                                    <IconButton
-                                      variant="ghost"
-                                      size="sm"
-                                      label={`Dismiss ${row.title}`}
-                                      icon={<AstryxIcon icon="close" />}
-                                      onClick={() => void write("notification.dismiss", { id: note.id })}
-                                    />
-                                  </span>
-                                ) : null}
-                                {deciding === row.id && row.source.kind === "approval" ? (
-                                  <div {...stylex.props(styles.decide)}>
-                                    <ApprovalCard approval={row.source.approval} />
-                                  </div>
-                                ) : null}
-                              </div>
-                            );
-                          })}
-                          {g.rows.length > ROWS_PER_GROUP ? (
-                            <p {...stylex.props(styles.more)}>And {g.rows.length - ROWS_PER_GROUP} older</p>
-                          ) : null}
-                        </section>
-                      ))}
-                  </div>
-                )}
               </div>
-            ) : null
-          }
-        >
-          <IconButton variant="ghost" size="sm" label={label} icon={<Icon name="bell" size={16} />} />
-        </Popover>
-        {needs > 0 ? (
-          <span aria-hidden {...stylex.props(styles.badge)}>
-            {needs > 99 ? "99+" : needs}
-          </span>
-        ) : null}
-      </div>
+              {rows === 0 ? (
+                <p {...stylex.props(styles.empty)}>Nothing here. You are up to date.</p>
+              ) : (
+                <div {...stylex.props(styles.list)}>
+                  {groups
+                    .filter((g) => g.rows.length > 0)
+                    .map((g) => (
+                      <section key={g.key} aria-label={g.label}>
+                        <div {...stylex.props(styles.group)}>
+                          <span {...stylex.props(styles.dot)} style={{ background: INBOX_TONES[g.tone] }} />
+                          {g.label}
+                          <span {...stylex.props(styles.count)}>{g.rows.length}</span>
+                        </div>
+                        {g.rows.slice(0, ROWS_PER_GROUP).map((row) => {
+                          const note = row.source.kind === "notification" ? row.source.notification : null;
+                          const unseen = note !== null && !note.read;
+                          return (
+                            <div key={row.id} {...stylex.props(styles.line)}>
+                              <button
+                                type="button"
+                                aria-expanded={row.source.kind === "approval" ? deciding === row.id : undefined}
+                                onClick={() => go(row)}
+                                {...stylex.props(styles.row, note !== null && styles.roomForDismiss)}
+                              >
+                                <span {...stylex.props(styles.glyph)}>
+                                  <StatusGlyph glyph={row.glyph} color={INBOX_TONES[row.tone]} />
+                                </span>
+                                <span {...stylex.props(styles.words)}>
+                                  <span {...stylex.props(styles.title, unseen && styles.unseen)}>{row.title}</span>
+                                  {row.meta ? <span {...stylex.props(styles.meta)}>{row.meta}</span> : null}
+                                </span>
+                                <span {...stylex.props(styles.age)}>{age(row.atMs, now)}</span>
+                              </button>
+                              {note ? (
+                                <span {...stylex.props(styles.dismiss)}>
+                                  <IconButton
+                                    variant="ghost"
+                                    size="sm"
+                                    label={`Dismiss ${row.title}`}
+                                    icon={<AstryxIcon icon="close" />}
+                                    onClick={() => void write("notification.dismiss", { id: note.id })}
+                                  />
+                                </span>
+                              ) : null}
+                              {deciding === row.id && row.source.kind === "approval" ? (
+                                <div {...stylex.props(styles.decide)}>
+                                  <ApprovalCard approval={row.source.approval} />
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                        {g.rows.length > ROWS_PER_GROUP ? (
+                          <p {...stylex.props(styles.more)}>And {g.rows.length - ROWS_PER_GROUP} older</p>
+                        ) : null}
+                      </section>
+                    ))}
+                </div>
+              )}
+            </div>
+          ) : null
+        }
+      >
+        <IconButton variant="ghost" size="sm" label={label} icon={<Icon name="bell" size={16} />} />
+      </Popover>
+      {needs > 0 ? (
+        <span aria-hidden {...stylex.props(styles.badge)}>
+          {needs > 99 ? "99+" : needs}
+        </span>
+      ) : null}
     </div>
   );
 }

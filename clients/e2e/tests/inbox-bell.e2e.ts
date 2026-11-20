@@ -1,4 +1,4 @@
-// The Inbox is a bell in every screen's head, and nothing else: its count, its dropdown, a row that
+// The Inbox is a bell in the sidebar's rail, and nothing else: its count, its dropdown, a row that
 // leads to where it is decided, and the old /inbox link that now starts on New session.
 
 import { mkdirSync } from "node:fs";
@@ -29,7 +29,7 @@ test("the bell counts what needs you, and a row leads to where it is decided", a
     await expect(page).toHaveURL(/\/new$/);
     await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
-    // No Inbox row in the sidebar; the bell in the head says what needs you.
+    // No Inbox row in the sidebar; the bell in the rail says what needs you.
     await expect(page.getByRole("navigation").getByRole("link", { name: /^Inbox/ })).toHaveCount(0);
     const bell = page.getByRole("button", { name: "Inbox, 1 need you" });
     await expect(bell).toBeVisible();

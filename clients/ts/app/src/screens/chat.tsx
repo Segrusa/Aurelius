@@ -60,7 +60,6 @@ import {
   NewLine,
 } from "./chat-message";
 import { Held } from "./dialogs";
-import { InboxBell } from "./inbox-bell";
 import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
@@ -1081,7 +1080,6 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
                 Overview
               </button>
             ) : null}
-            <InboxBell />
           </header>
         )}
         <ThreadWaiting conversationId={openId} />
