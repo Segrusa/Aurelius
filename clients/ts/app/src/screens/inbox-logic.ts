@@ -326,3 +326,58 @@ export function newNotes(before: NotificationView[] | null, after: NotificationV
     return !old || n.created_at_ms > old.created_at_ms;
   });
 }
+
+/** Where a row of the bell leads: the place where it is answered or decided. */
+export type RowPlace =
+  | { kind: "ticket"; id: string; number: number | null; message?: string }
+  | { kind: "task"; id: string }
+  | { kind: "conversation"; id: string }
+  | { kind: "message"; id: string }
+  | { kind: "employees" }
+  | { kind: "guideline"; id: string; proposal: string }
+  /** Nowhere else: an approval is decided in the bell itself, a plain update is only read. */
+  | { kind: "here" };
+
+/**
+ * The place of a row. `canLocate`: the server finds a message by its id (feature `message_locate`), so a
+ * mention opens at that message wherever it was written.
+ */
+export function rowPlace(row: InboxRow, canLocate: boolean): RowPlace {
+  const { source } = row;
+  switch (source.kind) {
+    case "approval": {
+      const a = source.approval;
+      // Its run shows the card in line; a ticket or conversation shows it where the run asked.
+      if (a.task_id) return { kind: "task", id: a.task_id };
+      if (a.ticket_id) return { kind: "ticket", id: a.ticket_id, number: null };
+      if (a.conversation_id) return { kind: "conversation", id: a.conversation_id };
+      return { kind: "here" };
+    }
+    case "proposal":
+      return { kind: "employees" };
+    case "guideline":
+      return { kind: "guideline", id: source.proposal.guideline_id ?? "new", proposal: source.proposal.id };
+    case "task": {
+      const t = source.task;
+      if (t.ticket_id) return { kind: "ticket", id: t.ticket_id, number: t.ticket_number ?? null };
+      return { kind: "task", id: t.id };
+    }
+    case "notification": {
+      const n = source.notification;
+      // A mention or a message outside a ticket: right to that message.
+      const inDiscussion = n.reason === "mention" || n.reason === "sent_back";
+      if (n.message_id && canLocate && (!n.ticket_id || inDiscussion)) return { kind: "message", id: n.message_id };
+      if (n.ticket_id) {
+        return {
+          kind: "ticket",
+          id: n.ticket_id,
+          number: n.ticket_number ?? null,
+          ...(n.message_id ? { message: n.message_id } : {}),
+        };
+      }
+      if (n.task_id) return { kind: "task", id: n.task_id };
+      if (n.conversation_id) return { kind: "conversation", id: n.conversation_id };
+      return { kind: "here" };
+    }
+  }
+}

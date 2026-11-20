@@ -30,18 +30,10 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
   try {
     const p = await app.firstWindow();
     const nav = (name: string) => p.getByRole("link", { name: new RegExp(`^${name}`) }).first();
-    // The Inbox is behind the bell in every screen's head: its dropdown opens the page.
-    const openInbox = async () => {
-      await p
-        .getByRole("button", { name: /^Inbox/ })
-        .first()
-        .click();
-      await p.getByRole("button", { name: "Open Inbox" }).click();
-    };
     await p.getByLabel("Name").fill("sam");
     await p.getByLabel("Password").fill("correct horse battery");
     await p.getByRole("button", { name: "Create" }).click();
-    await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(p.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     await openCompanyPage(p, "Employees");
     await p.getByRole("button", { name: "Add employee" }).click();
@@ -85,12 +77,16 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
     await expect(p.getByText(/No connection is configured/).first()).toBeVisible();
     await expect(p.getByRole("button", { name: "Try again" })).toBeVisible();
 
-    await openInbox();
+    // The Inbox bell lists it, and its row leads back to the ticket that says why.
     await p
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    await p
+      .getByRole("dialog", { name: "Inbox" })
       .getByRole("button", { name: /Login page/ })
       .first()
       .click();
-    await expect(p.getByText("Why it stopped")).toBeVisible();
     await expect(p.getByRole("button", { name: "Try again" })).toBeVisible();
     await expect(p.getByRole("link", { name: "Set one up" })).toBeVisible();
 

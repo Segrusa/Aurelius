@@ -215,7 +215,7 @@ export function SettingsSidebar() {
   const { hostName, remote } = useLinkState();
   return (
     <aside {...stylex.props(styles.sidebar)}>
-      <Link to="/inbox" {...stylex.props(styles.back)}>
+      <Link to="/new" {...stylex.props(styles.back)}>
         <Icon name="back" size={14} />
         Back to the app
       </Link>
@@ -278,7 +278,7 @@ export function SettingsScreen({ section, filters }: { section: string; filters:
     // biome-ignore lint/correctness/useHookAtTopLevel: a fixed list: the same hooks in the same order.
     useAction(action, () => pressKeyed(action));
   }
-  useAction("Back", () => void navigate({ to: "/inbox" }));
+  useAction("Back", () => void navigate({ to: "/new" }));
   const stepSection = (by: number) => {
     const at = SECTIONS.findIndex((s) => s.key === section);
     const next = SECTIONS[(at + by + SECTIONS.length) % SECTIONS.length];

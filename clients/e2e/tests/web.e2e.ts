@@ -1,8 +1,8 @@
 import { Connection, expectBody } from "@aurelius/client";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { openPipe } from "../../electron/src/main/pipe";
 import { serveStatic, TestDaemon, until, WEB_DIST } from "./daemon";
-import { approval, notification, scriptServer } from "./fake-server";
+import { approval, scriptServer } from "./fake-server";
 
 const PASSWORD = "a-long-enough-password";
 
@@ -67,12 +67,12 @@ test.describe("against a real daemon", () => {
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-    await expect(page).toHaveURL(/\/inbox$/);
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
+    await expect(page).toHaveURL(/\/new$/);
     await page.getByRole("button", { name: "Workspace: All projects" }).click();
     await expect(page.getByRole("menuitem", { name: "Northwind API" })).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("heading", { name: "Nothing waits for you." })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Inbox" }).first()).toBeVisible();
 
     // No credential for a script, and none in the address.
     const cookies = await page.context().cookies();
@@ -140,14 +140,18 @@ test.describe("against a real daemon", () => {
   });
 });
 
-test.describe("the Inbox", () => {
+test.describe("the Inbox bell", () => {
   let site: Awaited<ReturnType<typeof serveStatic>>;
   test.beforeAll(async () => {
     site = await serveStatic(WEB_DIST);
   });
   test.afterAll(() => site.close());
 
-  test("decides by keyboard with the approval's own digest, never resent", async ({ page }) => {
+  // There is no Inbox page: an approval with no run or conversation is decided in the bell.
+  const bell = (page: Page) => page.getByRole("button", { name: /^Inbox/ }).first();
+  const dropdown = (page: Page) => page.getByRole("dialog", { name: "Inbox" });
+
+  test("decides an approval in the bell with its own digest, never resent", async ({ page }) => {
     const list = [
       approval("a"),
       approval("b", { requested_at_ms: Date.now() - 600_000, arguments: { command: "ls" } }),
@@ -162,43 +166,29 @@ test.describe("the Inbox", () => {
         );
       },
     });
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page.getByRole("heading", { name: "Flux wants to run a command" })).toBeVisible();
-    await expect(page.locator("pre")).toHaveText("kubectl -n prod rollout restart deploy/api");
-
-    await page.keyboard.press("Enter");
+    await page.goto(`${site.origin}/new`);
+    await expect(page.getByRole("button", { name: "Inbox, 2 need you" })).toBeVisible();
+    await bell(page).click();
+    await dropdown(page)
+      .getByRole("button", { name: /Flux wants to run a command.*kubectl/ })
+      .click();
+    await expect(dropdown(page).locator("pre")).toHaveText("kubectl -n prod rollout restart deploy/api");
+    await dropdown(page)
+      .getByRole("button", { name: /^Allow once/ })
+      .click();
     await expect.poll(() => writes.length).toBe(1);
     expect(writes[0]).toMatchObject({
       method: "approval.decide",
       params: { approval_id: "a", action_digest: "digest-a", approve: true, always_allow: false },
     });
-    await expect(page.locator("pre")).toHaveText("ls");
 
-    await page.keyboard.press("d");
+    await dropdown(page)
+      .getByRole("button", { name: /Flux wants to run a command.*ls/ })
+      .click();
+    await dropdown(page).getByRole("button", { name: /^Deny/ }).click();
     await expect.poll(() => writes.length).toBe(2);
     expect(writes[1]).toMatchObject({ params: { approval_id: "b", approve: false } });
-    await expect(page.getByRole("heading", { name: "Nothing waits for you." })).toBeVisible();
-  });
-
-  test("J and K keep the selected row in view, and it fits a narrow window", async ({ page }) => {
-    await page.setViewportSize({ width: 930, height: 700 });
-    await scriptServer(page, {
-      approvals: [approval("a")],
-      notifications: Array.from({ length: 300 }, (_, i) => notification(i)),
-    });
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page.getByText(/^1 \/ 301/)).toBeVisible();
-    for (let i = 0; i < 40; i++) await page.keyboard.press("j");
-    await expect(page.getByText(/^41 \/ 301/)).toBeVisible();
-    await expect(page.locator('[aria-current="true"]')).toBeInViewport({ ratio: 1 });
-    for (let i = 0; i < 40; i++) await page.keyboard.press("k");
-    await expect(page.locator('[aria-current="true"]')).toBeInViewport({ ratio: 1 });
-    const counter = await page.getByText(/^1 \/ 301/).boundingBox();
-    expect(counter?.height).toBeLessThan(24);
-    const tops = await page
-      .getByRole("button", { name: /Allow once|Always allow|Deny/ })
-      .evaluateAll((all) => all.map((b) => b.getBoundingClientRect().top));
-    expect(new Set(tops).size).toBe(1);
+    await expect(dropdown(page).getByText("Nothing here. You are up to date.")).toBeVisible();
   });
 
   test("shows what an agent sent as text", async ({ page }) => {
@@ -210,31 +200,19 @@ test.describe("the Inbox", () => {
         }),
       ],
     });
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page.locator("pre")).toHaveText("<script>alert(1)</script>");
-    expect(await page.locator('[role="main"] img').count()).toBe(0);
-  });
-
-  test("walks with J and K, and filters", async ({ page }) => {
-    await scriptServer(page, { approvals: [approval("a")], notifications: [notification(4), notification(5)] });
-    await page.goto(`${site.origin}/inbox`);
-    const position = page.getByText(/^\d+ \/ \d+/);
-    await expect(position).toContainText("1 / 3");
-    await page.keyboard.press("j");
-    await expect(position).toContainText("2 / 3");
-    await page.keyboard.press("k");
-    await expect(position).toContainText("1 / 3");
-    await page.getByRole("radio", { name: "Reviews" }).click();
-    await expect(position).toContainText("1 / 1");
-    await expect(page.getByRole("button", { name: /Ready for your review/ })).toBeVisible();
-    await page.getByRole("radio", { name: "Mentions" }).click();
-    await expect(page.getByRole("button", { name: /Update 5/ })).toBeVisible();
+    await page.goto(`${site.origin}/new`);
+    await bell(page).click();
+    await dropdown(page)
+      .getByRole("button", { name: /wants to run a command/ })
+      .click();
+    await expect(dropdown(page).locator("pre")).toHaveText("<script>alert(1)</script>");
+    expect(await dropdown(page).locator("img").count()).toBe(0);
   });
 
   test("follows the chosen theme", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("aurelius.appearance", "light"));
     await scriptServer(page, { approvals: [approval("a")] });
-    await page.goto(`${site.origin}/inbox`);
+    await page.goto(`${site.origin}/new`);
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe("rgb(243, 243, 242)");
   });

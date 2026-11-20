@@ -194,8 +194,8 @@ test.describe("a ticket's session", () => {
         },
       }),
     );
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await page.goto(`${site.origin}/new`);
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     await page.keyboard.press("Alt+t");
     await page.getByLabel("Title").fill("From the dialog");
     await page.keyboard.press("Control+Enter");
@@ -332,7 +332,7 @@ test.describe("a ticket's session", () => {
       feeds: { general: feedOf("g", []), d70: feedOf("d70", []), d12: feedOf("d12", []) },
     };
     await scriptServer(page, scripted(world));
-    await page.goto(`${site.origin}/inbox`);
+    await page.goto(`${site.origin}/new`);
     const side = page.getByRole("navigation", { name: "Main" });
     await expect(side.getByText("Tickets", { exact: true })).toBeVisible();
     await expect(side.getByRole("link", { name: /Team chat/ })).toHaveCount(0);
@@ -356,7 +356,7 @@ test.describe("a ticket's session", () => {
       feeds: { general: feedOf("g", []), d70: feedOf("d70", []), d60: feedOf("d60", []) },
     };
     await scriptServer(page, scripted(world));
-    await page.goto(`${site.origin}/inbox`);
+    await page.goto(`${site.origin}/new`);
     const side = page.getByRole("navigation", { name: "Main" });
     const today = side.getByRole("link", { name: /#70 A ticket opens/ });
     const older = side.getByRole("link", { name: /#60 An older open ticket/ });

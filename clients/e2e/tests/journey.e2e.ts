@@ -63,20 +63,20 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     p.on("pageerror", (e) => consoleErrors.push(String(e)));
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1600, 950));
     const nav = (name: string) => p.getByRole("link", { name: new RegExp(`^${name}`) }).first();
-    // The Inbox is behind the bell in every screen's head: its dropdown opens the page.
+    // The Inbox is the bell in every screen's head: a row leads to where it is decided.
     const openInbox = async () => {
       await p
         .getByRole("button", { name: /^Inbox/ })
         .first()
         .click();
-      await p.getByRole("button", { name: "Open Inbox" }).click();
+      await expect(p.getByRole("dialog", { name: "Inbox" })).toBeVisible();
     };
 
     await step("first board member", async () => {
       await act(() => p.getByLabel("Name").fill("sam"));
       await act(() => p.getByLabel("Password").fill(PASSWORD));
       await act(() => p.getByRole("button", { name: "Create" }).click());
-      await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
+      await expect(p.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     });
 
     await step("add an employee", async () => {
@@ -124,11 +124,12 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
 
     await step("what the Inbox shows for it", async () => {
       await act(openInbox);
-      await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
       // One decision, one row, readable.
-      await expect(p.getByRole("button", { name: /Login page/ })).toHaveCount(1);
-      await expect(p.getByText("#1 #1")).toHaveCount(0);
-      await expect(p.getByText("plan_review")).toHaveCount(0);
+      const inbox = p.getByRole("dialog", { name: "Inbox" });
+      await expect(inbox.getByRole("button", { name: /Login page/ })).toHaveCount(1);
+      await expect(inbox.getByText("#1 #1")).toHaveCount(0);
+      await expect(inbox.getByText("plan_review")).toHaveCount(0);
+      await act(() => p.keyboard.press("Escape"));
     });
 
     await step("the plan in the ticket", async () => {
@@ -188,8 +189,11 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
 
     await step("approve a plan from the Inbox", async () => {
       await act(openInbox);
-      await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
-      const row = p.getByRole("button", { name: /hosting options/ }).first();
+      // The row leads to the ticket, where its plan is approved.
+      const row = p
+        .getByRole("dialog", { name: "Inbox" })
+        .getByRole("button", { name: /hosting options/ })
+        .first();
       await act(() => row.click());
       const approve = p.getByRole("button", { name: /^Approve/ }).first();
       await expect(approve).toBeVisible();
@@ -250,6 +254,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     for (const screen of ["Inbox", "Board"]) {
       await step(`dark ${screen}`, async () => {
         await act(() => (screen === "Inbox" ? openInbox() : nav(screen).click()));
+        if (screen === "Inbox") await p.keyboard.press("Escape");
         await p.waitForTimeout(300);
       });
     }

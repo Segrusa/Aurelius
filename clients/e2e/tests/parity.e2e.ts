@@ -46,7 +46,7 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     // The app's own mark, not a letter.
     await expect(page.getByRole("navigation", { name: "Main" }).getByRole("img", { name: "Aurelius" })).toBeVisible();

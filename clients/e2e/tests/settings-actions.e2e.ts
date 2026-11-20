@@ -311,12 +311,12 @@ test.describe("around the work", () => {
   });
 
   test("files on a new ticket are uploaded by a browser, and sent by the path it got", async ({ page }) => {
-    const { writes, stop } = await scripted(page, {}, "/inbox");
+    const { writes, stop } = await scripted(page, {}, "/new");
     await page.route("**/v1/upload", (route) =>
       route.fulfill({ json: { path: "/srv/inbox/1/notes.txt", name: "notes.txt", byte_length: 5 } }),
     );
     // The sidebar's + is New session now (ticket #60); New ticket is Alt+T on the web, once the app is up.
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     await page.keyboard.press("Alt+t");
     await page.getByPlaceholder("What should happen?").fill("With a file");
     const [chooser] = await Promise.all([
@@ -338,13 +338,19 @@ test.describe("around the work", () => {
       {
         notifications: [{ ...notification(1), read: false, needs_you: false }],
       },
-      "/inbox",
+      "/new",
     );
-    await page.getByRole("button", { name: "Mark all read" }).click();
+    await page
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    const inbox = page.getByRole("dialog", { name: "Inbox" });
+    await inbox.getByRole("button", { name: "Mark all read" }).click();
     await expect.poll(() => sent(writes, "notification.mark_all_read").length).toBe(1);
-    await page.getByRole("button", { name: "Clear all" }).click();
+    await inbox.getByRole("button", { name: "Clear all" }).click();
     expect(sent(writes, "notification.dismiss_all")).toHaveLength(0);
-    await page.getByRole("dialog").getByRole("button", { name: "Clear all" }).click();
+    await expect(inbox.getByText("Clear every update?")).toBeVisible();
+    await inbox.getByRole("button", { name: "Clear", exact: true }).click();
     await expect.poll(() => sent(writes, "notification.dismiss_all").length).toBe(1);
     await stop();
   });

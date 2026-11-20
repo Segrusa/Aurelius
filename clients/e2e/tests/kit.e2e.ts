@@ -9,13 +9,14 @@ import { REPO, serveStatic, TestDaemon, until, WEB_DIST } from "./daemon";
 import { scriptServer } from "./fake-server";
 import { expectNewSession, openGiveWork } from "./new-session";
 
-/** The Inbox is behind the bell in every screen's head: its dropdown opens the page. */
+/** The Inbox is the bell in every screen's head: its dropdown, closed again with Escape. */
 async function openInbox(page: Page): Promise<void> {
   await page
     .getByRole("button", { name: /^Inbox/ })
     .first()
     .click();
-  await page.getByRole("button", { name: "Open Inbox" }).click();
+  await expect(page.getByRole("dialog", { name: "Inbox" })).toBeVisible();
+  await page.keyboard.press("Escape");
 }
 
 const PASSWORD = "a-long-enough-password";
@@ -51,7 +52,7 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     // Quicker than through the screens (journey.e2e.ts does that), and the app must hear of it through events.
     let token: string | null = null;
@@ -96,10 +97,10 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await palette(page).fill("north");
     await expect(page.getByRole("option", { name: /Northwind API/ }).first()).toBeVisible();
     await palette(page).fill("j");
-    await expect(page).toHaveURL(/inbox/);
+    await expect(page).toHaveURL(/\/new/);
     await palette(page).fill("");
     await page.keyboard.press("Control+,");
-    await expect(page).toHaveURL(/inbox/);
+    await expect(page).toHaveURL(/\/new/);
     await page.keyboard.press("Escape");
     await expect(palette(page)).toHaveCount(0);
 
@@ -109,19 +110,18 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await page.keyboard.press("Enter");
     await expect(page.getByRole("heading", { level: 1, name: "Account" })).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     // Shortcuts go to the right screens; single keys stay out of a text field.
     await page.keyboard.press("Control+,");
     await expect(page.getByRole("heading", { level: 1, name: "Account" })).toBeVisible();
     await page.keyboard.press("Control+1");
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     // The sidebar's + is New session now (ticket #60), with the composer ready to type in.
     await page.getByRole("button", { name: "New session" }).first().click();
     await expectNewSession(page);
     await openInbox(page);
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
     // New ticket: the choices arrive, a wrong date is said, and the fields end up on the server.
     await page.keyboard.press("Control+t");
@@ -167,13 +167,10 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
       (await tickets()).find((t) => t.title === "Rotate the key" && t.column !== "backlog"),
     );
 
-    // n on the Inbox is New session now (ticket #60), not Give work. The create above opened the ticket's chat.
+    // Ctrl+1 is New session now; the Inbox is the bell. The create above opened the ticket's chat.
     await openInbox(page);
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-    await page.keyboard.press("n");
+    await page.keyboard.press("Control+1");
     await expectNewSession(page);
-    await openInbox(page);
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
     // Give work: the top of the org chart by default, a ticket started at once. Its own way in is the
     // Tasks screen, through the palette.
@@ -230,8 +227,8 @@ test("on the web a browser's own keys stay the browser's, and the action moves",
       ],
       employees: [{ id: "e", name: "Ava", role: "CEO", status: "active", agents: [], conversations: [] }],
     });
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await page.goto(`${site.origin}/new`);
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     await page.keyboard.press("Alt+t");
     await page.getByLabel("Title").fill("From the web");
     await page.keyboard.press("Control+Enter");

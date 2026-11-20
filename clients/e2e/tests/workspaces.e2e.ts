@@ -146,9 +146,10 @@ test("switching narrows the board, the inbox and the chat, and All projects show
       .getByRole("button", { name: /^Inbox/ })
       .first()
       .click();
-    await page.getByRole("button", { name: "Open Inbox" }).click();
-    await expect(page.getByText("Atlas news").first()).toBeVisible();
-    await expect(page.getByText("Zephyr news")).toBeHidden();
+    const inbox = page.getByRole("dialog", { name: "Inbox" });
+    await expect(inbox.getByText("Atlas news").first()).toBeVisible();
+    await expect(inbox.getByText("Zephyr news")).toBeHidden();
+    await page.keyboard.press("Escape");
 
     // The Team chat has no sidebar row any more; its shortcut still opens it.
     await page.keyboard.press("Control+8");
@@ -173,7 +174,7 @@ test("switching narrows the board, the inbox and the chat, and All projects show
 });
 
 test("a link to another project's ticket moves the workspace there", async ({ page }) => {
-  const site = await open(page, "/inbox", ZEPHYR);
+  const site = await open(page, "/new", ZEPHYR);
   try {
     await expect(switcher(page)).toHaveAccessibleName("Workspace: Zephyr");
     await page.goto(`${new URL(page.url()).origin}/board?ticket=t1`);
@@ -276,7 +277,7 @@ test("a real daemon takes the filters of a workspace", async () => {
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     await openCompanyPage(page, "Knowledge");
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     await page.getByRole("button", { name: "New project" }).first().click();
@@ -292,9 +293,11 @@ test("a real daemon takes the filters of a workspace", async () => {
       .getByRole("button", { name: /^Inbox/ })
       .first()
       .click();
-    await page.getByRole("button", { name: "Open Inbox" }).click();
-    await expect(page.getByText("Nothing waits for you in Atlas.").first()).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: "Inbox" }).getByText("Nothing here. You are up to date."),
+    ).toBeVisible();
     await noFailure();
+    await page.keyboard.press("Escape");
     await page.evaluate(() => {
       window.history.pushState({}, "", "/scheduled");
       window.dispatchEvent(new PopStateEvent("popstate"));
