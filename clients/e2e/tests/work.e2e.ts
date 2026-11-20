@@ -804,6 +804,48 @@ test.describe("states a test daemon cannot produce", () => {
     await header.screenshot({ path: `${REPO}/target/sidebar-summary/sessions-header.png` });
   });
 
+  test("many open sessions scroll on their own and leave the Tickets in sight", async ({ page }) => {
+    const sessions = Array.from({ length: 60 }, (_, n) => ({
+      conversation_id: `s${n}`,
+      title: `Session ${n}`,
+      employee_id: "e1",
+      employee_name: "Flux",
+      project_id: "p",
+      project_name: "Northwind API",
+      running: false,
+      created_at_ms: Date.now() - 60_000,
+      last_activity_ms: Date.now() - 1_000 - n,
+    }));
+    await scriptServer(page, {
+      ...script,
+      features: ["work_sessions"],
+      reads: { "work_session.list": () => ({ type: "work_sessions", value: { sessions, as_of_seq: 1 } }) },
+    });
+    await page.goto(site.origin);
+    const side = page.getByRole("navigation", { name: "Main" });
+    const own = side.getByRole("region", { name: "Sessions" });
+    const tickets = side.getByRole("region", { name: "Tickets" });
+    await expect(own.getByRole("link", { name: /Session 0$/ })).toBeVisible();
+    // The Tickets stay in sight, with their rows, under sixty open sessions.
+    await expect(tickets.getByRole("button", { name: "Tickets" })).toBeInViewport();
+    await expect(tickets.getByRole("link", { name: /Screenshots in review/ })).toBeInViewport();
+    // The sessions scroll in their own area, and the Tickets do not move with them.
+    const last = own.getByRole("link", { name: /Session 59$/ });
+    await expect(last).not.toBeInViewport();
+    const before = await tickets.boundingBox();
+    await own.getByRole("link", { name: /Session 3$/ }).hover();
+    await expect(async () => {
+      await page.mouse.wheel(0, 600);
+      await expect(last).toBeInViewport({ timeout: 200 });
+    }).toPass();
+    expect((await tickets.boundingBox())?.y).toBe(before?.y);
+    await side.screenshot({ path: `${REPO}/target/sidebar-scroll/open.png` });
+    // Folded, the Sessions give their room back to the Tickets.
+    await own.getByRole("button", { name: "Sessions" }).click();
+    await expect(tickets.getByRole("link", { name: /Still at work/ })).toBeInViewport();
+    await side.screenshot({ path: `${REPO}/target/sidebar-scroll/folded.png` });
+  });
+
   test("a new session goes to the dispatcher, which chooses who takes it", async ({ page }) => {
     const choosing = {
       conversation_id: "s2",

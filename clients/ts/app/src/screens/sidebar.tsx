@@ -160,9 +160,16 @@ const styles = stylex.create({
     textOverflow: "ellipsis",
     userSelect: "none",
   },
+  // Sessions and Tickets share the panel's height: each open one scrolls on its own, so a long list never
+  // pushes the other out of sight. Open sections grow from nothing to at most their content, so a short one
+  // keeps all it needs and the long one takes the rest; two long ones split the room.
+  sections: { display: "flex", flexDirection: "column", height: "100%", minHeight: 0 },
   section: {
     display: "flex",
     flexDirection: "column",
+    flex: "1 1 0",
+    minHeight: 0,
+    maxHeight: "max-content",
     marginBlockStart: 12,
     paddingBlockStart: 8,
     borderBlockStartWidth: 1,
@@ -170,6 +177,9 @@ const styles = stylex.create({
     borderBlockStartColor: "var(--color-border)",
   },
   firstSection: { marginBlockStart: 4 },
+  foldedSection: { flex: "0 0 auto" },
+  // The list scrolls under its section's head, which stays put.
+  sectionScroll: { flex: "1 1 auto", minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" },
   // A section's head reads as a quiet label, but folds the section.
   sectionFold: {
     display: "flex",
@@ -513,12 +523,19 @@ function Section({
   const [folded, toggle] = useFold(sectionKey(section));
   const mine = items.filter((i) => i.section === section);
   return (
-    <section aria-label={SECTION_TITLES[section]} {...stylex.props(styles.section, first && styles.firstSection)}>
+    <section
+      aria-label={SECTION_TITLES[section]}
+      {...stylex.props(styles.section, first && styles.firstSection, folded && styles.foldedSection)}
+    >
       <button type="button" aria-expanded={!folded} onClick={toggle} {...stylex.props(styles.sectionFold)}>
         <Chevron folded={folded} size={10} />
         <span {...stylex.props(styles.foldName)}>{SECTION_TITLES[section]}</span>
       </button>
-      {folded ? null : <SectionList section={section} items={mine} projects={projects} />}
+      {folded ? null : (
+        <div {...stylex.props(styles.sectionScroll)}>
+          <SectionList section={section} items={mine} projects={projects} />
+        </div>
+      )}
     </section>
   );
 }
@@ -714,8 +731,10 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
         ) : undefined
       }
     >
-      <Section section="sessions" items={items} projects={projects} first />
-      <Section section="tickets" items={items} projects={projects} />
+      <div {...stylex.props(styles.sections)}>
+        <Section section="sessions" items={items} projects={projects} first />
+        <Section section="tickets" items={items} projects={projects} />
+      </div>
     </SideNav>
   );
 }
