@@ -83,6 +83,7 @@ const styles = stylex.create({
     backgroundColor: "var(--color-text-primary)",
   },
   tile: {
+    position: "relative",
     display: "grid",
     placeItems: "center",
     width: TILE,
@@ -98,6 +99,10 @@ const styles = stylex.create({
     fontWeight: 600,
     opacity: { default: 0.75, ":hover": 1 },
     transition: "border-radius 120ms ease, opacity 120ms ease",
+    // The browser hit-tests the rounded shape, and the radius only shrinks once hovered: a click in a
+    // corner of the circle (a quick move, or a click while the radius still animates) hit nothing. This
+    // square overlay keeps the whole tile clickable, whatever its radius.
+    "::before": { content: '""', position: "absolute", inset: 0 },
   },
   tileOn: { borderRadius: 12, opacity: 1 },
   allTile: {
