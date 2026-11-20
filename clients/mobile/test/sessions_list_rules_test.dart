@@ -1,5 +1,4 @@
 import 'package:aurelius_mobile/data/protocol/protocol.dart';
-import 'package:aurelius_mobile/features/sessions/recent_use.dart';
 import 'package:aurelius_mobile/features/sessions/session_rules.dart';
 import 'package:aurelius_mobile/features/sessions/ticket_list_rules.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,7 +7,7 @@ import 'session_rules_test.dart' show session;
 import 'support/tickets.dart' show ticketOf;
 
 // The rules of the Sessions tab's two lists and of the Chat tab, ported from
-// the desktop sidebar (recent-use-logic.ts, ticket-session-logic.ts,
+// the desktop sidebar (session-logic.ts, ticket-session-logic.ts,
 // new-session-logic.ts).
 
 // Wednesday 18 November 2026, 15:00 local.
@@ -16,36 +15,8 @@ final now = DateTime(2026, 11, 18, 15);
 int at(DateTime d) => d.millisecondsSinceEpoch;
 
 void main() {
-  group('recent use', () {
-    test('lastUsed is the later of the activity and the open time here', () {
-      expect(lastUsed({'session:a': 50}, 'session:a', 10), 50);
-      expect(lastUsed({'session:a': 5}, 'session:a', 10), 10);
-      expect(lastUsed({}, 'session:a', 10), 10);
-    });
-
-    test('touchUse keeps only the newest open times', () {
-      final uses = touchUse({'a': 1, 'b': 2, 'c': 3}, 'd', 4, max: 3);
-      expect(uses.keys, ['d', 'c', 'b']);
-    });
-
-    test('parseUses reads nothing from a broken or odd value', () {
-      expect(parseUses(null), isEmpty);
-      expect(parseUses('not json'), isEmpty);
-      expect(parseUses('[1,2]'), isEmpty);
-      expect(parseUses('{"a": 3, "b": "x"}'), {'a': 3});
-    });
-  });
-
   group('sessionSections', () {
-    test('a session opened today here moves to Today, before newer activity', () {
-      final old = session(id: 'old', at: at(DateTime(2026, 11, 2)));
-      final fresh = session(id: 'fresh', at: at(DateTime(2026, 11, 18, 9)));
-      final sections = sessionSections([fresh, old], now, uses: {sessionUseKey('old'): at(DateTime(2026, 11, 18, 14))});
-      expect(sections.single.$1, SessionPeriod.today);
-      expect(sections.single.$2.map((s) => s.conversationId), ['old', 'fresh']);
-    });
-
-    test('without open times the activity alone sorts them, as before', () {
+    test('the activity alone sorts them, latest first', () {
       final sections = sessionSections([session(id: 'a', at: at(DateTime(2026, 11, 18, 8))), session(id: 'b', at: at(DateTime(2026, 11, 18, 9)))], now);
       expect(sections.single.$2.map((s) => s.conversationId), ['b', 'a']);
     });

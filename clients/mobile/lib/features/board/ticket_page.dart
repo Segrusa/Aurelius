@@ -26,7 +26,6 @@ import '../links/link_actions.dart';
 import '../markdown/links.dart';
 import '../chat/run_author.dart';
 import 'ticket_actions.dart';
-import '../sessions/recent_use.dart';
 import 'ticket_bloc.dart';
 import 'ticket_gate.dart';
 import 'ticket_properties.dart';
@@ -57,12 +56,7 @@ class TicketPage extends StatelessWidget {
   Widget build(BuildContext context) => BlocProvider(
         // Another ticket on the same route (a `go`) gets its own bloc, not the last one's.
         key: ValueKey('ticket-$ticketId'),
-        create: (context) {
-          final repository = context.read<AureliusRepository>();
-          // Opened here: the Tickets list puts it up front (recent_use.dart).
-          unawaited(noteUseOn(repository, ticketUseKey(ticketId)));
-          return TicketBloc(repository, ticketId);
-        },
+        create: (context) => TicketBloc(context.read<AureliusRepository>(), ticketId),
         child: _TicketView(key: ValueKey('ticket-view-$ticketId'), activity: activity, message: message),
       );
 }

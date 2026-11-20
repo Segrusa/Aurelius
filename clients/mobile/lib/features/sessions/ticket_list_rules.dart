@@ -3,7 +3,6 @@
 // sections are the mobile ones of the Sessions list (session_rules.dart).
 
 import '../../data/protocol/protocol.dart';
-import 'recent_use.dart';
 import 'session_rules.dart';
 
 /// The columns where a ticket is still open: the list leaves Backlog and Done out.
@@ -21,13 +20,12 @@ SessionSignal? ticketSignal(TicketView t, {required bool needsYou}) {
   return null;
 }
 
-/// The open tickets in their sections, each most recently used first: the
-/// later of their last update and when you last opened them on this phone.
-/// [needsYou] is the reader's ◆ of a ticket ([needsMe]).
-List<(SessionPeriod, List<TicketView>)> ticketSections(Iterable<TicketView> tickets, DateTime now, {required bool Function(TicketView) needsYou, Map<String, int> uses = const {}}) =>
+/// The open tickets in their sections, each last updated first: opening one
+/// does not move it up. [needsYou] is the reader's ◆ of a ticket ([needsMe]).
+List<(SessionPeriod, List<TicketView>)> ticketSections(Iterable<TicketView> tickets, DateTime now, {required bool Function(TicketView) needsYou}) =>
     sectionsByUse(
       tickets.where(listedTicket),
       now,
-      usedAt: (t) => lastUsed(uses, ticketUseKey(t.id), t.updatedAtMs),
+      usedAt: (t) => t.updatedAtMs,
       active: (t) => ticketSignal(t, needsYou: needsYou(t)) != null,
     );

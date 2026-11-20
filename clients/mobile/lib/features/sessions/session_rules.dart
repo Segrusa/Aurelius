@@ -3,7 +3,6 @@
 // session-logic.ts and new-session-logic.ts, with the same words.
 
 import '../../data/protocol/protocol.dart';
-import 'recent_use.dart';
 
 /// The server feature of work sessions.
 const workSessionsFeature = 'work_sessions';
@@ -82,14 +81,13 @@ List<(SessionPeriod, List<T>)> sectionsByUse<T>(Iterable<T> items, DateTime now,
   return [for (final p in SessionPeriod.values) if (by[p] case final list?) (p, list)];
 }
 
-/// The non-empty sections in their order, each with its sessions most
-/// recently used first: the later of their activity and when you last opened
-/// them on this phone ([uses], see recent_use.dart).
-List<(SessionPeriod, List<WorkSessionView>)> sessionSections(Iterable<WorkSessionView> sessions, DateTime now, {Map<String, int> uses = const {}}) =>
+/// The non-empty sections in their order, each with its sessions latest
+/// activity first: opening one does not move it up.
+List<(SessionPeriod, List<WorkSessionView>)> sessionSections(Iterable<WorkSessionView> sessions, DateTime now) =>
     sectionsByUse(
       sessions,
       now,
-      usedAt: (s) => lastUsed(uses, sessionUseKey(s.conversationId), s.lastActivityMs),
+      usedAt: (s) => s.lastActivityMs,
       active: (s) => sessionSignal(s) != null,
     );
 

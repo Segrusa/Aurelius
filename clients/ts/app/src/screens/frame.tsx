@@ -44,16 +44,6 @@ import { useOpenNewSession } from "./new-session";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
 import {
-  lastUsed,
-  parseUses,
-  RECENT_USE_KEY,
-  type RecentUses,
-  sessionUseKey,
-  ticketUseKey,
-  touchUse,
-  useKeyOf,
-} from "./recent-use-logic";
-import {
   activeSessions,
   type SessionSignal,
   sessionSignal,
@@ -338,31 +328,14 @@ function FoldingSection({
 }
 
 /**
- * When you opened which session or ticket on this device, recorded as you open one, so the sidebar lists
- * them most recently used first.
+ * The board member's work sessions (server feature `work_sessions`), the workspace's when one is chosen.
+ * Ordered by their own activity only: opening one must not move it to the top.
  */
-function useRecentUses(): RecentUses {
-  const { storage } = usePlatform();
-  const path = useRouterState({ select: (s) => s.location.pathname });
-  const [uses, setUses] = useState(() => parseUses(storage.get(RECENT_USE_KEY)));
-  const key = useKeyOf(path);
-  useEffect(() => {
-    if (!key) return;
-    setUses((was) => {
-      const next = touchUse(was, key, Date.now());
-      storage.set(RECENT_USE_KEY, JSON.stringify(next));
-      return next;
-    });
-  }, [key, storage]);
-  return uses;
-}
-
-/** The board member's work sessions (server feature `work_sessions`), the workspace's when one is chosen. */
-function RecentSessions({ uses }: { uses: RecentUses }) {
+function RecentSessions() {
   const workspace = useWorkspace().id;
   const [earlier, setEarlier] = useState(false);
   const all = useWorkSessions().data ?? [];
-  const usedAt = (s: WorkSessionView) => lastUsed(uses, sessionUseKey(s.conversation_id), s.last_activity_ms);
+  const usedAt = (s: WorkSessionView) => s.last_activity_ms;
   const today = sidebarSessions(all, workspace, startOfDay(Date.now()), usedAt);
   const { list: sessions, hasEarlier } = withEarlier(
     sidebarSessions(all, workspace, 0, usedAt),
@@ -401,14 +374,17 @@ function RecentSessions({ uses }: { uses: RecentUses }) {
   );
 }
 
-/** The open tickets (ticket #70: each opens as its own session), the workspace's when one is chosen. */
-function OpenTickets({ uses }: { uses: RecentUses }) {
+/**
+ * The open tickets (ticket #70: each opens as its own session), the workspace's when one is chosen.
+ * Ordered by their own changes only: opening one must not move it to the top.
+ */
+function OpenTickets() {
   const workspace = useWorkspace().id;
   const [earlier, setEarlier] = useState(false);
   const all = useTickets().data ?? [];
   const need = useTicketNeeds(all);
   const signal = (t: TicketView) => ticketSignal(t, need.mine(t));
-  const usedAt = (t: TicketView) => lastUsed(uses, ticketUseKey(t.number), t.updated_at_ms);
+  const usedAt = (t: TicketView) => t.updated_at_ms;
   const today = sidebarTickets(all, workspace, signal, startOfDay(Date.now()), usedAt);
   const { list: tickets, hasEarlier } = withEarlier(
     sidebarTickets(all, workspace, signal, 0, usedAt),
@@ -650,7 +626,6 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
     (id) => employees.data?.filter((e) => e.id === id && e.status !== "archived") ?? [],
   );
   const openNewSession = useOpenNewSession();
-  const uses = useRecentUses();
   return (
     <SideNav
       aria-label="Main"
@@ -720,8 +695,8 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
               ))}
             </div>
           ) : null}
-          <RecentSessions uses={uses} />
-          <OpenTickets uses={uses} />
+          <RecentSessions />
+          <OpenTickets />
           <Live />
         </>
       )}

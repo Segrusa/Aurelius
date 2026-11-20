@@ -215,14 +215,15 @@ void main() {
       expect(find.text('Fix the login'), findsNothing);
     });
 
-    testWidgets('a session opened on this phone earlier today stands under Today, above newer activity', (tester) async {
+    testWidgets('opening a session does not move it up: the list follows the activity alone', (tester) async {
       final now = DateTime.now();
       final early = DateTime(now.year, now.month, now.day, 0, 1).millisecondsSinceEpoch;
+      // An open time from the older build that sorted on it: it no longer counts.
       SharedPreferences.setMockInitialValues({'sessions.used:h': '{"session:old": ${early + 1000}}'});
       final repo = repoWith(sessions: [sessionOf('new', title: 'Newer activity', at: early + 500), sessionOf('old', title: 'Opened here', at: 1)]);
       await pumpSessions(tester, repo, const WorkSessionsPage());
-      expect(find.byKey(const ValueKey('sessions-section-older')), findsNothing);
-      expect(tester.getTopLeft(find.text('Opened here')).dy < tester.getTopLeft(find.text('Newer activity')).dy, isTrue);
+      expect(find.byKey(const ValueKey('sessions-section-older')), findsOneWidget);
+      expect(tester.getTopLeft(find.text('Newer activity')).dy < tester.getTopLeft(find.text('Opened here')).dy, isTrue);
     });
   });
 

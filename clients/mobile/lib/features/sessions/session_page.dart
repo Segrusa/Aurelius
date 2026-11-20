@@ -14,7 +14,6 @@ import '../chat/chat_bloc.dart';
 import '../chat/chat_view.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_banner.dart';
-import 'recent_use.dart';
 import 'session_rules.dart';
 import 'sessions_bloc.dart';
 import 'sessions_page.dart';
@@ -30,12 +29,7 @@ class SessionPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => BlocProvider(
-        create: (context) {
-          final repository = context.read<AureliusRepository>();
-          // Opened here: the Sessions list puts it up front (recent_use.dart).
-          unawaited(noteUseOn(repository, sessionUseKey(conversationId)));
-          return SessionsBloc(repository);
-        },
+        create: (context) => SessionsBloc(context.read<AureliusRepository>()),
         child: SessionsShownWatcher(child: _SessionBody(conversationId: conversationId)),
       );
 }

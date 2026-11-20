@@ -13,7 +13,6 @@ import '../board/board_bloc.dart';
 import '../board/board_page.dart' show BoardShownWatcher, needsMeOf;
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
-import 'recent_use.dart';
 import 'session_rules.dart';
 import 'sessions_bloc.dart';
 import 'ticket_list_rules.dart';
@@ -23,9 +22,8 @@ void openNewSession(BuildContext context) => context.go('/chat');
 
 /// The Sessions tab: your work sessions and the open tickets, one at a time
 /// under a Sessions | Tickets switch ([tickets] opens on Tickets). Both lists
-/// keep what is active on top, then the periods (Today, Yesterday, …), most
-/// recently used first, as the desktop sidebar: the later of the activity and
-/// when you last opened it on this phone.
+/// keep what is active on top, then the periods (Today, Yesterday, …), latest
+/// activity first, as the desktop sidebar: opening one does not move it up.
 class WorkSessionsPage extends StatelessWidget {
   const WorkSessionsPage({super.key, this.tickets = false});
 
@@ -86,29 +84,12 @@ class _WorkSessionsBody extends StatefulWidget {
 
 class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
   late bool _tickets = widget.tickets;
-  Map<String, int> _uses = const {};
-  bool? _shown;
 
   @override
   void didUpdateWidget(_WorkSessionsBody old) {
     super.didUpdateWidget(old);
     // A link to the tickets (an old Board place) switches the list.
     if (widget.tickets != old.tickets) _tickets = widget.tickets;
-  }
-
-  /// The open times are read again each time the tab shows: a session or ticket opened meanwhile moves up.
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final shown = TickerMode.valuesOf(context).enabled;
-    if (shown == _shown) return;
-    _shown = shown;
-    if (shown) _loadUses();
-  }
-
-  Future<void> _loadUses() async {
-    final uses = await loadUsesOn(context.read<AureliusRepository>());
-    if (mounted) setState(() => _uses = uses);
   }
 
   @override
@@ -164,7 +145,7 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
       );
     }
     if (board.board == null) return const Center(child: CircularProgressIndicator());
-    final sections = ticketSections(board.tickets, DateTime.now(), needsYou: mine, uses: _uses);
+    final sections = ticketSections(board.tickets, DateTime.now(), needsYou: mine);
     if (sections.isEmpty) {
       return EmptyState(
         'No open tickets',
@@ -218,7 +199,7 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
       child: ListView(
         padding: EdgeInsets.fromLTRB(0, 8, 0, listBottom(context)),
         children: [
-          for (final (period, sessions) in sessionSections(state.sessions, DateTime.now(), uses: _uses)) ...[
+          for (final (period, sessions) in sessionSections(state.sessions, DateTime.now())) ...[
             GroupHeader(period.label, key: ValueKey('sessions-section-${period.name}'), count: sessions.length),
             InsetGroup(children: [for (final s in sessions) SessionRow(session: s)]),
           ],
