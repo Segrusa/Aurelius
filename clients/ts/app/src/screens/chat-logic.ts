@@ -2,7 +2,7 @@
 // channel list's order, and how a thread and a reaction read. Port of team_feed.rs, discussion.rs,
 // threads.rs, progress.rs and the pure parts of chat.rs.
 
-import type { ActivityView, ChannelView, MessageView, ReactionView, SystemLine } from "@aurelius/protocol";
+import type { ActivityView, ChannelView, MessageView, ReactionView, RunDecision, SystemLine } from "@aurelius/protocol";
 
 export const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const DAY_MS = 86_400_000;
@@ -121,27 +121,59 @@ export function isSystemLine(m: MessageView, inGroup: boolean): boolean {
 
 // ---- The board member's decisions in a run --------------------------------------
 
-/** What the board member decided on a question or a plan, as the server writes it (approvals.rs). */
+/** What the board member decided on a question or a plan (`MessageView.decision`, feature `run_decisions`). */
 export type Decision =
   | { kind: "answered"; answers: { question: string; answer: string }[] }
   | { kind: "plan"; verdict: "approved" | "changes" | "rejected"; title: string; feedback: string | null };
 
-const ANSWERED = "Answered:";
-const ANSWER_ITEM = /(?:^|\n)- ([\s\S]+?)\n {2}\*\*([\s\S]*?)\*\*(?=\n- |$)/g;
-const PLAN_LINES: { prefix: string; verdict: "approved" | "changes" | "rejected"; title: string }[] = [
-  {
-    prefix: "Approved the plan; edits go through",
-    verdict: "approved",
-    title: "You approved the plan (edits go through)",
-  },
-  { prefix: "Approved the plan", verdict: "approved", title: "You approved the plan" },
-  { prefix: "Asked for changes to the plan", verdict: "changes", title: "You asked for changes to the plan" },
-  { prefix: "Rejected the plan", verdict: "rejected", title: "You rejected the plan" },
-];
+type PlanVerdict = { verdict: "approved" | "changes" | "rejected"; title: string };
+
+const APPROVED: PlanVerdict = { verdict: "approved", title: "You approved the plan" };
+const APPROVED_EDITS: PlanVerdict = { verdict: "approved", title: "You approved the plan (edits go through)" };
+const CHANGES: PlanVerdict = { verdict: "changes", title: "You asked for changes to the plan" };
+const REJECTED: PlanVerdict = { verdict: "rejected", title: "You rejected the plan" };
+
+/** The plan decisions by `RunDecision.kind` (the server's `run_decision` values). */
+const PLAN_KINDS = new Map<string, PlanVerdict>([
+  ["plan_approved", APPROVED],
+  ["plan_approved_edits", APPROVED_EDITS],
+  ["plan_changes", CHANGES],
+  ["plan_rejected", REJECTED],
+]);
 
 /** A status line the board member's answer or plan decision left in a run; null for any other message. */
 export function decisionOf(m: MessageView): Decision | null {
   if (m.role !== "assistant" || m.update !== "status" || m.system) return null;
+  // A kind this client does not know shows as the plain line, never as a guess from its text.
+  if (m.decision) return fromField(m.decision);
+  return fromText(m);
+}
+
+function fromField(d: RunDecision): Decision | null {
+  if (d.kind === "answered") {
+    const answers = (d.answers ?? [])
+      .map((a) => ({ question: a.question.trim(), answer: a.answer.trim() }))
+      .filter((a) => a.question && a.answer);
+    return answers.length > 0 ? { kind: "answered", answers } : null;
+  }
+  const plan = PLAN_KINDS.get(d.kind);
+  if (!plan) return null;
+  const feedback = plan.verdict === "approved" ? null : d.feedback?.trim() || null;
+  return { kind: "plan", ...plan, feedback };
+}
+
+// Decisions noted before the server sent `decision` (or by an older server) only have the
+// sentence of approvals.rs, so they are read from it.
+const ANSWERED = "Answered:";
+const ANSWER_ITEM = /(?:^|\n)- ([\s\S]+?)\n {2}\*\*([\s\S]*?)\*\*(?=\n- |$)/g;
+const PLAN_LINES: ({ prefix: string } & PlanVerdict)[] = [
+  { prefix: "Approved the plan; edits go through", ...APPROVED_EDITS },
+  { prefix: "Approved the plan", ...APPROVED },
+  { prefix: "Asked for changes to the plan", ...CHANGES },
+  { prefix: "Rejected the plan", ...REJECTED },
+];
+
+function fromText(m: MessageView): Decision | null {
   const author = m.author?.trim();
   if (author && author !== "You") return null;
   const text = m.text.trim();

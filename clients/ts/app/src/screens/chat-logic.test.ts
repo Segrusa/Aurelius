@@ -479,6 +479,38 @@ describe("the board member's decisions in a run", () => {
     expect(decisionOf(status("Rejected the plan."))).toMatchObject({ verdict: "rejected", feedback: null });
   });
 
+  it("reads the server's decision field before the text", () => {
+    const answered = msg({
+      update: "status",
+      author: "You",
+      text: "a sentence this client cannot read",
+      decision: { kind: "answered", answers: [{ question: "What goes?", answer: " All of it " }] },
+    });
+    expect(decisionOf(answered)).toEqual({
+      kind: "answered",
+      answers: [{ question: "What goes?", answer: "All of it" }],
+    });
+    const changes = msg({ update: "status", text: "x", decision: { kind: "plan_changes", feedback: "smaller steps" } });
+    expect(decisionOf(changes)).toEqual({
+      kind: "plan",
+      verdict: "changes",
+      title: "You asked for changes to the plan",
+      feedback: "smaller steps",
+    });
+    const edits = msg({ update: "status", text: "x", decision: { kind: "plan_approved_edits", feedback: "ignored" } });
+    expect(decisionOf(edits)).toMatchObject({ verdict: "approved", feedback: null });
+  });
+
+  it("shows a decision kind it does not know as the plain line", () => {
+    const later = msg({
+      update: "status",
+      author: "You",
+      text: "Approved the plan.",
+      decision: { kind: "plan_paused" },
+    });
+    expect(decisionOf(later)).toBeNull();
+  });
+
   it("leaves other messages alone", () => {
     expect(decisionOf(msg({ text: "Answered:\n\n- q\n  **a**" }))).toBeNull();
     expect(decisionOf(msg({ update: "status", author: "Forge", text: "Approved the plan." }))).toBeNull();
