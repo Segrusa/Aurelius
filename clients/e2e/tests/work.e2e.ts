@@ -847,6 +847,43 @@ test.describe("states a test daemon cannot produce", () => {
     await side.screenshot({ path: `${REPO}/target/sidebar-scroll/folded.png` });
   });
 
+  test("a folded section still shows the session or ticket you are in", async ({ page }) => {
+    const sessions = Array.from({ length: 3 }, (_, n) => ({
+      conversation_id: `s${n}`,
+      title: `Session ${n}`,
+      employee_id: "e1",
+      employee_name: "Flux",
+      project_id: "p",
+      project_name: "Northwind API",
+      running: false,
+      created_at_ms: Date.now() - 60_000,
+      last_activity_ms: Date.now() - 1_000 - n,
+    }));
+    await scriptServer(page, {
+      ...script,
+      features: ["work_sessions"],
+      reads: { "work_session.list": () => ({ type: "work_sessions", value: { sessions, as_of_seq: 1 } }) },
+    });
+    await page.goto(site.origin);
+    const side = page.getByRole("navigation", { name: "Main" });
+    const own = side.getByRole("region", { name: "Sessions" });
+    const tickets = side.getByRole("region", { name: "Tickets" });
+    await own.getByRole("link", { name: /Session 1$/ }).click();
+    await own.getByRole("button", { name: "Sessions" }).click();
+    // Folded, only the session you are in stays, still marked as the open one.
+    await expect(own.getByRole("link", { name: /Session 1$/ })).toBeVisible();
+    await expect(own.getByRole("link", { name: /Session 0$/ })).toHaveCount(0);
+    // Another page: the folded section is empty again.
+    await side.getByRole("link", { name: "Board" }).click();
+    await expect(own.getByRole("link")).toHaveCount(0);
+    // The same for a ticket, under a folded Tickets section.
+    await tickets.getByRole("link", { name: /Screenshots in review/ }).click();
+    await tickets.getByRole("button", { name: "Tickets" }).click();
+    await expect(tickets.getByRole("link", { name: /Screenshots in review/ })).toBeVisible();
+    await expect(tickets.getByRole("link", { name: /Still at work/ })).toHaveCount(0);
+    await side.screenshot({ path: `${REPO}/target/sidebar-open-row/folded.png` });
+  });
+
   test("a new session goes to the dispatcher, which chooses who takes it", async ({ page }) => {
     const choosing = {
       conversation_id: "s2",
