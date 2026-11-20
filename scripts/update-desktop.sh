@@ -2,7 +2,7 @@
 # Update the installed Linux desktop app (~/.local/bin/app) to this checkout's main.
 # Only the app is rebuilt and replaced: the server (aurelius-daemon), the bridge
 # and aurelius-ctl are not touched, and no tests run (use install-linux.sh for
-# a full install).
+# a full install, and update-server.sh for only the server).
 #
 #   scripts/update-desktop.sh                    rebuild and replace the app if main has something new
 #   scripts/update-desktop.sh --force            rebuild and replace even when it's up to date

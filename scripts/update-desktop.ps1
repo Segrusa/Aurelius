@@ -1,6 +1,7 @@
 # Update the installed Windows desktop app (aurelius.exe) to the latest main.
 # Only the app is rebuilt and replaced: the server/service is not touched, and
-# no tests run (use install-production.ps1 for a full, tested install).
+# no tests run (use install-production.ps1 for a full, tested install, and
+# update-server.ps1 for only the server).
 #
 #   scripts/update-desktop.ps1          pull main, rebuild and replace the app if there is something new
 #   scripts/update-desktop.ps1 -Force   rebuild and replace even when it's up to date
