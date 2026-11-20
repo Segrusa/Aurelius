@@ -10,6 +10,7 @@ import '../../data/aurelius_repository.dart';
 import '../../data/links.dart';
 import '../../data/views.dart' show ErrorCode;
 import '../hosts/hosts_bloc.dart';
+import '../inbox/inbox_rows.dart' show inboxRoute;
 
 // What a link does in the app (A5a, ui-ontwerp §6): Copy link, and opening one.
 // A link only ever navigates; every way it can fail says so in words.
@@ -82,17 +83,16 @@ Future<void> _otherServer(BuildContext context, AureliusLink link, String raw) a
 }
 
 /// A message's place comes from the server (`message.locate`): its ticket's
-/// discussion (also a reply in one of its threads: ticket #71 has no ticket
-/// channels), or its channel, with its thread when it is a reply.
+/// discussion (also a reply in one of its threads). A message anywhere else
+/// (chat is gone) opens the Inbox.
 Future<void> openMessageAt(BuildContext context, AureliusRepository repository, String messageId) async {
   try {
     final at = await repository.messageLocation(messageId);
     if (!context.mounted) return;
-    final thread = at.threadRoot;
     if (at.ticketId != null) {
       context.push('/ticket/${at.ticketId}?tab=discussion&message=$messageId');
     } else {
-      context.push('/channel/${at.conversationId}?message=$messageId${thread == null ? '' : '&thread=$thread'}');
+      context.go(inboxRoute);
     }
   } on ProtocolException catch (e) {
     if (!context.mounted) return;

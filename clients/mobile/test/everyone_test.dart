@@ -4,7 +4,7 @@ import 'package:aurelius_mobile/data/channels.dart';
 import 'package:aurelius_mobile/data/everyone.dart';
 import 'package:aurelius_mobile/data/protocol/models.dart';
 import 'package:aurelius_mobile/features/chat/everyone_audience.dart';
-import 'package:aurelius_mobile/features/team/mentions.dart';
+import 'package:aurelius_mobile/features/chat/mentions.dart';
 
 DiscussionAudience audience({int employees = 5, int paused = 1, int boardMembers = 2, String? coordinator}) => DiscussionAudience(
       boardMembers: boardMembers,

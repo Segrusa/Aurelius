@@ -14,7 +14,7 @@ import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/project/task_page.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
-import 'package:aurelius_mobile/features/team/mentions.dart';
+import 'package:aurelius_mobile/features/chat/mentions.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

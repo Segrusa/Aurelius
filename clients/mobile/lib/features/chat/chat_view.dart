@@ -33,7 +33,7 @@ import '../connection/connection_bloc.dart';
 import '../company_org/employee_run_sheet.dart';
 import '../inbox/inbox_bloc.dart';
 import '../load/load_widgets.dart';
-import '../team/mentions.dart';
+import 'mentions.dart';
 import 'answer_body.dart';
 import 'chat_bloc.dart';
 import 'collapse.dart';

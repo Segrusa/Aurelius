@@ -26,10 +26,9 @@ import '../features/company_org/company_org_page.dart';
 import '../features/company_org/employee_page.dart';
 import '../features/links/link_actions.dart' show openAureliusLink, openMessageAt;
 import '../features/tasks/tasks_page.dart';
-import '../features/team/channel_link_page.dart';
 import '../features/inbox/approval_page.dart';
 import '../features/inbox/inbox_page.dart';
-import '../features/inbox/inbox_rows.dart' show pushPlace;
+import '../features/inbox/inbox_rows.dart' show inboxRoute, pushPlace;
 import '../features/profile/hosts_page.dart';
 import '../features/profile/profile_page.dart';
 import '../features/onboarding/onboarding.dart';
@@ -159,12 +158,6 @@ class AppRouter {
         path: '/company',
         pageBuilder: (context, state) => routePage(state, CompanyOrgPage(initial: state.uri.queryParameters['view'])),
       ),
-      // Where a link to a message in a channel lands (A5a); a ticket's channel opens the ticket.
-      GoRoute(
-        parentNavigatorKey: _root,
-        path: '/channel/:cid',
-        pageBuilder: (context, state) => routePage(state, ChannelLinkPage(conversationId: state.pathParameters['cid']!, message: state.uri.queryParameters['message'], thread: state.uri.queryParameters['thread'])),
-      ),
       GoRoute(parentNavigatorKey: _root, path: '/projects', pageBuilder: (context, state) => routePage(state, const ProjectsPage())),
       GoRoute(
         parentNavigatorKey: _root,
@@ -241,11 +234,13 @@ class AppRouter {
     final messageId = data['message_id'] as String?;
     final place = pushPlace(data);
     if (place == null) return false;
-    config.go(data['ticket_id'] != null ? '/board' : '/sessions');
+    if (place != inboxRoute) config.go(data['ticket_id'] != null ? '/board' : '/sessions');
     // A reply in a thread has its own place; only the server knows it.
     final context = _root.currentContext;
     if (messageId != null && context != null && context.mounted && repository.linkState.has(messageLocateFeature)) {
       unawaited(openMessageAt(context, repository, messageId));
+    } else if (place == inboxRoute) {
+      config.go(place);
     } else {
       config.push(place);
     }
