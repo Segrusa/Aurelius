@@ -53,6 +53,7 @@ pub async fn view(shared: &Arc<Shared>, project: ProjectId) -> Result<CodeView, 
         });
         branch.owner = link.owner.clone();
         branch.working = link.working;
+        branch.open = link.open;
     }
     Ok(view)
 }
@@ -256,6 +257,7 @@ fn branch_of(repo: &Path, main: &str, r: &RefEntry, worktree_path: Option<&str>)
         ticket: None,
         owner: None,
         working: false,
+        open: false,
     }
 }
 

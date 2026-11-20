@@ -86,7 +86,7 @@ pub struct CodeBranch {
     pub ahead: u32,
     /// Commits on main this branch lacks (`branch..main`); 0 for main.
     pub behind: u32,
-    /// Every commit of it is in main (it can be deleted without losing work).
+    /// Every commit of it is in main (git's view: a fresh branch at main counts too; see `open`).
     #[serde(default)]
     pub merged: bool,
     /// Its upstream (`origin/…`); for main: how far it is from it after a fetch.
@@ -123,6 +123,11 @@ pub struct CodeBranch {
     /// An employee works on it now: a run of its ticket or work session is live or queued.
     #[serde(default)]
     pub working: bool,
+    /// Its ticket is not on Done (nor archived) or its work session is not deleted: work on
+    /// it may still come, also when nothing is ahead of main yet. The Code tab never offers to
+    /// remove or delete such a branch, and Clean up merged leaves it alone.
+    #[serde(default)]
+    pub open: bool,
 }
 
 /// A commit of a branch's own list.

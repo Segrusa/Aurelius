@@ -159,7 +159,8 @@ async fn the_code_tab_reads_a_repository_and_changes_it_only_as_asked() {
     // A clean merge, with the ticket's number in its message.
     let view = host(&client, merge(&feature)).await.unwrap();
     assert_eq!(git(&repo, &["log", "-1", "--format=%s", "main"]), format!("Merge {feature} (ticket #{number})"));
-    assert!(view.branches.iter().find(|b| b.name == feature).unwrap().merged, "the answer is the view after the merge");
+    let merged = view.branches.iter().find(|b| b.name == feature).unwrap();
+    assert!(merged.merged && merged.open, "the answer is the view after the merge; its ticket is still open");
 
     // Clean up merged while the feature's ticket is still open: only the merged branch
     // without a ticket goes. An open ticket's branch may simply have no commit yet.
