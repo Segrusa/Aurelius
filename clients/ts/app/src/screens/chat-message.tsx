@@ -48,7 +48,9 @@ import {
   canChange,
   canMakeTicket,
   clock,
+  type Decision,
   dayLabel,
+  decisionOf,
   fold,
   isSystemLine,
   lineMark,
@@ -61,6 +63,7 @@ import {
   REACTIONS,
   reactionOn,
   reactionTip,
+  recommendedSplit,
   rowActions,
   saveOf,
   splitBlocks,
@@ -410,6 +413,84 @@ const styles = stylex.create({
     textDecoration: "none",
   },
   liveRow: { display: "flex", gap: 12, paddingTop: 8 },
+  // The board member's answer or plan decision: under the question, in line with the messages' text.
+  decision: {
+    display: "flex",
+    flexDirection: "column",
+    marginInlineStart: 40,
+    marginBlock: 4,
+    overflow: "hidden",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+  },
+  decisionHead: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    paddingInline: 12,
+    paddingBlock: 8,
+    fontSize: 12,
+    color: "var(--color-text-secondary)",
+  },
+  decisionTitle: { minWidth: 0, flexGrow: 1, flexBasis: 0, fontWeight: 600, color: "var(--color-text-primary)" },
+  decisionMark: {
+    display: "inline-flex",
+    width: 18,
+    height: 18,
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 9,
+    fontSize: 11,
+    fontWeight: 700,
+  },
+  markGood: {
+    backgroundColor: "color-mix(in srgb, var(--color-text-accent) 18%, transparent)",
+    color: "var(--color-text-accent)",
+  },
+  markChange: { backgroundColor: "var(--color-warning-muted)", color: "var(--color-text-warning)" },
+  markBad: {
+    backgroundColor: "color-mix(in srgb, var(--color-text-error) 16%, transparent)",
+    color: "var(--color-text-error)",
+  },
+  decisionItem: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: "var(--precision-line2)",
+    paddingInline: 12,
+    paddingBlock: 9,
+  },
+  decisionQuestion: { fontSize: 12.5, lineHeight: 1.45, color: "var(--color-text-secondary)", whiteSpace: "pre-wrap" },
+  decisionAnswer: {
+    display: "flex",
+    alignItems: "baseline",
+    flexWrap: "wrap",
+    gap: 8,
+    borderInlineStartWidth: 2,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: "var(--color-text-accent)",
+    paddingInlineStart: 8,
+    fontSize: 14,
+    lineHeight: 1.45,
+    fontWeight: 500,
+    color: "var(--color-text-primary)",
+    whiteSpace: "pre-wrap",
+  },
+  decisionTag: {
+    borderRadius: 4,
+    backgroundColor: "var(--color-overlay-hover)",
+    paddingInline: 6,
+    paddingBlock: 1,
+    fontSize: 11,
+    fontWeight: 500,
+    color: "var(--precision-text3)",
+  },
   liveName: { display: "flex", alignItems: "baseline", gap: 8 },
   footer: { display: "flex", justifyContent: "flex-end", gap: 8 },
   dialogFooter: { paddingInline: 16, paddingBlock: 12 },
@@ -869,6 +950,60 @@ function SystemRow({ m }: { m: MessageView }) {
   );
 }
 
+/** What the board member answered or decided, as a card under the question instead of a bare grey line. */
+function DecisionCard({ m, d }: { m: MessageView; d: Decision }) {
+  const time = clock(m.created_at_ms, offset());
+  const verdict = d.kind === "answered" ? "approved" : d.verdict;
+  const title =
+    d.kind === "answered"
+      ? d.answers.length === 1
+        ? "You answered"
+        : `You answered ${d.answers.length} questions`
+      : d.title;
+  return (
+    <section {...stylex.props(styles.decision)} aria-label={`${title} at ${time}`}>
+      <div {...stylex.props(styles.decisionHead)}>
+        <span
+          aria-hidden
+          {...stylex.props(
+            styles.decisionMark,
+            verdict === "approved" ? styles.markGood : verdict === "changes" ? styles.markChange : styles.markBad,
+          )}
+        >
+          {verdict === "approved" ? (
+            <Icon name="check" size={11} weight={2} />
+          ) : verdict === "changes" ? (
+            <Icon name="edit" size={11} weight={1.6} />
+          ) : (
+            "✕"
+          )}
+        </span>
+        <span {...stylex.props(styles.decisionTitle)}>{title}</span>
+        <span>{time}</span>
+      </div>
+      {d.kind === "answered" ? (
+        d.answers.map((a, i) => {
+          const { text, recommended } = recommendedSplit(a.answer);
+          return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: the answers never change order.
+            <div key={i} {...stylex.props(styles.decisionItem)}>
+              <span {...stylex.props(styles.decisionQuestion)}>{a.question}</span>
+              <span {...stylex.props(styles.decisionAnswer)}>
+                {text}
+                {recommended ? <span {...stylex.props(styles.decisionTag)}>Recommended</span> : null}
+              </span>
+            </div>
+          );
+        })
+      ) : d.feedback ? (
+        <div {...stylex.props(styles.decisionItem)}>
+          <Markdown text={d.feedback} />
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function UpdateCard({ m }: { m: MessageView }) {
   const { approvals } = useChat();
   const pending = m.approval_id ? approvals.get(m.approval_id) : undefined;
@@ -1306,6 +1441,8 @@ export const MessageRow = memo(function MessageRow({
     messages,
     retryTarget ?? { channel, threadParent: m.thread_parent ?? null },
   );
+  const decision = decisionOf(m);
+  if (decision) return <DecisionCard m={m} d={decision} />;
   if (m.system || isSystemLine(m, true)) return <SystemRow m={m} />;
   const who = authorOf(m, roleOf, speaker, me);
   const body = m.deleted_at_ms ? (

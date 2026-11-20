@@ -406,6 +406,36 @@ test.describe("scripted", () => {
     }
   });
 
+  test("an answer and a plan decision read as cards, not as a grey line", async ({ page }) => {
+    const answered = message(
+      "m2",
+      "assistant",
+      "Answered:\n\n- What happens to the chat history in the database?\n  **Delete it for good**\n- What exactly goes?\n  **1-on-1 + Team chat (Recommended)**",
+      { update: "status", author: "You", ordinal: 2 },
+    );
+    const revised = message("m3", "assistant", "Asked for changes to the plan: Smaller steps, please.", {
+      update: "status",
+      author: "You",
+      ordinal: 3,
+    });
+    const { stop } = await open(page, {
+      channels: [general],
+      feeds: { general: feed("g", [message("m1", "user", "Go", {}), answered, revised]) },
+    });
+    try {
+      const card = page.getByRole("region", { name: /^You answered 2 questions/ });
+      await expect(card).toContainText("What exactly goes?");
+      await expect(card).toContainText("Delete it for good");
+      await expect(card.getByText("Recommended", { exact: true })).toBeVisible();
+      await expect(card).not.toContainText("**");
+      const plan = page.getByRole("region", { name: /^You asked for changes to the plan/ });
+      await expect(plan).toContainText("Smaller steps, please.");
+      await page.screenshot({ path: join(REPO, "target/decision-card/decision-card.png") });
+    } finally {
+      await stop();
+    }
+  });
+
   test("2,000 messages scroll without long frames and render few rows", async ({ page }) => {
     const many = Array.from({ length: 2000 }, (_, i) =>
       message(`m${i}`, i % 2 ? "assistant" : "user", `Message ${i} with **bold** text and \`code\`.\n\n- one\n- two`, {

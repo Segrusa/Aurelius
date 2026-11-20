@@ -13,6 +13,7 @@ import {
   clock,
   completeMention,
   dayLabel,
+  decisionOf,
   fold,
   indexOfByte,
   isSystemLine,
@@ -30,6 +31,7 @@ import {
   quickReplies,
   reactionOn,
   readOnlyBar,
+  recommendedSplit,
   replies,
   replyLabel,
   rowActions,
@@ -442,5 +444,52 @@ describe("statusLine", () => {
     expect(statusLine("", false, false)).toBe("Thinking…");
     expect(statusLine("text", false, false)).toBe("Writing…");
     expect(statusLine("", true, true)).toBe("Waiting for your approval");
+  });
+});
+
+describe("the board member's decisions in a run", () => {
+  const status = (text: string) => msg({ update: "status", author: "You", text });
+
+  it("reads each question with its answer", () => {
+    const d = decisionOf(
+      status(
+        "Answered:\n\n- What happens to the history?\n  **Delete it**\n- What goes?\n  **1-on-1 + Team chat (Recommended)**",
+      ),
+    );
+    expect(d).toEqual({
+      kind: "answered",
+      answers: [
+        { question: "What happens to the history?", answer: "Delete it" },
+        { question: "What goes?", answer: "1-on-1 + Team chat (Recommended)" },
+      ],
+    });
+  });
+
+  it("keeps an answer over several lines in one piece", () => {
+    const d = decisionOf(status("Answered:\n\n- Why?\n  **First line\n- not a new item**"));
+    expect(d).toEqual({ kind: "answered", answers: [{ question: "Why?", answer: "First line\n- not a new item" }] });
+  });
+
+  it("reads a plan decision with its feedback", () => {
+    expect(decisionOf(status("Approved the plan."))).toMatchObject({ verdict: "approved", feedback: null });
+    expect(decisionOf(status("Asked for changes to the plan: smaller steps"))).toMatchObject({
+      verdict: "changes",
+      feedback: "smaller steps",
+    });
+    expect(decisionOf(status("Rejected the plan."))).toMatchObject({ verdict: "rejected", feedback: null });
+  });
+
+  it("leaves other messages alone", () => {
+    expect(decisionOf(msg({ text: "Answered:\n\n- q\n  **a**" }))).toBeNull();
+    expect(decisionOf(msg({ update: "status", author: "Forge", text: "Approved the plan." }))).toBeNull();
+    expect(decisionOf(status("Something else"))).toBeNull();
+  });
+
+  it("splits off a trailing (Recommended) only", () => {
+    expect(recommendedSplit("Keep it (Recommended)")).toEqual({ text: "Keep it", recommended: true });
+    expect(recommendedSplit("(Recommended) first, then more")).toEqual({
+      text: "(Recommended) first, then more",
+      recommended: false,
+    });
   });
 });

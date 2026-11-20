@@ -119,6 +119,54 @@ export function isSystemLine(m: MessageView, inGroup: boolean): boolean {
   return m.update === "group" && !m.author?.trim() && m.status !== "partial";
 }
 
+// ---- The board member's decisions in a run --------------------------------------
+
+/** What the board member decided on a question or a plan, as the server writes it (approvals.rs). */
+export type Decision =
+  | { kind: "answered"; answers: { question: string; answer: string }[] }
+  | { kind: "plan"; verdict: "approved" | "changes" | "rejected"; title: string; feedback: string | null };
+
+const ANSWERED = "Answered:";
+const ANSWER_ITEM = /(?:^|\n)- ([\s\S]+?)\n {2}\*\*([\s\S]*?)\*\*(?=\n- |$)/g;
+const PLAN_LINES: { prefix: string; verdict: "approved" | "changes" | "rejected"; title: string }[] = [
+  {
+    prefix: "Approved the plan; edits go through",
+    verdict: "approved",
+    title: "You approved the plan (edits go through)",
+  },
+  { prefix: "Approved the plan", verdict: "approved", title: "You approved the plan" },
+  { prefix: "Asked for changes to the plan", verdict: "changes", title: "You asked for changes to the plan" },
+  { prefix: "Rejected the plan", verdict: "rejected", title: "You rejected the plan" },
+];
+
+/** A status line the board member's answer or plan decision left in a run; null for any other message. */
+export function decisionOf(m: MessageView): Decision | null {
+  if (m.role !== "assistant" || m.update !== "status" || m.system) return null;
+  const author = m.author?.trim();
+  if (author && author !== "You") return null;
+  const text = m.text.trim();
+  if (text.startsWith(ANSWERED)) {
+    const body = text.slice(ANSWERED.length).trim();
+    const answers = [...body.matchAll(ANSWER_ITEM)].map((x) => ({
+      question: (x[1] ?? "").trim(),
+      answer: (x[2] ?? "").trim(),
+    }));
+    return answers.length > 0 ? { kind: "answered", answers } : null;
+  }
+  const plan = PLAN_LINES.find((p) => text.startsWith(p.prefix));
+  if (!plan) return null;
+  const colon = text.indexOf(":");
+  const feedback = plan.verdict !== "approved" && colon >= 0 ? text.slice(colon + 1).trim() || null : null;
+  return { kind: "plan", verdict: plan.verdict, title: plan.title, feedback };
+}
+
+/** An answer cut where Claude's own "(Recommended)" tag starts, so the tag can be shown quieter. */
+export function recommendedSplit(answer: string): { text: string; recommended: boolean } {
+  const at = answer.lastIndexOf("(Recommended)");
+  if (at < 0 || answer.slice(at + "(Recommended)".length).trim()) return { text: answer, recommended: false };
+  return { text: answer.slice(0, at).trimEnd(), recommended: true };
+}
+
 // ---- Mentions -------------------------------------------------------------------
 
 export interface Mentionable {
