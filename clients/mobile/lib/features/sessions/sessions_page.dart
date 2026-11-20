@@ -95,11 +95,28 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
     final company = context.watch<CompanyBloc>().state;
     final me = context.select<ConnectionBloc, String?>((b) => b.state.user?.id);
     bool mine(TicketView t) => needsMeOf(t, company, board, me: me);
+    final now = DateTime.now();
+    final sessions = state.supported ? sessionSections(state.sessions, now) : <(SessionPeriod, List<WorkSessionView>)>[];
+    final tickets = board.board == null ? <(SessionPeriod, List<TicketView>)>[] : ticketSections(board.tickets, now, needsYou: mine);
+    final runningSessions = [for (final (p, list) in sessions) if (p == SessionPeriod.active) ...list];
+    final runningTickets = [for (final (p, list) in tickets) if (p == SessionPeriod.active) ...list];
+    final running = runningSessions.length + runningTickets.length;
     // Who works shows as the Sessions tab's badge, so the page has no count of its own.
     return LargeTitleScaffold(
       title: 'Sessions',
-      onRefresh: () async => _tickets ? context.read<BoardBloc>().add(const BoardRefreshed()) : context.read<SessionsBloc>().add(const SessionsRefreshed()),
+      onRefresh: () async {
+        context.read<BoardBloc>().add(const BoardRefreshed());
+        context.read<SessionsBloc>().add(const SessionsRefreshed());
+      },
       header: [
+        // What runs or waits for you now stands on top, whichever list the switch shows.
+        if (running > 0) ...[
+          GroupHeader('Running', key: const ValueKey('sessions-running'), count: running),
+          InsetGroup(children: [
+            for (final s in runningSessions) SessionRow(session: s),
+            for (final t in runningTickets) TicketRow(ticket: t, needsYou: mine(t)),
+          ]),
+        ],
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
           child: BrandSegments<bool>(
@@ -112,7 +129,7 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
         ),
       ],
       fill: _tickets ? _ticketFill(context, board) : _fill(context, state),
-      children: _tickets ? _ticketList(board, mine) : _list(state),
+      children: _tickets ? _ticketList(tickets, mine) : _list(sessions),
     );
   }
 
@@ -137,8 +154,10 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
     return null;
   }
 
-  List<Widget> _ticketList(BoardState board, bool Function(TicketView) mine) => [
-        for (final (period, tickets) in ticketSections(board.tickets, DateTime.now(), needsYou: mine)) ...[
+  /// The sections below the switch; the active ones stand under Running on top.
+  List<Widget> _ticketList(List<(SessionPeriod, List<TicketView>)> sections, bool Function(TicketView) mine) => [
+        for (final (period, tickets) in sections)
+          if (period != SessionPeriod.active) ...[
           GroupHeader(period.label, key: ValueKey('tickets-section-${period.name}'), count: tickets.length),
           InsetGroup(children: [for (final t in tickets) TicketRow(ticket: t, needsYou: mine(t))]),
         ],
@@ -173,8 +192,9 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
     return null;
   }
 
-  List<Widget> _list(SessionsState state) => [
-        for (final (period, sessions) in sessionSections(state.sessions, DateTime.now())) ...[
+  List<Widget> _list(List<(SessionPeriod, List<WorkSessionView>)> sections) => [
+        for (final (period, sessions) in sections)
+          if (period != SessionPeriod.active) ...[
           GroupHeader(period.label, key: ValueKey('sessions-section-${period.name}'), count: sessions.length),
           InsetGroup(children: [for (final s in sessions) SessionRow(session: s)]),
         ],

@@ -121,7 +121,7 @@ void main() {
       await pumpSessions(tester, repo, const WorkSessionsPage());
       expect(find.text('Sessions'), findsWidgets);
       expect(find.text('1 working'), findsNothing);
-      expect(find.text('ACTIVE · 2'), findsOneWidget, reason: 'the working one and the one waiting for your choice');
+      expect(find.text('RUNNING · 2'), findsOneWidget, reason: 'the working one and the one waiting for your choice');
       final busy = tester.getTopLeft(find.text('Busy one')).dy;
       final nobody = tester.getTopLeft(find.text('Nobody chosen')).dy;
       final old = tester.getTopLeft(find.text('Old and quiet')).dy;
@@ -138,10 +138,10 @@ void main() {
       final repo = repoWith(sessions: [sessionOf('c1', title: 'Finished one', at: 1, unseen: true)]);
       await pumpSessions(tester, repo, const WorkSessionsPage());
       expect(find.descendant(of: find.byKey(const ValueKey('session-c1')), matching: find.byKey(const ValueKey('session-done'))), findsOneWidget);
-      expect(find.textContaining('ACTIVE'), findsNothing);
+      expect(find.textContaining('RUNNING'), findsNothing);
     });
 
-    testWidgets('sessions stand in sections: Active, then by the day of their last activity', (tester) async {
+    testWidgets('sessions stand in sections: Running above the switch, then by the day of their last activity', (tester) async {
       final now = DateTime.now();
       final repo = repoWith(sessions: [
         sessionOf('c1', title: 'From long ago', at: 1),
@@ -149,13 +149,33 @@ void main() {
         sessionOf('c3', title: 'Earlier today', at: DateTime(now.year, now.month, now.day).millisecondsSinceEpoch),
       ]);
       await pumpSessions(tester, repo, const WorkSessionsPage());
-      final active = tester.getTopLeft(find.byKey(const ValueKey('sessions-section-active'))).dy;
+      final running = tester.getTopLeft(find.byKey(const ValueKey('sessions-running'))).dy;
+      final switcher = tester.getTopLeft(find.byKey(const ValueKey('sessions-switch'))).dy;
       final today = tester.getTopLeft(find.byKey(const ValueKey('sessions-section-today'))).dy;
       final older = tester.getTopLeft(find.byKey(const ValueKey('sessions-section-older'))).dy;
-      expect(active < tester.getTopLeft(find.text('Busy one')).dy, isTrue);
-      expect(tester.getTopLeft(find.text('Busy one')).dy < today && today < tester.getTopLeft(find.text('Earlier today')).dy, isTrue);
+      expect(running < tester.getTopLeft(find.text('Busy one')).dy, isTrue);
+      expect(tester.getTopLeft(find.text('Busy one')).dy < switcher && switcher < today, isTrue, reason: 'Running stands above the switch');
+      expect(find.byKey(const ValueKey('sessions-section-active')), findsNothing, reason: 'no second Active section below');
+      expect(today < tester.getTopLeft(find.text('Earlier today')).dy, isTrue);
       expect(tester.getTopLeft(find.text('Earlier today')).dy < older && older < tester.getTopLeft(find.text('From long ago')).dy, isTrue);
       expect(find.byKey(const ValueKey('sessions-section-yesterday')), findsNothing, reason: 'an empty section is left out');
+    });
+
+    testWidgets('Running on top shows the running sessions and tickets together, on both lists', (tester) async {
+      final repo = repoWith(
+        sessions: [sessionOf('c1', title: 'Busy one', at: 1, running: true), sessionOf('c2', title: 'Quiet one', at: 1)],
+        board: boardOf([ticketOf(id: 'k1', number: 4, title: 'Report waits', column: ColumnKind.review, updatedAtMs: 1)]),
+      );
+      await pumpSessions(tester, repo, const WorkSessionsPage());
+      expect(find.text('RUNNING · 2'), findsOneWidget);
+      final switcher = tester.getTopLeft(find.byKey(const ValueKey('sessions-switch'))).dy;
+      expect(tester.getTopLeft(find.text('Busy one')).dy, lessThan(switcher));
+      expect(tester.getTopLeft(find.text('#4 Report waits')).dy, lessThan(switcher), reason: 'a ticket that needs you stands on top of the Sessions list too');
+      expect(tester.getTopLeft(find.text('Quiet one')).dy, greaterThan(switcher));
+      await tester.tap(find.descendant(of: find.byKey(const ValueKey('sessions-switch')), matching: find.text('Tickets')));
+      await settleBoard(tester);
+      expect(find.text('RUNNING · 2'), findsOneWidget);
+      expect(find.text('Busy one'), findsOneWidget, reason: 'Running stays on the Tickets list');
     });
 
     testWidgets('a tap opens the session', (tester) async {
@@ -221,10 +241,11 @@ void main() {
       expect(find.textContaining('Backlog'), findsNothing);
       expect(find.textContaining('All done'), findsNothing);
       expect(find.textContaining('Archived one'), findsNothing);
-      expect(find.text('ACTIVE · 1'), findsOneWidget);
-      final active = tester.getTopLeft(find.byKey(const ValueKey('tickets-section-active'))).dy;
+      expect(find.text('RUNNING · 1'), findsOneWidget);
+      final running = tester.getTopLeft(find.byKey(const ValueKey('sessions-running'))).dy;
       final todaySection = tester.getTopLeft(find.byKey(const ValueKey('tickets-section-today'))).dy;
-      expect(active < tester.getTopLeft(find.text('#2 Report waits')).dy && tester.getTopLeft(find.text('#2 Report waits')).dy < todaySection, isTrue);
+      expect(running < tester.getTopLeft(find.text('#2 Report waits')).dy && tester.getTopLeft(find.text('#2 Report waits')).dy < todaySection, isTrue);
+      expect(find.byKey(const ValueKey('tickets-section-active')), findsNothing);
       expect(find.descendant(of: find.byKey(const ValueKey('ticket-row-k2')), matching: find.byKey(const ValueKey('session-needs-you'))), findsOneWidget);
       await tester.tap(find.text('#1 Quiet in Todo'));
       await settleBoard(tester);
