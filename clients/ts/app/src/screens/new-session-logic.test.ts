@@ -12,6 +12,7 @@ import {
   defaultKind,
   defaultProject,
   defaultWho,
+  keptChoice,
   noteRecent,
   offeredKind,
   PROJECT_ROWS,
@@ -116,6 +117,22 @@ describe("the kind and who", () => {
     expect(quick).toContainEqual([LAST_QUICK, "e1"]);
     // A quick task leaves the ticket's who as it was.
     expect(quick.some(([key]) => key === "new_session.who:host-1")).toBe(false);
+  });
+
+  it("remembers the model, effort and mode a start used, so the next one opens on them", () => {
+    const run = { model: "claude-opus-5-5", effort: "high", mode: "plan" };
+    const writes = remembered("host-1", { kind: "session", projectId: "p", who: "e1", run }, []);
+    expect(writes).toContainEqual(["new_session.model:host-1", "claude-opus-5-5"]);
+    expect(writes).toContainEqual(["new_session.effort:host-1", "high"]);
+    expect(writes).toContainEqual(["new_session.mode:host-1", "plan"]);
+  });
+
+  it("opens on a remembered choice only while it is still offered", () => {
+    expect(keptChoice("high", ["default", "low", "high"])).toBe("high");
+    expect(keptChoice("gone-model", ["default", "m-1"])).toBe("default");
+    expect(keptChoice(null, ["default", "m-1"])).toBe("default");
+    // Before the models have loaded, the remembered one is kept rather than lost.
+    expect(keptChoice("m-2", ["default"], false)).toBe("m-2");
   });
 });
 

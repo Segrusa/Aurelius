@@ -311,6 +311,45 @@ void main() {
       expect(prefs.getString('new_session.project:h'), 'p1');
     });
 
+    testWidgets('the model, effort and mode of a start are remembered for this server', (tester) async {
+      final repo = repoWith();
+      when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
+          .thenAnswer((_) async => receiptOf(const CommandResultWorkSessionDispatching(conversationId: 'c9', messageId: 'm', projectId: 'p1')));
+      await pumpSessions(tester, repo, const NewSessionPage());
+      await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'First');
+      await choose(tester, 'effort', 'pick-Effort-high');
+      await choose(tester, 'mode', 'pick-Mode-plan');
+      await tester.tap(find.byKey(const ValueKey('new-session-start')));
+      await settleBoard(tester);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('new_session.effort:h'), 'high');
+      expect(prefs.getString('new_session.mode:h'), 'plan');
+      expect(prefs.getString('new_session.model:h'), 'default');
+    });
+
+    testWidgets('a new session opens on the remembered model, effort and mode and starts with them', (tester) async {
+      SharedPreferences.setMockInitialValues({'new_session.model:h': 'claude-opus-5-5', 'new_session.effort:h': 'high', 'new_session.mode:h': 'plan'});
+      final repo = repoWith();
+      when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
+          .thenAnswer((_) async => receiptOf(const CommandResultWorkSessionDispatching(conversationId: 'c10', messageId: 'm', projectId: 'p1')));
+      await pumpSessions(tester, repo, const NewSessionPage());
+      expect(find.descendant(of: find.byKey(const ValueKey('new-session-effort')), matching: find.text('High')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('new-session-mode')), matching: find.text('Plan')), findsOneWidget);
+      await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'Second');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('new-session-start')));
+      await settleBoard(tester);
+      // The runtime's model list has not loaded in this test, so the remembered model is kept.
+      expect(paramsOf(writesOf(repo).single)['run'], {'model': 'claude-opus-5-5', 'effort': 'high', 'mode': 'plan'});
+    });
+
+    testWidgets('a remembered effort or mode the app no longer offers falls back to the default', (tester) async {
+      SharedPreferences.setMockInitialValues({'new_session.effort:h': 'extreme', 'new_session.mode:h': 'yolo'});
+      await pumpSessions(tester, repoWith(), const NewSessionPage());
+      expect(find.descendant(of: find.byKey(const ValueKey('new-session-effort')), matching: find.text('Effort')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('new-session-mode')), matching: find.text('Mode')), findsOneWidget);
+    });
+
     testWidgets('without session_dispatch there is no Dispatcher: Who must be chosen', (tester) async {
       final link = linkOf(const ['work_sessions']);
       final repo = repoWith(link: link);

@@ -98,7 +98,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
 
   String get _host => context.read<AureliusRepository>().host.hostId;
 
-  /// The project, Who, kind and recent projects last used on this server.
+  /// The project, Who, kind, recent projects, model, effort and mode last used on this server.
   Future<void> _loadRemembered() async {
     final host = _host;
     final company = context.read<CompanyBloc>().state;
@@ -106,6 +106,9 @@ class _NewSessionPageState extends State<NewSessionPage> {
     String? project;
     String? who;
     String? kind;
+    String? model;
+    String? effort;
+    String? mode;
     var recent = const <String>[];
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -113,6 +116,9 @@ class _NewSessionPageState extends State<NewSessionPage> {
       who = prefs.getString(sessionKey('who', host));
       kind = prefs.getString(sessionKey('kind', host));
       recent = _parseRecent(prefs.getString(sessionKey('recent', host)));
+      model = prefs.getString(sessionKey('model', host));
+      effort = prefs.getString(sessionKey('effort', host));
+      mode = prefs.getString(sessionKey('mode', host));
     } catch (_) {
       // No preferences (tests, a broken store): the defaults.
     }
@@ -122,6 +128,10 @@ class _NewSessionPageState extends State<NewSessionPage> {
       _project ??= defaultSessionProject([for (final p in company.openProjects) p.id], project);
       _who ??= defaultWho(last: who, active: {for (final e in company.activeEmployees) e.id}, dispatchOn: dispatchOn);
       if (kind == StartKind.ticket.name) _kind = StartKind.ticket;
+      // The model is checked against the offered list while building, as that list loads later.
+      if (_model == 'default') _model = model ?? 'default';
+      if (_effort == 'default') _effort = keptChoice(effort, [for (final (v, _, _) in ModelCatalog.efforts) v]);
+      if (_mode == 'default') _mode = keptChoice(mode, [for (final m in agentModes) m.wire]);
     });
   }
 
@@ -146,7 +156,12 @@ class _NewSessionPageState extends State<NewSessionPage> {
     }
   }
 
-  Future<void> _remember({required String projectId, String? who}) async {
+  /// The chosen model while the server still offers it, else the employee's own.
+  String _modelOf(List<String> models) => keptChoice(_model, models, loaded: models.isNotEmpty);
+
+  List<String> get _models => context.read<RuntimeBloc>().state.choice(Purpose.employee)?.connection.models ?? const [];
+
+  Future<void> _remember({required String projectId, String? who, SessionStartInput? run}) async {
     final recent = noteRecent(_recent, projectId);
     setState(() => _recent = recent);
     try {
@@ -155,6 +170,11 @@ class _NewSessionPageState extends State<NewSessionPage> {
       await prefs.setString(sessionKey('recent', _host), jsonEncode(recent));
       await prefs.setString(sessionKey('kind', _host), _kind.name);
       if (who != null) await prefs.setString(sessionKey('who', _host), who);
+      if (run != null) {
+        await prefs.setString(sessionKey('model', _host), run.model);
+        await prefs.setString(sessionKey('effort', _host), run.effort);
+        await prefs.setString(sessionKey('mode', _host), run.mode);
+      }
     } catch (_) {
       // Not saved; the next start picks again.
     }
@@ -185,7 +205,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
     final start = SessionStartInput(
       projectId: project,
       text: _text.text,
-      model: _model,
+      model: _modelOf(_models),
       effort: _effort,
       mode: _mode,
       images: [for (final i in _images) i.path],
@@ -198,7 +218,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
     try {
       final receipt = await writeConfirmingSecret(repository, request, sendAnywayDialog(context), retry: false);
       if (receipt == null) return;
-      await _remember(projectId: project, who: who);
+      await _remember(projectId: project, who: who, run: start);
       final conversation = startedSession(receipt);
       _reset();
       if (conversation != null) router.push('/session/$conversation');
@@ -312,6 +332,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
     final dispatchOn = link.has(sessionDispatchFeature);
     final filesOn = link.has(chatFilesFeature);
     final models = context.select<RuntimeBloc, List<String>>((b) => b.state.choice(Purpose.employee)?.connection.models ?? const []);
+    final model = _modelOf(models);
     final projects = company.openProjects;
     final employees = company.activeEmployees;
     final whoName = _who == dispatcherWho ? 'Dispatcher' : company.employee(_who ?? '')?.name;
@@ -389,7 +410,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
               ),
             ),
           ),
-          _composer(context, kind: kind, dispatchOn: dispatchOn, filesOn: filesOn, models: models, employees: employees, whoName: whoName, problem: problem, note: note, can: can, keyboard: keyboard),
+          _composer(context, kind: kind, dispatchOn: dispatchOn, filesOn: filesOn, models: models, model: model, employees: employees, whoName: whoName, problem: problem, note: note, can: can, keyboard: keyboard),
         ]),
       ),
     );
@@ -401,6 +422,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
     required bool dispatchOn,
     required bool filesOn,
     required List<String> models,
+    required String model,
     required List<EmployeeSummary> employees,
     required String? whoName,
     required String? problem,
@@ -433,8 +455,8 @@ class _NewSessionPageState extends State<NewSessionPage> {
                 ),
                 _TrayChip(
                   key: const ValueKey('new-session-model'),
-                  label: _model == 'default' ? 'Model' : ModelCatalog.friendly(_model),
-                  onTap: () => _pick('Model', [('default', employeeDefault), for (final m in models) (m, ModelCatalog.friendly(m))], _model, (v) => _model = v),
+                  label: model == 'default' ? 'Model' : ModelCatalog.friendly(model),
+                  onTap: () => _pick('Model', [('default', employeeDefault), for (final m in models) (m, ModelCatalog.friendly(m))], model, (v) => _model = v),
                 ),
                 _TrayChip(
                   key: const ValueKey('new-session-effort'),

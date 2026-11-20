@@ -134,7 +134,8 @@ String dispatchedNote(bool worktree) => worktree
 /// The composer's hint on New session (desktop: placeholderOf("session")).
 const newSessionHint = 'What do you want to work on?';
 
-/// What is remembered per server: `project` and `who`.
+/// What is remembered per server: `project`, `recent`, `kind`, `who`, and the
+/// run choices `model`, `effort` and `mode` of the last session start.
 String sessionKey(String what, String hostId) => 'new_session.$what:$hostId';
 
 /// How many projects the Chat tab offers as chips before "All projects…".
@@ -182,6 +183,14 @@ String continueColumnLabel(ColumnKind column) => switch (column) {
       ColumnKind.review => 'Review',
       _ => column.wire,
     };
+
+/// A remembered model, effort or mode while it is still [offered], else
+/// `default`. Before the offered list has loaded ([loaded] false) the
+/// remembered one is kept, so a slow start does not lose it.
+String keptChoice(String? stored, List<String> offered, {bool loaded = true}) {
+  if (stored == null || stored.isEmpty) return 'default';
+  return !loaded || offered.contains(stored) ? stored : 'default';
+}
 
 /// The last used project while it is still open, else the only open one, else none (the board member picks).
 String? defaultSessionProject(List<String> open, String? last) {

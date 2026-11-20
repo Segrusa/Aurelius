@@ -35,7 +35,7 @@ const RECENT_MAX = 20;
 const CONTINUE_COLUMNS = new Set(["doing", "testing", "review"]);
 
 /** What is remembered per server, like the workspace (`workspace:<host>`). */
-export function sessionKey(what: "project" | "recent" | "kind" | "who", hostId: string | null): string {
+export function sessionKey(what: "project" | "recent" | "kind" | "who" | RunChoice, hostId: string | null): string {
   return `new_session.${what}:${hostId ?? ""}`;
 }
 
@@ -124,10 +124,25 @@ export function defaultWho(
   return active ? stored : DISPATCHER;
 }
 
+/** The run choices of the composer that the next start opens on again. */
+export type RunChoice = "model" | "effort" | "mode";
+
+/** The composer's run choices; `default` leaves it to the employee or owner. */
+export type RunChoices = Record<RunChoice, string>;
+
+/**
+ * A remembered model, effort or mode while the composer still offers it, else `default`. Before the
+ * offered list has loaded ([loaded] false) the remembered one is kept, so it is not lost to a slow start.
+ */
+export function keptChoice(stored: string | null, offered: readonly string[], loaded = true): string {
+  if (!stored) return "default";
+  return !loaded || offered.includes(stored) ? stored : "default";
+}
+
 /** What a successful start remembers, as storage writes. The dialogs' own last choice goes along. */
 export function remembered(
   hostId: string | null,
-  start: { kind: SessionKind; projectId: string; who: string },
+  start: { kind: SessionKind; projectId: string; who: string; run?: RunChoices },
   recent: string[],
 ): [string, string][] {
   const writes: [string, string][] = [
@@ -135,6 +150,9 @@ export function remembered(
     [sessionKey("recent", hostId), JSON.stringify(noteRecent(recent, start.projectId))],
     [sessionKey("kind", hostId), start.kind],
   ];
+  if (start.run) {
+    for (const what of ["model", "effort", "mode"] as const) writes.push([sessionKey(what, hostId), start.run[what]]);
+  }
   if (start.kind !== "ticket") return [...writes, [LAST_QUICK, start.who]];
   writes.push([sessionKey("who", hostId), start.who]);
   return start.who === DISPATCHER ? writes : [...writes, [LAST_GIVEN, start.who]];

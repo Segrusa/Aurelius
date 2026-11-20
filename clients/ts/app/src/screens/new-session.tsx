@@ -33,6 +33,7 @@ import {
   defaultKind,
   defaultProject,
   defaultWho,
+  keptChoice,
   offeredKind,
   parseRecent,
   placeholderOf,
@@ -199,9 +200,21 @@ export function NewSessionScreen() {
   const attach = usePromptAttachments({ files: kind !== "session" || (sessionFiles && !worktree), folders: true });
   const [pickedProject, setProject] = useState<string | null>(null);
   const [pickedWho, setWho] = useState<string | null>(null);
-  const [model, setModel] = useState("default");
-  const [effort, setEffort] = useState("default");
-  const [mode, setMode] = useState("default");
+  // Model, effort and mode open on what the last start on this server used, while still offered.
+  const [pickedModel, setModel] = useState(() => storage.get(sessionKey("model", hostId)) ?? "default");
+  const [effort, setEffort] = useState(() => keptChoice(storage.get(sessionKey("effort", hostId)), EFFORTS));
+  const [mode, setMode] = useState(() =>
+    keptChoice(
+      storage.get(sessionKey("mode", hostId)),
+      MODES.map((m) => m.key as string),
+    ),
+  );
+  const model = keptChoice(
+    pickedModel,
+    models.map((m) => m.key),
+    models.length > 1,
+  );
+  const run = { model, effort, mode };
 
   const shown = useMemo(() => shownProjects(projects.data ?? [], workspace.id), [projects.data, workspace.id]);
   const recent = parseRecent(storage.get(sessionKey("recent", hostId)));
@@ -289,7 +302,7 @@ export function NewSessionScreen() {
               { retry: false },
             );
         startedTo.current = startedSession(receipt);
-        for (const [key, value] of remembered(hostId, { kind, projectId: project.id, who: whoId }, recent)) {
+        for (const [key, value] of remembered(hostId, { kind, projectId: project.id, who: whoId, run }, recent)) {
           storage.set(key, value);
         }
         return dispatched
@@ -313,7 +326,7 @@ export function NewSessionScreen() {
       );
       const receipt = await connection.write("ticket.create", params, { retry: false });
       created.remember(receipt);
-      for (const [key, value] of remembered(hostId, { kind, projectId: project.id, who: whoId }, recent)) {
+      for (const [key, value] of remembered(hostId, { kind, projectId: project.id, who: whoId, run }, recent)) {
         storage.set(key, value);
       }
       return done;

@@ -158,6 +158,13 @@ void main() {
   });
 
   group('defaults', () {
+    test('keptChoice: a remembered choice while still offered, else default; kept while the list has not loaded', () {
+      expect(keptChoice('high', ['low', 'high']), 'high');
+      expect(keptChoice('gone', ['m-1']), 'default');
+      expect(keptChoice(null, ['m-1']), 'default');
+      expect(keptChoice('m-2', const [], loaded: false), 'm-2');
+    });
+
     test('defaultWho: the last employee while active, else the Dispatcher where there is one', () {
       expect(defaultWho(last: 'e1', active: {'e1', 'e2'}, dispatchOn: true), 'e1');
       expect(defaultWho(last: 'gone', active: {'e1'}, dispatchOn: true), dispatcherWho);
