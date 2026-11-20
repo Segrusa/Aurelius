@@ -11,5 +11,6 @@ pub mod project_chat;
 pub mod work_session;
 pub mod session_dispatch;
 pub mod session_history;
+pub mod session_title;
 pub(crate) mod scheduled;
 pub mod ticket_channel;

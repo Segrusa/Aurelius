@@ -122,7 +122,8 @@ pub struct WorkSessionView {
     pub project_name: String,
     pub employee_id: EmployeeId,
     pub employee_name: String,
-    /// Named after its first message.
+    /// Named after its first message, until a title made from its content
+    /// replaces it after the first answer.
     pub title: String,
     /// Its own worktree and branch; none when it works in the project's folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -147,9 +148,74 @@ pub struct WorkSessionsSnapshot {
     pub sessions: Vec<WorkSessionView>,
 }
 
+/// A made session title is cut at this many characters (as `conversation::derive_title`).
+pub const SESSION_TITLE_MAX_CHARS: usize = 60;
+/// How much of a session's opening the title job reads (the oldest messages win).
+pub const SESSION_TITLE_INPUT_MAX_CHARS: usize = 6_000;
+/// One message in the title job's input is cut here.
+pub const SESSION_TITLE_MESSAGE_MAX_CHARS: usize = 2_000;
+
+/// The title a model's answer gives a session, or none when it gave nothing usable.
+/// A model may wrap the title in quotes, Markdown or a "Title:" label, or add a
+/// second line; only the bare first line is kept, cut at `SESSION_TITLE_MAX_CHARS`.
+pub fn session_title(answer: &str) -> Option<String> {
+    let line = answer.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let line = line.trim_start_matches('#').trim_start();
+    let line = match line.split_once(':') {
+        Some((label, rest)) if ["title", "titel"].contains(&label.trim().trim_matches('*').to_lowercase().as_str()) => rest,
+        _ => line,
+    };
+    // Not « »: the vault redactor marks a secret with them.
+    const WRAP: &[char] = &['"', '\'', '“', '”', '‘', '’', '*', '_', '`'];
+    let unwrap = |s: &str| s.trim_matches(|c: char| c.is_whitespace() || WRAP.contains(&c)).to_owned();
+    let line = unwrap(unwrap(line).trim_end_matches('.'));
+    let line: String = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.is_empty() {
+        return None;
+    }
+    let mut title: String = line.chars().take(SESSION_TITLE_MAX_CHARS).collect();
+    if line.chars().count() > SESSION_TITLE_MAX_CHARS {
+        title = title.trim_end().to_owned();
+        title.push('…');
+    }
+    Some(title)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bare_title_is_kept_as_it_is() {
+        assert_eq!(session_title("Sessietitels laten genereren").as_deref(), Some("Sessietitels laten genereren"));
+    }
+
+    #[test]
+    fn quotes_markdown_a_label_and_a_second_line_are_taken_off() {
+        assert_eq!(session_title("\n\n\"Fix the login flow.\"\nThis title says what was done.").as_deref(), Some("Fix the login flow"));
+        assert_eq!(session_title("**Title:** “Faster CSV export”").as_deref(), Some("Faster CSV export"));
+        assert_eq!(session_title("# Titel: Sneller exporteren").as_deref(), Some("Sneller exporteren"));
+        assert_eq!(session_title("`Release   0.9.3   prep`").as_deref(), Some("Release 0.9.3 prep"));
+        assert_eq!(session_title("\"Token «secret:GH_TOKEN».\"").as_deref(), Some("Token «secret:GH_TOKEN»"), "a redacted secret keeps its marks");
+    }
+
+    #[test]
+    fn a_colon_that_is_no_label_stays() {
+        assert_eq!(session_title("Mobile: shorter tab bar").as_deref(), Some("Mobile: shorter tab bar"));
+    }
+
+    #[test]
+    fn an_empty_answer_gives_no_title() {
+        assert_eq!(session_title(""), None);
+        assert_eq!(session_title("  \n \"\" \n"), None);
+    }
+
+    #[test]
+    fn a_long_title_is_cut_with_an_ellipsis() {
+        let title = session_title(&"word ".repeat(40)).unwrap();
+        assert!(title.ends_with('…'));
+        assert_eq!(title.chars().count(), SESSION_TITLE_MAX_CHARS);
+    }
 
     #[test]
     fn a_session_branch_is_short_and_under_session() {

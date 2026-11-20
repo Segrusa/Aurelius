@@ -206,6 +206,25 @@ pub fn summary_so_far(conn: &Connection, conversation: ConversationId) -> Result
         .unwrap_or((None, None)))
 }
 
+/// Mark that the session's title is asked for (`migrations/0047`). Whether it was
+/// not asked for before: only then does the caller queue the job, so a session asks once.
+pub fn mark_title_asked(tx: &Transaction<'_>, conversation: ConversationId) -> Result<bool, StorageError> {
+    let changed = tx.execute(
+        "UPDATE work_sessions SET title_asked_at_ms = ?2 WHERE conversation_id = ?1 AND title_asked_at_ms IS NULL",
+        params![conversation.to_string(), now_ms()],
+    )?;
+    Ok(changed > 0)
+}
+
+/// Put a made title on a session that is still there (not deleted). Whether it changed.
+pub fn set_title(tx: &Transaction<'_>, conversation: ConversationId, title: &str) -> Result<bool, StorageError> {
+    let changed = tx.execute(
+        "UPDATE conversations SET title = ?2, version = version + 1 WHERE id = ?1 AND kind = 'session' AND archived_at_ms IS NULL AND title <> ?2",
+        params![conversation.to_string(), title],
+    )?;
+    Ok(changed > 0)
+}
+
 /// What `work_session.history` narrows on; every given one applies.
 #[derive(Debug, Clone, Default)]
 pub struct HistoryFilter {

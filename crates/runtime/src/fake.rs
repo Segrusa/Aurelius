@@ -31,6 +31,7 @@ pub const MODEL_ID: &str = "fake-deterministic-1";
 pub const MEMORY_MARKER: &str = "[[aurelius:memory]]";
 pub const SUMMARY_MARKER: &str = "[[aurelius:summary]]";
 pub const CONSOLIDATE_MARKER: &str = "[[aurelius:consolidate]]";
+pub const TITLE_MARKER: &str = "[[aurelius:title]]";
 
 /// Deterministic structured output for the background steps (memory extraction,
 /// consolidation, summaries), picked by a marker in the trusted system text.
@@ -89,6 +90,10 @@ fn scripted(request: &RunRequest) -> Option<String> {
             })
             .collect();
         return Some(serde_json::json!({ "points": points, "dropped": [] }).to_string());
+    }
+    if system.contains(TITLE_MARKER) {
+        let first = prompt.lines().find_map(|l| l.strip_prefix("[Board member] ")).unwrap_or("");
+        return Some(format!("Title: \"{}\"", first.trim_end_matches('.')));
     }
     if system.contains(SUMMARY_MARKER) {
         let lines: Vec<&str> = prompt.lines().filter(|l| l.starts_with('[')).collect();
