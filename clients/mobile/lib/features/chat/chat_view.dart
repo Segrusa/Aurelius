@@ -1557,7 +1557,8 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
       decoration: BoxDecoration(
         color: Tokens.cell,
         border: Border.all(color: Tokens.sep),
-        borderRadius: BorderRadius.circular(26),
+        // Fully round: concentric with the 40 pt clip and Send at a 6 pt inset.
+        borderRadius: BorderRadius.circular(999),
         boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)), BoxShadow(color: Color(0x0D000000), blurRadius: 16, offset: Offset(0, 6))],
       ),
       child: row,
@@ -1711,8 +1712,11 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
               children: [
                 if (_canAttach(context.read<ChatBloc>()) || !context.read<ChatBloc>().group)
                   floating
-                      ? Glass(
-                          radius: 20,
+                      // A flat filled circle: floating glass cast its 28 pt shadow inside the pill,
+                      // so the clip looked lower and further out than the pill's edge.
+                      ? DecoratedBox(
+                          key: const Key('composer-clip'),
+                          decoration: BoxDecoration(color: Tokens.cell2, shape: BoxShape.circle),
                           child: SizedBox.square(
                             dimension: 40,
                             child: IconButton(
@@ -1777,6 +1781,8 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                       foregroundColor: Tokens.accentInk,
                       fixedSize: Size.square(side),
                       minimumSize: Size.square(side),
+                      // In the pill the 48 pt tap margin made the pill taller than the clip and Send.
+                      tapTargetSize: floating ? MaterialTapTargetSize.shrinkWrap : null,
                     );
                     // The group chat: several may answer at once; each answer has its own Stop.
                     final runId = group ? null : running?.runId;

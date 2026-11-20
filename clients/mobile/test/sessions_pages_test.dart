@@ -2,6 +2,7 @@ import 'package:aurelius_mobile/core/net/connection.dart' show LinkState, LinkSt
 import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
 import 'package:aurelius_mobile/core/widgets/widgets.dart' show StatusDot;
+import 'package:aurelius_mobile/core/widgets/ios.dart' show Glass;
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/discussion.dart' show TicketDraft;
 import 'package:aurelius_mobile/data/protocol/protocol.dart';
@@ -481,6 +482,19 @@ void main() {
       expect(attach, 40);
       expect(send, 40);
       expect(input, 40);
+    });
+
+    testWidgets('the pill hugs the clip: the same gap left, above and below, and no glass shadow inside', (tester) async {
+      final repo = repoWith(sessions: [sessionOf('c1')], messages: snapshotOf('c1', messages: [messageOf('m1', MessageRole.user, 'Fix the login')]));
+      await pumpSessions(tester, repo, const SessionPage(conversationId: 'c1'));
+      final pill = tester.getRect(find.byKey(const Key('composer-pill')));
+      final clip = tester.getRect(find.byKey(const Key('composer-clip')));
+      expect(clip.top - pill.top, clip.left - pill.left);
+      expect(pill.bottom - clip.bottom, clip.left - pill.left);
+      final send = tester.getRect(find.byKey(const Key('composer-send')));
+      expect(pill.right - send.right, clip.left - pill.left);
+      expect(send.top - pill.top, clip.left - pill.left);
+      expect(find.descendant(of: find.byKey(const Key('composer-pill')), matching: find.byType(Glass)), findsNothing);
     });
 
     testWidgets('while an answer runs it says Working and offers Stop', (tester) async {
