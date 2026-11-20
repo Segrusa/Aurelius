@@ -56,8 +56,12 @@ for (const theme of ["dark", "light"] as const) {
         })),
         limits: [{ label: "Weekly limit", percent: 58, resets: "Resets Mon 09:00" }],
       });
-      await page.goto(`${site.origin}/inbox`);
-      await page.getByRole("heading", { name: "Flux wants to run a command" }).waitFor();
+      await page.goto(`${site.origin}/new`);
+      await page
+        .getByRole("button", { name: /^Inbox/ })
+        .first()
+        .click();
+      await page.getByRole("dialog", { name: "Inbox" }).getByText("Flux wants to run a command").first().waitFor();
       await page.evaluate(() => document.fonts.ready);
       const dir = join(REPO, "clients/e2e/test-results/shots");
       mkdirSync(dir, { recursive: true });
@@ -69,7 +73,7 @@ for (const theme of ["dark", "light"] as const) {
 }
 
 const ROUTES = [
-  "inbox",
+  "new",
   "board",
   "tasks",
   "scheduled",

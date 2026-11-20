@@ -39,6 +39,7 @@ import { ActivityBar } from "./activity-bar";
 import { ChatDock } from "./chat-dock";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
 import { pinKey, usePins } from "./employees";
+import { openInboxBell } from "./inbox-bell";
 import { newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
 import { useOpenNewSession } from "./new-session";
 import { overlays } from "./overlays-store";
@@ -470,7 +471,7 @@ function Usage() {
 const SIDEBAR_KEY = "sidebar";
 
 const GO_TO: Record<string, string> = {
-  GoDashboard: "/inbox",
+  GoDashboard: "/new",
   GoBoard: "/board",
   GoTasks: "/tasks",
   GoTeamChat: "/chat",
@@ -484,7 +485,6 @@ const GO_TO: Record<string, string> = {
   OpenBackups: "/settings/backups",
   OpenRemoteAccess: "/settings/remote",
   GoProjects: "/projects",
-  OpenNotifications: "/inbox",
   OpenServers: "/settings/servers",
 };
 
@@ -580,6 +580,8 @@ function useGlobalActions(): void {
   const connection = useConnection();
   const navigate = useNavigate();
   const openNewSession = useOpenNewSession();
+  // The Inbox is the bell in the head: the key opens its dropdown.
+  useAction("OpenNotifications", openInboxBell);
   useAction("Quit", () => platform.quit?.(), platform.quit !== null);
   useAction("OpenUpdates", () => {
     connection

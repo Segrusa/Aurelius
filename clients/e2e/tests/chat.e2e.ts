@@ -349,7 +349,7 @@ test.describe("scripted", () => {
     }
   });
 
-  test("a question and a plan get their own answer, also in the Inbox", async ({ page }) => {
+  test("a question and a plan get their own answer, and the bell leads back to them", async ({ page }) => {
     const question = approval("q1", {
       tool: "claude.AskUserQuestion",
       conversation_id: "g",
@@ -397,9 +397,10 @@ test.describe("scripted", () => {
         .getByRole("button", { name: /^Inbox/ })
         .first()
         .click();
-      await page.getByRole("button", { name: "Open Inbox" }).click();
-      await page.getByRole("button", { name: /Flux/ }).first().click();
-      await expect(page.getByRole("radio", { name: /Green/ })).toBeVisible();
+      // The bell lists the question; its row leads to the conversation it was asked in.
+      await page.getByRole("dialog", { name: "Inbox" }).getByRole("button", { name: /Flux/ }).first().click();
+      await expect(page.getByRole("dialog", { name: "Inbox" })).toHaveCount(0);
+      await expect(page).toHaveURL(/\/chat/);
       await expect(page.getByRole("button", { name: /^Allow once/ })).toHaveCount(0);
     } finally {
       await stop();
@@ -501,7 +502,7 @@ test("the Team chat over a real daemon: send, and a diagram under the strict pag
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     await page.keyboard.press("Control+8");
     const box = page.getByRole("textbox", { name: /^Message/ });
     await box.fill("```mermaid\ngraph TD\n  A[Start] --> B[Finish]\n```");

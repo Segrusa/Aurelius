@@ -84,7 +84,7 @@ test("the popout lists the chats, opens one, sends and keeps out of the way", as
       },
       reads: { "employee.chats": chats },
     });
-    await page.goto(`${site.origin}/inbox`);
+    await page.goto(`${site.origin}/new`);
     const launcher = page.getByRole("button", { name: "Open chat, 2 unread" });
     await expect(launcher).toBeVisible();
     await shot(page, "launcher");
@@ -160,7 +160,7 @@ test("a ticket reads as a chat: in its session and in the popout's compact sessi
       .poll(() => writes.find((w) => w.method === "group_chat.send")?.params)
       .toMatchObject({ channel: "d1", text: "The first one" });
 
-    await page.goto(`${site.origin}/inbox`);
+    await page.goto(`${site.origin}/new`);
     await page.getByRole("button", { name: /Open chat/ }).click();
     const popout = page.getByRole("region", { name: "Chat popout" });
     await expect(popout.getByText("Tickets", { exact: true })).toBeVisible();
@@ -178,7 +178,7 @@ test("a ticket reads as a chat: in its session and in the popout's compact sessi
   }
 });
 
-test("a question on a ticket is one row in the Inbox, readable and answerable there", async ({ page }) => {
+test("a question on a ticket is one row in the Inbox bell, and leads to the ticket", async ({ page }) => {
   const site = await serveStatic(WEB_DIST);
   try {
     const open = ticket("t1", 35, "doing", { title: "Trim the texts", conversation_id: "d1" });
@@ -191,7 +191,7 @@ test("a question on a ticket is one row in the Inbox, readable and answerable th
       employee_name: "Pixel",
       conversation_id: "tc",
     });
-    const { writes } = await scriptServer(page, {
+    await scriptServer(page, {
       employees: [pixel],
       tickets: [open],
       tasks: [waiting],
@@ -210,16 +210,18 @@ test("a question on a ticket is one row in the Inbox, readable and answerable th
         ]),
       },
     });
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page.getByText("Pixel mentioned you")).toHaveCount(0);
-    await page.getByText("Trim the texts").first().click();
-    await expect(page.getByText("Which group may I remove first?")).toBeVisible();
+    await page.goto(`${site.origin}/new`);
+    await page
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    const inbox = page.getByRole("dialog", { name: "Inbox" });
+    // One question, one row: the mention of the same ask is left out.
+    await expect(inbox.getByRole("button", { name: /Trim the texts/ })).toHaveCount(1);
+    await expect(inbox.getByText("Pixel mentioned you")).toHaveCount(0);
     await shot(page, "inbox-question");
-    await page.getByRole("textbox", { name: "Your answer to Pixel" }).fill("The first one");
-    await page.getByRole("button", { name: "Send answer" }).click();
-    await expect
-      .poll(() => writes.find((w) => w.method === "ticket.post")?.params)
-      .toMatchObject({ ticket_id: "t1", text: "The first one" });
+    await inbox.getByRole("button", { name: /Trim the texts/ }).click();
+    await expect(page).toHaveURL(/\/ticket\/35$/);
   } finally {
     await site.close();
   }

@@ -47,7 +47,7 @@ test("the board and a ticket's session against a real daemon", async () => {
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     let token: string | null = null;
     const endpoint = daemonEndpoint(daemon.data);
@@ -505,7 +505,7 @@ test.describe("states a test daemon cannot produce", () => {
       .toMatchObject({ approval_id: "q9", answers: { "Which colour?": "Green" } });
   });
 
-  test("a question in the Inbox: the number keys, then Enter", async ({ page }) => {
+  test("a question in the bell leads to its run, where it is answered", async ({ page }) => {
     const question = approval("q1", {
       tool: "claude.AskUserQuestion",
       task_id: "k3",
@@ -525,16 +525,19 @@ test.describe("states a test daemon cannot produce", () => {
       },
     });
     const { writes } = await scriptServer(page, { ...script, approvals: [question] });
-    await page.goto(`${site.origin}/inbox`);
+    await page.goto(`${site.origin}/new`);
     await page
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    await page
+      .getByRole("dialog", { name: "Inbox" })
       .getByRole("button", { name: /Which database|Flux/ })
       .first()
       .click();
-    await expect(page.getByRole("radio", { name: "SQLite" })).toBeVisible();
-    await page.locator("body").click({ position: { x: 1, y: 1 } });
-    await page.keyboard.press("2");
-    await expect(page.getByRole("radio", { name: "SQLite" })).toBeChecked();
-    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/tasks\/k3$/);
+    await page.getByRole("radio", { name: "SQLite" }).check();
+    await page.getByRole("button", { name: "Send answer" }).first().click();
     await expect
       .poll(() => writes.find((w) => w.method === "approval.answer")?.params)
       .toMatchObject({ approval_id: "q1" });
@@ -842,17 +845,23 @@ test.describe("states a test daemon cannot produce", () => {
       .toEqual({ conversation_id: "s2", employee_id: "e1" });
   });
 
-  test("the Inbox says what each row is, and acts on it", async ({ page }) => {
+  test("the Inbox bell says what each row is, and leads to where it is acted on", async ({ page }) => {
     const { writes } = await scriptServer(page, script);
     await page.goto(site.origin);
-    await page.getByRole("button", { name: /Lena/ }).click();
+    const bell = () => page.getByRole("button", { name: /^Inbox/ }).first();
+    const inbox = page.getByRole("dialog", { name: "Inbox" });
+    // A proposed hire is approved on the org chart.
+    await bell().click();
+    await inbox.getByRole("button", { name: /Lena/ }).click();
+    await expect(page).toHaveURL(/\/employees\/org$/);
     await expect(page.getByText("Test everything.")).toBeVisible();
     await page.getByRole("button", { name: "Approve" }).click();
     await expect
       .poll(() => writes.find((w) => w.method === "proposal.decide")?.params)
       .toMatchObject({ proposal_id: "pr1", approve: true });
-    await page.getByRole("button", { name: /Update 1 on this ticket/ }).click();
-    await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+    // An update is dismissed in the bell itself.
+    await bell().click();
+    await inbox.getByRole("button", { name: "Dismiss Update 1 on this ticket" }).click();
     await expect
       .poll(() => writes.find((w) => w.method === "notification.dismiss")?.params)
       .toMatchObject({ id: "n1" });
@@ -868,7 +877,7 @@ test.describe("states a test daemon cannot produce", () => {
     );
     await scriptServer(page, { ...script, board: boardOf(many), tickets: many, details: {}, conversations: {} });
     await page.goto(site.origin);
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     const started = Date.now();
     await nav(page, "Board");
     await expect(page.getByRole("button", { name: /Busy ticket 0$/ })).toBeVisible();

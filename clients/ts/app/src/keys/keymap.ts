@@ -39,7 +39,7 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["secondary-1"],
     context: "Aurelius",
     navKeys: [],
-    label: "Go to Dashboard",
+    label: "Go to New session",
     section: "General",
     inPalette: true,
     action: "GoDashboard",

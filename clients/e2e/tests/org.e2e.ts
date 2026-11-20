@@ -38,7 +38,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     // A project, opened on creation.
     await openCompanyPage(page, "Knowledge");
@@ -570,7 +570,7 @@ test.describe("scripted organisation", () => {
           }),
         },
       },
-      "/inbox",
+      "/new",
     );
     const nav = page.getByRole("navigation");
     await expect(nav.getByRole("link", { name: "Mira" })).toBeVisible();

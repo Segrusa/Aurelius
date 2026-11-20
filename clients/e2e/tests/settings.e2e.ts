@@ -46,7 +46,7 @@ test("every section works against a real daemon, and what is changed stays chang
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     await page.getByRole("link", { name: "Settings" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "Account" })).toBeVisible();

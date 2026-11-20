@@ -31,7 +31,6 @@ import { GuidelineEditor, GuidelinesScreen } from "./screens/guidelines";
 import { HistoryScreen } from "./screens/history";
 import { historyFilters } from "./screens/history-logic";
 import { IdeasBody } from "./screens/ideas";
-import { InboxScreen } from "./screens/inbox";
 import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
 import { NewSessionScreen } from "./screens/new-session";
@@ -64,20 +63,17 @@ const root = createRootRoute({
 const index = createRoute({
   getParentRoute: () => root,
   path: "/",
+  // The app starts on New session; the Inbox is the bell in every screen's head.
   beforeLoad: () => {
-    throw redirect({ to: "/inbox" });
+    throw redirect({ to: "/new" });
   },
 });
+// The Inbox page is gone: an old link to it starts on New session too.
 const inbox = createRoute({
   getParentRoute: () => root,
   path: "/inbox",
-  // `row`: the row the bell's dropdown opened.
-  validateSearch: (search: Record<string, unknown>): { row?: string } => ({
-    ...(typeof search.row === "string" ? { row: search.row } : {}),
-  }),
-  component: function InboxRoute() {
-    const { row } = inbox.useSearch();
-    return <InboxScreen row={row ?? null} />;
+  beforeLoad: () => {
+    throw redirect({ to: "/new" });
   },
 });
 const newSession = createRoute({ getParentRoute: () => root, path: "/new", component: NewSessionScreen });
