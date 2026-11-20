@@ -89,7 +89,8 @@ fn a_schema_26_store_migrates_without_losing_a_row() {
 fn a_thread_read_marker_is_one_per_board_member_and_root_and_points_at_real_rows() {
     let dir = tempfile::tempdir().unwrap();
     schema_26_database(dir.path());
-    drop(Store::open(dir.path()).unwrap());
+    // Up to 44: migration 45 deletes the Team chat, where the root message lives.
+    drop(Store::open_until(dir.path(), 44).unwrap());
     let conn = db(dir.path());
     conn.execute("INSERT INTO thread_reads(user_id, root_message_id, read_through, read_at_ms) VALUES (?1, 'm1', 2, 20)", [ALEX]).unwrap();
     assert!(conn.execute("INSERT INTO thread_reads(user_id, root_message_id, read_through, read_at_ms) VALUES (?1, 'm1', 3, 21)", [ALEX]).is_err(), "once per root");

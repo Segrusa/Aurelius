@@ -1,5 +1,6 @@
 //! Migration 19: the channels of the Team chat, the tickets' discussions and
-//! the board member who wrote a message.
+//! the board member who wrote a message. The Team chat is gone since migration 45:
+//! what is about its channels opens the store at 44, the last schema that has them.
 
 use crate::conversations::{self, NewMessage};
 use crate::events::{NewEvent, append};
@@ -21,6 +22,9 @@ const T3: &str = "00000000-0000-7000-8000-000000000006";
 const EVENT: &str = "00000000-0000-7000-8000-000000000007";
 const NOTE: &str = "00000000-0000-7000-8000-000000000008";
 const PLANS: &str = "00000000-0000-7000-8000-000000000009";
+
+/// The last schema that has the Team chat's channels (45 removes them).
+const LAST_WITH_CHANNELS: i64 = 44;
 
 fn db(dir: &std::path::Path) -> Connection {
     let conn = Connection::open(dir.join("data/aurelius.sqlite")).unwrap();
@@ -107,9 +111,9 @@ fn a_board_database_migrates_without_losing_anything() {
     };
     let conversations_before = strings(&db(dir.path()), "SELECT id || ' ' || kind || ' ' || COALESCE(project_id, '-') || ' ' || title FROM conversations ORDER BY id");
 
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::open_until(dir.path(), LAST_WITH_CHANNELS).unwrap();
     let conn = db(dir.path());
-    assert_eq!(count(&conn, "SELECT MAX(version) FROM schema_migrations"), crate::migrate::supported_version());
+    assert_eq!(count(&conn, "SELECT MAX(version) FROM schema_migrations"), LAST_WITH_CHANNELS);
     assert!(strings(&conn, "SELECT \"table\" FROM pragma_foreign_key_check").is_empty());
 
     // Every row is still there, unchanged.
@@ -126,18 +130,14 @@ fn a_board_database_migrates_without_losing_anything() {
     assert_eq!(count(&conn, &format!("SELECT COUNT(*) FROM messages WHERE id = '{NOTE}' AND conversation_id = '{group}' AND author_user_id IS NULL")), 1);
 
     // The group chat is the general channel.
-    let group = ConversationId::parse(&group).unwrap();
-    assert_eq!(store.read(|c| discussions::channel(c, None)).unwrap(), Some(group));
-    assert_eq!(store.read(conversations::group_conversation).unwrap(), Some(group));
+    assert_eq!(strings(&conn, "SELECT id FROM conversations WHERE kind = 'group' AND project_id IS NULL"), [group.clone()]);
 
-    // Every project has its channel, named after it; the archived one is read-only.
-    let channels = store.read(discussions::channels).unwrap();
-    let listed: Vec<(Option<String>, &str, bool)> = channels.iter().map(|c| (c.project_id.map(|p| p.to_string()), c.name.as_str(), c.read_only)).collect();
-    assert_eq!(listed, vec![(None, "Team chat", false), (Some(ALPHA.into()), "Alpha", false), (Some(BETA.into()), "Beta", true)]);
-    assert_eq!(channels[0].conversation_id, group);
-    for channel in &channels[1..] {
-        assert_eq!(store.read(|c| discussions::channel(c, channel.project_id)).unwrap(), Some(channel.conversation_id));
-        assert_eq!(store.read(|c| discussions::kind_of(c, channel.conversation_id)).unwrap(), Some(ConversationKind::Group));
+    // Every project has its channel, named after it.
+    let channels = strings(&conn, "SELECT COALESCE(project_id, '-') || ' ' || title FROM conversations WHERE kind = 'group' ORDER BY project_id IS NOT NULL, title");
+    assert_eq!(channels, vec!["- Team chat".to_owned(), format!("{ALPHA} Alpha"), format!("{BETA} Beta")]);
+    for id in strings(&conn, "SELECT id FROM conversations WHERE kind = 'group'") {
+        let id = ConversationId::parse(&id).unwrap();
+        assert_eq!(store.read(|c| discussions::kind_of(c, id)).unwrap(), Some(ConversationKind::Group));
     }
 
     // Every ticket has exactly one discussion, in its project.
@@ -158,7 +158,7 @@ fn a_board_database_migrates_without_losing_anything() {
 fn the_indexes_keep_one_general_channel_one_per_project_and_one_discussion_per_ticket() {
     let dir = tempfile::tempdir().unwrap();
     board_database(dir.path());
-    drop(Store::open(dir.path()).unwrap());
+    drop(Store::open_until(dir.path(), LAST_WITH_CHANNELS).unwrap());
     let conn = db(dir.path());
     let indexes = strings(&conn, "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name");
     for name in ["one_general_channel", "one_project_channel", "messages_waking", "conversations_project", "conversations_employee", "tickets_column", "tickets_project", "tickets_root_task"] {
@@ -270,30 +270,16 @@ fn a_new_ticket_gets_exactly_one_discussion() {
 }
 
 #[test]
-fn a_new_project_gets_its_channel_in_the_same_transaction() {
+fn a_new_project_gets_no_channel_and_a_renamed_one_keeps_no_channel_either() {
     let f = fixture();
-    let channel = f.store.read(|c| discussions::channel(c, Some(f.project))).unwrap().expect("a channel");
-    assert_eq!(f.store.read(|c| discussions::kind_of(c, channel)).unwrap(), Some(ConversationKind::Group));
-    assert!(f.store.read(|c| discussions::channel(c, None)).unwrap().is_some(), "the general channel is there too");
-    assert_ne!(f.store.read(|c| discussions::channel(c, None)).unwrap(), Some(channel));
-    assert!(!f.store.write(move |tx| conversations::conversation_exists(tx, channel)).unwrap());
+    let groups = |f: &Fixture| f.store.read(|c| Ok(count(c, "SELECT COUNT(*) FROM conversations WHERE kind = 'group'"))).unwrap();
+    assert_eq!(groups(&f), 0, "no general channel and none for the project");
 
-    // A project that fails to be made leaves no channel behind.
-    let failed = ProjectId::new();
-    let refused = f.store.write(move |tx| {
-        events::insert_project_projection(tx, failed, "Hermes", None)?;
-        Err::<(), _>(crate::StorageError::Rejected("stop".into()))
-    });
-    assert!(refused.is_err());
-    assert_eq!(f.store.read(|c| discussions::channel(c, Some(failed))).unwrap(), None);
-
-    // The channel follows the project's name; the list is general first, then by name.
     let project = f.project;
     f.store.write(move |tx| events::rename_project_projection(tx, project, "Zeta", 2)).unwrap();
     let other = ProjectId::new();
     f.store.write(move |tx| events::insert_project_projection(tx, other, "Beta", None)).unwrap();
-    let names: Vec<String> = f.store.read(discussions::channels).unwrap().into_iter().map(|c| c.name).collect();
-    assert_eq!(names, ["Team chat", "Beta", "Zeta"]);
+    assert_eq!(groups(&f), 0);
 }
 
 #[test]
@@ -304,15 +290,17 @@ fn a_project_on_an_older_schema_gets_its_channel_from_the_migration() {
     store.write(move |tx| events::insert_project_projection(tx, project, "Atlas", None)).unwrap();
     assert!(!store.read(discussions::has_discussions).unwrap());
     drop(store);
-    let store = Store::open(dir.path()).unwrap();
+    let store = Store::open_until(dir.path(), LAST_WITH_CHANNELS).unwrap();
     assert!(store.read(discussions::has_discussions).unwrap());
-    assert!(store.read(|c| discussions::channel(c, Some(project))).unwrap().is_some());
+    let channels: i64 = store.read(move |c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'group' AND project_id = ?1", [project.to_string()], |r| r.get(0))?)).unwrap();
+    assert_eq!(channels, 1);
 }
 
 #[test]
-fn waking_posts_count_over_every_channel_and_ticket_together() {
+fn waking_posts_count_over_every_ticket_together() {
     let f = fixture();
     let ticket = add_ticket(&f, "Fix the login");
+    let (second, third) = (add_ticket(&f, "Write the docs"), add_ticket(&f, "Ship it"));
     let (run, other_run, employee, someone) = (RunId::new(), RunId::new(), EmployeeId::new(), EmployeeId::new());
     let project = f.project;
     let text = f.store.blobs().put(b"I asked Ada", "text/plain").unwrap();
@@ -320,8 +308,8 @@ fn waking_posts_count_over_every_channel_and_ticket_together() {
         .write(move |tx| {
             crate::blobs::register(tx, &text)?;
             let key = text.id.to_string();
-            let general = discussions::channel(tx, None)?.unwrap();
-            let channel = discussions::channel(tx, Some(project))?.unwrap();
+            let general = discussions::ticket_conversation(tx, second)?.unwrap();
+            let channel = discussions::ticket_conversation(tx, third)?.unwrap();
             let discussion = discussions::ticket_conversation(tx, ticket)?.unwrap();
             let plans = ConversationId::new();
             conversations::insert_project_conversation(tx, plans, project, "Plans")?;

@@ -20,7 +20,8 @@ fn a_schema_29_store_upgrades_and_none_of_its_conversations_is_a_quick_answer() 
     let before: i64 = conn.query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0)).unwrap();
     assert!(conn.prepare("SELECT quick_answer FROM conversations").is_err(), "the column is new in 30");
     drop(conn);
-    let store = Store::open(dir.path()).unwrap();
+    // Up to 44: migration 45 deletes the Team chat.
+    let store = Store::open_until(dir.path(), 44).unwrap();
     let (after, quick): (i64, i64) = store.read(|c| Ok((c.query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))?, c.query_row("SELECT COUNT(*) FROM conversations WHERE quick_answer = 1", [], |r| r.get(0))?))).unwrap();
     assert_eq!((after, quick), (before, 0));
     assert!(migrate::supported_version() >= 30);

@@ -260,6 +260,8 @@ mod schema43_tests;
 #[cfg(test)]
 mod schema44_tests;
 #[cfg(test)]
+mod schema45_tests;
+#[cfg(test)]
 mod schema38_tests;
 #[cfg(test)]
 mod schema39_tests;
