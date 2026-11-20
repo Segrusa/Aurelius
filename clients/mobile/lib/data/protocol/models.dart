@@ -1408,6 +1408,7 @@ final class CodeBranch {
     this.isMain = false,
     this.merged = false,
     required this.name,
+    this.open = false,
     this.owner,
     required this.subject,
     this.ticket,
@@ -1434,9 +1435,13 @@ final class CodeBranch {
   final int insertions;
   /// The repository's main branch.
   final bool isMain;
-  /// Every commit of it is in main (it can be deleted without losing work).
+  /// Every commit of it is in main (git's view: a fresh branch at main counts too; see `open`).
   final bool merged;
   final String name;
+  /// Its ticket is not on Done (nor archived) or its work session is not deleted: work on
+  /// it may still come, also when nothing is ahead of main yet. The Code tab never offers to
+  /// remove or delete such a branch, and Clean up merged leaves it alone.
+  final bool open;
   /// Who works on it: the ticket's owner, else the employee of the work session.
   final CodeOwner? owner;
   /// Its newest commit: subject, author name and time.
@@ -1466,6 +1471,7 @@ final class CodeBranch {
     isMain: (json['is_main'] == null ? false : (json['is_main'] as bool)),
     merged: (json['merged'] == null ? false : (json['merged'] as bool)),
     name: (json['name'] as String),
+    open: (json['open'] == null ? false : (json['open'] as bool)),
     owner: (json['owner'] == null ? null : CodeOwner.fromJson(json['owner'] as Map<String, dynamic>)),
     subject: (json['subject'] as String),
     ticket: (json['ticket'] == null ? null : CodeTicket.fromJson(json['ticket'] as Map<String, dynamic>)),
@@ -1489,6 +1495,7 @@ final class CodeBranch {
     'is_main': isMain,
     'merged': merged,
     'name': name,
+    'open': open,
     if (owner != null) 'owner': owner?.toJson(),
     'subject': subject,
     if (ticket != null) 'ticket': ticket?.toJson(),

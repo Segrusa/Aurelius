@@ -761,10 +761,16 @@ export interface CodeBranch {
    */
   is_main?: boolean;
   /**
-   * Every commit of it is in main (it can be deleted without losing work).
+   * Every commit of it is in main (git's view: a fresh branch at main counts too; see `open`).
    */
   merged?: boolean;
   name: string;
+  /**
+   * Its ticket is not on Done (nor archived) or its work session is not deleted: work on
+   * it may still come, also when nothing is ahead of main yet. The Code tab never offers to
+   * remove or delete such a branch, and Clean up merged leaves it alone.
+   */
+  open?: boolean;
   /**
    * Who works on it: the ticket's owner, else the employee of the work session.
    */
