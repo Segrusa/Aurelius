@@ -49,6 +49,9 @@ const styles = stylex.create({
     fontSize: 12,
     color: "var(--precision-text3)",
   },
+  // Below the head: the conversation, and a session's properties panel beside it.
+  body: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0 },
+  main: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column" },
   feedBox: { minHeight: 0, flexGrow: 1, flexBasis: 0 },
   feed: { height: "100%", scrollbarGutter: "stable both-edges" },
   feedColumn: { marginInline: "auto", width: "100%", maxWidth: 820, paddingInline: 24 },
@@ -122,6 +125,10 @@ export interface ChatFrame {
   footer?: (snapshot: MessagesSnapshot) => ReactNode;
   /** What stands where the composer is, while nothing can be written (a session nobody took yet). */
   instead?: ReactNode;
+  /** Buttons at the right of the head (a session's properties). */
+  actions?: ReactNode;
+  /** Beside the conversation, below the head: a session's properties panel. */
+  aside?: ReactNode;
 }
 
 /**
@@ -241,114 +248,120 @@ export function EmployeeChat({
               ? `${name} answering`
               : (frame?.subtitle ?? (employee ? (employee.title ?? employee.role) : ""))}
           </span>
+          {frame?.actions}
         </header>
       )}
-      <ThreadWaiting conversationId={conversationId} />
-      <ChatProvider value={ctx}>
-        <FeedIdsProvider value={{ conversationId }}>
-          <div {...stylex.props(styles.feedBox)}>
-            {feed.error ? (
-              <div {...stylex.props(styles.problem)}>
-                <Banner
-                  status="error"
-                  role="alert"
-                  title="This chat did not load."
-                  description={feed.error.message}
-                  endContent={<Button label="Try again" onClick={() => void feed.refetch()} />}
-                />
-              </div>
-            ) : feed.isPending ? (
-              loading ? (
-                <div {...stylex.props(styles.loading)}>
-                  <Skeleton height={48} />
-                  <Skeleton height={48} />
-                </div>
-              ) : null
-            ) : rows.length === 0 ? (
-              <EmptyState
-                title={frame?.empty.title ?? `Talk with ${name} here.`}
-                description={
-                  frame?.empty.description ??
-                  `Only you and ${name} read this. Once the work is concrete, ${name} makes a ticket and tells you here when it reaches Review.`
-                }
-              />
-            ) : (
-              <Virtuoso
-                ref={handle}
-                key={conversationId}
-                data={rows}
-                {...stylex.props(styles.feed)}
-                increaseViewportBy={600}
-                initialTopMostItemIndex={{ index: "LAST", align: "end" }}
-                atBottomThreshold={120}
-                followOutput={(bottom) => (bottom ? "auto" : false)}
-                computeItemKey={(_, row) => (row.kind === "message" ? row.m.id : row.id)}
-                components={FEED_PARTS}
-                itemContent={(_, row) => (
-                  <div {...stylex.props(styles.feedColumn, compact && styles.feedCompact)}>
-                    {row.kind === "message" ? (
-                      <>
-                        {row.day ? <DayLine ms={row.m.created_at_ms} /> : null}
-                        <div {...(row.grouped ? null : stylex.props(styles.topGap))}>
-                          <MessageRow m={row.m} grouped={row.grouped} />
-                        </div>
-                      </>
-                    ) : row.kind === "live" ? (
-                      <LiveRow id={row.id} name={name} kind="employee" />
-                    ) : approvalMap.get(row.id) ? (
-                      <div {...stylex.props(styles.approvalGap)}>
-                        <ApprovalCard
-                          approval={approvalMap.get(row.id) as NonNullable<ReturnType<typeof approvalMap.get>>}
-                        />
-                      </div>
-                    ) : null}
+      <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.main)}>
+          <ThreadWaiting conversationId={conversationId} />
+          <ChatProvider value={ctx}>
+            <FeedIdsProvider value={{ conversationId }}>
+              <div {...stylex.props(styles.feedBox)}>
+                {feed.error ? (
+                  <div {...stylex.props(styles.problem)}>
+                    <Banner
+                      status="error"
+                      role="alert"
+                      title="This chat did not load."
+                      description={feed.error.message}
+                      endContent={<Button label="Try again" onClick={() => void feed.refetch()} />}
+                    />
                   </div>
+                ) : feed.isPending ? (
+                  loading ? (
+                    <div {...stylex.props(styles.loading)}>
+                      <Skeleton height={48} />
+                      <Skeleton height={48} />
+                    </div>
+                  ) : null
+                ) : rows.length === 0 ? (
+                  <EmptyState
+                    title={frame?.empty.title ?? `Talk with ${name} here.`}
+                    description={
+                      frame?.empty.description ??
+                      `Only you and ${name} read this. Once the work is concrete, ${name} makes a ticket and tells you here when it reaches Review.`
+                    }
+                  />
+                ) : (
+                  <Virtuoso
+                    ref={handle}
+                    key={conversationId}
+                    data={rows}
+                    {...stylex.props(styles.feed)}
+                    increaseViewportBy={600}
+                    initialTopMostItemIndex={{ index: "LAST", align: "end" }}
+                    atBottomThreshold={120}
+                    followOutput={(bottom) => (bottom ? "auto" : false)}
+                    computeItemKey={(_, row) => (row.kind === "message" ? row.m.id : row.id)}
+                    components={FEED_PARTS}
+                    itemContent={(_, row) => (
+                      <div {...stylex.props(styles.feedColumn, compact && styles.feedCompact)}>
+                        {row.kind === "message" ? (
+                          <>
+                            {row.day ? <DayLine ms={row.m.created_at_ms} /> : null}
+                            <div {...(row.grouped ? null : stylex.props(styles.topGap))}>
+                              <MessageRow m={row.m} grouped={row.grouped} />
+                            </div>
+                          </>
+                        ) : row.kind === "live" ? (
+                          <LiveRow id={row.id} name={name} kind="employee" />
+                        ) : approvalMap.get(row.id) ? (
+                          <div {...stylex.props(styles.approvalGap)}>
+                            <ApprovalCard
+                              approval={approvalMap.get(row.id) as NonNullable<ReturnType<typeof approvalMap.get>>}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  />
                 )}
+              </div>
+            </FeedIdsProvider>
+            {closed ? (
+              <p {...stylex.props(styles.closed)}>
+                {closed === "paused"
+                  ? `${name} is paused: resume them to go on with this ${frame ? "session" : "chat"}.`
+                  : `${name} is archived: this ${frame ? "session" : "chat"} can only be read.`}
+              </p>
+            ) : frame?.instead ? (
+              frame.instead
+            ) : (
+              <Composer
+                key={conversationId}
+                draftKey={`chat:${conversationId}`}
+                channel={null}
+                threadParent={null}
+                waiting={!running && list.at(-1)?.role === "user"}
+                placeholder={`Message ${name}`}
+                hint={null}
+                activeRun={running}
+                people={NOBODY}
+                archived={NOBODY}
+                quick={quick}
+                footer={frame?.footer && feed.data ? frame.footer(feed.data) : null}
+                // New session's box; files go along where the server takes them.
+                prompt={{ files: features.includes(CHAT_FILES_FEATURE) }}
+                send={(message) =>
+                  connection.write(
+                    "chat.send",
+                    {
+                      conversation_id: conversationId,
+                      text: message.text,
+                      images: message.images,
+                      ...(message.files.length > 0 ? { files: message.files } : {}),
+                      confirm_secret: message.confirmSecret,
+                    },
+                    { retry: false },
+                  )
+                }
+                onSent={() => handle.current?.scrollToIndex({ index: "LAST", align: "end" })}
               />
             )}
-          </div>
-        </FeedIdsProvider>
-        {closed ? (
-          <p {...stylex.props(styles.closed)}>
-            {closed === "paused"
-              ? `${name} is paused: resume them to go on with this ${frame ? "session" : "chat"}.`
-              : `${name} is archived: this ${frame ? "session" : "chat"} can only be read.`}
-          </p>
-        ) : frame?.instead ? (
-          frame.instead
-        ) : (
-          <Composer
-            key={conversationId}
-            draftKey={`chat:${conversationId}`}
-            channel={null}
-            threadParent={null}
-            waiting={!running && list.at(-1)?.role === "user"}
-            placeholder={`Message ${name}`}
-            hint={null}
-            activeRun={running}
-            people={NOBODY}
-            archived={NOBODY}
-            quick={quick}
-            footer={frame?.footer && feed.data ? frame.footer(feed.data) : null}
-            // New session's box; files go along where the server takes them.
-            prompt={{ files: features.includes(CHAT_FILES_FEATURE) }}
-            send={(message) =>
-              connection.write(
-                "chat.send",
-                {
-                  conversation_id: conversationId,
-                  text: message.text,
-                  images: message.images,
-                  ...(message.files.length > 0 ? { files: message.files } : {}),
-                  confirm_secret: message.confirmSecret,
-                },
-                { retry: false },
-              )
-            }
-            onSent={() => handle.current?.scrollToIndex({ index: "LAST", align: "end" })}
-          />
-        )}
-      </ChatProvider>
+          </ChatProvider>
+        </div>
+        {frame?.aside}
+      </div>
     </section>
   );
 }

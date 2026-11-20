@@ -473,12 +473,14 @@ test.describe("states a test daemon cannot produce", () => {
     });
     await page.goto(site.origin);
     await nav(page, "Board");
-    // The card opens the ticket's session: what its runs used is in its head.
+    // The card opens the ticket's session: what its runs used is in its properties, not in its head.
     await page.getByRole("button", { name: /#\d+ Still at work/ }).click();
     const head = page.locator("header[data-titlebar]").filter({ hasText: "Still at work" });
-    await expect(head.getByText("Tokens in")).toBeVisible();
-    await expect(head.getByText("9k", { exact: true })).toBeVisible();
-    await expect(head.getByText("$0.12", { exact: true })).toBeVisible();
+    await expect(head).toBeVisible();
+    await expect(head.getByText("Tokens in")).toHaveCount(0);
+    const properties = page.getByRole("complementary", { name: "Ticket properties" });
+    await properties.getByRole("button", { name: "Usage" }).hover();
+    await expect(page.getByRole("tooltip")).toContainText("$0.12 API-equivalent");
 
     await page.goto(`${site.origin}/chat?channel=d3`);
     const chat = page.getByRole("main");
@@ -559,9 +561,11 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(page.getByText("2 steps")).toBeVisible();
     await expect(page.getByText("1 failed")).toBeVisible();
     const properties = page.getByRole("complementary", { name: "Run properties" });
+    await properties.getByRole("button", { name: /Files written/ }).click();
     await expect(properties.getByText("src/api.rs")).toBeVisible();
-    await expect(properties.getByText(/6\.4k out/)).toBeVisible();
-    await expect(properties.getByText(/\$0\.43/)).toBeVisible();
+    await properties.getByRole("button", { name: "Usage" }).hover();
+    await expect(page.getByRole("tooltip")).toContainText("6.4k out");
+    await expect(page.getByRole("tooltip")).toContainText("$0.43");
 
     await page.getByRole("button", { name: /Allow once/ }).click();
     await expect
@@ -638,12 +642,26 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(properties.getByText("session/ab12")).toBeVisible();
     await expect(properties.getByText("Opus")).toBeVisible();
     await expect(properties.getByText("high", { exact: true })).toBeVisible();
-    await expect(properties.getByText("src/login.tsx")).toBeVisible();
-    await expect(properties.getByText("Rust style")).toBeVisible();
-    await expect(properties.getByText("v3")).toBeVisible();
-    await expect(properties.getByText(/2\.1k out/)).toBeVisible();
+    // The files and guidelines start folded; their headings say how many.
+    const files = properties.getByRole("button", { name: /Files written/ });
+    await expect(files).toHaveAttribute("aria-expanded", "false");
+    await expect(properties.getByText("src/login.tsx")).toHaveCount(0);
+    // What the runs used is behind the info icon of the Properties heading.
+    await expect(properties.getByText(/2\.1k out/)).toBeHidden();
+    await properties.getByRole("button", { name: "Usage" }).hover();
+    await expect(page.getByRole("tooltip")).toContainText("2.1k out");
     await expect(page.getByText("The login page works again.")).toBeVisible();
     await page.screenshot({ path: `${REPO}/target/session-details/session-panel.png` });
+    await files.click();
+    await expect(properties.getByText("src/login.tsx")).toBeVisible();
+    await properties.getByRole("button", { name: /Guidelines in this run/ }).click();
+    await expect(properties.getByText("Rust style")).toBeVisible();
+    await expect(properties.getByText("v3")).toBeVisible();
+    // The head's button hides the panel beside the talk, and shows it again.
+    await page.getByRole("button", { name: "Hide session properties" }).click();
+    await expect(properties).toHaveCount(0);
+    await page.getByRole("button", { name: "Show session properties" }).click();
+    await expect(properties).toBeVisible();
   });
 
   test("a new session goes to the dispatcher, which chooses who takes it", async ({ page }) => {

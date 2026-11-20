@@ -1,8 +1,8 @@
 // A work session (server feature `work_sessions`): one employee in one project's folder, started from
 // New session without a ticket. It is the employee chat with its own head: the session's title and where
 // it works. Later messages go in with `chat.send`, as in a chat. Below the words, as in Claude's own
-// sessions, it chooses what the next run uses: model, effort and mode. On the right, as a task's run has,
-// a panel with the session's properties and what its runs used: files, guidelines and tokens.
+// sessions, it chooses what the next run uses: model, effort and mode. Beside it, as a task's run has, a
+// panel (shown or hidden from the head) with the session's properties and what its runs used.
 
 import { Button } from "@astryxdesign/core/Button";
 import type { AgentMode, MessagesSnapshot, WorkSessionView } from "@aurelius/protocol";
@@ -20,7 +20,16 @@ import { useModels } from "./dialogs";
 import { EmployeeChat } from "./employee-chat";
 import { MODE_LABELS, MODES } from "./employee-logic";
 import { lastRunOf, usageTotals } from "./run-logic";
-import { FilesWritten, RunAside, RunGuidelines, SideProperties, SideRow, UsageTotalsLine } from "./run-side";
+import {
+  FilesWritten,
+  type PropertiesDock,
+  PropertiesPanel,
+  PropertiesToggle,
+  RunGuidelines,
+  SideProperties,
+  SideRow,
+  usePropertiesDock,
+} from "./run-side";
 import { chooserText, runChange, runChipLabel, sessionFolder, sessionPlace, sessionStatus } from "./session-logic";
 import { modelName } from "./settings-kit";
 import { SubagentsAtWork } from "./subagents";
@@ -45,6 +54,7 @@ const styles = stylex.create({
 export function SessionScreen({ conversationId }: { conversationId: string }) {
   useKeyContext("TeamChat");
   const session = useWorkSessions().data?.find((s) => s.conversation_id === conversationId) ?? null;
+  const dock = usePropertiesDock();
   return (
     <div {...stylex.props(styles.body)}>
       <EmployeeChat
@@ -58,15 +68,24 @@ export function SessionScreen({ conversationId }: { conversationId: string }) {
           },
           footer: (snapshot) => <RunChips snapshot={snapshot} />,
           ...(session?.dispatch ? { instead: <Chooser session={session} /> } : {}),
+          actions: <PropertiesToggle dock={dock} label="Session properties" />,
+          aside: <SessionDetails dock={dock} conversationId={conversationId} session={session} />,
         }}
       />
-      <SessionDetails conversationId={conversationId} session={session} />
     </div>
   );
 }
 
-/** The session's side panel: what a task's run shows, for this session. */
-function SessionDetails({ conversationId, session }: { conversationId: string; session: WorkSessionView | null }) {
+/** The session's properties panel: what a task's run shows, for this session. */
+function SessionDetails({
+  dock,
+  conversationId,
+  session,
+}: {
+  dock: PropertiesDock;
+  conversationId: string;
+  session: WorkSessionView | null;
+}) {
   const feed = useMessages(conversationId);
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
   const files = useMemo(() => filesWritten(list), [list]);
@@ -75,8 +94,8 @@ function SessionDetails({ conversationId, session }: { conversationId: string; s
   const mode = feed.data?.agent_mode;
   const running = session?.running ?? false;
   return (
-    <RunAside label="Session properties">
-      <SideProperties>
+    <PropertiesPanel dock={dock} label="Session properties">
+      <SideProperties usage={usage}>
         {session ? (
           <>
             <SideRow name="Employee">{session.dispatch ? "Not chosen yet" : session.employee_name}</SideRow>
@@ -100,8 +119,7 @@ function SessionDetails({ conversationId, session }: { conversationId: string; s
       <SubagentsAtWork conversationId={conversationId} live={running} />
       <FilesWritten files={files} />
       <RunGuidelines runId={lastRunOf(list)} />
-      <UsageTotalsLine usage={usage} />
-    </RunAside>
+    </PropertiesPanel>
   );
 }
 
