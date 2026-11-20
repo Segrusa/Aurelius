@@ -870,7 +870,7 @@ test.describe("states a test daemon cannot produce", () => {
 
     // The session opens: the dispatcher is at it, and the board member can choose instead.
     await expect(page).toHaveURL(/\/session\/s2$/);
-    await expect(page.getByText("Orion is choosing who takes this…")).toBeVisible();
+    await expect(page.getByRole("region", { name: /^Orion is choosing who takes this/ })).toBeVisible();
     const properties = page.getByRole("complementary", { name: "Session properties" });
     await expect(properties.getByText("Dispatcher is choosing")).toBeVisible();
     await expect(page.getByText(/You can also choose yourself/)).toBeVisible();
@@ -880,6 +880,46 @@ test.describe("states a test daemon cannot produce", () => {
     await expect
       .poll(() => writes.find((w) => w.method === "work_session.assign")?.params)
       .toEqual({ conversation_id: "s2", employee_id: "e1" });
+  });
+
+  test("the dispatcher's lines show as cards: who chooses, and whom it chose with the reason", async ({ page }) => {
+    const taken = {
+      conversation_id: "s3",
+      title: "The login page is blank",
+      employee_id: "e1",
+      employee_name: "Flux",
+      project_id: "p",
+      project_name: "Northwind API",
+      running: false,
+      created_at_ms: Date.now() - 60_000,
+      last_activity_ms: Date.now() - 60_000,
+    };
+    await scriptServer(page, {
+      ...script,
+      features: ["work_sessions", "session_dispatch"],
+      employees: [
+        { id: "e0", name: "Orion", role: "Project Manager", status: "active" },
+        { id: "e1", name: "Flux", role: "Engineer", status: "active" },
+      ],
+      conversations: {
+        s3: {
+          ...messages("s3", [
+            message("m1", "user", "The login page is blank."),
+            message("m2", "assistant", "Orion is choosing who takes this…", { update: "system" }),
+            message("m3", "assistant", "Orion chose Flux: The login page is front-end work.", { update: "system" }),
+          ]),
+          employee_id: "e1",
+        },
+      },
+      reads: { "work_session.list": () => ({ type: "work_sessions", value: { sessions: [taken], as_of_seq: 1 } }) },
+    });
+    await page.goto(`${site.origin}/session/s3`);
+    const chose = page.getByRole("region", { name: /^Orion chose Flux: The login page is front-end work\./ });
+    await expect(chose).toBeVisible();
+    await expect(chose.getByText("The login page is front-end work.")).toBeVisible();
+    // Once it chose, the line that it is choosing goes: the card says it all.
+    await expect(page.getByRole("region", { name: /^Orion is choosing/ })).toHaveCount(0);
+    await page.screenshot({ path: `${REPO}/target/dispatch-cards/session.png` });
   });
 
   test("the Inbox bell says what each row is, and leads to where it is acted on", async ({ page }) => {

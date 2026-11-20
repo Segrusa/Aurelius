@@ -49,8 +49,10 @@ import {
   canMakeTicket,
   clock,
   type Decision,
+  type Dispatch,
   dayLabel,
   decisionOf,
+  dispatchOf,
   fold,
   isSystemLine,
   lineMark,
@@ -83,6 +85,11 @@ import { stepLine } from "./tasks-logic";
 import { ticketNumberIn, ticketPlace } from "./ticket-session-logic";
 
 const OUTPUT_LINES = 400;
+
+const dispatchPulse = stylex.keyframes({
+  "0%, 80%, 100%": { opacity: 0.25 },
+  "40%": { opacity: 1 },
+});
 
 const barIn = stylex.keyframes({
   from: { opacity: 0, transform: "translateY(4px) scale(0.98)" },
@@ -414,6 +421,43 @@ const styles = stylex.create({
   },
   liveRow: { display: "flex", gap: 12, paddingTop: 8 },
   // The board member's answer or plan decision: under the question, in line with the messages' text.
+  dispatch: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    marginInlineStart: 40,
+    marginBlock: 4,
+    paddingInline: 12,
+    paddingBlock: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+  },
+  dispatchHead: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--precision-text3)" },
+  dispatchText: { minWidth: 0, flexGrow: 1, flexBasis: 0, fontSize: 13, color: "var(--color-text-secondary)" },
+  dispatchName: { fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)" },
+  dispatchArrow: { color: "var(--precision-text3)" },
+  dispatchReason: {
+    paddingInlineStart: 26,
+    fontSize: 12.5,
+    lineHeight: 1.45,
+    color: "var(--color-text-secondary)",
+    whiteSpace: "pre-wrap",
+  },
+  dispatchDots: { display: "inline-flex", gap: 3, alignItems: "center" },
+  dispatchDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "var(--color-text-accent)",
+    animationName: { default: dispatchPulse, "@media (prefers-reduced-motion: reduce)": "none" },
+    animationDuration: "1.2s",
+    animationIterationCount: "infinite",
+  },
+  dispatchDot2: { animationDelay: "0.2s" },
+  dispatchDot3: { animationDelay: "0.4s" },
   decision: {
     display: "flex",
     flexDirection: "column",
@@ -950,6 +994,55 @@ function SystemRow({ m }: { m: MessageView }) {
   );
 }
 
+/**
+ * The dispatcher choosing who takes a session, and whom it chose with its reason:
+ * the two names as marks instead of a bare grey sentence.
+ */
+function DispatchCard({ m, d, messages }: { m: MessageView; d: Dispatch; messages: MessageView[] }) {
+  const time = clock(m.created_at_ms, offset());
+  if (d.kind === "choosing") {
+    // Once a later line says whom it chose, that card tells the whole story.
+    const at = messages.findIndex((x) => x.id === m.id);
+    if (messages.slice(at + 1).some((x) => dispatchOf(x)?.kind === "chose")) return null;
+    return (
+      <section {...stylex.props(styles.dispatch)} aria-label={`${d.by} is choosing who takes this at ${time}`}>
+        <div {...stylex.props(styles.dispatchHead)}>
+          <Mark letter={initial(d.by)} color={markColor(d.by)} size={18} radius={5} />
+          <span {...stylex.props(styles.dispatchText)}>
+            <span {...stylex.props(styles.dispatchName)}>{d.by}</span> is choosing who takes this
+          </span>
+          <span aria-hidden {...stylex.props(styles.dispatchDots)}>
+            <span {...stylex.props(styles.dispatchDot)} />
+            <span {...stylex.props(styles.dispatchDot, styles.dispatchDot2)} />
+            <span {...stylex.props(styles.dispatchDot, styles.dispatchDot3)} />
+          </span>
+          <span>{time}</span>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section
+      {...stylex.props(styles.dispatch)}
+      aria-label={`${d.by} chose ${d.chosen}${d.reason ? `: ${d.reason}` : ""} at ${time}`}
+    >
+      <div {...stylex.props(styles.dispatchHead)}>
+        <Mark letter={initial(d.by)} color={markColor(d.by)} size={18} radius={5} />
+        <span {...stylex.props(styles.dispatchName)}>{d.by}</span>
+        <span aria-hidden {...stylex.props(styles.dispatchArrow)}>
+          →
+        </span>
+        <Mark letter={initial(d.chosen)} color={markColor(d.chosen)} size={18} radius={5} />
+        <span {...stylex.props(styles.dispatchText)}>
+          <span {...stylex.props(styles.dispatchName)}>{d.chosen}</span> takes this
+        </span>
+        <span>{time}</span>
+      </div>
+      {d.reason ? <div {...stylex.props(styles.dispatchReason)}>{d.reason}</div> : null}
+    </section>
+  );
+}
+
 /** What the board member answered or decided, as a card under the question instead of a bare grey line. */
 function DecisionCard({ m, d }: { m: MessageView; d: Decision }) {
   const time = clock(m.created_at_ms, offset());
@@ -1443,6 +1536,8 @@ export const MessageRow = memo(function MessageRow({
   );
   const decision = decisionOf(m);
   if (decision) return <DecisionCard m={m} d={decision} />;
+  const dispatch = dispatchOf(m);
+  if (dispatch) return <DispatchCard m={m} d={dispatch} messages={messages} />;
   if (m.system || isSystemLine(m, true)) return <SystemRow m={m} />;
   const who = authorOf(m, roleOf, speaker, me);
   const body = m.deleted_at_ms ? (

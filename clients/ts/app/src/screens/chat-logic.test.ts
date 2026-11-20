@@ -12,6 +12,7 @@ import {
   completeMention,
   dayLabel,
   decisionOf,
+  dispatchOf,
   fold,
   indexOfByte,
   isSystemLine,
@@ -465,5 +466,30 @@ describe("the board member's decisions in a run", () => {
       text: "(Recommended) first, then more",
       recommended: false,
     });
+  });
+});
+
+describe("dispatchOf", () => {
+  const line = (text: string, over: Partial<MessageView> = {}) =>
+    msg({ update: "system", author: "Aurelius", text, ...over });
+  it("reads the dispatcher choosing", () => {
+    expect(dispatchOf(line("Orion is choosing who takes this…"))).toEqual({ kind: "choosing", by: "Orion" });
+  });
+  it("reads who it chose and why", () => {
+    expect(dispatchOf(line("Orion chose Flux: This is front-end work."))).toEqual({
+      kind: "chose",
+      by: "Orion",
+      chosen: "Flux",
+      reason: "This is front-end work.",
+    });
+  });
+  it("reads a board member's choice without a reason", () => {
+    expect(dispatchOf(line("grace chose Flux."))).toEqual({ kind: "chose", by: "grace", chosen: "Flux", reason: null });
+  });
+  it("leaves other lines alone", () => {
+    expect(dispatchOf(line("The dispatcher chose nobody. Choose who takes this session."))).toBeNull();
+    expect(dispatchOf(line("Orion chose Flux: x", { update: "status" }))).toBeNull();
+    expect(dispatchOf(line("Orion chose Flux: x", { author: "Orion" }))).toBeNull();
+    expect(dispatchOf(line("Orion chose Flux: x", { system: { kind: "moved" } }))).toBeNull();
   });
 });

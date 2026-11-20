@@ -118,6 +118,29 @@ export function isSystemLine(m: MessageView, inGroup: boolean): boolean {
   return m.update === "group" && !m.author?.trim() && m.status !== "partial";
 }
 
+// ---- Who takes a session -----------------------------------------------------------
+
+/** The dispatcher's lines in a work session (server: `session_dispatch.rs`). */
+export type Dispatch =
+  | { kind: "choosing"; by: string }
+  | { kind: "chose"; by: string; chosen: string; reason: string | null };
+
+const CHOOSING = /^(\S+) is choosing who takes this…$/;
+// Names are one word (employees and usernames); "The dispatcher chose nobody." never matches.
+const CHOSE = /^(\S+) chose (\S+?)(?:\.|: ([\s\S]+))$/;
+
+/** A line that says who chooses or chose who takes the session; null for any other message. */
+export function dispatchOf(m: MessageView): Dispatch | null {
+  if (m.role !== "assistant" || m.update !== "system" || m.system) return null;
+  if (m.author?.trim() && m.author.trim() !== "Aurelius") return null;
+  const text = m.text.trim();
+  const choosing = CHOOSING.exec(text);
+  if (choosing?.[1]) return { kind: "choosing", by: choosing[1] };
+  const chose = CHOSE.exec(text);
+  if (!chose?.[1] || !chose[2] || chose[2] === "nobody") return null;
+  return { kind: "chose", by: chose[1], chosen: chose[2], reason: chose[3]?.trim() || null };
+}
+
 // ---- The board member's decisions in a run --------------------------------------
 
 /** What the board member decided on a question or a plan (`MessageView.decision`, feature `run_decisions`). */
