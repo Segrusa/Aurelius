@@ -1,4 +1,4 @@
-import { App, type Platform } from "@aurelius/app";
+import { App, guardStrayDrops, type Platform } from "@aurelius/app";
 import { pairBrowser, webLink } from "@aurelius/client";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -91,6 +91,8 @@ const platform: Platform = {
   openProjectWindow: null,
   quit: null,
 };
+
+guardStrayDrops(window);
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("No root element.");

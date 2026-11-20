@@ -3,7 +3,7 @@
 //! pipeline (idempotency key, receipt, audit event, required right).
 
 use crate::views::{FileScope, TimelineQuery};
-use aurelius_domain::{ConversationId, EmployeeId, MessageId, ProjectId, RunId};
+use aurelius_domain::{CommandId, ConversationId, EmployeeId, MessageId, ProjectId, RunId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -126,6 +126,13 @@ pub enum Method {
     /// accept `ticket_channels` gets no ticket channels here either.
     #[serde(rename = "channel.search")]
     ChannelSearch { query: String },
+    /// Whether the server committed the write sent with `idempotency_key` (feature
+    /// `command_applied`), answered with `CommandApplied`. A client asks this after
+    /// the connection dropped or timed out under a write it will not resend, so it
+    /// can tell "it arrived, the answer was lost" from "it never arrived". Only yes
+    /// or no: the receipt's result stays with the connection that wrote it.
+    #[serde(rename = "command.applied")]
+    CommandApplied { idempotency_key: CommandId },
     /// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
     /// answered with `DiscussionAudience`, for the reader's own message (the
     /// reader is never counted). `channel`: a channel or a ticket's discussion

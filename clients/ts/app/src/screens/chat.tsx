@@ -6,7 +6,7 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
-import { ProtocolError } from "@aurelius/client";
+import { arrived, ProtocolError } from "@aurelius/client";
 import type { ChannelView, EmployeeSummary, MessageView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
@@ -446,20 +446,25 @@ export function Composer({
     setHeld(null);
     setBusy(true);
     try {
-      if (send) await send({ text: words, images: attach.images, files: attach.files, confirmSecret });
-      else
-        await connection.write(
-          "group_chat.send",
-          {
-            text: words,
-            images: attach.images,
-            files: attach.files,
-            channel,
-            thread_parent: threadParent,
-            confirm_secret: confirmSecret,
-          },
-          { retry: false },
-        );
+      try {
+        if (send) await send({ text: words, images: attach.images, files: attach.files, confirmSecret });
+        else
+          await connection.write(
+            "group_chat.send",
+            {
+              text: words,
+              images: attach.images,
+              files: attach.files,
+              channel,
+              thread_parent: threadParent,
+              confirm_secret: confirmSecret,
+            },
+            { retry: false },
+          );
+      } catch (e) {
+        // The server has it; only its answer was lost on the way back.
+        if (!arrived(e)) throw e;
+      }
       attach.clear();
       void client.invalidateQueries({ queryKey: ["messages"] });
       onSent();

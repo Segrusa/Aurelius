@@ -10,6 +10,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { TextInput } from "@astryxdesign/core/TextInput";
+import { arrived } from "@aurelius/client";
 import type { ApprovalView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
@@ -518,7 +519,8 @@ export function ReplyCard({ who, onSend }: { who: string; onSend: (text: string)
       await onSend(clean);
       setText("");
     } catch (e) {
-      toast(e instanceof Error ? e.message : "This did not work.");
+      if (arrived(e)) setText("");
+      else toast(e instanceof Error ? e.message : "This did not work.");
     } finally {
       setBusy(false);
     }

@@ -42,9 +42,9 @@ contextBridge.exposeInMainWorld("aurelius", {
   quit: () => invoke("app:quit"),
   openLink: () => invoke("link:open"),
   sendLink: (id: number, text: string) => invoke("link:send", id, text),
-  closeLink: (id: number) => {
+  closeLink: (id: number, reason?: string) => {
     listeners.delete(id);
-    return invoke("link:close", id);
+    return invoke("link:close", id, reason);
   },
   listenLink: (id: number, frame: FrameListener, closed: ClosedListener) => {
     listeners.set(id, { frame, closed });

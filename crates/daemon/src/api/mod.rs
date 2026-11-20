@@ -183,7 +183,10 @@ pub async fn serve(shared: Arc<Shared>, stream: BoxStream) {
                 }
                 continue;
             }
-            Err(IpcError::Io(_)) => break,
+            Err(IpcError::Io(err)) => {
+                tracing::info!(error = %err, "client connection: reading failed, closing");
+                break;
+            }
         };
         // Not a request (e.g. a method this server does not know): answer for its id, keep the connection.
         let request: Request = match serde_json::from_value(value.clone()) {
@@ -244,6 +247,11 @@ pub(crate) fn oversized(message: &ServerMessage, err: &aurelius_host::frame::Fra
 /// events and stream deltas out. Ends when `requests` closes.
 pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiver<Request>, out_tx: mpsc::Sender<ServerMessage>) {
     peer.conn = shared.sessions.connection();
+    // For the line that says how this connection ended: a dropped link can only be
+    // pieced together afterwards from when and why it closed.
+    let opened = std::time::Instant::now();
+    let mut answered: u64 = 0;
+    let mut ended = ConnectionEnd::ClientClosed;
     // Ending this connection's session elsewhere (revoke, a new password, disable) closes it.
     // `users` puts the connection in the hub when it gets a board member (before the
     // session is stored or checked, R1 M-2); losing one takes it out (below).
@@ -264,6 +272,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             biased;
             Some(reason) = end_rx.recv() => {
                 let _ = out_tx.send(ServerMessage::SignedOut { reason }).await;
+                ended = ConnectionEnd::SignedOut;
                 break;
             }
             request = requests.recv() => match request {
@@ -275,12 +284,15 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
         if let Err(reason) = users::keep_session(&shared, &mut peer).await {
             shared.sessions.forget(peer.conn);
             let _ = out_tx.send(ServerMessage::SignedOut { reason }).await;
+            ended = ConnectionEnd::SignedOut;
             break;
         }
         if let Err(err) = gate(&shared, &mut peer, &request).await {
             if respond(&out_tx, request_id, Err(err)).await.is_err() {
+                ended = ConnectionEnd::AnswerLost;
                 break;
             }
+            answered += 1;
             continue;
         }
         let before = peer.user;
@@ -374,14 +386,46 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
         }
         let outcome = if ticket_channels { outcome } else { outcome.map_err(for_older_client) };
         if respond(&out_tx, request_id, outcome).await.is_err() {
+            ended = ConnectionEnd::AnswerLost;
             break;
         }
+        answered += 1;
     }
+    tracing::info!(
+        conn = peer.conn,
+        remote = peer.remote.is_some(),
+        open_ms = u64::try_from(opened.elapsed().as_millis()).unwrap_or(u64::MAX),
+        answered,
+        reason = ended.as_str(),
+        "client connection ended"
+    );
     shared.sessions.forget(peer.conn);
     // A sign-in to Claude of this connection ends with it (C13).
     shared.claude_links.cancel_conn(peer.conn);
     if let Some(task) = forwarder {
         task.abort();
+    }
+}
+
+/// Why a client connection ended, for its line in the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectionEnd {
+    /// The client stopped sending: it closed the link, or the link broke.
+    ClientClosed,
+    /// The session ended (signed out here or elsewhere, revoked, expired).
+    SignedOut,
+    /// An answer was ready but the client was gone: its request was handled
+    /// (a write may have committed) without the client hearing so.
+    AnswerLost,
+}
+
+impl ConnectionEnd {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ClientClosed => "client closed",
+            Self::SignedOut => "signed out",
+            Self::AnswerLost => "answer not delivered",
+        }
     }
 }
 

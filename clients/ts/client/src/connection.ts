@@ -24,13 +24,14 @@ import {
   type UserView,
   type WriteName,
 } from "@aurelius/protocol";
-import { DisconnectedError, LinkError, NotSentError, ProtocolError } from "./errors";
+import { DisconnectedError, LinkError, NotSentError, ProtocolError, TimedOutError } from "./errors";
 import { StreamMerge, type StreamUpdate } from "./stream";
 
 /** One open connection. Frames are JSON text, whatever carries them. */
 export interface Link {
   send(text: string): void;
-  close(): void;
+  /** `reason`: a few words for the transport's log of why this side closed it. */
+  close(reason?: string): void;
   /** Set once, right after opening. `code`: the close code, when the transport has one. */
   listen(onFrame: (text: string) => void, onClosed: (code: number | null) => void): void;
 }
@@ -114,6 +115,10 @@ const RETRY_WINDOW_MS = 60_000;
 /** A browser sees no WebSocket pings, so this client asks something itself when all is quiet. */
 const HEARTBEAT_MS = 20_000;
 const SILENCE_LIMIT_MS = 45_000;
+/** How long a write that lost its answer waits for the link to come back and the server to say whether it arrived. */
+const CONFIRM_WAIT_MS = 15_000;
+/** The server feature of `command.applied`. */
+const COMMAND_APPLIED = "command_applied";
 
 const DIFFERENT_VERSIONS = "Update Aurelius on this device and on the server.";
 const UNREACHABLE = "The server is not reachable.";
@@ -246,7 +251,7 @@ export class Connection {
     this.disposed = true;
     for (const timer of this.timers) clearInterval(timer);
     this.wake();
-    this.link?.close();
+    this.link?.close("app closed the connection");
     this.failWaiting();
     for (const pending of this.outbox.splice(0)) pending.reject(new NotSentError(pending.key));
   }
@@ -362,7 +367,7 @@ export class Connection {
         this.setState({ status: "offline", message: "Connection lost. Reconnecting…" });
         if (closedCode === 4401) continue; // Revoked or turned off: the next open says which, now.
       } catch (error) {
-        this.link?.close();
+        this.link?.close(error instanceof Error ? `hello failed: ${error.message}` : "hello failed");
         this.failWaiting();
         if (this.disposed) return;
         if (error instanceof Incompatible) {
@@ -505,7 +510,7 @@ export class Connection {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.waiting.delete(requestId);
-        reject(new DisconnectedError("The server did not answer in time."));
+        reject(new TimedOutError());
       }, timeoutMs);
       this.waiting.set(requestId, { resolve, reject, timer });
       const encoded = encodeRequest({ ...input, requestId } as RequestInput<MethodName>);
@@ -534,12 +539,52 @@ export class Connection {
       if (error instanceof DisconnectedError) {
         if (pending.retry) return;
         this.removeFromOutbox(pending);
-        pending.reject(new NotSentError(pending.key, true));
+        await this.rejectLost(pending, error instanceof TimedOutError ? "timed_out" : "dropped");
         return;
       }
       this.removeFromOutbox(pending);
       pending.reject(error as Error);
     }
+  }
+
+  /**
+   * A write that is never resent lost its answer. Before it is called failed, the server is
+   * asked whether it arrived: a message that was stored must not come back as "not sent".
+   */
+  private async rejectLost(pending: Pending, reason: "dropped" | "timed_out"): Promise<void> {
+    let applied: boolean | null = null;
+    try {
+      // A server without the method (the last hello says so) is not waited for.
+      const canAsk = () => this.state.features.includes(COMMAND_APPLIED);
+      if (!this.disposed && canAsk() && (await this.online(CONFIRM_WAIT_MS)) && canAsk()) {
+        const body = await this.request(
+          { method: "command.applied", params: { idempotency_key: pending.key } },
+          CONFIRM_WAIT_MS,
+        );
+        applied = expectBody(body, "command_applied").value.applied;
+      }
+    } catch {
+      // Not known: the message says it may have arrived.
+    }
+    pending.reject(new NotSentError(pending.key, true, reason, applied));
+  }
+
+  /** True once this connection is online again with a link, false after `withinMs` or when it gives up. */
+  private online(withinMs: number): Promise<boolean> {
+    const ready = () => this.state.status === "online" && this.link !== null;
+    if (ready()) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const done = (ok: boolean) => {
+        clearTimeout(timer);
+        off();
+        resolve(ok);
+      };
+      const timer = setTimeout(() => done(false), withinMs);
+      const off = this.subscribe(() => {
+        if (ready()) done(true);
+        else if (this.state.status === "revoked" || this.state.status === "incompatible") done(false);
+      });
+    });
   }
 
   private removeFromOutbox(pending: Pending): void {
@@ -627,7 +672,7 @@ export class Connection {
     if (link === null || this.state.status !== "online") return;
     const quiet = Date.now() - this.lastFrameAt;
     if (quiet >= SILENCE_LIMIT_MS) {
-      link.close();
+      link.close(`no answer for ${Math.round(quiet / 1000)} s`);
       this.linkClosed(link, null);
     } else if (quiet >= HEARTBEAT_MS) {
       this.call("user.whoami").catch(() => {});

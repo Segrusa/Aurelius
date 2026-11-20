@@ -7,7 +7,7 @@ import { Dialog } from "@astryxdesign/core/Dialog";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { Table } from "@astryxdesign/core/Table";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import { expectBody } from "@aurelius/client";
+import { arrived, expectBody } from "@aurelius/client";
 import type {
   DirEntryView,
   FileRef,
@@ -367,7 +367,9 @@ export function useRetryAnswer(
                 { retry: false },
               )
             : connection.write("chat.send", { conversation_id: conversationId, text }, { retry: false });
-    sent.catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
+    sent.catch((e: unknown) => {
+      if (!arrived(e)) toast(e instanceof Error ? e.message : "This did not work.");
+    });
   };
 }
 

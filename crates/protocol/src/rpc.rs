@@ -435,6 +435,11 @@ pub mod feature {
     /// `MessageView::decision` (protocol 5, additive), so a client shows it as a card.
     /// Decisions noted earlier have only `text`; a client keeps showing those as before.
     pub const RUN_DECISIONS: &str = "run_decisions";
+    /// The read `command.applied { idempotency_key }` (protocol 5, additive) says
+    /// whether a write with that key committed (`CommandApplied`). A client asks it
+    /// when a write it does not resend lost its answer to a dropped link or a
+    /// timeout; without this feature it can only say the write may have arrived.
+    pub const COMMAND_APPLIED: &str = "command_applied";
 }
 
 /// Every feature this build has.
@@ -491,7 +496,15 @@ pub const FEATURES: &[&str] = &[
     feature::SUBAGENT_STEPS,
     feature::COMPACTION_SETTING,
     feature::RUN_DECISIONS,
+    feature::COMMAND_APPLIED,
 ];
+
+/// The answer of `command.applied`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CommandApplied {
+    /// True: a write with this key committed. False: none did (yet).
+    pub applied: bool,
+}
 
 /// Daemon → client.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -603,6 +616,8 @@ pub enum ResponseBody {
     /// `employee.start_profiles`.
     EmployeeStartProfiles(aurelius_domain::employee_tools::StartProfiles),
     EmployeeRuns(aurelius_domain::views::EmployeeRunsView),
+    /// `command.applied`.
+    CommandApplied(CommandApplied),
     /// `discussion.audience`.
     DiscussionAudience(aurelius_domain::views::DiscussionAudience),
     /// `thread.read`.
