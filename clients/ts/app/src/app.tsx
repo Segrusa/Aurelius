@@ -20,6 +20,7 @@ import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
 import { activityFilters } from "./screens/activity-logic";
 import { BoardScreen } from "./screens/board";
+import { CodeScreen } from "./screens/code";
 import { type EmployeeTab, isEmployeeTab } from "./screens/employee-logic";
 import { EmployeePage } from "./screens/employee-page";
 import { EmployeesScreen, OrgChartScreen } from "./screens/employees";
@@ -232,6 +233,8 @@ const history = createRoute({
     );
   },
 });
+// The Code tab of the current workspace (ticket #77); the screen says so when the server lacks it.
+const code = createRoute({ getParentRoute: () => root, path: "/code", component: CodeScreen });
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
 const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
 // The log lives in Settings now; an old link keeps what it narrowed on.
@@ -279,6 +282,7 @@ const router = createRouter({
     board,
     myTickets,
     history,
+    code,
     tasks,
     taskRun,
     ticketSession,

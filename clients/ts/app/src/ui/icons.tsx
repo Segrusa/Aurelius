@@ -33,6 +33,9 @@ const NAV_PATHS = {
   trash:
     "M2.5 4.5h11M6.2 4.5V3a.5.5 0 0 1 .5-.5h2.6a.5.5 0 0 1 .5.5v1.5M4 4.5l.6 8.1a1 1 0 0 0 1 .9h4.8a1 1 0 0 0 1-.9l.6-8.1",
   history: "M2.8 8a5.2 5.2 0 1 0 1.5-3.7M2.5 2.5v2.3h2.3M8 5v3l2 1.3",
+  // The Code tab (ticket #77): a branch that leaves a line; and the Fetch button's turning arrow.
+  code: "M4 2a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3zM4 11a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3zM12 4a1.5 1.5 0 1 0 0 3a1.5 1.5 0 1 0 0-3zM4 5v6M12 7c0 2.6-3.6 2.2-8 4.6",
+  refresh: "M13.5 8a5.5 5.5 0 1 1-1.8-4.1l1.8 1.6M13.5 2.5v3h-3",
   know: "M8 4.5C6.5 3.5 4.5 3.3 2.5 3.5v9c2-.2 4 0 5.5 1 1.5-1 3.5-1.2 5.5-1v-9c-2-.2-4 0-5.5 1zM8 4.5v9",
   // The Inbox, at the right of every screen's head.
   bell: "M4 11.5V7.2a4 4 0 0 1 8 0v4.3l1.2 1.5H2.8zM6.6 13.5a1.5 1.5 0 0 0 2.8 0",
