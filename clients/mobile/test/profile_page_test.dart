@@ -45,7 +45,7 @@ void main() {
     whenListen(hosts, const Stream<HostsState>.empty(), initialState: const HostsState(loading: false));
     final router = GoRouter(routes: [
       GoRoute(path: '/', builder: (_, _) => const ProfilePage()),
-      for (final path in ['/company', '/account/sessions', '/account/claude', '/account/password', '/settings/board', '/settings/board-members', '/hosts'])
+      for (final path in ['/company', '/projects', '/account/sessions', '/account/claude', '/account/password', '/settings/board', '/settings/board-members', '/hosts'])
         GoRoute(path: path, builder: (_, _) => Scaffold(body: Text('page $path'))),
     ]);
     addTearDown(router.dispose);
@@ -65,17 +65,34 @@ void main() {
     expect(find.text('Profile'), findsWidgets);
     expect(find.byKey(const ValueKey('profile-name')), findsOneWidget);
     expect(find.text('alex'), findsWidgets);
-    for (final key in ['account-sessions', 'account-claude', 'account-password', 'profile-employees', 'settings-board', 'settings-board-members', 'account-sign-out']) {
+    for (final key in ['profile-pc', 'account-sessions', 'account-claude', 'account-password', 'profile-employees', 'profile-projects', 'settings-board', 'settings-board-members', 'account-sign-out']) {
       expect(find.byKey(ValueKey(key)), findsOneWidget, reason: key);
     }
     expect(find.text('Notifications'), findsOneWidget);
     expect(find.text('Paired PCs'), findsOneWidget);
     expect(find.text('About Aurelius'), findsOneWidget);
     expect(find.text('More'), findsNothing);
+    expect(find.text('Signed in on'), findsOneWidget, reason: "the desktop's words for where you are signed in");
+  });
+
+  testWidgets('the parts stand in order: you and the PC, Account, Workspace, App, then Sign out', (tester) async {
+    await pump(tester);
+    double y(Finder f) => tester.getTopLeft(f).dy;
+    final ys = [
+      y(find.byKey(const ValueKey('profile-name'))),
+      y(find.byKey(const ValueKey('profile-pc'))),
+      y(find.text('Account')),
+      y(find.text('Workspace')),
+      y(find.text('App')),
+      y(find.byKey(const ValueKey('account-sign-out'))),
+    ];
+    expect(ys, [...ys]..sort());
   });
 
   for (final (key, page) in [
     ('profile-employees', '/company'),
+    ('profile-projects', '/projects'),
+    ('profile-pc', '/hosts'),
     ('account-sessions', '/account/sessions'),
     ('account-claude', '/account/claude'),
     ('account-password', '/account/password'),

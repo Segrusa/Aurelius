@@ -30,12 +30,11 @@ Future<String> appVersion() async {
 
 String _monogram(String name) => name.isEmpty ? '?' : String.fromCharCode(name.runes.first).toUpperCase();
 
-/// The Profile tab (ticket #72), one page instead of More › Account and
-/// More › Settings, in the style of iOS Settings: the signed-in board member
-/// and their account (sessions, Claude login, password), the PC this phone
-/// talks to, what is used while operating (employees, notifications, board,
-/// board members, paired PCs), About and Sign out. The PC's own settings are
-/// changed on the desktop.
+/// The Profile tab: who you are and where you are signed in, then the parts
+/// with the desktop's words (Settings › You): Account (Claude login, where
+/// you are signed in, password), Workspace (employees, projects, board
+/// members, model & effort, board, paired PCs), App (notifications, about)
+/// and Sign out on its own. The PC's own settings are changed on the desktop.
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
@@ -50,39 +49,40 @@ class ProfilePage extends StatelessWidget {
     }
   }
 
+  Future<void> _about(BuildContext context) async {
+    final version = await appVersion();
+    if (!context.mounted) return;
+    showAboutDialog(
+      context: context,
+      applicationName: 'Aurelius',
+      applicationVersion: version,
+      children: const [
+        Text('The PC stays the host: projects, memory, credentials and runtimes never leave it. '
+            'This phone gives work, follows it up, chats and approves; the PC\'s settings are changed in Aurelius on the desktop.'),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final repository = context.read<AureliusRepository>();
-    final host = repository.host;
     final link = context.watch<ConnectionBloc>().state;
     final user = link.user;
     final push = context.read<PushService>();
     final paired = context.select<HostsBloc, int>((b) => b.state.hosts.length);
     final employees = context.select<CompanyBloc, int>((b) => b.state.activeEmployees.length);
+    final projects = context.select<CompanyBloc, int>((b) => b.state.openProjects.length);
     return LargeTitleScaffold(
       title: 'Profile',
       children: [
+        _Hero(username: user?.username),
+        // The PC's name, with the PC above. Lazy: a server without the feature is never asked its name (SN-02 AC4).
+        BlocProvider(create: (_) => ServerNameBloc(repository)..add(const ServerNameRefreshed()), child: ServerNameSection(link: link)),
         if (user != null) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-            child: Row(children: [
-              Monogram(_monogram(user.username), active: true, size: 48),
-              const SizedBox(width: 14),
-              Expanded(child: Text(user.username, key: const ValueKey('profile-name'), style: Tokens.title(size: 22))),
-            ]),
-          ),
-          const SizedBox(height: 12),
           const GroupHeader('Account'),
           InsetGroup(
             dividerIndent: 60,
             children: [
-              GroupRow(
-                key: const ValueKey('account-sessions'),
-                leading: const IconTile(CupertinoIcons.device_phone_portrait),
-                title: 'Sessions',
-                chevron: true,
-                onTap: () => context.push('/account/sessions'),
-              ),
               GroupRow(
                 key: const ValueKey('account-claude'),
                 leading: const IconTile(CupertinoIcons.sparkles),
@@ -90,6 +90,13 @@ class ProfilePage extends StatelessWidget {
                 value: claudeLoginLine(link.claudeLogin),
                 chevron: true,
                 onTap: () => context.push('/account/claude'),
+              ),
+              GroupRow(
+                key: const ValueKey('account-sessions'),
+                leading: const IconTile(CupertinoIcons.device_phone_portrait),
+                title: 'Signed in on',
+                chevron: true,
+                onTap: () => context.push('/account/sessions'),
               ),
               GroupRow(
                 key: const ValueKey('account-password'),
@@ -100,67 +107,9 @@ class ProfilePage extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
         ],
-        const GroupHeader('Settings'),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-          child: Material(
-            color: Tokens.cell,
-            clipBehavior: Clip.antiAlias,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Tokens.cardRadius)),
-            child: InkWell(
-              onTap: () => context.push('/hosts'),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 52,
-                      height: 52,
-                      decoration: BoxDecoration(color: Tokens.accentTint, borderRadius: BorderRadius.circular(14)),
-                      child: Icon(CupertinoIcons.desktopcomputer, size: 28, color: Tokens.accent),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            Flexible(child: Text(host.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: Tokens.title(size: 20).copyWith(fontWeight: FontWeight.w600))),
-                            if (host.isDev) ...[
-                              const SizedBox(width: 8),
-                              Text('DEV', style: TextStyle(color: Tokens.devBadge, fontWeight: FontWeight.w700, fontSize: 12)),
-                            ],
-                          ]),
-                          const SizedBox(height: 2),
-                          Row(children: [
-                            Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: link.isOnline ? Tokens.accent : Tokens.warning)),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                link.isOnline ? 'Connected${link.daemonVersion != null ? ' · Aurelius ${link.daemonVersion}' : ''}' : (link.message ?? 'Not connected'),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: Tokens.label2, fontSize: 15),
-                              ),
-                            ),
-                          ]),
-                          const SizedBox(height: 3),
-                          Text(host.url, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Tokens.label3, fontSize: 12)),
-                        ],
-                      ),
-                    ),
-                    const Chevron(),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-        // Lazy: a server without the feature is never asked its name (SN-02 AC4).
-        BlocProvider(create: (_) => ServerNameBloc(repository)..add(const ServerNameRefreshed()), child: ServerNameSection(link: link)),
-        const SizedBox(height: 20),
+        const SizedBox(height: 8),
+        const GroupHeader('Workspace'),
         InsetGroup(
           dividerIndent: 60,
           children: [
@@ -173,6 +122,32 @@ class ProfilePage extends StatelessWidget {
               chevron: true,
               onTap: () => context.push('/company'),
             ),
+            GroupRow(
+              key: const ValueKey('profile-projects'),
+              leading: const IconTile(CupertinoIcons.folder_fill),
+              title: 'Projects',
+              value: projects == 0 ? null : '$projects',
+              chevron: true,
+              onTap: () => context.push('/projects'),
+            ),
+            GroupRow(
+              key: const ValueKey('settings-board-members'),
+              leading: const IconTile(CupertinoIcons.person_crop_circle_fill),
+              title: 'Board members',
+              chevron: true,
+              onTap: () => context.push('/settings/board-members'),
+            ),
+            if (link.features.contains('employee_run_overview'))
+              GroupRow(key: const ValueKey('settings-employee-runs'), leading: const IconTile(CupertinoIcons.slider_horizontal_3), title: 'Model & effort', subtitle: 'Per employee', chevron: true, onTap: () => context.push('/settings/employee-runs')),
+            GroupRow(key: const ValueKey('settings-board'), leading: const IconTile(CupertinoIcons.square_split_2x1), title: 'Board', subtitle: 'Columns and dispatcher', chevron: true, onTap: () => context.push('/settings/board')),
+            GroupRow(key: const ValueKey('profile-paired'), leading: const IconTile(CupertinoIcons.device_laptop), title: 'Paired PCs', value: '$paired', chevron: true, onTap: () => context.push('/hosts')),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const GroupHeader('App'),
+        InsetGroup(
+          dividerIndent: 60,
+          children: [
             ValueListenableBuilder<PushState>(
               valueListenable: push.state,
               builder: (context, state, _) => GroupRow(
@@ -192,45 +167,11 @@ class ProfilePage extends StatelessWidget {
                 ),
               ),
             ),
-            GroupRow(key: const ValueKey('settings-board'), leading: const IconTile(CupertinoIcons.square_split_2x1), title: 'Board', subtitle: 'Columns and dispatcher', chevron: true, onTap: () => context.push('/settings/board')),
-            if (link.features.contains('employee_run_overview'))
-              GroupRow(key: const ValueKey('settings-employee-runs'), leading: const IconTile(CupertinoIcons.slider_horizontal_3), title: 'Model & effort', subtitle: 'Per employee', chevron: true, onTap: () => context.push('/settings/employee-runs')),
-            GroupRow(
-              key: const ValueKey('settings-board-members'),
-              leading: const IconTile(CupertinoIcons.person_crop_circle_fill),
-              title: 'Board members',
-              value: link.user?.username,
-              chevron: true,
-              onTap: () => context.push('/settings/board-members'),
-            ),
-            GroupRow(leading: const IconTile(CupertinoIcons.device_laptop), title: 'Paired PCs', value: '$paired', chevron: true, onTap: () => context.push('/hosts')),
-          ],
-        ),
-        const SizedBox(height: 20),
-        InsetGroup(
-          dividerIndent: 60,
-          children: [
-            GroupRow(
-              leading: const IconTile(CupertinoIcons.info),
-              title: 'About Aurelius',
-              onTap: () async {
-                final version = await appVersion();
-                if (!context.mounted) return;
-                showAboutDialog(
-                  context: context,
-                  applicationName: 'Aurelius',
-                  applicationVersion: version,
-                  children: const [
-                    Text('The PC stays the host: projects, memory, credentials and runtimes never leave it. '
-                        'This phone gives work, follows it up, chats and approves; the PC\'s settings are changed in Aurelius on the desktop.'),
-                  ],
-                );
-              },
-            ),
+            GroupRow(key: const ValueKey('profile-about'), leading: const IconTile(CupertinoIcons.info), title: 'About Aurelius', chevron: true, onTap: () => _about(context)),
           ],
         ),
         if (user != null) ...[
-          const SizedBox(height: 20),
+          const SizedBox(height: 28),
           InsetGroup(children: [
             GroupRow(
               key: const ValueKey('account-sign-out'),
@@ -243,6 +184,80 @@ class ProfilePage extends StatelessWidget {
         ],
         const SizedBox(height: 32),
       ],
+    );
+  }
+}
+
+/// The top of Profile: your monogram and name, and the PC this phone talks to
+/// with whether it is connected; a tap opens the PCs.
+class _Hero extends StatelessWidget {
+  const _Hero({required this.username});
+
+  /// Null while nobody is signed in: only the PC.
+  final String? username;
+
+  @override
+  Widget build(BuildContext context) {
+    final host = context.read<AureliusRepository>().host;
+    final link = context.watch<ConnectionBloc>().state;
+    final name = username;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Material(
+        color: Tokens.cell,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Tokens.cardRadius)),
+        child: Column(children: [
+          if (name != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 14),
+              child: Column(children: [
+                Monogram(_monogram(name), active: true, size: 72),
+                const SizedBox(height: 10),
+                Text(name, key: const ValueKey('profile-name'), style: Tokens.title(size: 24)),
+                const SizedBox(height: 2),
+                Text('Board member', style: TextStyle(color: Tokens.label2, fontSize: 14)),
+              ]),
+            ),
+          if (name != null) Divider(height: 1, thickness: 0.5, color: Tokens.sep, indent: 16, endIndent: 16),
+          InkWell(
+            key: const ValueKey('profile-pc'),
+            onTap: () => context.push('/hosts'),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+              child: Row(children: [
+                Icon(CupertinoIcons.desktopcomputer, size: 22, color: Tokens.accent),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Flexible(child: Text(host.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
+                      if (host.isDev) ...[
+                        const SizedBox(width: 8),
+                        Text('DEV', style: TextStyle(color: Tokens.devBadge, fontWeight: FontWeight.w700, fontSize: 12)),
+                      ],
+                    ]),
+                    const SizedBox(height: 2),
+                    Row(children: [
+                      Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: link.isOnline ? Tokens.accent : Tokens.warning)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          link.isOnline ? 'Connected${link.daemonVersion != null ? ' · Aurelius ${link.daemonVersion}' : ''}' : (link.message ?? 'Not connected'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: Tokens.label2, fontSize: 13),
+                        ),
+                      ),
+                    ]),
+                  ]),
+                ),
+                const Chevron(),
+              ]),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }
