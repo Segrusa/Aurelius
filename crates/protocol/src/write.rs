@@ -477,9 +477,12 @@ pub enum HostResult {
 }
 
 impl HostResult {
-    /// What a receipt keeps: secrets blanked, so a replay never shows them again.
+    /// What a receipt keeps: secrets blanked, so a replay never shows them again, and a
+    /// Code view without its worktrees, branches and commits (they can be hundreds of KB and
+    /// are stale on a replay; the client reads them again with `code.get`).
     pub fn redacted(&self) -> HostResult {
         match self {
+            HostResult::Code(view) => HostResult::Code(aurelius_domain::code::CodeView { worktrees: vec![], branches: vec![], commits: vec![], ..view.clone() }),
             HostResult::PairingCode(code) => HostResult::PairingCode(PairingCode { code: String::new(), qr: String::new(), expires_at_ms: code.expires_at_ms, pairing_text: String::new() }),
             HostResult::VaultItem(item) => HostResult::VaultItem(aurelius_domain::vault::VaultItemView { value: None, ..item.clone() }),
             other => other.clone(),
@@ -544,5 +547,23 @@ mod tests {
         let pairing = HostResult::PairingCode(PairingCode { code: "ABCD2345".into(), qr: "{}".into(), expires_at_ms: 9, pairing_text: "aurelius-pair:x".into() });
         let kept = serde_json::to_string(&pairing.redacted()).unwrap();
         assert!(!kept.contains("ABCD2345") && !kept.contains("aurelius-pair"));
+    }
+
+    #[test]
+    fn a_code_receipt_keeps_the_head_of_the_view_and_none_of_its_lists() {
+        use aurelius_domain::code::{CodeCommit, CodeView, CodeWorktree};
+        let view = CodeView {
+            project_id: aurelius_domain::ProjectId::new(),
+            repo_path: "/repo".into(),
+            main_branch: Some("main".into()),
+            problem: Some("why".into()),
+            has_remote: true,
+            fetched_at_ms: Some(7),
+            worktrees: vec![CodeWorktree { path: "/repo".into(), branch: Some("main".into()), is_main: true, head: "h".into(), changed_files: vec![], changed_count: 0, missing: false }],
+            branches: vec![],
+            commits: vec![CodeCommit { hash: "h".into(), parents: vec![], subject: "first".into(), author: "Ann".into(), at_ms: 1, branches: vec!["main".into()] }],
+        };
+        let HostResult::Code(kept) = HostResult::Code(view.clone()).redacted() else { panic!("still a Code result") };
+        assert_eq!(kept, CodeView { worktrees: vec![], branches: vec![], commits: vec![], ..view });
     }
 }

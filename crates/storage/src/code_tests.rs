@@ -141,9 +141,9 @@ fn a_work_sessions_branch_gets_its_employee_and_works_while_a_run_is_live_or_que
     assert!(!found.working);
     run_in(&f, conversation, "created");
     assert!(link(&f, "session/1a2b3c4d").working, "a queued run");
-    let (project, path) = (f.atlas, "/data/worktrees/s1");
-    assert!(f.store.read(move |c| worktree_working(c, project, path)).unwrap(), "the same session found by its worktree");
-    assert!(!f.store.read(move |c| worktree_working(c, project, "/elsewhere")).unwrap());
+    let project = f.atlas;
+    let worktrees = f.store.read(move |c| session_worktrees(c, project)).unwrap();
+    assert_eq!(worktrees, vec![SessionWorktree { path: "/data/worktrees/s1".into(), working: true }], "the same session found by its worktree");
 }
 
 #[test]

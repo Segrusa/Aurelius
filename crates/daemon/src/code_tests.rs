@@ -112,3 +112,177 @@ fn a_subject_is_cut_at_its_limit_by_characters_not_bytes() {
     assert_eq!(cut.chars().count(), CODE_SUBJECT_MAX_CHARS);
     assert!(cut.ends_with('…'));
 }
+
+// ---- The writes against real repositories in a temp folder ----
+
+fn run(dir: &Path, args: &[&str]) -> String {
+    let out = quick::git(dir, args).unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    quick::text(&out)
+}
+
+/// A repository on main with one commit ("base").
+fn repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("project");
+    std::fs::create_dir_all(&repo).unwrap();
+    run(&repo, &["init", "--quiet", "--initial-branch=main"]);
+    run(&repo, &["config", "user.name", "Test"]);
+    run(&repo, &["config", "user.email", "test@example.com"]);
+    run(&repo, &["config", "core.autocrlf", "false"]);
+    commit(&repo, "readme.md", "base");
+    (dir, repo)
+}
+
+fn commit(dir: &Path, file: &str, message: &str) -> String {
+    std::fs::write(dir.join(file), format!("{message}\n")).unwrap();
+    run(dir, &["add", "."]);
+    run(dir, &["commit", "--quiet", "-m", message]);
+    run(dir, &["rev-parse", "HEAD"])
+}
+
+/// A commit on a branch that is gone afterwards: reachable only from what the test points at it.
+fn loose_commit(repo: &Path, file: &str, message: &str) -> String {
+    run(repo, &["switch", "--quiet", "-c", "scratch"]);
+    let sha = commit(repo, file, message);
+    run(repo, &["switch", "--quiet", "main"]);
+    run(repo, &["branch", "--quiet", "-D", "scratch"]);
+    sha
+}
+
+fn nobody() -> Busy {
+    Busy { links: HashMap::new(), loose_working: vec![] }
+}
+
+fn merge_of(branch: &str) -> HostWrite {
+    HostWrite::CodeMerge { project_id: ProjectId::new(), branch: branch.into() }
+}
+
+fn is_ancestor(repo: &Path, commit: &str, of: &str) -> bool {
+    quick::git(repo, &["merge-base", "--is-ancestor", commit, of]).unwrap().status.success()
+}
+
+#[test]
+fn a_branch_named_like_an_option_merges_exactly_its_commit_and_never_mains_upstream() {
+    let (_dir, repo) = repo();
+    // main tracks origin/main, which has a commit main lacks: a bare `git merge -Xours` would merge it.
+    let upstream = loose_commit(&repo, "upstream.txt", "upstream-only");
+    run(&repo, &["update-ref", "refs/remotes/origin/main", &upstream]);
+    run(&repo, &["config", "remote.origin.url", "/nowhere"]);
+    run(&repo, &["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+    run(&repo, &["config", "branch.main.remote", "origin"]);
+    run(&repo, &["config", "branch.main.merge", "refs/heads/main"]);
+    let work = loose_commit(&repo, "dash.txt", "the branch's work");
+    run(&repo, &["update-ref", "refs/heads/-Xours", &work]);
+
+    perform(&repo, merge_of("-Xours"), &nobody()).unwrap();
+    assert_eq!(run(&repo, &["rev-parse", "main^2"]), work, "the branch's commit is merged");
+    assert!(!is_ancestor(&repo, &upstream, "main"), "origin/main never reaches main");
+    assert_eq!(run(&repo, &["log", "-1", "--format=%s", "main"]), "Merge -Xours", "the message keeps the short name");
+}
+
+#[test]
+fn a_tag_named_like_the_branch_does_not_shadow_it_in_a_merge() {
+    let (_dir, repo) = repo();
+    let other = loose_commit(&repo, "other.txt", "NOT the branch");
+    run(&repo, &["tag", "feat/x", &other]);
+    run(&repo, &["switch", "--quiet", "-c", "feat/x"]);
+    let work = commit(&repo, "x.txt", "the branch");
+    run(&repo, &["switch", "--quiet", "main"]);
+
+    perform(&repo, merge_of("feat/x"), &nobody()).unwrap();
+    assert_eq!(run(&repo, &["rev-parse", "main^2"]), work);
+    assert!(!is_ancestor(&repo, &other, "main"), "the tag's commit stays out");
+}
+
+#[test]
+fn a_branch_named_like_an_option_can_be_deleted_with_force() {
+    let (_dir, repo) = repo();
+    let work = loose_commit(&repo, "x.txt", "unmerged");
+    run(&repo, &["update-ref", "refs/heads/-x", &work]);
+    let delete = HostWrite::CodeDeleteBranch { project_id: ProjectId::new(), branch: "-x".into(), force: true };
+    perform(&repo, delete, &nobody()).unwrap();
+    assert!(!quick::git(&repo, &["rev-parse", "--verify", "--quiet", "refs/heads/-x"]).unwrap().status.success(), "the branch is gone");
+}
+
+#[test]
+fn a_fetch_from_a_remote_that_never_answers_ends_at_its_deadline_and_leaves_the_git_lock_free() {
+    let (_dir, repo) = repo();
+    // The kernel accepts the connection; nobody ever answers it.
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    run(&repo, &["remote", "add", "origin", &format!("git://127.0.0.1:{}/repo.git", silent.local_addr().unwrap().port())]);
+    let deadline = Duration::from_secs(2);
+    let fetching = {
+        let repo = repo.clone();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let result = apply(&repo, HostWrite::CodeFetch { project_id: ProjectId::new() }, &nobody(), deadline);
+            (result, started.elapsed())
+        })
+    };
+    std::thread::sleep(Duration::from_millis(300));
+    let (got, lock_taken) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _git = quick::lock();
+        let _ = got.send(());
+    });
+    assert!(lock_taken.recv_timeout(Duration::from_secs(1)).is_ok(), "a quick task's git work goes on while the fetch waits");
+    let (result, took) = fetching.join().unwrap();
+    let e = result.expect_err("the fetch is stopped");
+    assert_eq!(e.code, ErrorCode::Validation);
+    assert_eq!(e.message, "The fetch did not finish within 2 s.");
+    assert!(took < deadline + Duration::from_secs(2), "stopped at its deadline, took {took:?}");
+    drop(silent);
+}
+
+#[test]
+fn reading_the_view_never_writes_the_index_of_a_worktree_that_needs_a_refresh() {
+    let (dir, repo) = repo();
+    let worktree = dir.path().join("wt");
+    run(&repo, &["worktree", "add", "--quiet", "-b", "feat/x", &worktree.to_string_lossy(), "main"]);
+    let index = PathBuf::from(run(&worktree, &["rev-parse", "--path-format=absolute", "--git-path", "index"]));
+    // Same content, another time: git sees a file that may have changed and wants to refresh its index.
+    let file = std::fs::File::options().write(true).open(worktree.join("readme.md")).unwrap();
+    file.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600)).unwrap();
+    let before = std::fs::read(&index).unwrap();
+
+    let view = read_view(ProjectId::new(), &repo).unwrap();
+    let listed = view.worktrees.iter().find(|w| w.branch.as_deref() == Some("feat/x")).unwrap();
+    assert_eq!(listed.changed_count, 0, "an unchanged file is no change");
+    assert!(std::fs::read(&index).unwrap() == before, "the index is never written, so index.lock is never taken");
+    assert!(!index.with_extension("lock").exists());
+}
+
+#[test]
+fn a_sessions_worktree_is_found_also_when_its_path_is_written_differently() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("wt");
+    std::fs::create_dir_all(&real).unwrap();
+    let real = real.to_string_lossy().into_owned();
+    let sessions = vec![SessionWorktree { path: format!("{real}/"), working: true }];
+    assert!(working_at(&sessions, &real), "a trailing slash");
+    assert!(!working_at(&sessions, &dir.path().join("other").to_string_lossy()));
+    #[cfg(unix)]
+    {
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let sessions = vec![SessionWorktree { path: link.to_string_lossy().into_owned(), working: true }];
+        assert!(working_at(&sessions, &real), "a symlinked data root");
+    }
+    let idle = vec![SessionWorktree { path: real.clone(), working: false }, SessionWorktree { path: real.clone(), working: true }];
+    assert!(!working_at(&idle, &real), "the newest session of the folder decides");
+}
+
+#[test]
+fn a_git_line_that_reaches_the_client_is_redacted() {
+    let token = "t77f2-vault-value-in-a-remote-url";
+    aurelius_runtime::redact::add_to_set("code-tests", aurelius_runtime::redact::Secret { name: "remote".into(), label: "Remote".into(), value: token.to_owned().into() });
+    let (dir, repo) = repo();
+    let remote = dir.path().join(token);
+    run(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
+    let e = apply(&repo, HostWrite::CodeFetch { project_id: ProjectId::new() }, &nobody(), Duration::from_secs(30)).expect_err("no repository there");
+    assert!(e.message.starts_with("The fetch failed"), "{}", e.message);
+    assert!(!e.message.contains(token), "{}", e.message);
+    let shown = problem(ProjectId::new(), String::new(), format!("fatal: {token}"));
+    assert!(!shown.problem.unwrap_or_default().contains(token));
+}
