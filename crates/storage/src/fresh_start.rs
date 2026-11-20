@@ -596,8 +596,11 @@ impl Blobs<'_> {
                     Ok(bytes) => {
                         let path = self.to.join(&key);
                         std::fs::create_dir_all(path.parent().unwrap_or(&self.to))?;
-                        std::fs::write(&path, &bytes)?;
-                        std::fs::File::open(&path)?.sync_all()?;
+                        // Written and flushed through one handle: Windows refuses to flush a
+                        // file opened for reading only ("Access is denied").
+                        let mut file = std::fs::File::create(&path)?;
+                        std::io::Write::write_all(&mut file, &bytes)?;
+                        file.sync_all()?;
                         self.texts.insert(id.to_string(), String::from_utf8_lossy(&bytes).into_owned());
                         insert(tx, "blobs", &row, &[])?;
                         true
