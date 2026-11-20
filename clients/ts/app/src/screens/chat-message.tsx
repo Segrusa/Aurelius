@@ -80,7 +80,15 @@ import { messageLink } from "./links-logic";
 import { overlays } from "./overlays-store";
 import { RunNote } from "./run-card";
 import { waitsOnReply } from "./run-card-logic";
-import { FileChips, KeptFiles, MarkdownChips, type RetryTarget, ScreenshotLink, useRetryAnswer } from "./run-tools";
+import {
+  FileChips,
+  KeptFiles,
+  MarkdownChips,
+  type RetryTarget,
+  ScreenshotLink,
+  TraceLink,
+  useRetryAnswer,
+} from "./run-tools";
 import { stepLine } from "./tasks-logic";
 import { ticketNumberIn, ticketPlace } from "./ticket-session-logic";
 
@@ -1557,6 +1565,7 @@ export const MessageRow = memo(function MessageRow({
       />
       <FileChips files={m.uploads} />
       <KeptFiles files={m.files ?? []} />
+      {m.run_id && m.role === "assistant" ? <TraceLink run={m.run_id} /> : null}
       {m.status === "interrupted" ? <Meta>Stopped; text up to that point is kept.</Meta> : null}
       {m.status === "failed" ? (
         <span {...stylex.props(styles.metaError)}>Failed; this doesn't count as an answer.</span>

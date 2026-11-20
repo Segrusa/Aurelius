@@ -11,7 +11,6 @@ import { toast } from "./toast";
 
 const styles = stylex.create({
   row: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 },
-  images: { display: "flex", flexWrap: "wrap", gap: 6, paddingInline: 10, paddingTop: 8 },
   file: {
     cursor: "pointer",
     borderRadius: 6,
@@ -122,52 +121,6 @@ export function AttachRow({ attach }: { attach: ReturnType<typeof useAttachments
           {...stylex.props(styles.file)}
         >
           {f.name} ×
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** Images pasted in a chat's box. "+ File" and dropping stay hidden there (`ChatAttachments`). */
-export function useImagePaste() {
-  const platform = usePlatform();
-  const [files, setFiles] = useState<Attached[]>([]);
-  const onPaste = useCallback(
-    (event: ClipboardEvent) => {
-      const images = filesFrom(event.clipboardData).filter((f) => f.type.startsWith("image/"));
-      if (images.length === 0) return;
-      event.preventDefault();
-      const { fit, problems } = acceptable(images);
-      for (const problem of problems) toast(problem);
-      platform.keepFiles(fit).then(
-        (kept) => setFiles((now) => [...now, ...kept].slice(0, FILES_MAX)),
-        (e: unknown) => toast(failure(e)),
-      );
-    },
-    [platform],
-  );
-  return {
-    files,
-    paths: files.map((f) => f.path),
-    remove: (path: string) => setFiles((now) => now.filter((f) => f.path !== path)),
-    clear: () => setFiles([]),
-    target: { onPaste },
-  };
-}
-
-export function AttachedImages({ images }: { images: ReturnType<typeof useImagePaste> }) {
-  if (images.files.length === 0) return null;
-  return (
-    <div {...stylex.props(styles.images)}>
-      {images.files.map((f) => (
-        <button
-          key={f.path}
-          type="button"
-          aria-label={`Remove ${f.name}`}
-          onClick={() => images.remove(f.path)}
-          {...stylex.props(styles.file)}
-        >
-          ▣ {f.name} ×
         </button>
       ))}
     </div>

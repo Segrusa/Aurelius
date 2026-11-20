@@ -53,6 +53,16 @@ describe("interrupt card", () => {
     ]);
     expect(approvalsFor(list, { conversationId: "nope" })).toEqual([]);
   });
+  it("takes a task's own approvals too, also those of a run outside its conversation", () => {
+    const list = [
+      approval({ id: "task", task_id: "k", conversation_id: "elsewhere" }),
+      approval({ id: "here", conversation_id: "c" }),
+      approval({ id: "decided", task_id: "k", status: "approved" }),
+      approval({ id: "other", task_id: "k2" }),
+    ];
+    expect(approvalsFor(list, { conversationId: "c", taskId: "k" }).map((a) => a.id)).toEqual(["task", "here"]);
+    expect(approvalsFor(list, { conversationId: "c" }).map((a) => a.id)).toEqual(["here"]);
+  });
 });
 
 describe("odometer", () => {

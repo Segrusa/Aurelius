@@ -8,10 +8,10 @@ import { Button } from "@astryxdesign/core/Button";
 import type { AgentMode, MessagesSnapshot, WorkSessionView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useConnection } from "../connection";
 import { useEmployees, useMessages, useWorkSessions } from "../data";
-import { useKeyContext } from "../keys/provider";
+import { useAction, useKeyContext } from "../keys/provider";
 import { Chip } from "../ui/chip";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
@@ -183,8 +183,8 @@ function Chooser({ session }: { session: WorkSessionView }) {
   );
 }
 
-/** Model, effort and mode of the session's next run; a run under way keeps what it started with. */
-function RunChips({ snapshot }: { snapshot: MessagesSnapshot }) {
+/** Model, effort and mode of the next run (a session's or a task's); a run under way keeps what it started with. */
+export function RunChips({ snapshot }: { snapshot: MessagesSnapshot }) {
   const connection = useConnection();
   const client = useQueryClient();
   const models = useModels();
@@ -199,10 +199,14 @@ function RunChips({ snapshot }: { snapshot: MessagesSnapshot }) {
     }
   };
   const modelOf = (key: string) => models.find((m) => m.key === key)?.label ?? key;
+  const [modelOpen, setModelOpen] = useState(false);
+  useAction("CycleModel", () => setModelOpen(true));
   return (
     <>
       <Menu
         label="Model"
+        open={modelOpen}
+        onOpenChange={setModelOpen}
         value={run.model ?? "default"}
         options={models.map((m) => (m.key === "default" ? { ...m, label: "Employee's default" } : m))}
         onPick={(model) =>

@@ -560,9 +560,10 @@ test.describe("states a test daemon cannot produce", () => {
     await preview.getByRole("button", { name: /Open conversation/ }).click();
 
     await expect(page.getByRole("heading", { name: "Run by Flux" })).toBeVisible();
-    await expect(page.getByText("I restart the API now.")).toBeVisible();
-    await expect(page.getByText("2 steps")).toBeVisible();
-    await expect(page.getByText("1 failed")).toBeVisible();
+    // The same chat as a session: the steps stand where they were taken, folded to one line each.
+    await expect(page.getByText("restart the API now.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Wrote api.rs" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Ran 1 command · 1 failed" })).toBeVisible();
     const properties = page.getByRole("complementary", { name: "Run properties" });
     await properties.getByRole("button", { name: /Files written/ }).click();
     await expect(properties.getByText("src/api.rs")).toBeVisible();

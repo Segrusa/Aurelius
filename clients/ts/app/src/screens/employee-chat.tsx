@@ -54,6 +54,7 @@ const styles = stylex.create({
   topGap: { paddingTop: 8 },
   approvalGap: { paddingTop: 12 },
   edge: { height: 14 },
+  emptyView: { boxSizing: "border-box", height: "100%", overflowY: "auto", paddingBlock: 24 },
   loading: { display: "flex", flexDirection: "column", gap: 8, padding: 24 },
   problem: { padding: 24 },
   closed: {
@@ -83,11 +84,34 @@ type Row =
   | { kind: "live"; id: string }
   | { kind: "approval"; id: string };
 
-/** What another kind of conversation with one employee (a work session) shows instead of a chat's words. */
+/** What a message from the composer carries; a frame may send it its own way. */
+export interface ChatMessage {
+  text: string;
+  images: string[];
+  files: string[];
+  confirmSecret: boolean;
+}
+
+/**
+ * What another kind of conversation with one employee (a work session, a task's run) shows instead of a
+ * chat's words.
+ */
 export interface ChatFrame {
-  /** The head's title; the employee's name when not given. */
+  /** The head's title; the employee's name when not given. Also the screen's name. */
   title?: string;
+  /** The head's left side instead of the title alone (a task's project, ticket and state). */
+  head?: ReactNode;
+  /** What the conversation is, in "this session can only be read". */
+  noun?: string;
   empty: { title: string; description: string };
+  /** Instead of the empty state: what there is without messages (a finished task's result). */
+  emptyView?: ReactNode;
+  /** Pending approvals of this task show here too, also those of a run outside this conversation. */
+  taskId?: string;
+  /** The run under way, when the feed does not show it yet (a task's run waiting on an approval). */
+  activeRun?: string | null;
+  /** How the composer's message goes; `chat.send` when not given. */
+  send?: (message: ChatMessage) => Promise<unknown>;
   /** Controls in the composer's bottom row, from what the conversation runs on now. */
   footer?: (snapshot: MessagesSnapshot) => ReactNode;
   /** What stands where the composer is, while nothing can be written (a session nobody took yet). */
@@ -119,9 +143,10 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
     store.settle(new Set(list.filter((m) => m.status !== "partial").map((m) => m.id)));
   }, [list, store]);
 
+  const taskId = frame?.taskId;
   const pending = useMemo(
-    () => approvalsFor(approvals.data ?? [], { conversationId }),
-    [approvals.data, conversationId],
+    () => approvalsFor(approvals.data ?? [], { conversationId, taskId }),
+    [approvals.data, conversationId, taskId],
   );
   const approvalMap = useMemo(() => new Map(pending.map((a) => [a.id, a])), [pending]);
   const onCard = useMemo(() => new Set(list.flatMap((m) => m.approval_id ?? [])), [list]);
@@ -173,7 +198,10 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
   );
 
   const running =
-    [...list].reverse().find((m) => m.status === "partial" && m.run_id)?.run_id ?? live.at(-1)?.run_id ?? null;
+    [...list].reverse().find((m) => m.status === "partial" && m.run_id)?.run_id ??
+    live.at(-1)?.run_id ??
+    frame?.activeRun ??
+    null;
   const lastAnswer = [...list].reverse().find((m) => !m.update);
   const quick =
     features.includes("quick_replies") &&
@@ -184,13 +212,30 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
       : null;
   const loading = useDelayed(feed.isPending);
   const closed = employee && employee.status !== "active" ? employee.status : null;
+  const noun = frame ? (frame.noun ?? "session") : "chat";
+  const send =
+    frame?.send ??
+    ((message: ChatMessage) =>
+      connection.write(
+        "chat.send",
+        {
+          conversation_id: conversationId,
+          text: message.text,
+          images: message.images,
+          ...(message.files.length > 0 ? { files: message.files } : {}),
+          confirm_secret: message.confirmSecret,
+        },
+        { retry: false },
+      ));
 
   return (
     <section aria-label={frame?.title ?? `Chat with ${name}`} {...stylex.props(styles.screen)}>
       <header data-titlebar {...stylex.props(styles.top)}>
-        <Heading level={1} xstyle={styles.title}>
-          {frame?.title || name}
-        </Heading>
+        {frame?.head ?? (
+          <Heading level={1} xstyle={styles.title}>
+            {frame?.title || name}
+          </Heading>
+        )}
         {/* A session's head has the title only; a chat says the employee's role, or that it answers. */}
         <span {...stylex.props(styles.subtitle)}>
           {frame ? null : live.length > 0 ? `${name} answering` : employee ? (employee.title ?? employee.role) : ""}
@@ -220,6 +265,8 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
                       <Skeleton height={48} />
                     </div>
                   ) : null
+                ) : rows.length === 0 && frame?.emptyView ? (
+                  <div {...stylex.props(styles.feedColumn, styles.emptyView)}>{frame.emptyView}</div>
                 ) : rows.length === 0 ? (
                   <EmptyState
                     title={frame?.empty.title ?? `Talk with ${name} here.`}
@@ -267,8 +314,8 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
             {closed ? (
               <p {...stylex.props(styles.closed)}>
                 {closed === "paused"
-                  ? `${name} is paused: resume them to go on with this ${frame ? "session" : "chat"}.`
-                  : `${name} is archived: this ${frame ? "session" : "chat"} can only be read.`}
+                  ? `${name} is paused: resume them to go on with this ${noun}.`
+                  : `${name} is archived: this ${noun} can only be read.`}
               </p>
             ) : frame?.instead ? (
               frame.instead
@@ -288,19 +335,7 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
                 footer={frame?.footer && feed.data ? frame.footer(feed.data) : null}
                 // New session's box; files go along where the server takes them.
                 prompt={{ files: features.includes(CHAT_FILES_FEATURE) }}
-                send={(message) =>
-                  connection.write(
-                    "chat.send",
-                    {
-                      conversation_id: conversationId,
-                      text: message.text,
-                      images: message.images,
-                      ...(message.files.length > 0 ? { files: message.files } : {}),
-                      confirm_secret: message.confirmSecret,
-                    },
-                    { retry: false },
-                  )
-                }
+                send={send}
                 onSent={() => handle.current?.scrollToIndex({ index: "LAST", align: "end" })}
               />
             )}

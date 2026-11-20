@@ -1,15 +1,6 @@
 import type { TaskView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import {
-  filesWritten,
-  filterTasks,
-  foldTree,
-  stepLine,
-  stepsOf,
-  subtasksOf,
-  taskStateLine,
-  treeOrder,
-} from "./tasks-logic";
+import { filesWritten, filterTasks, foldTree, stepLine, subtasksOf, taskStateLine, treeOrder } from "./tasks-logic";
 
 const task = (id: string, over: Partial<TaskView> = {}): TaskView => ({
   id,
@@ -103,13 +94,7 @@ describe("the task tree", () => {
 });
 
 describe("a run's steps", () => {
-  it("are one line with the failures", () => {
-    expect(stepsOf([])).toBeNull();
-    const steps = stepsOf([
-      { tool: "Bash", input: { command: "ls\n-la" }, ok: false },
-      { tool: "Read", input: { file_path: "a.rs" }, ok: true },
-    ]);
-    expect(steps).toEqual({ count: 2, failed: 1, last: "a.rs" });
+  it("are each one line", () => {
     expect(stepLine({ tool: "claude.Thing", input: {} })).toBe("Thing");
     expect(stepLine({ tool: "Bash", input: { command: "ls\n-la" } })).toBe("ls");
   });

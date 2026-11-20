@@ -45,14 +45,19 @@ export function waitsOnReply(
 /** The open approvals of a discussion: asked in it, by a run it woke, or on its ticket. */
 export function approvalsFor<T extends ApprovalView>(
   approvals: T[],
-  place: { conversationId?: string | null | undefined; ticketId?: string | null | undefined },
+  place: {
+    conversationId?: string | null | undefined;
+    ticketId?: string | null | undefined;
+    taskId?: string | null | undefined;
+  },
 ): T[] {
-  const { conversationId, ticketId } = place;
+  const { conversationId, ticketId, taskId } = place;
   return approvals.filter(
     (a) =>
       a.status === "pending" &&
       ((conversationId && (a.conversation_id === conversationId || a.discussion_id === conversationId)) ||
-        (ticketId && a.ticket_id === ticketId)),
+        (ticketId && a.ticket_id === ticketId) ||
+        (taskId && a.task_id === taskId)),
   );
 }
 
