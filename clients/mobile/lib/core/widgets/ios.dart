@@ -575,7 +575,7 @@ class AppTabBar extends StatelessWidget {
 
   /// The point size of the SF Symbols on the native bar. The plugin's default
   /// (24pt) draws them far larger than the system's own tab bars do.
-  static const nativeTabIconSize = 18.0;
+  static const nativeTabIconSize = 16.0;
 
   /// Whether the native bar is used on this platform.
   static bool get native => defaultTargetPlatform == TargetPlatform.iOS;
@@ -583,22 +583,21 @@ class AppTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!native) return GlassTabBar(tabs: tabs, current: current, onTap: onTap, fade: fade);
-    return SafeArea(
-      top: false,
-      child: CNTabBar(
-        currentIndex: current,
-        onTap: onTap,
-        tint: Tokens.accent,
-        items: [
-          for (final t in tabs)
-            CNTabBarItem(
-              label: t.label,
-              icon: switch (t.symbol) { final s? => CNSymbol(s, size: nativeTabIconSize), null => null },
-              customIcon: t.symbol == null ? t.icon : null,
-              badge: t.badge > 0 && !t.calm ? '${t.badge}' : (t.dot ? CNTabBarItem.dotBadge : null),
-            ),
-        ],
-      ),
+    // No SafeArea: the native bar's own height already holds the
+    // home-indicator inset, so a SafeArea lifted it that inset too high.
+    return CNTabBar(
+      currentIndex: current,
+      onTap: onTap,
+      tint: Tokens.accent,
+      items: [
+        for (final t in tabs)
+          CNTabBarItem(
+            label: t.label,
+            icon: switch (t.symbol) { final s? => CNSymbol(s, size: nativeTabIconSize), null => null },
+            customIcon: t.symbol == null ? t.icon : null,
+            badge: t.badge > 0 && !t.calm ? '${t.badge}' : (t.dot ? CNTabBarItem.dotBadge : null),
+          ),
+      ],
     );
   }
 }
