@@ -145,7 +145,7 @@ const styles = stylex.create({
   },
   grid: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 2.2fr) minmax(0, 1fr) 96px minmax(0, 1.6fr) 112px",
+    gridTemplateColumns: "minmax(0, 2.2fr) minmax(0, 1fr) 96px minmax(0, 1.6fr) 140px",
     gap: 12,
     alignItems: "center",
     paddingInline: 14,

@@ -1,5 +1,6 @@
 // The Code tab of a workspace (ticket #77) against a scripted server: the design's repository (worktrees,
-// branches, the commit graph), a merge that answers the new view, and a refused delete that shows inline.
+// branches, the commit graph), a merge that answers the new view, a refused delete that shows inline, a fresh
+// branch of an open ticket that is not Merged, and a detached worktree.
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -7,7 +8,7 @@ import { expect, test } from "@playwright/test";
 import { REPO, serveStatic, WEB_DIST } from "./daemon";
 import { scriptServer } from "./fake-server";
 
-const SHOTS = join(REPO, "target/T77-D");
+const SHOTS = join(REPO, "target/T77-D2");
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
@@ -39,6 +40,8 @@ function view(now: number, merged = false) {
       { path: `${WT}/73`, branch: "fix/73-rail-hit-area", head: hash("a3f9c21"), changed_count: 1 },
       { path: `${WT}/71`, branch: "feat/71-scroll-sessions", head: hash("91c4e5a"), changed_count: 0 },
       { path: `${WT}/68`, branch: "feat/68-ticket-activity-feed", head: hash("c71f2aa"), changed_count: 0 },
+      { path: `${WT}/80`, branch: "feat/80-fresh", head: hash("e02b7f3"), changed_count: 0 },
+      { path: `${WT}/probe`, branch: null, head: hash("d00d1e5"), changed_count: 0 },
     ],
     branches: [
       branch({
@@ -145,6 +148,18 @@ function view(now: number, merged = false) {
         deletions: 30,
         commits: [{ hash: hash("e44c0b9"), subject: "Try bottom tab bar" }],
       }),
+      // Just made from main for an open ticket: git calls it merged, but nothing has been done yet.
+      branch({
+        name: "feat/80-fresh",
+        head: hash("e02b7f3"),
+        merged: true,
+        open: true,
+        subject: "Merge fix/64-history-tickets",
+        at_ms: at(2 * HOUR),
+        worktree_path: `${WT}/80`,
+        ticket: { ticket_id: "t80", number: 80, title: "Nieuw werk" },
+        owner: flux,
+      }),
     ],
     commits: [
       ["a3f9c21", ["7be0d14"], "Move tile click target to square wrapper", "Flux", 4 * MIN, ["fix/73-rail-hit-area"]],
@@ -188,6 +203,7 @@ test("the Code tab shows the repository, merges a ready branch and shows a refus
       projects: [{ id: "p", name: "Aurelius", status: "active", created_at_ms: 0, employees_active: 2, version: 1 }],
       reads: { "code.get": () => ({ type: "code", value: view(now, merged) }) },
       results: {
+        "code.remove_worktree": () => ({ kind: "host", value: { type: "code", ...view(now, merged) } }),
         "code.merge": () => {
           merged = true;
           return { kind: "host", value: { type: "code", ...view(now, true) } };
@@ -204,9 +220,9 @@ test("the Code tab shows the repository, merges a ready branch and shows a refus
 
     // The head, the sidebar row with its count, the worktrees and the graph.
     await expect(page.getByRole("heading", { level: 1, name: "Code" })).toBeVisible();
-    await expect(page.getByRole("link", { name: /^Code/ })).toContainText("3");
+    await expect(page.getByRole("link", { name: /^Code/ })).toContainText("5");
     const worktrees = page.getByRole("region", { name: "Worktrees" });
-    await expect(worktrees.getByText("3 active")).toBeVisible();
+    await expect(worktrees.getByText("5 active")).toBeVisible();
     await expect(page.getByText("Fetched 2m ago")).toBeVisible();
     const details = page.getByRole("complementary", { name: "Branch details" });
     await expect(details.getByRole("heading", { name: "fix/73-rail-hit-area" })).toBeVisible();
@@ -220,6 +236,28 @@ test("the Code tab shows the repository, merges a ready branch and shows a refus
     // Active hides Merged and Stale; All shows them.
     const branches = page.getByRole("region", { name: "Branches" });
     await expect(branches.getByRole("button", { name: /spike\/mobile-nav/ })).toHaveCount(0);
+
+    // A fresh branch of an open ticket is not Merged: it stays in Active and its worktree stays.
+    const fresh = branches.getByRole("button", { name: /feat\/80-fresh/ });
+    await expect(fresh).toContainText("Nothing to merge yet");
+    await fresh.click();
+    await expect(details.getByRole("heading", { name: "feat/80-fresh" })).toBeVisible();
+    await expect(details.getByRole("button", { name: "Remove worktree" })).toBeDisabled();
+    await details.getByRole("button", { name: "Remove worktree" }).hover({ force: true });
+    await expect(page.getByText("Its ticket is still open.")).toBeVisible();
+    await page.screenshot({ path: join(SHOTS, "code-fresh.png"), animations: "disabled" });
+
+    // A detached worktree says so and can be removed by its path, after a confirm.
+    await expect(worktrees.getByText("detached")).toBeVisible();
+    await worktrees.getByRole("button", { name: "Remove worktree" }).click();
+    await page
+      .getByRole("dialog", { name: "Remove the detached worktree?" })
+      .getByRole("button", { name: "Remove worktree" })
+      .click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "code.remove_worktree")?.params)
+      .toMatchObject({ project_id: "p", path: `${WT}/probe` });
+
     await branches.getByRole("radio", { name: "All" }).click();
     await expect(branches.getByRole("button", { name: /spike\/mobile-nav.*Stale/ })).toBeVisible();
 
