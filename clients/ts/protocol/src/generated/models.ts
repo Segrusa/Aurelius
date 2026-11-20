@@ -916,6 +916,11 @@ export interface CodeWorktree {
    */
   missing?: boolean;
   path: string;
+  /**
+   * An employee works in it now: its branch is `working`, or (a detached HEAD) a run of
+   * the work session in this folder is live or queued. It is not removed then.
+   */
+  working?: boolean;
 }
 
 /**

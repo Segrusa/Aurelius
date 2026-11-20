@@ -1683,6 +1683,7 @@ final class CodeWorktree {
     this.isMain = false,
     this.missing = false,
     required this.path,
+    this.working = false,
   });
 
   /// Its branch; none: a detached HEAD.
@@ -1698,6 +1699,9 @@ final class CodeWorktree {
   /// Git no longer finds its folder (`git worktree prune` removes it).
   final bool missing;
   final String path;
+  /// An employee works in it now: its branch is `working`, or (a detached HEAD) a run of
+  /// the work session in this folder is live or queued. It is not removed then.
+  final bool working;
 
   factory CodeWorktree.fromJson(Map<String, dynamic> json) => CodeWorktree(
     branch: (json['branch'] == null ? null : (json['branch'] as String)),
@@ -1707,6 +1711,7 @@ final class CodeWorktree {
     isMain: (json['is_main'] == null ? false : (json['is_main'] as bool)),
     missing: (json['missing'] == null ? false : (json['missing'] as bool)),
     path: (json['path'] as String),
+    working: (json['working'] == null ? false : (json['working'] as bool)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -1717,6 +1722,7 @@ final class CodeWorktree {
     'is_main': isMain,
     'missing': missing,
     'path': path,
+    'working': working,
   };
 }
 
