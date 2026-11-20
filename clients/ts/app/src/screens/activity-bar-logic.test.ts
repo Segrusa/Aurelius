@@ -1,7 +1,16 @@
-import type { ActivityOverview, ActivityWaiting, TicketActivity } from "@aurelius/protocol";
+import type { ActivityOverview, ActivityWaiting, LoadSnapshot, TicketActivity } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import { areasOf } from "../data";
-import { activityCounts, PRIVATE_CHAT, ticketActivityLine, waitLabel, workLabel } from "./activity-bar-logic";
+import {
+  activityCounts,
+  machineFigures,
+  PRIVATE_CHAT,
+  serverLine,
+  ticketActivityLine,
+  waitLabel,
+  workHref,
+  workLabel,
+} from "./activity-bar-logic";
 
 const wait = (waits_for: string): ActivityWaiting => ({
   employee_name: "Ann",
@@ -59,5 +68,60 @@ describe("a ticket's line", () => {
 
   it("has words for a reason it does not know", () => {
     expect(waitLabel("something_new", "Ann")).toBe("Waiting");
+  });
+});
+
+describe("where a row leads", () => {
+  const sessions = new Set(["s1"]);
+
+  it("opens the ticket first, then the task, the channel or the chat", () => {
+    expect(workHref({ ticket_id: "k", task_id: "t", chat_id: "c" }, sessions)).toBe("/board?ticket=k");
+    expect(workHref({ task_id: "t", chat_id: "c" }, sessions)).toBe("/tasks/t");
+    expect(workHref({ channel_id: "ch" }, sessions)).toBe("/chat?channel=ch");
+    expect(workHref({ chat_id: "c" }, sessions)).toBe("/talk/c");
+  });
+
+  it("opens a chat that is a work session as that session", () => {
+    expect(workHref({ chat_id: "s1" }, sessions)).toBe("/session/s1");
+  });
+
+  it("leads nowhere for another board member's chat or work without a place", () => {
+    expect(workHref({ private: true, chat_id: "c" }, sessions)).toBeNull();
+    expect(workHref({ label: "x" }, sessions)).toBeNull();
+  });
+});
+
+describe("the server and its machine", () => {
+  const load = (over: Partial<LoadSnapshot> = {}): LoadSnapshot => ({
+    checks_active: true,
+    cpu_pct: 12.4,
+    gate: "open",
+    held: 0,
+    limits: { cpu_high: 90, cpu_low: 70, enabled: true, max_runs: 4, mem_min_mb: 1024 },
+    mem_free_mb: 4096,
+    mem_total_mb: 16384,
+    running: 0,
+    sampled_at_ms: 1,
+    ...over,
+  });
+
+  it("names the server with its version", () => {
+    expect(serverLine("atlas-box", "0.9.3")).toBe("atlas-box · v0.9.3");
+    expect(serverLine("atlas-box", null)).toBe("atlas-box");
+    expect(serverLine(null, null)).toBe("Aurelius");
+  });
+
+  it("shows CPU and the memory in use as whole percentages, with the amounts in the hint", () => {
+    expect(machineFigures(load())).toEqual({
+      cpu: "12%",
+      memory: "75%",
+      cpuHint: "CPU 12% (all cores, last ~10 s)",
+      memoryHint: "Memory 75% in use: 12.0 of 16.0 GB",
+    });
+  });
+
+  it("shows nothing where the server does not measure the machine", () => {
+    expect(machineFigures(load({ checks_active: false }))).toBeNull();
+    expect(machineFigures(load({ mem_total_mb: 0 }))).toBeNull();
   });
 });

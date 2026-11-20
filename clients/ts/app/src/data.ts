@@ -1,4 +1,4 @@
-import { ACTIVITY_REFRESH_MS } from "./screens/activity-bar-logic";
+import { ACTIVITY_REFRESH_MS, LOAD_REFRESH_MS } from "./screens/activity-bar-logic";
 import { ACTIVITY_LIMIT } from "./screens/board-logic";
 // Server data: a read per query key, refetched when an event says its area changed. Events come in
 // bursts while agents work, so a refetch waits for the burst, as the Rust client did (500 ms).
@@ -245,6 +245,27 @@ export function useActivityOverview() {
     enabled: status === "online" && user !== null && features.includes("activity_overview"),
     staleTime: 5_000,
     refetchInterval: ACTIVITY_REFRESH_MS,
+  });
+}
+
+/**
+ * The machine's CPU and memory for the status bar. The server pushes `load_changed` only while
+ * runs wait, so it is also read on a timer; the key is the one the load settings use.
+ */
+export function useMachineLoad() {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const { status, user } = useLinkState();
+  useEffect(
+    () => connection.loads.on((snapshot) => client.setQueryData(["settings", "load"], snapshot)),
+    [connection, client],
+  );
+  return useQuery({
+    queryKey: ["settings", "load"],
+    queryFn: async () => expectBody(await connection.call("load.get"), "load").value,
+    enabled: status === "online" && user !== null,
+    staleTime: 2_000,
+    refetchInterval: LOAD_REFRESH_MS,
   });
 }
 
