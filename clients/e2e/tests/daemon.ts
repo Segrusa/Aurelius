@@ -1,7 +1,7 @@
 // A real daemon with its own temporary data. No Claude, no Tailscale, nothing of this machine's.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -34,8 +34,71 @@ export async function until<T>(
   throw new Error(`Timed out waiting for ${what}.`);
 }
 
+const DIR_PREFIX = "aurelius-e2e-";
+const OWNER_FILE = "owner.pid";
+const PID_FILE = "daemon.pid";
+const SETPRIV = "/usr/bin/setpriv";
+
+/**
+ * On Linux the daemon gets SIGTERM when the test process dies, through util-linux `setpriv`
+ * (it execs, so the pid stays the daemon's). Without it a killed run (Ctrl-C, a tool's timeout)
+ * skips every `finally`, and its daemon lives on under init.
+ */
+function withParentDeath(bin: string): [string, string[]] {
+  if (process.platform !== "linux" || !existsSync(SETPRIV)) return [bin, []];
+  return [SETPRIV, ["--pdeathsig", "TERM", "--", bin]];
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readPid(file: string): number | null {
+  try {
+    const pid = Number.parseInt(readFileSync(file, "utf8"), 10);
+    return pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether `pid` still runs an aurelius-daemon, so a reused pid is never killed. */
+function isDaemon(pid: number): boolean {
+  if (process.platform !== "linux") return alive(pid);
+  try {
+    return /\/aurelius-daemon( \(deleted\))?$/.test(readlinkSync(`/proc/${pid}/exe`));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stops the daemons and removes the folders that earlier runs left behind: only those whose
+ * owning test process is gone, so another session's run that is still going is left alone.
+ * Returns how many folders it removed.
+ */
+export function cleanLeftovers(root = tmpdir()): number {
+  let removed = 0;
+  for (const name of readdirSync(root)) {
+    if (!name.startsWith(DIR_PREFIX)) continue;
+    const dir = join(root, name);
+    const owner = readPid(join(dir, OWNER_FILE));
+    if (owner !== null && alive(owner)) continue;
+    const daemon = readPid(join(dir, PID_FILE));
+    if (daemon !== null && isDaemon(daemon)) process.kill(daemon, "SIGTERM");
+    rmSync(dir, { recursive: true, force: true });
+    removed += 1;
+  }
+  return removed;
+}
+
 export class TestDaemon {
-  readonly dir = mkdtempSync(join(tmpdir(), "aurelius-e2e-"));
+  readonly dir = mkdtempSync(join(tmpdir(), DIR_PREFIX));
   readonly data = join(this.dir, "data");
   readonly socket = join(this.data, "ipc", "daemon.sock");
   port = 0;
@@ -43,7 +106,10 @@ export class TestDaemon {
 
   async start(): Promise<void> {
     this.port ||= await freePort();
-    this.process = spawn(BIN, [], {
+    // Who owns this daemon, so a later run can tell a leftover from another session's live test.
+    writeFileSync(join(this.dir, OWNER_FILE), String(process.pid));
+    const [program, args] = withParentDeath(BIN);
+    this.process = spawn(program, args, {
       env: {
         PATH: process.env.PATH,
         HOME: join(this.dir, "home"),
@@ -57,6 +123,7 @@ export class TestDaemon {
       },
       stdio: "ignore",
     });
+    if (this.process.pid) writeFileSync(join(this.dir, PID_FILE), String(this.process.pid));
     await until("the socket", () => existsSync(this.socket));
   }
 
