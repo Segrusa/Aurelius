@@ -26,8 +26,8 @@ which names a run may get, and the risks that remain.
 ### Moving the server: export and import
 
 1. **Export** (a board member, in the app): *Vault → Export key* asks for your
-   password again. Every board member sees a line in the Team chat that you
-   exported it; without that line (no general Team chat) the key is not
+   password again. Every board member gets a notification in their Inbox that you
+   exported it; if that notification cannot be written, the key is not
    exported. Whoever has the key opens every vault value and every backup of
    this server: keep it like a password.
 2. **Import** on the new machine, with the Aurelius daemon stopped, from a
@@ -63,8 +63,8 @@ which names a run may get, and the risks that remain.
   …) and the CA bundles. The cloud's own credentials (`AWS_*`, `GOOGLE_*`,
   `AZURE_*`) are allowed: Claude Code only uses them behind its provider
   switches, which stay refused, so they go to the tools the run calls. An
-  item whose key a newer Aurelius refuses is not delivered, and the Team chat
-  says so once per item.
+  item whose key a newer Aurelius refuses is not delivered, and every board
+  member is told in their Inbox, once per item.
 - Texts and URLs go to runs as well, but they are **not** redacted: anything
   that must stay hidden is a *secret*.
 

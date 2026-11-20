@@ -80,25 +80,16 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         }
         Method::GroupChatGet { channel } => {
             let store = shared.store().clone();
-            let found = storage_task(move || {
-                store.read(|c| match channel {
-                    None => aurelius_storage::conversations::group_conversation(c),
-                    // A channel, or a ticket's (feature `ticket_channels`; also read with `conversation.get`).
-                    Some(id) => Ok(match aurelius_storage::discussions::channels(c)?.into_iter().find(|ch| ch.conversation_id == id) {
-                        Some(ch) => Some(ch.conversation_id),
-                        None => aurelius_storage::discussions::ticket_of_conversation(c, id)?.map(|_| id),
-                    }),
-                })
-            })
-            .await?;
-            match (found, channel) {
-                (Some(conversation_id), _) => {
+            // Only a ticket's channel is left (feature `ticket_channels`; also read with `conversation.get`).
+            let Some(id) = channel else { return Err(ProtocolError::new(ErrorCode::NotFound, aurelius_application::conversation::discussion::TEAM_CHAT_GONE)) };
+            let found = storage_task(move || store.read(|c| Ok(aurelius_storage::discussions::ticket_of_conversation(c, id)?.map(|_| id)))).await?;
+            match found {
+                Some(conversation_id) => {
                     let body = messages(shared, conversation_id, reader).await?;
                     mark_read(shared, reader, conversation_id).await;
                     Ok(body)
                 }
-                (None, Some(_)) => Err(ProtocolError::new(ErrorCode::NotFound, "this channel does not exist")),
-                (None, None) => Err(ProtocolError::new(ErrorCode::NotFound, "the group chat does not exist")),
+                None => Err(ProtocolError::new(ErrorCode::NotFound, "this channel does not exist")),
             }
         }
         Method::ChannelList => channels(shared, reader, false, None).await,
@@ -970,9 +961,9 @@ async fn thread(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, r
     Ok(ResponseBody::Thread(aurelius_domain::views::ThreadSnapshot { as_of_seq, conversation_id, root: root_view, replies: messages, read_only }))
 }
 
-/// `channel.list` and `channel.search { query }`: General, the project channels
-/// and (`ticket_channels`: the connection accepts them) the ticket channels,
-/// open ones first, newest ticket first. A query keeps the channels whose name,
+/// `channel.list` and `channel.search { query }`: the ticket channels (the Team chat's
+/// General and project channels are gone), when the connection accepts them
+/// (`ticket_channels`), open ones first, newest ticket first. A query keeps the channels whose name,
 /// ticket title or ticket number matches it. A connection without `ticket_channels` gets exactly
 /// the list of before: no ticket channels and none of the new fields.
 pub(super) async fn channels(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, ticket_channels: bool, query: Option<String>) -> Result<ResponseBody, ProtocolError> {
@@ -990,26 +981,6 @@ pub(super) async fn channels(shared: &Arc<Shared>, reader: Option<aurelius_domai
             };
             let last = |id: ConversationId| c.query_row("SELECT MAX(created_at_ms) FROM messages WHERE conversation_id = ?1", [id.to_string()], |r| r.get::<_, Option<i64>>(0));
             let mut channels = Vec::new();
-            for ch in discussions::channels(c)? {
-                let name = if ch.project_id.is_none() { "General".to_owned() } else { ch.name };
-                if !query.as_deref().is_none_or(|q| channel_matches(&name, None, None, q)) {
-                    continue;
-                }
-                let (unread, mentions) = match &reader {
-                    Some((user, username)) => discussions::unread(c, *user, username, ch.conversation_id, &read_text)?,
-                    None => (0, 0),
-                };
-                let kind = if ch.project_id.is_none() { ChannelKind::General } else { ChannelKind::Project };
-                let read_through = match &reader {
-                    Some((user, _)) => discussions::read_through(c, *user, ch.conversation_id)?,
-                    None => None,
-                };
-                // Every board member is in General and the project channels.
-                channels.push(ChannelView {
-                    conversation_id: ch.conversation_id, project_id: ch.project_id, name, unread, mentions, archived: ch.read_only, last_activity_ms: last(ch.conversation_id)?,
-                    kind, ticket_id: None, ticket_number: None, ticket_column: None, member: reader.is_some(), member_count: None, read_through,
-                });
-            }
             if ticket_channels {
                 let mut tickets = discussions::ticket_channels(c)?;
                 // Open channels first; within each, the newest ticket first (as listed).

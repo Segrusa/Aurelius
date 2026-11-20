@@ -1,11 +1,10 @@
-//! Discussions (migration 19): the channels of the Team chat and the tickets'
-//! discussions. A channel is a conversation of kind `group`: the general one
-//! (the group chat of migration 17, no project) and one per project, made with
-//! the project. A ticket's discussion is a conversation of kind `ticket` with
-//! the ticket's project, made with the ticket (`tickets.conversation_id`).
+//! Discussions (migration 19): the tickets' discussions. A ticket's discussion is a
+//! conversation of kind `ticket` with the ticket's project, made with the ticket
+//! (`tickets.conversation_id`). The Team chat (the channels of kind `group`) is gone
+//! since migration 45.
 //!
-//! The loop limits of RULE 08 count over all of them together, per employee
-//! (`waking_posts`): a loop through three channels gets no more than one would.
+//! The loop limits of RULE 08 count over all discussions together, per employee
+//! (`waking_posts`): a loop through three tickets gets no more than one would.
 
 use crate::{StorageError, now_ms};
 use aurelius_domain::{ConversationId, EmployeeId, MessageId, ProjectId, RunId, TicketId, UserId, conversation::ConversationKind};
@@ -55,78 +54,13 @@ pub fn run_last_post_key(conn: &Connection, discussion: ConversationId, run: Run
         .optional()?)
 }
 
-// ---- channels ----
-
-/// The channel of a project (`Some`), or the general channel (`None`).
-pub fn channel(conn: &Connection, project: Option<ProjectId>) -> Result<Option<ConversationId>, StorageError> {
-    let id: Option<String> = match project {
-        None => conn
-            .query_row("SELECT id FROM conversations WHERE kind = 'group' AND project_id IS NULL", [], |r| r.get(0))
-            .optional()?,
-        Some(project) => conn
-            .query_row("SELECT id FROM conversations WHERE kind = 'group' AND project_id = ?1", [project.to_string()], |r| r.get(0))
-            .optional()?,
-    };
-    Ok(conversation_id(id))
-}
+// ---- discussions ----
 
 /// Whether the database has the channels and discussions (schema 19 or later).
 /// The v0.6 import and some fixtures write projects into an older schema;
 /// migration 19 then makes their channels.
 pub fn has_discussions(conn: &Connection) -> Result<bool, StorageError> {
     Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'one_project_channel')", [], |r| r.get(0))?)
-}
-
-/// Make a project's channel, titled with its name (`insert_project_projection`
-/// does, in the project's transaction). A project has at most one. None: the
-/// schema is older than 19 (see `has_discussions`).
-pub fn insert_project_channel(tx: &Transaction<'_>, project: ProjectId, name: &str) -> Result<Option<ConversationId>, StorageError> {
-    if !has_discussions(tx)? {
-        return Ok(None);
-    }
-    let id = ConversationId::new();
-    tx.execute(
-        "INSERT INTO conversations(id, kind, project_id, title, version, created_at_ms) VALUES (?1, 'group', ?2, ?3, 1, ?4)",
-        params![id.to_string(), project.to_string(), name, now_ms()],
-    )?;
-    Ok(Some(id))
-}
-
-/// A project's channel follows its name.
-pub fn rename_project_channel(tx: &Transaction<'_>, project: ProjectId, name: &str) -> Result<(), StorageError> {
-    tx.execute("UPDATE conversations SET title = ?2 WHERE kind = 'group' AND project_id = ?1", params![project.to_string(), name])?;
-    Ok(())
-}
-
-/// One channel of the Team chat.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Channel {
-    pub conversation_id: ConversationId,
-    /// None: the general channel.
-    pub project_id: Option<ProjectId>,
-    /// "Team chat" for the general channel, the project's name for the others.
-    pub name: String,
-    /// The project is archived: its channel is read-only.
-    pub read_only: bool,
-}
-
-/// The channels: the general one first, then the projects' by name.
-pub fn channels(conn: &Connection) -> Result<Vec<Channel>, StorageError> {
-    let mut stmt = conn.prepare(
-        "SELECT c.id, c.project_id, COALESCE(p.name, c.title), COALESCE(p.status = 'archived', 0)
-         FROM conversations c LEFT JOIN projects p ON p.id = c.project_id
-         WHERE c.kind = 'group'
-         ORDER BY c.project_id IS NOT NULL, p.name COLLATE NOCASE, c.created_at_ms, c.id",
-    )?;
-    let rows = stmt.query_map([], |r| {
-        Ok(Channel {
-            conversation_id: parse(ConversationId::parse(&r.get::<_, String>(0)?))?,
-            project_id: r.get::<_, Option<String>>(1)?.map(|p| parse(ProjectId::parse(&p))).transpose()?,
-            name: r.get(2)?,
-            read_only: r.get(3)?,
-        })
-    })?;
-    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 // ---- tickets ----

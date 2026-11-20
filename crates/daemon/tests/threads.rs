@@ -8,7 +8,7 @@
 mod common;
 
 use aurelius_client::Client;
-use aurelius_domain::employee::{CreateEmployee, LifecycleStatus, SetProjectStatus};
+use aurelius_domain::employee::CreateEmployee;
 use aurelius_domain::group_chat::{ReactToMessage, SendGroupMessage};
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::views::{MessageView, ThreadSnapshot};
@@ -95,7 +95,7 @@ async fn sent(stream: &mut BoxStream, command: Command) -> MessageId {
 async fn project_channel(client: &Client, name: &str) -> (ProjectId, ConversationId) {
     let created = client.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: name.into(), description: None, folder: None }), None)).await.unwrap();
     let CommandResult::ProjectCreated { project_id, .. } = created.result else { panic!("{:?}", created.result) };
-    let channel = client.channels().await.unwrap().channels.into_iter().find(|c| c.project_id == Some(project_id)).expect("its channel").conversation_id;
+    let channel = talk_channel(client, project_id).await;
     (project_id, channel)
 }
 
@@ -158,14 +158,15 @@ async fn a_nested_reply_and_a_reply_in_an_archived_channel_are_refused_with_code
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
-    let (project, channel) = project_channel(&client, "Atlas").await;
+    let (_, channel) = project_channel(&client, "Atlas").await;
     let mut new = raw(dir.path(), BOARD_MEMBER, NEW).await;
     let mut old = raw(dir.path(), BOARD_MEMBER, &[]).await;
     let root = sent(&mut new, send(channel, "Root", None)).await;
     let reply = sent(&mut new, send(channel, "Reply", Some(root))).await;
     let nested = write(&mut new, send(channel, "Nested", Some(reply))).await.unwrap_err();
     assert_eq!(nested.code, ErrorCode::Validation);
-    client.execute(aurelius_client::envelope(Command::SetProjectStatus(SetProjectStatus { project_id: project, status: LifecycleStatus::Archived }), None)).await.unwrap();
+    let ticket: String = common::db(dir.path()).query_row("SELECT id FROM tickets WHERE conversation_id = ?1", [channel.to_string()], |r| r.get(0)).unwrap();
+    client.ticket_command(Command::ArchiveTicket(aurelius_domain::ticket::ArchiveTicket { ticket_id: aurelius_domain::TicketId::parse(&ticket).unwrap() }), None).await.unwrap();
     assert_eq!(write(&mut new, send(channel, "Late", Some(root))).await.unwrap_err().code, ErrorCode::ChannelArchived);
     assert_eq!(write(&mut old, send(channel, "Late", Some(root))).await.unwrap_err().code, ErrorCode::Validation, "an older client never reads channel_archived");
     let react = Command::ReactToMessage(ReactToMessage { message_id: root, emoji: "👍".into(), on: true });

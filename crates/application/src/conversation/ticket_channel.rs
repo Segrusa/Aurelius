@@ -7,9 +7,7 @@
 //!   is ever removed.
 //! * Closed: on Done or archived, the channel is archived (read-only, still
 //!   listed and searchable); leaving Done reopens it. Never deleted.
-//! * Its events are system lines in the channel only. General gets exactly one
-//!   short line when a ticket opens and one when it closes, each with the
-//!   ticket and a link to its channel (`SystemLine::channel_id`).
+//! * Its events are system lines in the channel only.
 
 use super::discussion::{Discussion, actor_name, of_ticket, system_line};
 use aurelius_domain::ticket::{Actor, ColumnKind};
@@ -20,33 +18,25 @@ use aurelius_storage::{StorageError, Tx};
 use rusqlite::OptionalExtension;
 
 /// A new ticket's channel opens: its creator and the Owner join (the owner
-/// employee too, by `sync`), and General gets "‹by› opened #N" with the link.
-/// `in_general`: the ticket was made from a message in General, whose own line
-/// there already links to it (`created_from`); General then gets no second line.
-pub(crate) fn opened(tx: &Tx<'_>, ticket: TicketId, creator: UserId, in_general: bool) -> Result<Vec<EventNotice>, StorageError> {
-    opened_by(tx, ticket, creator, Actor::BoardMember { user_id: creator }, in_general)
+/// employee too, by `sync`).
+pub(crate) fn opened(tx: &Tx<'_>, ticket: TicketId, creator: UserId) -> Result<Vec<EventNotice>, StorageError> {
+    opened_by(tx, ticket, creator, Actor::BoardMember { user_id: creator })
 }
 
-/// `opened` for a ticket that `by` made for the board member `creator` (an employee's `create_ticket`):
-/// the line in General names `by`.
-pub(crate) fn opened_by(tx: &Tx<'_>, ticket: TicketId, creator: UserId, by: Actor, in_general: bool) -> Result<Vec<EventNotice>, StorageError> {
+/// `opened` for a ticket that `by` made for the board member `creator` (an employee's `create_ticket`).
+pub(crate) fn opened_by(tx: &Tx<'_>, ticket: TicketId, creator: UserId, by: Actor) -> Result<Vec<EventNotice>, StorageError> {
     let Some(d) = of_ticket(tx, ticket)? else { return Ok(Vec::new()) };
     let now = aurelius_storage::now_ms();
     discussions::join(tx, d.id, Member::User(creator), now)?;
     for owner in discussions::owners(tx)? {
         discussions::join(tx, d.id, Member::User(owner), now)?;
     }
-    let mut notices = sync(tx, ticket, Some(by))?;
-    if !in_general {
-        let by = actor_name(tx, Some(by))?;
-        notices.extend(general_line(tx, &d, SystemLineKind::TicketCreated, system_action::OPENED, &by, |n, title| format!("{by} opened #{n} “{title}”"))?);
-    }
-    Ok(notices)
+    sync(tx, ticket, Some(by))
 }
 
 /// Bring the channel of `ticket` in line with the ticket, after anything that
 /// changed it (`by`: who): its owner and its main task's employee join; on Done
-/// or archived it closes (a line here and one in General); off Done it reopens
+/// or archived it closes (a line here); off Done it reopens
 /// (a line here). Nothing changes when it already matches, so calling it again is safe.
 pub(crate) fn sync(tx: &Tx<'_>, ticket: TicketId, by: Option<Actor>) -> Result<Vec<EventNotice>, StorageError> {
     let Some(d) = of_ticket(tx, ticket)? else { return Ok(Vec::new()) };
@@ -66,7 +56,6 @@ pub(crate) fn sync(tx: &Tx<'_>, ticket: TicketId, by: Option<Actor>) -> Result<V
             discussions::set_ticket_channel_archived(tx, d.id, Some(now))?;
             let who = actor_name(tx, by)?;
             notices.extend(channel_line(tx, &d, SystemLineKind::Done, system_action::CLOSED, &who, &format!("#{} is closed · this channel can only be read now", t.number))?);
-            notices.extend(general_line(tx, &d, SystemLineKind::Done, system_action::CLOSED, &who, |n, title| format!("#{n} “{title}” closed · {who}"))?);
         }
         (false, Some(_)) => {
             discussions::set_ticket_channel_archived(tx, d.id, None)?;
@@ -88,15 +77,6 @@ fn channel_line(tx: &Tx<'_>, d: &Discussion, kind: SystemLineKind, action: &str,
     let mut line = SystemLine::new(kind).with_action(action);
     (line.by, line.ticket_id, line.channel_id) = (Some(by.to_owned()), Some(t.id), Some(d.id));
     Ok(vec![system_line(tx, d.id, &line, Some(text))?])
-}
-
-/// The one line in General about a ticket's channel (opened, closed), with the
-/// ticket and the link. Nothing without a General channel.
-fn general_line(tx: &Tx<'_>, d: &Discussion, kind: SystemLineKind, action: &str, by: &str, text: impl FnOnce(u32, &str) -> String) -> Result<Vec<EventNotice>, StorageError> {
-    let (Some(t), Some(general)) = (d.ticket(), super::discussion::general(tx)?) else { return Ok(Vec::new()) };
-    let mut line = SystemLine::new(kind).with_action(action);
-    (line.by, line.ticket_id, line.channel_id) = (Some(by.to_owned()), Some(t.id), Some(d.id));
-    Ok(vec![system_line(tx, general.id, &line, Some(&text(t.number, &t.title)))?])
 }
 
 #[cfg(test)]

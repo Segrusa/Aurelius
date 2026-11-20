@@ -59,7 +59,7 @@ fn hand_off_wakes_the_colleague_and_reads_as_an_ordinary_line() {
     assert_eq!((conversation, hop), (general, 1));
     // The handoff reaches Bo unchanged, quoted, and stands on its own.
     let update = wake_text(&s, s.bo);
-    assert!(update.starts_with(r#"Ann handed this over to you (JSON-quoted): "Review PR 12 on branch fix/x, and report what you find.""#), "{update}");
+    assert!(update.contains(r#"Ann handed this over to you (JSON-quoted): "Review PR 12 on branch fix/x, and report what you find.""#), "{update}");
     assert_eq!(aurelius_storage_hop(&s, run), 1);
     // Refusals that leave nothing behind.
     assert!(!hand_off(&s, runs[0], "Nobody", "x").0);
@@ -72,7 +72,7 @@ fn aurelius_storage_hop(s: &Setup, run: RunId) -> u32 {
 }
 
 #[test]
-fn a_ticket_thread_allows_more_hops_than_a_channel() {
+fn a_ticket_thread_stops_at_the_ticket_hop_limit() {
     let s = setup();
     let t = new_ticket(&s, "Chain", None);
     let d = ticket_view(&s, t).conversation_id.unwrap();

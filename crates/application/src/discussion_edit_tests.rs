@@ -158,9 +158,10 @@ fn only_the_author_may_change_a_message_and_not_a_decisions_feedback_or_a_delete
 #[test]
 fn a_closed_discussion_refuses_an_edit_and_a_delete() {
     let s = setup();
-    let orbit = channel(&s, s.project);
+    let t = new_ticket(&s, "Login", Some(s.ann));
+    let orbit = ticket_view(&s, t).conversation_id.unwrap();
     let message = sent_message(&s, Some(orbit), "Before the archive");
-    s.service.store().write(|tx| Ok(tx.execute("UPDATE projects SET status = 'archived'", [])?)).unwrap();
+    engine_puts(&s, t, ColumnKind::Done);
     assert_eq!(edit(&s, message, "After").unwrap_err().code, ErrorCode::ChannelArchived);
     assert_eq!(delete(&s, message).unwrap_err().code, ErrorCode::ChannelArchived);
     assert_eq!(view(&s, orbit, message).text, "Before the archive");

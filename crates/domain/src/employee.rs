@@ -211,8 +211,8 @@ pub struct CancelScheduledMessage {
     pub message_id: crate::ScheduledMessageId,
 }
 
-/// `employee.open_chat`: once the acting board member's lasting chat with this employee.
-/// Chatting with an employee is gone: the server refuses it (the command stays on the wire).
+/// `employee.open_chat`: the acting board member's lasting chat with this employee,
+/// made the first time (feature `employee_chats`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OpenEmployeeChat {
     pub employee_id: EmployeeId,

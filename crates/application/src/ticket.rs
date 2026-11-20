@@ -635,10 +635,8 @@ impl CommandService {
             if cmd.start || kind == TicketKind::Quick {
                 notices.extend(ticket_line::started(tx, &st, id, user)?);
             }
-            // Its channel opens; made from a message in General, that line there is the one.
-            let general = crate::conversation::discussion::general(tx)?.map(|d| d.id);
-            let in_general = source.as_ref().is_some_and(|(_, (conversation, _))| Some(*conversation) == general);
-            notices.extend(crate::conversation::ticket_channel::opened(tx, id, user, in_general)?);
+            // Its channel opens.
+            notices.extend(crate::conversation::ticket_channel::opened(tx, id, user)?);
             Ok(Ok((CommandResult::TicketCreated { ticket_id: id, number }, notices)))
         });
         self.discard_unused(&attachments, committed.as_ref().map_or(true, |c| c.receipt.replayed));

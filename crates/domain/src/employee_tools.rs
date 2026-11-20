@@ -62,7 +62,6 @@ pub const SWITCHABLE_TOOLS: &[SwitchableTool] = &[
     tool("mcp__aurelius__update_ticket", "Update tickets", COMPANY),
     tool("mcp__aurelius__move_ticket", "Move tickets", COMPANY),
     tool("mcp__aurelius__post_to_ticket", "Post on other tickets", COMPANY),
-    tool("mcp__aurelius__post_to_group_chat", "Post in channels", COMPANY),
     tool("mcp__aurelius__schedule_message", "Schedule messages", COMPANY),
     tool("mcp__aurelius__propose_colleague", "Propose a colleague", COMPANY),
     tool("mcp__aurelius__propose_instructions", "Propose instructions", COMPANY),

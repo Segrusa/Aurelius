@@ -67,6 +67,7 @@ pub const EMPLOYEE_CHAT_GONE: &str = "Chatting with an employee is no longer ava
 
 pub const CHAT_RUN_KIND: &str = "run.chat";
 
+pub mod board_notice;
 pub mod conversation;
 pub mod guideline;
 pub mod guideline_proposal;

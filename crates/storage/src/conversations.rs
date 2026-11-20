@@ -78,30 +78,6 @@ pub fn conversation_exists(tx: &Transaction<'_>, id: ConversationId) -> Result<b
     Ok(tx.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND employee_id IS NULL AND kind NOT IN ('group','ticket'))", [id.to_string()], |r| r.get(0))?)
 }
 
-/// The schema version whose migration makes the group chat.
-pub const GROUP_CHAT_SCHEMA: i64 = 17;
-
-/// Make the company's group chat (the general channel) again when its row is
-/// missing (a database edited or restored by hand): migration 17 makes it once,
-/// and `group_chat.get` only reads. Called when the store opens; true when it
-/// had to make it.
-pub fn ensure_group_conversation(conn: &Connection) -> Result<bool, StorageError> {
-    let made = conn.execute(
-        "INSERT INTO conversations(id, kind, title, version, created_at_ms)
-         SELECT ?1, 'group', 'Team chat', 1, ?2 WHERE NOT EXISTS (SELECT 1 FROM conversations WHERE kind = 'group' AND project_id IS NULL)",
-        params![ConversationId::new().to_string(), now_ms()],
-    )?;
-    Ok(made == 1)
-}
-
-/// The company's group chat, the general channel (migration 17 makes it). The
-/// projects' channels: `discussions::channel`.
-pub fn group_conversation(conn: &Connection) -> Result<Option<ConversationId>, StorageError> {
-    let id: Option<String> =
-        conn.query_row("SELECT id FROM conversations WHERE kind = 'group' AND project_id IS NULL ORDER BY created_at_ms, id LIMIT 1", [], |r| r.get(0)).optional()?;
-    Ok(id.and_then(|c| ConversationId::parse(&c).ok()))
-}
-
 /// The messages of the group chat that employees read: the user's and the
 /// employees' (kind `group`), complete. Notes of Aurelius are not among them.
 const GROUP_MESSAGES: &str = "FROM messages m JOIN blobs b ON b.id = m.content_blob_id

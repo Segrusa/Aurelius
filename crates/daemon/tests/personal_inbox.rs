@@ -59,7 +59,7 @@ async fn setup(client: &Client) -> (EmployeeId, ProjectId, ConversationId) {
     let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Forge".into(), role: "Engineer".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = run(client, Command::CreateEmployee(create)).await else { panic!() };
     let CommandResult::ProjectCreated { project_id, .. } = run(client, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })).await else { panic!() };
-    let channel = client.channels().await.unwrap().channels.into_iter().find(|c| c.project_id == Some(project_id)).expect("its channel").conversation_id;
+    let channel = talk_channel(client, project_id).await;
     (employee_id, project_id, channel)
 }
 
@@ -213,15 +213,12 @@ async fn a_mention_reaches_who_it_names_in_a_ticket_and_in_a_channel_and_holds_n
     assert!(rows_of(&alex, ticket).await.is_empty(), "naming yourself is no news");
     assert_eq!(db(dir.path()).query_row("SELECT COUNT(*) FROM notifications WHERE user_id = ?1", [cara_id.to_string()], |r| r.get::<_, i64>(0)).unwrap(), 0, "never to a disabled member");
 
-    // Outside a ticket: one row per channel, never a ticket's fields.
+    // Another ticket's channel: one row per ticket, merged, with the ticket's fields.
     say_in_channel(&alex, Some(channel), &format!("@bea {CANARY} one")).await;
     say_in_channel(&alex, Some(channel), &format!("@bea {CANARY} two")).await;
-    say_in_channel(&alex, None, &format!("@bea {CANARY} three")).await;
-    let outside: Vec<_> = inbox(&bea).await.into_iter().filter(|n| n.ticket_id.is_none()).collect();
-    assert_eq!(outside.len(), 2, "{outside:#?}");
-    let in_project = outside.iter().find(|n| n.conversation_id == Some(channel)).expect("the project's channel");
-    assert_eq!((in_project.merged_count, in_project.subject.as_str(), in_project.task_id), (1, "#Atlas", None));
-    assert!(outside.iter().any(|n| n.subject == "#general"), "{outside:#?}");
+    let in_channel: Vec<_> = inbox(&bea).await.into_iter().filter(|n| n.conversation_id == Some(channel)).collect();
+    assert_eq!(in_channel.len(), 1, "{in_channel:#?}");
+    assert_eq!(in_channel[0].merged_count, 1);
 
     // Never the text: not in any column of any row, in the view, or in any push.
     let stored: Vec<String> = db(dir.path())
@@ -234,7 +231,7 @@ async fn a_mention_reaches_who_it_names_in_a_ticket_and_in_a_channel_and_holds_n
     assert!(!stored.is_empty() && stored.iter().all(|s| !s.contains(CANARY)), "{stored:#?}");
     assert!(!serde_json::to_string(&inbox(&bea).await).unwrap().contains(CANARY));
     let pushes = all_pushes(dir.path());
-    assert!(pushes.len() >= 3, "{pushes:#?}");
+    assert!(pushes.len() >= 2, "{pushes:#?}");
     assert!(pushes.iter().all(|(_, alert)| !alert.contains(CANARY)), "{pushes:#?}");
     stop(dir.path(), daemon).await;
 }
@@ -521,34 +518,6 @@ async fn a_push_goes_per_person_only_to_their_iphones_and_never_to_android() {
     assert_eq!(alert.data["ticket_id"], serde_json::json!(ticket));
     assert_eq!(alert.data["reason"], "mention");
     assert_eq!(alert.title, "alex mentioned you");
-    stop(dir.path(), daemon).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_row_outside_a_ticket_names_its_channel_through_the_redactor_and_pushes_no_text() {
-    let secret = "sk-test-FAKE-channel-name-0000";
-    let owner = "personal-inbox-channel-name";
-    aurelius_runtime::redact::add_to_set(owner, aurelius_runtime::redact::Secret { name: "CHANNEL_NAME".into(), label: String::new(), value: zeroize::Zeroizing::new(secret.into()) });
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = start(dir.path()).await;
-    let (alex, bea) = (connect(dir.path()).await, connect_as(dir.path(), "bea").await);
-    let store = Store::open(dir.path()).unwrap();
-    let CommandResult::ProjectCreated { project_id, .. } = run(&alex, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })).await else { panic!() };
-    let channel = alex.channels().await.unwrap().channels.into_iter().find(|c| c.project_id == Some(project_id)).expect("its channel").conversation_id;
-    // A name with a secret in it can only come from before that secret was in the vault.
-    let name = format!("Atlas {secret}");
-    store.write(move |tx| Ok(tx.execute("UPDATE projects SET name = ?1 WHERE id = ?2", rusqlite::params![name, project_id.to_string()])?)).unwrap();
-
-    say_in_channel(&alex, Some(channel), &format!("@bea {CANARY}")).await;
-    let row = inbox(&bea).await.into_iter().find(|n| n.conversation_id == Some(channel)).expect("a row");
-    assert!(row.subject.starts_with("#Atlas ") && !row.subject.contains(secret), "{}", row.subject);
-    assert_eq!(row.ticket_id, None);
-    let stored: String = db(dir.path()).query_row("SELECT metadata_json FROM events WHERE json_extract(metadata_json, '$.mentioned_users') IS NOT NULL ORDER BY seq DESC LIMIT 1", [], |r| r.get(0)).unwrap();
-    assert!(!stored.contains(secret) && !stored.contains(CANARY), "{stored}");
-    let (found, alert) = all_pushes(dir.path()).into_iter().find(|(f, _)| f.view.id == row.id).expect("a push");
-    assert_eq!(found.view.subject, row.subject);
-    assert!(!alert.contains(secret) && !alert.contains(CANARY), "{alert}");
-    aurelius_runtime::redact::install_set(owner, Vec::new());
     stop(dir.path(), daemon).await;
 }
 

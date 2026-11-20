@@ -148,8 +148,6 @@ pub fn insert_project_projection(
          VALUES (?1, ?2, ?3, ?4, 'active', 1, ?5, ?5)",
         params![pid, scope_id, name, description_blob_id, now],
     )?;
-    // Its channel in the Team chat, in the same transaction (migration 19).
-    crate::discussions::insert_project_channel(tx, project_id, name)?;
     Ok(())
 }
 
@@ -166,7 +164,7 @@ pub fn rename_project_projection(
     if changed != 1 {
         return Err(StorageError::Rejected("project projection is out of date".into()));
     }
-    crate::discussions::rename_project_channel(tx, project_id, name)
+    Ok(())
 }
 
 /// The description lives in a blob; `None` clears it.

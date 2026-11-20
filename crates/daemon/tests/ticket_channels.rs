@@ -2,7 +2,8 @@
 //! discussion is its channel. Only a connection that accepts `ticket_channels`
 //! sees ticket channels in `channel.list` and gets the code `channel_archived`;
 //! an older one sees the list of before and still reads and posts in a ticket's
-//! discussion. General gets one line when a ticket opens and one when it closes.
+//! discussion. The Team chat (General and the project channels) is gone: a ticket's
+//! channel is all there is.
 
 mod common;
 
@@ -12,7 +13,7 @@ use aurelius_domain::group_chat::SendGroupMessage;
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::task::TaskStatus;
 use aurelius_domain::ticket::*;
-use aurelius_domain::views::{ChannelKind, ChannelView, MessageView, SystemLineKind, system_action};
+use aurelius_domain::views::{ChannelKind, ChannelView, SystemLineKind, system_action};
 use aurelius_domain::{AppError, Command, CommandId, CommandResult, ConversationId, EmployeeId, ErrorCode, ProjectId, TicketId};
 use aurelius_host::ipc::{self, BoxStream, read_frame, write_frame};
 use aurelius_protocol::{HelloParams, Method, Outcome, Receipt, Request, ResponseBody, ServerMessage, WriteMethod, WriteResult, client_feature};
@@ -105,15 +106,6 @@ async fn channel_of(client: &Client, id: TicketId) -> ConversationId {
     client.ticket(id).await.unwrap().ticket.conversation_id.expect("a discussion")
 }
 
-async fn general(client: &Client) -> Vec<MessageView> {
-    client.group_chat().await.unwrap().messages
-}
-
-/// The lines in General about `ticket`, as (kind, action, channel link, text).
-async fn general_lines(client: &Client, ticket: TicketId) -> Vec<(SystemLineKind, Option<String>, Option<ConversationId>, String)> {
-    general(client).await.into_iter().filter_map(|m| m.system.filter(|s| s.ticket_id == Some(ticket)).map(|s| (s.kind, s.action, s.channel_id, m.text))).collect()
-}
-
 fn members(root: &std::path::Path, channel: ConversationId) -> Vec<String> {
     let db = common::db(root);
     let mut stmt = db
@@ -154,32 +146,23 @@ async fn an_older_client_sees_the_list_of_before_and_still_works_in_a_ticket_dis
     let id = ticket(&client, atlas, "Fix the login page", None, false).await;
     let channel = channel_of(&client, id).await;
 
-    // The older client: General and the project channels, as before, none of the new fields.
+    // The older client: the list of before, which is empty now that the Team chat is gone, and no ticket channel in it.
     let after = list(&mut old, Method::ChannelList).await;
-    let shape = |c: &[ChannelView]| c.iter().map(|c| (c.name.clone(), c.conversation_id, c.project_id.is_some())).collect::<Vec<_>>();
-    assert_eq!(shape(&after), shape(&before));
-    assert_eq!(after.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["General", "Atlas", "Orbit"]);
-    for c in &after {
-        assert_eq!((c.kind, c.ticket_id, c.member, c.member_count, c.read_through), (ChannelKind::General, None, false, None, None), "{c:?}");
-        let json = serde_json::to_value(c).unwrap();
-        assert!(json.get("kind").is_none() && json.get("member").is_none(), "{json}");
-    }
+    assert!(before.is_empty() && after.is_empty(), "{after:?}");
     // It still posts and reads in the ticket's discussion (through TicketView::conversation_id).
     assert!(matches!(write(&mut old, post(id, "Which browser?")).await, Ok(CommandResult::TicketMessagePosted { .. })));
     let read = call(&mut old, Request::read(70, Method::ConversationGet { conversation_id: channel })).await;
     let Outcome::Ok(ResponseBody::Messages(snapshot)) = read else { panic!("{read:?}") };
     assert!(snapshot.messages.iter().any(|m| m.text == "Which browser?"));
 
-    // A client that shows ticket channels gets the ticket's, after the team channels.
+    // A client that shows ticket channels gets the ticket's.
     let mut new = raw(dir.path(), BOARD_MEMBER, NEW).await;
     let channels = list(&mut new, Method::ChannelList).await;
-    assert_eq!(channels.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["General", "Atlas", "Orbit", "#1-fix-the-login-page"]);
-    let mine = &channels[3];
+    assert_eq!(channels.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["#1-fix-the-login-page"]);
+    let mine = &channels[0];
     assert_eq!((mine.kind, mine.ticket_id, mine.ticket_number, mine.ticket_column, mine.conversation_id), (ChannelKind::Ticket, Some(id), Some(1), Some(ColumnKind::Backlog), channel));
     assert!(mine.member && !mine.archived, "{mine:?}");
     assert_eq!(mine.member_count, Some(1), "alex made it and is the Owner");
-    assert_eq!(channels[0].kind, ChannelKind::General);
-    assert_eq!(channels[1].kind, ChannelKind::Project);
     // channel.search finds it by number and by name; an older client never gets ticket channels there.
     assert_eq!(list(&mut new, Method::ChannelSearch { query: "#1".into() }).await.iter().map(|c| c.conversation_id).collect::<Vec<_>>(), [channel]);
     assert_eq!(list(&mut new, Method::ChannelSearch { query: "LOGIN".into() }).await.len(), 1);
@@ -198,7 +181,7 @@ async fn an_older_client_sees_the_list_of_before_and_still_works_in_a_ticket_dis
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn general_gets_one_line_when_a_ticket_opens_and_one_when_it_closes_and_its_events_stay_in_its_channel() {
+async fn a_ticket_opening_and_closing_leave_their_lines_in_its_own_channel_only() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect_as(dir.path(), "grace").await;
@@ -209,14 +192,9 @@ async fn general_gets_one_line_when_a_ticket_opens_and_one_when_it_closes_and_it
     until(&client, id, ColumnKind::Review, TaskStatus::Review).await;
     client.ticket_command(Command::AcceptTicket(AcceptTicket { confirm_secret: false, ticket_id: id, note: None }), None).await.unwrap();
 
-    let lines = general_lines(&client, id).await;
-    assert_eq!(lines.len(), 2, "{lines:#?}");
-    assert_eq!((lines[0].0, lines[0].1.as_deref(), lines[0].2), (SystemLineKind::TicketCreated, Some(system_action::OPENED), Some(channel)));
-    assert_eq!(lines[0].3, "grace opened #1 “Login page”");
-    assert_eq!((lines[1].0, lines[1].1.as_deref(), lines[1].2), (SystemLineKind::Done, Some(system_action::CLOSED), Some(channel)));
-    assert_eq!(lines[1].3, "#1 “Login page” closed · grace");
-    // Nothing else of the ticket went to General: every other line is in its channel.
-    assert_eq!(general(&client).await.iter().filter(|m| m.system.is_some()).count(), 2);
+    // There is no General to tell: every line is in the ticket's channel.
+    assert!(client.group_chat().await.is_err(), "the Team chat is gone");
+    assert_eq!(common::db(dir.path()).query_row::<i64, _, _>("SELECT COUNT(*) FROM conversations WHERE kind = 'group'", [], |r| r.get(0)).unwrap(), 0);
     let own = client.messages(channel).await.unwrap().messages;
     let texts: Vec<&str> = own.iter().filter(|m| m.system.is_some()).map(|m| m.text.as_str()).collect();
     assert!(texts.iter().any(|t| t.ends_with("the ticket moved from Backlog to Todo")) && texts.contains(&"grace accepted the report and moved the ticket to Done"), "{texts:#?}");
@@ -254,7 +232,6 @@ async fn a_closed_channel_refuses_writes_with_channel_archived_and_stays_listed_
     let found = list(&mut new, Method::ChannelSearch { query: "old".into() }).await;
     assert_eq!(found.len(), 1);
     assert!(found[0].archived && found[0].kind == ChannelKind::Ticket, "{:?}", found[0]);
-    assert_eq!(general_lines(&client, id).await.iter().map(|l| l.1.clone()).collect::<Vec<_>>(), [Some("opened".to_owned()), Some("closed".to_owned())]);
 
     drop(client);
     stop(dir.path(), daemon).await;
@@ -278,7 +255,7 @@ async fn channel_search_finds_a_ticket_channel_by_several_words_of_its_title_als
         assert_eq!(found(list(&mut new, Method::ChannelSearch { query: query.into() }).await), only_mine, "{query}");
     }
     assert!(list(&mut new, Method::ChannelSearch { query: "reset the password".into() }).await.is_empty());
-    // Both titles have "reset"; General and the project channel have neither.
+    // Both titles have "reset".
     assert_eq!(list(&mut new, Method::ChannelSearch { query: "reset".into() }).await.len(), 2);
 
     drop(client);
@@ -286,7 +263,7 @@ async fn channel_search_finds_a_ticket_channel_by_several_words_of_its_title_als
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_closed_tickets_channel_reports_no_unread_and_no_mentions_but_an_archived_projects_channel_still_does() {
+async fn a_closed_tickets_channel_reports_no_unread_and_no_mentions() {
     // Trace R1 m5 (Titan): old closed tickets never light up the Team badge.
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
@@ -299,19 +276,13 @@ async fn a_closed_tickets_channel_reports_no_unread_and_no_mentions_but_an_archi
         client.execute(aurelius_client::envelope(post(id, "@Robin can you look?"), None)).await.unwrap();
     }
     client.ticket_command(Command::ArchiveTicket(ArchiveTicket { ticket_id: closed }), None).await.unwrap();
-    let mut alex = raw(dir.path(), BOARD_MEMBER, NEW).await;
-    let atlas_channel = list(&mut alex, Method::ChannelList).await.into_iter().find(|c| c.kind == ChannelKind::Project).unwrap().conversation_id;
-    assert!(matches!(write(&mut alex, send(atlas_channel, "@Robin the project too")).await, Ok(CommandResult::GroupMessageSent { .. })));
-    let archive = aurelius_domain::employee::SetProjectStatus { project_id: atlas, status: aurelius_domain::employee::LifecycleStatus::Archived };
-    client.execute(aurelius_client::envelope(Command::SetProjectStatus(archive), None)).await.unwrap();
 
     let mut robin = raw(dir.path(), "robin", NEW).await;
     let channels = list(&mut robin, Method::ChannelList).await;
-    let of = |ticket: Option<TicketId>| channels.iter().find(|c| if ticket.is_some() { c.ticket_id == ticket } else { c.conversation_id == atlas_channel }).unwrap();
-    let (o, c, p) = (of(Some(open)), of(Some(closed)), of(None));
+    let of = |ticket: TicketId| channels.iter().find(|c| c.ticket_id == Some(ticket)).unwrap();
+    let (o, c) = (of(open), of(closed));
     assert!(!o.archived && o.unread >= 1 && o.mentions == 1, "{o:?}");
     assert!(c.archived && (c.unread, c.mentions) == (0, 0), "{c:?}");
-    assert!(p.archived && p.unread >= 1 && p.mentions == 1, "{p:?}");
 
     drop(client);
     stop(dir.path(), daemon).await;

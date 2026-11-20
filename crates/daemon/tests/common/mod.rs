@@ -203,6 +203,13 @@ pub async fn backlog_ticket(client: &Client, project_id: aurelius_domain::Projec
     ticket_id
 }
 
+/// The discussion of a ticket made for the purpose: the place where a test writes in a channel (a project's
+/// channel of the Team chat was that once).
+pub async fn talk_channel(client: &Client, project_id: aurelius_domain::ProjectId) -> aurelius_domain::ConversationId {
+    let ticket = backlog_ticket(client, project_id, "Talk").await;
+    client.ticket(ticket).await.unwrap().ticket.conversation_id.expect("a discussion")
+}
+
 /// A runtime that, in a run offered `report_ready` (the owner's run of a ticket's main task),
 /// reports the work ready through the daemon's bridge before the run starts, as an owner
 /// that finished would. Every other run is the inner runtime's, unchanged.

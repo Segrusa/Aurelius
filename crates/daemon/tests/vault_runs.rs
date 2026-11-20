@@ -210,7 +210,7 @@ async fn a_redactor_that_cannot_be_filled_delivers_nothing() {
 }
 
 /// SEC1 m4: an item whose env name runs may no longer have (an older rule)
-/// is told about in the Team chat once, not at every run.
+/// is told about in every board member's Inbox once, not at every run.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_name_is_told_once() {
     let dir = tempfile::tempdir().unwrap();
@@ -230,7 +230,7 @@ async fn a_refused_name_is_told_once() {
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     }
-    let told = client.group_chat().await.unwrap().messages.iter().filter(|m| m.text.contains("did not get NODE_OPTIONS")).count();
+    let told = client.notifications().await.unwrap().notifications.iter().filter(|n| n.title.contains("did not get NODE_OPTIONS")).count();
     assert_eq!(told, 1);
     drop(client);
     stop(dir.path(), daemon).await;

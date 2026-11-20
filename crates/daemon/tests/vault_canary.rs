@@ -290,8 +290,9 @@ async fn a_canary_secret_reaches_the_runs_environment_and_nothing_else() {
     assert!(answer.text.contains("«secret:CANARY_TOKEN»"), "{}", answer.text);
     assert!(answer.text.contains("The token is «secret:CANARY_TOKEN», as asked."), "split over two deltas: {}", answer.text);
 
-    // B10: a board member pastes it, confirmed, in the general channel.
-    let paste = aurelius_domain::group_chat::SendGroupMessage { text: format!("the key: {CANARY}"), images: vec![], files: vec![], channel: None, confirm_secret: false, thread_parent: None };
+    // B10: a board member pastes it, confirmed, in a ticket's channel.
+    let talk = common::talk_channel(&client, project_a).await;
+    let paste = aurelius_domain::group_chat::SendGroupMessage { text: format!("the key: {CANARY}"), images: vec![], files: vec![], channel: Some(talk), confirm_secret: false, thread_parent: None };
     assert!(client.send_group_message(paste.clone()).await.is_err());
     client.send_group_message(aurelius_domain::group_chat::SendGroupMessage { confirm_secret: true, ..paste }).await.unwrap();
 

@@ -321,7 +321,7 @@ pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>
         },
     )?;
     let mut notices = settle_created(tx, id, e)?;
-    notices.extend(ticket_channel::opened_by(tx, id, user, by, false)?);
+    notices.extend(ticket_channel::opened_by(tx, id, user, by)?);
     notices.extend(agent_line(tx, id, by, "created this ticket")?);
     let project_name = crate::queries_project_name(tx, project).unwrap_or_default();
     Ok((true, format!("Created ticket #{number} “{title}” in project {project_name}, in Backlog. It does not start by itself: a manager starts it (move_ticket to todo) or a board member."), notices))
@@ -473,8 +473,8 @@ pub(crate) fn move_to(tx: &Tx<'_>, st: &Store, run: RunId, ticket_needle: &str, 
     Ok((true, format!("Started ticket #{}: it is in Todo and the dispatcher chooses its owner.", view.number), notices))
 }
 
-/// `post_to_ticket`: a message in the discussion of any shown ticket, as `post_to_group_chat`
-/// does in a channel (same limits, wake budget and read-only rules; a ticket on Done is read-only).
+/// `post_to_ticket`: a message in the discussion of any shown ticket, as `post_to_discussion`
+/// does in the run's own (same limits, wake budget and read-only rules; a ticket on Done is read-only).
 pub(crate) fn post(tx: &Tx<'_>, st: &Store, run: RunId, ticket_needle: &str, message: &str) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     if caller(tx, run)?.is_none() {
         return refuse(EMPLOYEES_ONLY);

@@ -21,7 +21,7 @@ use std::time::Duration;
 async fn project_channel(client: &Client, name: &str) -> (ProjectId, ConversationId) {
     let created = client.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: name.into(), description: None, folder: None }), None)).await.unwrap();
     let CommandResult::ProjectCreated { project_id, .. } = created.result else { panic!("{:?}", created.result) };
-    let channel = client.channels().await.unwrap().channels.into_iter().find(|c| c.project_id == Some(project_id)).expect("its channel").conversation_id;
+    let channel = talk_channel(client, project_id).await;
     (project_id, channel)
 }
 
@@ -84,9 +84,10 @@ async fn message_locate_finds_a_message_of_a_channel_with_its_thread() {
     let reply = post(&client, channel, "Yes", Some(root)).await;
 
     let found = client.message_locate(root).await.unwrap();
-    assert_eq!((found.message_id, found.conversation_id, found.ticket_id, found.ticket_number, found.thread_root), (root, channel, None, None, None));
+    assert_eq!((found.message_id, found.conversation_id, found.ticket_number, found.thread_root), (root, channel, Some(1), None));
+    assert!(found.ticket_id.is_some(), "a ticket's channel names its ticket");
     let found = client.message_locate(reply).await.unwrap();
-    assert_eq!((found.message_id, found.conversation_id, found.ticket_id, found.thread_root), (reply, channel, None, Some(root)));
+    assert_eq!((found.message_id, found.conversation_id, found.thread_root), (reply, channel, Some(root)));
 
     drop(client);
     stop(dir.path(), daemon).await;
@@ -338,7 +339,8 @@ async fn a_connection_without_accepts_gets_neither_new_event_in_the_replay() {
     assert!(kinds.contains(&EventKind::MessageUserCommitted), "the rest of the log comes: {kinds:?}");
 
     let kinds = replayed_kinds(&mut raw(dir.path(), &[client_feature::TEAM_CHANNELS, client_feature::TICKET_FOLLOW]).await).await;
-    assert_eq!((count(&kinds, EventKind::TicketFollowChanged), count(&kinds, EventKind::MessageEdited)), (1, 0), "{kinds:?}");
+    // The channel's ticket and the one made here: two creators' follows.
+    assert_eq!((count(&kinds, EventKind::TicketFollowChanged), count(&kinds, EventKind::MessageEdited)), (2, 0), "{kinds:?}");
 
     let kinds = replayed_kinds(&mut raw(dir.path(), &[client_feature::TEAM_CHANNELS, client_feature::MESSAGE_EDITS]).await).await;
     assert_eq!((count(&kinds, EventKind::TicketFollowChanged), count(&kinds, EventKind::MessageEdited)), (0, 1), "{kinds:?}");

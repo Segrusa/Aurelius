@@ -320,15 +320,16 @@ async fn the_author_of_every_message_and_write_is_the_sessions_board_member() {
     let robin = common::connect_as(dir.path(), "robin").await;
     let alex_id: UserId = alex.user_whoami().await.unwrap().user.unwrap().id;
     let robin_id: UserId = robin.user_whoami().await.unwrap().user.unwrap().id;
+    let project = project(&robin).await;
+    let channel = common::talk_channel(&robin, project).await;
     for (client, text) in [(&alex, "From Alex"), (&robin, "From Robin")] {
-        let send = SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel: None, thread_parent: None };
+        let send = SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel: Some(channel), thread_parent: None };
         client.execute(aurelius_client::envelope(Command::SendGroupMessage(send), None)).await.unwrap();
     }
-    let messages = alex.group_chat().await.unwrap().messages;
+    let messages = alex.channel_messages(channel).await.unwrap().messages;
     let author = |text: &str| messages.iter().find(|m| m.text == text).and_then(|m| m.author_user.as_ref().map(|u| u.id));
     assert_eq!((author("From Alex"), author("From Robin")), (Some(alex_id), Some(robin_id)));
 
-    let project = project(&robin).await;
     let made = robin.ticket_command(ticket(project, "By Robin"), None).await.unwrap();
     let CommandResult::TicketCreated { ticket_id, .. } = made.result else { panic!() };
     let db = common::db(dir.path());

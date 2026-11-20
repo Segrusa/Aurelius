@@ -7,7 +7,7 @@ use crate::run::approvals::RuntimePermission;
 use crate::task::task_runs::EmployeeAction;
 use aurelius_domain::company::{UpdateProject};
 use aurelius_domain::employee::CreateEmployee;
-use aurelius_domain::group_chat::{MAX_HOPS, SendGroupMessage, WAKING_POSTS_PER_RUN, WAKING_POSTS_PER_WINDOW};
+use aurelius_domain::group_chat::{SendGroupMessage, TICKET_MAX_HOPS, WAKING_POSTS_PER_RUN, WAKING_POSTS_PER_WINDOW};
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::ticket::{self, ColumnKind, SetDispatcher};
 use aurelius_domain::views::{SystemLine, SystemLineKind};
@@ -62,15 +62,35 @@ fn setup() -> Setup {
     Setup { _dir: dir, service, project: project_id, user, ceo, ann, bo, cy }
 }
 
+/// A ticket the CEO owns (it stays in Backlog), made the first time it is asked for: the place where the tests that
+/// only need somewhere to say something write (the Team chat's General channel was that once).
+fn home(s: &Setup) -> TicketId {
+    let found: Option<String> = s.service.store().read(|c| Ok(c.query_row("SELECT id FROM tickets WHERE title = 'Home'", [], |r| r.get(0)).ok())).unwrap();
+    match found.and_then(|t| TicketId::parse(&t).ok()) {
+        Some(ticket) => ticket,
+        None => new_ticket(s, "Home", Some(s.ceo)),
+    }
+}
+
+/// The discussion of `home`.
 fn general(s: &Setup) -> ConversationId {
-    s.service.store().read(aurelius_storage::conversations::group_conversation).unwrap().unwrap()
+    ticket_view(s, home(s)).conversation_id.unwrap()
 }
 
-fn channel(s: &Setup, project: ProjectId) -> ConversationId {
-    s.service.store().read(|c| aurelius_storage::discussions::channel(c, Some(project))).unwrap().expect("a project channel")
+/// The discussion of a second ticket nobody owns, for the tests that need two places to write in
+/// (a project's channel of the Team chat was that once).
+fn channel(s: &Setup, _project: ProjectId) -> ConversationId {
+    let found: Option<String> = s.service.store().read(|c| Ok(c.query_row("SELECT id FROM tickets WHERE title = 'Orbit talk'", [], |r| r.get(0)).ok())).unwrap();
+    let ticket = match found.and_then(|t| TicketId::parse(&t).ok()) {
+        Some(ticket) => ticket,
+        None => new_ticket(s, "Orbit talk", None),
+    };
+    ticket_view(s, ticket).conversation_id.unwrap()
 }
 
+/// A board member writes with `group_chat.send`: in the discussion `channel` of a ticket, else in `home`.
 fn send(s: &Setup, channel: Option<ConversationId>, text: &str) -> Result<(Vec<EmployeeId>, Vec<RunId>), AppError> {
+    let channel = Some(channel.unwrap_or_else(|| general(s)));
     match exec(s, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel, thread_parent: None }))? {
         CommandResult::GroupMessageSent { to, run_ids, .. } => Ok((to, run_ids)),
         other => panic!("{other:?}"),
@@ -121,8 +141,9 @@ fn act(s: &Setup, run: RunId, action: EmployeeAction) -> (bool, String) {
     (ok, text)
 }
 
-fn post_in_channel(s: &Setup, run: RunId, channel: Option<&str>, message: &str) -> (bool, String) {
-    act(s, run, EmployeeAction::PostToGroupChat { message: message.into(), channel: channel.map(str::to_owned) })
+/// A post of a run in the discussion that woke it (the Team chat's `post_to_group_chat` was that once).
+fn post_in_channel(s: &Setup, run: RunId, _channel: Option<&str>, message: &str) -> (bool, String) {
+    post_in_discussion(s, run, message)
 }
 
 fn post_in_discussion(s: &Setup, run: RunId, message: &str) -> (bool, String) {
@@ -189,11 +210,11 @@ fn a_non_lead_is_woken_with_a_scoped_view_and_the_lead_with_the_whole_thread() {
     let ann = wake_text(&s, s.ann);
     assert!(ann.contains("please look at the logs"), "{ann}");
     assert!(!ann.contains("release date"), "not addressed to her: {ann}");
-    assert!(ann.contains("Other messages in this thread, not shown here: 1. read_group_chat reads them."), "{ann}");
+    assert!(ann.contains("Other messages in this thread, not shown here: 1. read_discussion reads them."), "{ann}");
     assert!(ann.contains("The lead of this thread is @Atlas."), "{ann}");
 
     // The CEO leads the general channel: everything, with no note.
-    send(&s, None, "And what does the boss think?").unwrap();
+    send(&s, None, "@Atlas And what does the boss think?").unwrap();
     let ceo = wake_text(&s, s.ceo);
     assert!(ceo.contains(r#""text":"@Ann please look at the logs"}"#) && ceo.contains(r#""board_member":true"#) && ceo.contains("release date"), "{ceo}");
     assert!(!ceo.contains("Scoped view") && ceo.contains("You are the lead of this thread"), "{ceo}");
@@ -217,7 +238,7 @@ fn the_full_thread_stays_readable_with_the_tool() {
     send(&s, None, "@Bo private to Bo").unwrap();
     let (_, runs) = send(&s, None, "@Ann your turn").unwrap();
     assert!(!wake_text(&s, s.ann).contains("private to Bo"));
-    let (ok, text) = act(&s, runs[0], EmployeeAction::ReadGroupChat { last: None, channel: None });
+    let (ok, text) = act(&s, runs[0], EmployeeAction::ReadDiscussion { last: None });
     assert!(ok && text.contains("private to Bo") && text.contains("your turn"), "{text}");
 }
 
@@ -258,50 +279,7 @@ fn a_message_that_woke_the_run_is_marked_new() {
     let s = setup();
     let (_, runs) = send(&s, None, "@Ann start").unwrap();
     let turn = plan_of(&s, runs[0]).turns.last().unwrap().text.clone();
-    assert!(turn.starts_with("[Group chat · from Owner] (new)\n"), "{turn}");
-}
-
-#[test]
-fn the_general_channel_wakes_the_ceo_and_a_project_channel_its_dispatcher() {
-    let s = setup();
-    // General, no @: the CEO, at hop 0, answering in the general channel.
-    let (to, runs) = send(&s, None, "How are we doing?").unwrap();
-    assert_eq!((to, runs.len()), (vec![s.ceo], 1));
-    assert_eq!(woken(&s, s.ceo), vec![(runs[0], general(&s), 0)]);
-
-    // The project's channel, no @, no dispatcher: the CEO, answering in that channel.
-    let orbit = channel(&s, s.project);
-    let (to, runs) = send(&s, Some(orbit), "Status of Orbit?").unwrap();
-    assert_eq!(to, vec![s.ceo]);
-    assert_eq!(last_woken(&s, s.ceo), (runs[0], orbit, 0));
-    // With a dispatcher for the project: that one.
-    exec(&s, Command::UpdateProject(UpdateProject { styleguide_url: None, project_id: s.project, dispatcher: Some(SetDispatcher { employee_id: Some(s.bo) }) })).unwrap();
-    let (to, _) = send(&s, Some(orbit), "And now?").unwrap();
-    assert_eq!(to, vec![s.bo]);
-    let update = messages(&s, aurelius_storage_main_chat(&s, s.bo)).into_iter().last().unwrap();
-    assert!(update.text.starts_with("In the #Orbit channel of the Team chat"), "{}", update.text);
-    assert!(update.text.contains("From the board member grace:\nAnd now?"), "{}", update.text);
-    // @Name wins over the dispatcher, and the answer is copied to the same channel.
-    let (to, runs) = send(&s, Some(orbit), "@Ann can you look?").unwrap();
-    assert_eq!(to, vec![s.ann]);
-    s.service
-        .store()
-        .write({
-            let st = s.service.store().clone();
-            let chat = aurelius_storage_main_chat(&s, s.ann);
-            let run = runs[0];
-            move |tx| discussion::mirror_answer(tx, &st, run, chat, "On it.", None, &[], None)
-        })
-        .unwrap();
-    let answer = messages(&s, orbit).into_iter().find(|m| m.text == "On it.").expect("copied to the channel");
-    assert_eq!(answer.author.as_deref(), Some("Ann"));
-    // The board member's messages carry their author.
-    assert!(messages(&s, orbit).iter().filter(|m| m.role == aurelius_domain::conversation::MessageRole::User).all(|m| m.author_user.as_ref().map(|u| u.username.as_str()) == Some("grace")));
-    // A ticket's discussion is its channel too (feature `ticket_channels`).
-    let t = new_ticket(&s, "Login", None);
-    let discussion = ticket_view(&s, t).conversation_id.unwrap();
-    send(&s, Some(discussion), "x").unwrap();
-    assert!(messages(&s, discussion).iter().any(|m| m.text == "x"));
+    assert!(turn.starts_with("[Discussion · from Owner] (new)\n"), "{turn}");
 }
 
 /// The conversation `employee` was last woken in: its own for that thread (R6), else its main chat.
@@ -356,19 +334,9 @@ fn a_mention_in_a_ticket_wakes_and_the_answer_comes_back_there() {
     let (ok, text) = post_in_discussion(&s, runs[0], "Looks fine to me.");
     assert!(ok, "{text}");
     assert!(messages(&s, d).iter().any(|m| m.text == "Looks fine to me." && m.author.as_deref() == Some("Bo")));
-    // Woken in the discussion, its group chat default is not the ticket: the project's channel.
-    let (ok, text) = post_in_channel(&s, runs[0], None, "FYI");
-    assert!(ok && text.starts_with("Posted in the #Orbit channel."), "{text}");
     // The non-owner did not touch the ticket.
     let view = ticket_view(&s, t);
     assert_eq!((view.column, view.root_task_id), (ColumnKind::Backlog, None));
-    // A run of the general channel has no ticket discussion.
-    let (_, runs) = send(&s, None, "@Cy hi").unwrap();
-    let (ok, text) = post_in_discussion(&s, runs[0], "x");
-    assert!(!ok && text.contains("no ticket discussion"), "{text}");
-    // Ticket discussions are not among the channels.
-    let channels = s.service.store().read(aurelius_storage::discussions::channels).unwrap();
-    assert!(channels.iter().all(|c| c.conversation_id != d));
 }
 
 #[test]
@@ -760,7 +728,7 @@ fn hops_stop_at_max_and_leave_a_system_line_that_wakes_nobody() {
     let (_, runs) = send(&s, None, "@Ann start").unwrap();
     let mut run = runs[0];
     let names = [("Bo", s.bo), ("Ann", s.ann)];
-    for hop in 1..=MAX_HOPS {
+    for hop in 1..=TICKET_MAX_HOPS {
         let (name, who) = names[(hop as usize + 1) % 2];
         let (ok, text) = hand_off(&s, run, name, "Your turn: check the release notes and report back.");
         assert!(ok && text.contains(&format!("{name} will answer")), "hop {hop}: {text}");
@@ -769,14 +737,14 @@ fn hops_stop_at_max_and_leave_a_system_line_that_wakes_nobody() {
         run = next;
     }
     let before = (woken(&s, s.ann).len(), woken(&s, s.bo).len());
-    // Bo (at hop MAX_HOPS) cannot hand over any more.
-    let (ok, text) = hand_off(&s, run, "Ann", "One more.");
+    // Ann (at hop TICKET_MAX_HOPS) cannot hand over any more.
+    let (ok, text) = hand_off(&s, run, "Bo", "One more.");
     assert!(!ok && text.contains("Limit reached") && text.contains("will not be woken"), "{text}");
-    assert_eq!((woken(&s, s.ann).len(), woken(&s, s.bo).len()), before, "nobody past MAX_HOPS");
+    assert_eq!((woken(&s, s.ann).len(), woken(&s, s.bo).len()), before, "nobody past TICKET_MAX_HOPS");
     let lines = system_lines(&s, general);
-    assert!(lines.contains(&(SystemLineKind::Limit, "Limit reached: Ann was not woken.".into())), "{lines:?}");
+    assert!(lines.contains(&(SystemLineKind::Limit, "Limit reached: Bo was not woken.".into())), "{lines:?}");
     // The system line itself names them, and is not part of what employees read.
-    let read = act(&s, run, EmployeeAction::ReadGroupChat { last: None, channel: None }).1;
+    let read = act(&s, run, EmployeeAction::ReadDiscussion { last: None }).1;
     assert!(!read.contains("Limit reached"), "{read}");
     // A system line written anywhere wakes nobody, even with @Name in it.
     let mut line = SystemLine::new(SystemLineKind::Moved);
@@ -824,18 +792,18 @@ fn waking_posts_are_capped_per_run_and_per_hour_over_three_discussions_together(
     assert!(hand_off(&s, r_ticket[0], "Cy", "Look.").1.contains("Cy will answer"));
     // ...and the fifth, in a third discussion, is refused.
     let (ok, text) = hand_off(&s, r_general[0], "Cy", "And here.");
-    assert!(!ok && text.contains("Limit reached") && text.contains("last hour") && text.contains("all channels and tickets together"), "{text}");
+    assert!(!ok && text.contains("Limit reached") && text.contains("last hour") && text.contains("all tickets together"), "{text}");
     for conversation in [general, orbit, d] {
         assert!(!messages(&s, conversation).is_empty());
     }
     assert!(system_lines(&s, general).iter().any(|(k, text)| *k == SystemLineKind::Limit && text == "Limit reached: Cy was not woken."));
     // A post still goes through: it wakes nobody.
-    let (ok, text) = post_in_channel(&s, r_general[0], None, "No mention.");
-    assert_eq!((ok, text.as_str()), (true, "Posted in the group chat."));
+    let (ok, text) = post_in_discussion(&s, r_general[0], "No mention.");
+    assert!(ok, "{text}");
 }
 
 #[test]
-fn a_ticket_on_done_and_an_archived_projects_channel_are_read_only() {
+fn a_ticket_on_done_is_read_only() {
     let s = setup();
     let t = new_ticket(&s, "Login", Some(s.ann));
     let (_, runs) = post(&s, t, "@Bo before").unwrap();
@@ -849,15 +817,14 @@ fn a_ticket_on_done_and_an_archived_projects_channel_are_read_only() {
     // Reading still works, and says so.
     let (ok, read) = act(&s, runs[0], EmployeeAction::ReadDiscussion { last: None });
     assert!(ok && read.contains("before") && read.contains("can only be read"), "{read}");
-    // Unknown channel: a clear refusal naming the channels.
-    let (ok, text) = post_in_channel(&s, runs[0], Some("Nowhere"), "x");
-    assert!(!ok && text.contains("There is no channel “Nowhere”") && text.contains("Orbit"), "{text}");
-    // Archived project: its channel can only be read.
-    exec(&s, Command::SetProjectStatus(aurelius_domain::employee::SetProjectStatus { project_id: s.project, status: aurelius_domain::employee::LifecycleStatus::Archived })).unwrap();
-    let orbit = channel(&s, s.project);
-    assert_eq!(send(&s, Some(orbit), "x").unwrap_err().code, ErrorCode::ChannelArchived);
-    let (ok, text) = post_in_channel(&s, runs[0], Some("Orbit"), "x");
-    assert!(!ok && text.contains("archived"), "{text}");
+    // The Team chat is gone: group_chat.send without a ticket's channel is refused with a clear text.
+    let gone = exec(&s, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "x".into(), images: vec![], files: vec![], channel: None, thread_parent: None })).unwrap_err();
+    assert_eq!((gone.code, gone.message.as_str()), (ErrorCode::NotFound, discussion::TEAM_CHAT_GONE));
+    // And an old call of its tools is refused.
+    let (ok, text) = act(&s, runs[0], EmployeeAction::PostToGroupChat { message: "x".into(), channel: None });
+    assert!(!ok && text.contains("no longer exists"), "{text}");
+    let (ok, text) = act(&s, runs[0], EmployeeAction::ReadGroupChat { last: None, channel: None });
+    assert!(!ok && text.contains("no longer exists"), "{text}");
 }
 
 #[test]
@@ -872,6 +839,7 @@ fn ticket_post_needs_a_board_member_and_an_existing_ticket() {
 
 /// The message `send` stored in a channel: its id.
 fn sent_message(s: &Setup, channel: Option<ConversationId>, text: &str) -> aurelius_domain::MessageId {
+    let channel = Some(channel.unwrap_or_else(|| general(s)));
     match exec(s, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: text.into(), images: vec![], files: vec![], channel, thread_parent: None })).unwrap() {
         CommandResult::GroupMessageSent { message_id, .. } => message_id,
         other => panic!("{other:?}"),
@@ -924,14 +892,10 @@ fn a_ticket_made_from_a_message_links_both_ways_and_wakes_nobody() {
     let first = messages(&s, discussion).into_iter().next().expect("a first line");
     let line = first.system.clone().expect("a system line first");
     assert_eq!((line.kind, line.conversation_id, line.message_id), (SystemLineKind::CreatedFrom, Some(orbit), Some(message)));
-    assert_eq!(first.text, format!("#{number} created from a message in the #Orbit channel · grace"));
+    assert_eq!(first.text, format!("#{number} created from a message in the discussion of #1 · grace"));
     assert_eq!(woken(&s, s.ceo).len() + woken(&s, s.ann).len(), before, "neither line wakes anyone");
 
-    // From the general channel and from an employee's chat as well.
-    let general = general(&s);
-    let hello = sent_message(&s, None, "And a PDF export?");
-    let (_, n) = ticket_from(&s, Some(hello), Some(s.user)).unwrap();
-    assert!(system_lines(&s, general).contains(&(SystemLineKind::TicketCreated, format!("grace created #{n} from a message"))));
+    // From an employee's chat as well.
     let (ann_ticket, chat, _) = {
         let (_, runs) = send(&s, None, "@Ann what about XML?").unwrap();
         assert!(!runs.is_empty());
@@ -946,9 +910,8 @@ fn a_ticket_made_from_a_message_links_both_ways_and_wakes_nobody() {
 }
 
 #[test]
-fn a_run_woken_in_a_projects_channel_works_in_that_projects_context() {
-    // MU2-08 AC4: the project's memory (and folder) for a run a project's channel woke;
-    // the company's context for one the General channel woke.
+fn a_run_woken_in_a_tickets_discussion_works_in_that_projects_context() {
+    // MU2-08 AC4: the project's memory (and folder) for a run a ticket's discussion woke.
     let s = setup();
     let orbit = channel(&s, s.project);
     let project = s.project;
@@ -961,11 +924,6 @@ fn a_run_woken_in_a_projects_channel_works_in_that_projects_context() {
     let in_project = plan_of(runs[0]);
     assert!(in_project.system.as_deref().unwrap().contains("The message you answer now comes from the project Orbit: answer in its context, with its memory"), "{:?}", in_project.system);
     assert!(in_project.manifest.as_ref().unwrap().scopes.contains(&scope), "the project's memory: {:?}", in_project.manifest);
-
-    let (_, runs) = send(&s, None, "@Bo how is the export going?").unwrap();
-    let in_general = plan_of(runs[0]);
-    assert!(!in_general.system.as_deref().unwrap().contains("comes from the project"), "{:?}", in_general.system);
-    assert!(!in_general.manifest.as_ref().unwrap().scopes.contains(&scope), "the company's context: {:?}", in_general.manifest);
 }
 
 #[test]
@@ -1141,18 +1099,36 @@ fn only_colleagues_that_can_be_woken_use_the_waking_budget() {
 }
 
 #[test]
-fn a_ticket_from_a_message_of_another_projects_channel_or_discussion_is_refused() {
-    // Sentinel n1: a message of a project (its channel, a ticket's discussion, a task)
-    // only makes a ticket in that project; the General channel and an employee's chat in any.
+fn a_ticket_from_a_message_of_another_projects_discussion_is_refused() {
+    // Sentinel n1: a message of a project (a ticket's discussion, a task)
+    // only makes a ticket in that project; an employee's chat in any.
     let s = setup();
     let made = exec(&s, Command::CreateProject(CreateProject { name: "Nova".into(), description: None, folder: None })).unwrap();
     let CommandResult::ProjectCreated { project_id: nova, .. } = made else { panic!("{made:?}") };
-    let elsewhere = sent_message(&s, Some(channel(&s, nova)), "Nova needs a logo");
+    let in_nova = ticket::CreateTicket {
+        responsible_user_id: None,
+        confirm_secret: false,
+        project_id: nova,
+        title: "Nova talk".into(),
+        description: None,
+        priority: Default::default(),
+        labels: vec![],
+        deadline_ms: None,
+        owner_employee_id: None,
+        run: Default::default(),
+        files: vec![],
+        start: false,
+        from_message: None,
+        from_idea: None,
+        kind: None,
+    };
+    let CommandResult::TicketCreated { ticket_id: nova_ticket, .. } = exec(&s, Command::CreateTicket(in_nova)).unwrap() else { panic!() };
+    let elsewhere = sent_message(&s, ticket_view(&s, nova_ticket).conversation_id, "Nova needs a logo");
     let err = ticket_from(&s, Some(elsewhere), Some(s.user)).unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation);
     assert!(err.message.contains("another project"), "{}", err.message);
-    // The same project's channel, a ticket's discussion and a task: fine.
-    let here = sent_message(&s, Some(channel(&s, s.project)), "Orbit needs a logo");
+    // The same project's discussion and a task: fine.
+    let here = sent_message(&s, None, "Orbit needs a logo");
     assert!(ticket_from(&s, Some(here), Some(s.user)).is_ok());
     let t = new_ticket(&s, "Login", Some(s.ann));
     post(&s, t, "Split off the reset flow").unwrap();
@@ -1162,9 +1138,6 @@ fn a_ticket_from_a_message_of_another_projects_channel_or_discussion_is_refused(
     let (_, conversation) = started(&s, t);
     let in_task = messages(&s, conversation).into_iter().next().expect("the brief").id;
     assert!(ticket_from(&s, Some(in_task), Some(s.user)).is_ok());
-    // The General channel: any project.
-    let general = sent_message(&s, None, "Everyone needs a logo");
-    assert!(ticket_from(&s, Some(general), Some(s.user)).is_ok());
 }
 
 #[test]
@@ -1312,11 +1285,11 @@ fn a_mention_of_a_busy_employee_also_gets_a_quick_answer_that_wakes_nobody() {
 }
 
 #[test]
-fn a_mention_in_another_channel_of_an_employee_busy_elsewhere_gets_no_busy_line() {
+fn a_mention_in_another_ticket_of_an_employee_busy_elsewhere_gets_no_busy_line() {
     let s = setup();
     send(&s, None, "@Bo first question").unwrap();
     go_running(&s, s.bo);
-    // Bo works in the general channel; the project channel is a thread of its own, so its run starts alongside.
+    // Bo works in one discussion; another ticket's is a thread of its own, so its run starts alongside.
     let project = channel(&s, s.project);
     let (to, runs) = send(&s, Some(project), "@Bo status?").unwrap();
     assert_eq!((to, runs.len()), (vec![s.bo], 1));
@@ -1339,7 +1312,7 @@ fn a_quick_answer_is_told_of_no_tool_it_lacks_and_an_ordinary_run_still_is() {
         s.service.prepare_chat_run(&serde_json::from_str(&job).unwrap()).unwrap().expect("a plan").system.unwrap_or_default()
     };
     let (answer, ordinary) = (system_of(quick[0].0), system_of(runs[0]));
-    let guided = ["suggest_replies", "list_tickets", "read_ticket", "post_to_ticket", "update_ticket", "create_ticket", "move_ticket", "delegate_task", "hand_over_task", "message_task", "hand_off", "post_to_group_chat", "read_group_chat", "scratchpad tool"];
+    let guided = ["suggest_replies", "list_tickets", "read_ticket", "post_to_ticket", "update_ticket", "create_ticket", "move_ticket", "delegate_task", "hand_over_task", "message_task", "hand_off", "scratchpad tool"];
     for tool in guided {
         assert!(!answer.contains(tool), "a quick answer has no {tool}: {answer}");
         assert!(ordinary.contains(tool), "an ordinary run is still told of {tool}: {ordinary}");
@@ -1588,30 +1561,25 @@ fn set_dispatcher(s: &Setup, employee: EmployeeId) {
 }
 
 #[test]
-fn everyone_in_a_channel_wakes_only_the_ceo_or_the_dispatcher() {
+fn everyone_in_a_ticket_wakes_only_its_owner() {
     let s = setup();
     let ada = second_board_member(&s);
     let (to, runs) = send(&s, None, "@EVERYONE: standup now").unwrap();
-    assert_eq!((to, runs.len()), (vec![s.ceo], 1), "the general channel: the CEO");
+    assert_eq!((to, runs.len()), (vec![s.ceo], 1), "the owner of the ticket");
     for e in [s.ann, s.bo, s.cy] {
         assert!(woken(&s, e).is_empty());
     }
     assert!(wake_text(&s, s.ceo).contains("hand_off"), "{}", wake_text(&s, s.ceo));
     // The other board member is told, the sender (grace) is not.
     assert_eq!(mentioned_users(&s), vec![ada.to_string()]);
-    let project = channel(&s, s.project);
-    let (to, runs) = send(&s, Some(project), "@Everyone hi").unwrap();
-    assert_eq!((to, runs.len()), (vec![s.ceo], 1), "a project without a dispatcher: the CEO");
+    // The ticket's owner coordinates, a dispatcher does not take that over.
     set_dispatcher(&s, s.bo);
-    let (to, runs) = send(&s, Some(project), "@Everyone hi").unwrap();
-    assert_eq!((to, runs.len()), (vec![s.bo], 1), "the project's dispatcher");
-    // Even with a dispatcher, the general channel is the CEO's.
-    let (to, _) = send(&s, None, "@Everyone hi").unwrap();
-    assert_eq!(to, vec![s.ceo]);
+    let (to, runs) = send(&s, None, "@Everyone hi").unwrap();
+    assert_eq!((to, runs.len()), (vec![s.ceo], 1), "the owner of the ticket");
     // Not a word on its own: an email address and a longer name are no @Everyone.
-    let (to, _) = send(&s, Some(project), "mail everyone@example.com or @everyone2 or @Everyone-else").unwrap();
-    assert_eq!(to, vec![s.bo], "the dispatcher answers as for any message");
-    assert!(!wake_text(&s, s.bo).contains("hand_off"), "{}", wake_text(&s, s.bo));
+    let (to, _) = send(&s, None, "mail everyone@example.com or @everyone2 or @Everyone-else").unwrap();
+    assert!(to.is_empty(), "nobody is named: nobody answers in a ticket in Backlog");
+    assert!(!wake_text(&s, s.ceo).contains("hand_off") || woken(&s, s.ceo).len() == 2, "no second coordination");
     assert!(mentioned_users(&s).is_empty());
 }
 
@@ -1701,7 +1669,7 @@ fn everyone_from_an_employee_wakes_and_tells_nobody() {
     let meta: String = s.service.store().read(|c| Ok(c.query_row("SELECT metadata_json FROM events WHERE type = 'task.posted' ORDER BY seq DESC LIMIT 1", [], |r| r.get(0))?)).unwrap();
     assert!(serde_json::from_str::<serde_json::Value>(&meta).unwrap()["mentioned_users"].is_null(), "{meta}");
     let (_, runs) = send(&s, None, "@Cy hi").unwrap();
-    let (ok, text) = post_in_channel(&s, runs[0], None, "@everyone");
+    let (ok, text) = post_in_discussion(&s, runs[0], "@everyone");
     assert!(ok, "{text}");
     assert!(woken(&s, s.ann).is_empty() && woken(&s, s.bo).len() == 1);
 }
@@ -1711,13 +1679,8 @@ fn the_audience_counts_what_everyone_would_do_and_never_the_reader() {
     let s = setup();
     let _ada = second_board_member(&s);
     pause(&s, s.cy);
-    let general = audience_of(&s, None, Some(s.user));
-    assert_eq!((general.employees, general.paused, general.board_members), (3, 1, 1), "{general:?}");
-    assert_eq!((general.board_usernames, general.paused_names), (vec!["ada".to_owned()], vec!["Cy".to_owned()]));
-    assert_eq!(general.coordinator.as_deref(), Some("Atlas"));
-    let project = audience_of(&s, Some(channel(&s, s.project)), Some(s.user));
-    assert_eq!((project.employees, project.paused, project.board_members), (3, 1, 1));
-    assert_eq!(project.coordinator.as_deref(), Some("Atlas"), "no dispatcher");
+    // No channel, no audience: the Team chat is gone.
+    assert!(s.service.store().read(|c| discussion::discussion_audience(c, None, Some(s.user))).unwrap().is_none());
     let t = new_ticket(&s, "Login", Some(s.ann));
     let d = ticket_view(&s, t).conversation_id.unwrap();
     let ticket = audience_of(&s, Some(d), Some(s.user));

@@ -1,12 +1,10 @@
-//! The discussions: one engine for the Team chat's channels (the general one,
-//! one per project) and the discussion of each ticket. Every discussion is a
-//! conversation (kind `group` or `ticket`); the rules differ only in who answers
-//! a board member's message without `@Name` (B3).
+//! The discussions: the engine for the discussion of each ticket (a conversation
+//! of kind `ticket`). The Team chat (the general channel and one per project) is
+//! gone; what is left of it is `ConversationKind::Group` and the group kind of an
+//! employee's post, which stay for what was stored.
 //!
 //! * Who answers: the employees the message names with `@Name`. Without a name,
-//!   from a board member: in the general channel the top of the org chart (the
-//!   CEO); in a project channel the project's dispatcher, else the CEO; in a
-//!   ticket's discussion the owner, while the ticket is in Todo (with an owner),
+//!   from a board member: in a ticket's discussion the owner, while the ticket is in Todo (with an owner),
 //!   Doing, Plan review or Review, as a message in its main task (no run of its
 //!   own: the main task's conversation answers it); else nobody, with a hint. What
 //!   an employee writes wakes nobody: an @Name there only refers to someone. Handing
@@ -29,16 +27,15 @@
 //!   when they are woken in this thread later. The board members are told.
 //! * How: the message, with the latest messages of the discussion (a JSON list,
 //!   so no message can pass for another or for a board member's), goes to each
-//!   of them as an update (`[Group chat · from …]`) in their own conversation for
-//!   that ticket or channel (R6, `employee_threads`), where a normal run answers it. A woken employee that is not the ticket's owner
+//!   of them as an update (`[Discussion · from …]`) in their own conversation for
+//!   that ticket (R6, `employee_threads`), where a normal run answers it. A woken employee that is not the ticket's owner
 //!   only answers there: the ticket's column and main task stay as they are.
 //! * What a woken employee reads (P2, P3): the lead of the discussion, and unless it
 //!   is the lead or the only employee there, only the messages addressed to it and
 //!   its own, with how many others there are (`ThreadView`). Clients show everything.
 //! * The answer: copied to the discussion as the employee's message when the run
 //!   ends (`mirror_answer`), streamed there live under that message's id meanwhile.
-//! * A ticket on Done (or archived) and the channel of an archived project are
-//!   read-only (B7).
+//! * A ticket on Done (or archived) is read-only (B7).
 
 use crate::run::events::{Ev, emit};
 use crate::run::queue::queue_run_marked;
@@ -54,8 +51,8 @@ use aurelius_storage::conversations::{self as conv, GroupRun, NewMessage};
 use aurelius_storage::{StorageError, Store, Tx, blobs, employees};
 use rusqlite::OptionalExtension;
 
-/// The `subject` of a row about a mention in the general channel.
-const GENERAL_SUBJECT: &str = "#general";
+/// Why a message to the Team chat is refused: the Team chat is gone, only a ticket's discussion takes messages.
+pub const TEAM_CHAT_GONE: &str = "The Team chat no longer exists: write in a ticket's discussion.";
 /// Why a reply is refused whose `thread_parent` is not a message of the discussion.
 const THREAD_NOT_HERE: &str = "The message this replies to is not in this channel.";
 /// Why a reply to a reply is refused: a thread has one level (no nested threads).
@@ -78,10 +75,6 @@ pub(crate) struct TicketPlace {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Place {
-    /// The general channel (the group chat of before the channels).
-    General,
-    /// A project's channel.
-    Project { project: ProjectId, name: String, archived: bool },
     Ticket(TicketPlace),
 }
 
@@ -96,9 +89,6 @@ impl Discussion {
     /// Why nobody can write here any more, if so.
     pub(crate) fn read_only(&self) -> Option<String> {
         match &self.place {
-            Place::General => None,
-            Place::Project { name, archived: true, .. } => Some(format!("The project {name} is archived: its channel can only be read.")),
-            Place::Project { .. } => None,
             Place::Ticket(t) if t.column == ColumnKind::Done => Some(format!("Ticket #{} is done: its discussion can only be read. Follow-up work is a new ticket.", t.number)),
             Place::Ticket(t) if t.archived => Some(format!("Ticket #{} is archived: its discussion can only be read.", t.number)),
             Place::Ticket(_) => None,
@@ -108,8 +98,6 @@ impl Discussion {
     /// How a tool answer names it.
     pub(crate) fn label(&self) -> String {
         match &self.place {
-            Place::General => "the group chat".into(),
-            Place::Project { name, .. } => format!("the #{name} channel"),
             Place::Ticket(t) => format!("the discussion of ticket #{}", t.number),
         }
     }
@@ -117,8 +105,6 @@ impl Discussion {
     /// The line in front of a message that wakes an employee: where it was written.
     fn heading(&self) -> Option<String> {
         match &self.place {
-            Place::General => None,
-            Place::Project { name, .. } => Some(format!("In the #{name} channel of the Team chat (about the project {name}):")),
             Place::Ticket(t) => Some(format!("In the discussion of ticket #{} “{}”:", t.number, t.title)),
         }
     }
@@ -126,58 +112,24 @@ impl Discussion {
     pub(crate) fn ticket(&self) -> Option<&TicketPlace> {
         match &self.place {
             Place::Ticket(t) => Some(t),
-            _ => None,
         }
     }
 }
 
-/// The discussion `id` is, if it is one (a channel or a ticket's discussion).
+/// The discussion `id` is, if it is one (a ticket's discussion).
 pub(crate) fn load(conn: &rusqlite::Connection, id: ConversationId) -> Result<Option<Discussion>, StorageError> {
-    let row: Option<(String, Option<String>)> =
-        conn.query_row("SELECT kind, project_id FROM conversations WHERE id = ?1 AND kind IN ('group', 'ticket')", [id.to_string()], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
-    let Some((kind, project)) = row else { return Ok(None) };
-    let place = match (kind.as_str(), project.and_then(|p| ProjectId::parse(&p).ok())) {
-        ("group", None) => Place::General,
-        ("group", Some(project)) => {
-            let Some((name, archived)) = conn
-                .query_row("SELECT name, status = 'archived' FROM projects WHERE id = ?1", [project.to_string()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))
-                .optional()?
-            else {
-                return Ok(None);
-            };
-            Place::Project { project, name, archived }
-        }
-        _ => {
-            let Some(ticket) = aurelius_storage::discussions::ticket_of_conversation(conn, id)? else { return Ok(None) };
-            match ticket_place(conn, ticket)? {
-                Some(t) => Place::Ticket(t),
-                None => return Ok(None),
-            }
-        }
-    };
-    Ok(Some(Discussion { id, place }))
+    let is_ticket: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM conversations WHERE id = ?1 AND kind = 'ticket')", [id.to_string()], |r| r.get(0))?;
+    if !is_ticket {
+        return Ok(None);
+    }
+    let Some(ticket) = aurelius_storage::discussions::ticket_of_conversation(conn, id)? else { return Ok(None) };
+    Ok(ticket_place(conn, ticket)?.map(|t| Discussion { id, place: Place::Ticket(t) }))
 }
 
 fn ticket_place(conn: &rusqlite::Connection, ticket: TicketId) -> Result<Option<TicketPlace>, StorageError> {
     let Some(state) = aurelius_storage::tickets::state(conn, ticket)? else { return Ok(None) };
     let (number, title): (i64, String) = conn.query_row("SELECT number, title FROM tickets WHERE id = ?1", [ticket.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))?;
     Ok(Some(TicketPlace { id: ticket, number: number as u32, title, project: state.project_id, column: state.column, owner: state.owner, root_task: state.root_task_id, archived: state.archived }))
-}
-
-/// The general channel.
-pub(crate) fn general(conn: &rusqlite::Connection) -> Result<Option<Discussion>, StorageError> {
-    Ok(conv::group_conversation(conn)?.map(|id| Discussion { id, place: Place::General }))
-}
-
-/// The channel of `project`, if it has one.
-pub(crate) fn project_channel(conn: &rusqlite::Connection, project: ProjectId) -> Result<Option<Discussion>, StorageError> {
-    if !aurelius_storage::discussions::has_discussions(conn)? {
-        return Ok(None);
-    }
-    match aurelius_storage::discussions::channel(conn, Some(project))? {
-        Some(id) => load(conn, id),
-        None => Ok(None),
-    }
 }
 
 /// The discussion of `ticket`.
@@ -236,13 +188,11 @@ struct Addressees {
 /// ones too, they get the paused line), who read it when next woken here, and the
 /// active board members in it, who are told. Who it wakes is `coordinator_of`.
 ///
-/// * The general channel and a project's channel have no member list: every
-///   board member and every employee reads them, so every one is in them.
-/// * A ticket's discussion: its owner, the employees of its channel (owner and
-///   main task's employee), those with a task anywhere in its task tree, and
-///   those who wrote in the discussion. Board members: the channel's members,
-///   the followers and the responsible one. An employee only named in a message
-///   is not in it (naming is no part of the thread).
+/// The employees in it: the ticket's owner, the employees of its channel (owner and
+/// main task's employee), those with a task anywhere in its task tree, and those who
+/// wrote in the discussion. Board members: the channel's members, the followers and
+/// the responsible one. An employee only named in a message is not in it (naming is
+/// no part of the thread).
 #[derive(Debug, Default)]
 pub(crate) struct Audience {
     /// (id, name, active), in the order of the company.
@@ -254,7 +204,7 @@ pub(crate) struct Audience {
 pub(crate) fn audience(conn: &rusqlite::Connection, d: &Discussion) -> Result<Audience, StorageError> {
     let team = team(conn)?;
     let board: Vec<(UserId, String)> = aurelius_storage::users::list(conn)?.into_iter().filter(|u| !u.disabled()).filter_map(|u| Some((UserId::parse(&u.id).ok()?, u.username))).collect();
-    let Place::Ticket(t) = &d.place else { return Ok(Audience { employees: team, users: board }) };
+    let Place::Ticket(t) = &d.place;
     let mut employees: Vec<EmployeeId> = t.owner.into_iter().collect();
     let mut users: Vec<UserId> = Vec::new();
     for member in aurelius_storage::discussions::members(conn, d.id)? {
@@ -275,33 +225,26 @@ pub(crate) fn audience(conn: &rusqlite::Connection, d: &Discussion) -> Result<Au
 }
 
 /// The one employee a board member's `@Everyone` in `d` wakes, the first active one
-/// of: a ticket's owner; on a ticket or in a project's channel the dispatcher; the
-/// CEO. `team` is `team(conn)`. None when there is nobody.
+/// of: a ticket's owner; the dispatcher of its project; the CEO. `team` is `team(conn)`. None when there is nobody.
 fn coordinator_of(conn: &rusqlite::Connection, d: &Discussion, team: &[(EmployeeId, String, bool)]) -> Result<Option<EmployeeId>, StorageError> {
     let active = |id: &EmployeeId| team.iter().any(|(e, _, active)| e == id && *active);
     if let Some(owner) = d.ticket().and_then(|t| t.owner).filter(active) {
         return Ok(Some(owner));
     }
     let project = match &d.place {
-        Place::General => None,
-        Place::Project { project, .. } => Some(*project),
-        Place::Ticket(t) => Some(t.project),
+        Place::Ticket(t) => t.project,
     };
-    if let Some(dispatcher) = project.map(|p| aurelius_storage::company::dispatcher_for(conn, p)).transpose()?.flatten().filter(active) {
+    if let Some(dispatcher) = aurelius_storage::company::dispatcher_for(conn, project)?.filter(active) {
         return Ok(Some(dispatcher));
     }
     Ok(ceo(conn)?.filter(active))
 }
 
-/// The audience of the discussion `channel` (none: the general channel) for the
+/// The audience of the discussion `channel` (a ticket's; none: nothing) for the
 /// board member `reader`, who is not counted: what `discussion.audience` answers.
 /// None when the discussion does not exist.
 pub fn discussion_audience(conn: &rusqlite::Connection, channel: Option<ConversationId>, reader: Option<UserId>) -> Result<Option<aurelius_domain::views::DiscussionAudience>, StorageError> {
-    let d = match channel {
-        Some(id) => load(conn, id)?,
-        None => general(conn)?,
-    };
-    let Some(d) = d else { return Ok(None) };
+    let Some(d) = channel.map(|id| load(conn, id)).transpose()?.flatten() else { return Ok(None) };
     let a = audience(conn, &d)?;
     let team = team(conn)?;
     let coordinator = coordinator_of(conn, &d, &team)?.and_then(|c| team.into_iter().find(|(id, _, _)| *id == c)).map(|(_, name, _)| name);
@@ -356,12 +299,6 @@ fn addressees(conn: &rusqlite::Connection, d: &Discussion, text: &str) -> Result
             }
         }
         Place::Ticket(_) => {}
-        Place::General if chosen.is_empty() => chosen.extend(ceo(conn)?),
-        Place::Project { project, .. } if chosen.is_empty() => match aurelius_storage::company::dispatcher_for(conn, *project)? {
-            Some(dispatcher) => chosen.push(dispatcher),
-            None => chosen.extend(ceo(conn)?),
-        },
-        _ => {}
     }
     for (id, name, active) in chosen.into_iter().filter_map(|id| team.iter().find(|(e, _, _)| *e == id)) {
         if *active {
@@ -434,8 +371,7 @@ pub(crate) enum Lead {
 }
 
 /// The lead of `d`. On a ticket its responsible board member (an active one), else
-/// its owner; in a project's channel the project's dispatcher, else the CEO; in the
-/// general channel the CEO. None when there is nobody.
+/// its owner. None when there is nobody.
 pub(crate) fn lead_of(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option<String>, d: &Discussion) -> Result<Option<Lead>, StorageError> {
     let employee = match &d.place {
         Place::Ticket(t) => {
@@ -445,11 +381,6 @@ pub(crate) fn lead_of(conn: &rusqlite::Connection, read: &dyn Fn(&str) -> Option
             }
             t.owner
         }
-        Place::General => ceo(conn)?,
-        Place::Project { project, .. } => match aurelius_storage::company::dispatcher_for(conn, *project)? {
-            Some(dispatcher) => Some(dispatcher),
-            None => ceo(conn)?,
-        },
     };
     employee.map(|id| Ok(Lead::Employee(id, employee_name(conn, id)?))).transpose()
 }
@@ -485,7 +416,7 @@ impl ThreadView {
             team: team(conn)?.into_iter().map(|(id, name, _)| (id, name)).collect(),
             lead: lead_of(conn, read, d)?,
             owner: d.ticket().and_then(|t| t.owner),
-            tool: if d.ticket().is_some() { "read_discussion" } else { "read_group_chat" },
+            tool: "read_discussion",
         })
     }
 
@@ -550,7 +481,6 @@ fn nobody_answers(d: &Discussion, paused: &[String]) -> String {
         (_, [_, ..]) => format!("Nobody was woken: {} are paused. Resume them, or name a colleague with @Name.", paused.join(", ")),
         (Place::Ticket(t), []) if t.owner.is_none() => "Nobody was woken: this ticket has no owner yet. Name a colleague with @Name.".into(),
         (Place::Ticket(_), []) => "Nobody was woken: the owner only answers here while the ticket is in Todo, Doing, Plan review, Testing or Review. Name a colleague with @Name.".into(),
-        (_, []) => "Nobody was woken: there is no CEO to answer a message without @Name. Name a colleague with @Name.".into(),
     }
 }
 
@@ -606,9 +536,6 @@ fn with_mentions(conn: &rusqlite::Connection, id: ConversationId, text: &str, fr
     }
     metadata["mentioned_users"] = serde_json::json!(named);
     match &d.place {
-        Place::General => metadata["subject"] = serde_json::json!(GENERAL_SUBJECT),
-        // Stored and pushed, so through the redactor like everything else that leaves.
-        Place::Project { name, .. } => metadata["subject"] = serde_json::json!(aurelius_runtime::redact::string(format!("#{name}"))),
         Place::Ticket(t) => metadata["ticket_id"] = serde_json::json!(t.id),
     }
     Ok(metadata)
@@ -682,9 +609,9 @@ pub(crate) fn employee_name(conn: &rusqlite::Connection, employee: EmployeeId) -
     Ok(name.unwrap_or_else(|| "An employee".into()))
 }
 
-/// The conversation of a message, how a line names it ("the #Web channel",
-/// "Ann's chat", the task's, the project assistant's), for a ticket made from it,
-/// and the project it belongs to (none: the General channel, an employee's chat).
+/// The conversation of a message, how a line names it ("Ann's chat", the task's,
+/// the project assistant's), for a ticket made from it, and the project it belongs
+/// to (none: an employee's chat).
 /// None for a message that does not exist or is in no known kind of conversation.
 pub(crate) fn message_place(conn: &rusqlite::Connection, message: MessageId) -> Result<Option<(ConversationId, String, Option<ProjectId>)>, StorageError> {
     let row: Option<(String, String, Option<String>, Option<String>, Option<String>, Option<String>)> = conn
@@ -698,7 +625,7 @@ pub(crate) fn message_place(conn: &rusqlite::Connection, message: MessageId) -> 
         .optional()?;
     let Some((id, kind, project, employee, task, project_id)) = row else { return Ok(None) };
     let Ok(id) = ConversationId::parse(&id) else { return Ok(None) };
-    if !matches!(kind.as_str(), "group" | "ticket" | "employee" | "project" | "task") {
+    if !matches!(kind.as_str(), "ticket" | "employee" | "project" | "task") {
         return Ok(None);
     }
     let project_id = match project_id {
@@ -709,8 +636,6 @@ pub(crate) fn message_place(conn: &rusqlite::Connection, message: MessageId) -> 
         None => None,
     };
     let label = match (kind.as_str(), project, employee, task) {
-        ("group", None, _, _) => "the General channel".to_owned(),
-        ("group", Some(project), _, _) => format!("the #{project} channel"),
         ("ticket", _, _, _) => match aurelius_storage::discussions::ticket_of_conversation(conn, id)?.map(|t| ticket_place(conn, t)).transpose()?.flatten() {
             Some(t) => format!("the discussion of #{}", t.number),
             None => "a ticket's discussion".to_owned(),
@@ -733,11 +658,8 @@ pub(crate) fn created_from(tx: &Tx<'_>, ticket: TicketId, number: u32, user: Use
     let mut notices = ticket_line(tx, ticket, first, &format!("#{number} created from a message in {label} · {by}"))?;
     let mut back = SystemLine::new(SystemLineKind::TicketCreated);
     (back.by, back.ticket_id, back.message_id) = (Some(by), Some(ticket), Some(message));
-    // The link to the ticket's channel; in General this is its one line on opening.
+    // The link to the ticket's channel.
     back.channel_id = of_ticket(tx, ticket)?.map(|d| d.id);
-    if general(tx)?.is_some_and(|g| g.id == conversation) {
-        back.action = Some(aurelius_domain::views::system_action::OPENED.to_owned());
-    }
     notices.push(system_line(tx, conversation, &back, None)?);
     Ok(notices)
 }
@@ -807,7 +729,7 @@ fn wake(tx: &Tx<'_>, store: &Store, meta: &serde_json::Value, correlation: &str,
     if !shared.images.is_empty() {
         conv::set_message_files(tx, update, shared.images)?;
     }
-    // The employees of the Team chat always work in Auto.
+    // The employees woken by a discussion always work in Auto.
     conv::set_agent_mode(tx, chat, AgentMode::Auto)?;
     // Only a board member waits for the answer; a colleague's mention would just add lines.
     let busy = if w.board.is_some() { busy_notices(tx, store, meta, correlation, (employee, name), w)? } else { Vec::new() };
@@ -1163,23 +1085,19 @@ struct Sent {
 }
 
 impl CommandService {
-    /// A board member writes in a channel of the Team chat (`group_chat.send`): the
-    /// message is stored, and the employees it names (or the one B3 names) each
-    /// answer from their own main chat.
+    /// A board member writes in the discussion of a ticket (`group_chat.send` with its
+    /// channel): the message is stored, and the employees it names (or the one B3 names)
+    /// answer. The Team chat (no channel, or a project's) is gone: a clear error.
     pub(crate) fn send_group_message(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &group::SendGroupMessage) -> Result<Committed, AppError> {
         let text = cmd.validate().map_err(domain_error)?;
+        let Some(channel) = cmd.channel else { return Err(AppError::new(ErrorCode::NotFound, TEAM_CHAT_GONE)) };
+        // A ticket's channel (feature `ticket_channels`): the same discussion as `ticket.post`.
         let discussion = self
             .store
-            .read(|c| match cmd.channel {
-                None => general(c),
-                // A ticket's channel too (feature `ticket_channels`): the same discussion as `ticket.post`.
-                Some(id) => load(c, id),
-            })
+            .read(|c| load(c, channel))
             .map_err(storage_error)?
-            .ok_or_else(|| AppError::new(ErrorCode::NotFound, if cmd.channel.is_some() { "This channel does not exist." } else { "The group chat does not exist." }))?;
-        if discussion.ticket().is_some() {
-            crate::ticket::require_board_member(ctx)?;
-        }
+            .ok_or_else(|| AppError::new(ErrorCode::NotFound, "This channel does not exist."))?;
+        crate::ticket::require_board_member(ctx)?;
         self.send_in(ctx, envelope, hash, (discussion, cmd.thread_parent), text, &cmd.images, &cmd.files, |d, s| CommandResult::GroupMessageSent { conversation_id: d.id, message_id: s.0, to: s.1.to, run_ids: s.1.run_ids })
     }
 
@@ -1263,9 +1181,8 @@ impl CommandService {
                 return Ok(Err(err));
             }
             // Whoever answers on a ticket, from wherever, needs no line in the Inbox that they were asked there.
-            if let Place::Ticket(t) = &d.place {
-                aurelius_storage::timeline::clear_ticket_mentions_for(tx, &t.id.to_string(), user.map(|u| u.to_string()).as_deref())?;
-            }
+            let Place::Ticket(t) = &d.place;
+            aurelius_storage::timeline::clear_ticket_mentions_for(tx, &t.id.to_string(), user.map(|u| u.to_string()).as_deref())?;
             let correlation = command_id.to_string();
             blobs::register(tx, &text_blob)?;
             let (event_id, n) = emit(tx, Ev {
@@ -1462,13 +1379,11 @@ fn run_ticket(conn: &rusqlite::Connection, run: RunId) -> Result<Option<TicketId
 }
 
 /// The project whose context a run a discussion woke answers in (MU2-08 AC4):
-/// a project's channel's, or the project of a ticket's discussion; none for the
-/// General channel (the company's context) or a run no discussion woke.
+/// the project of a ticket's discussion; none for a run no discussion woke.
 pub(crate) fn run_channel_project(conn: &rusqlite::Connection, run: RunId) -> Result<Option<(ProjectId, String)>, StorageError> {
     Ok(match waking_discussion(conn, run)?.map(|d| d.place) {
-        Some(Place::Project { project, name, .. }) => Some((project, name)),
         Some(Place::Ticket(t)) => crate::queries_project_name(conn, t.project).map(|name| (t.project, name)),
-        _ => None,
+        None => None,
     })
 }
 
@@ -1493,54 +1408,9 @@ pub(crate) fn conversation_discussion(conn: &rusqlite::Connection, conversation:
     }
 }
 
-/// The channel a run's `post_to_group_chat` / `read_group_chat` means: the one
-/// named (`General`, a project's name or a channel id), else the channel that
-/// woke the run, else its project's (a ticket's that woke it), else the general one. Refused for an
-/// unknown channel.
-pub(crate) fn run_channel(conn: &rusqlite::Connection, run: RunId, named: Option<&str>) -> Result<Result<Discussion, String>, StorageError> {
-    if let Some(named) = named.map(str::trim).filter(|n| !n.is_empty()) {
-        let bare = named.trim_start_matches('#');
-        if ["general", "algemeen", "team chat", "group chat"].iter().any(|g| bare.eq_ignore_ascii_case(g)) {
-            return Ok(general(conn)?.ok_or_else(|| "There is no group chat.".to_owned()));
-        }
-        if let Ok(id) = ConversationId::parse(bare) {
-            if let Some(d) = load(conn, id)?.filter(|d| d.ticket().is_none()) {
-                return Ok(Ok(d));
-            }
-        }
-        let project: Option<String> = conn.query_row("SELECT id FROM projects WHERE name = ?1 COLLATE NOCASE ORDER BY created_at_ms LIMIT 1", [bare], |r| r.get(0)).optional()?;
-        if let Some(d) = match project.and_then(|p| ProjectId::parse(&p).ok()) {
-            Some(project) => project_channel(conn, project)?,
-            None => None,
-        } {
-            return Ok(Ok(d));
-        }
-        let mut known = vec!["General".to_owned()];
-        let mut stmt = conn.prepare("SELECT p.name FROM conversations c JOIN projects p ON p.id = c.project_id WHERE c.kind = 'group' ORDER BY p.name")?;
-        known.extend(stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?);
-        return Ok(Err(format!("There is no channel “{named}”. The channels are: {}.", known.join(", "))));
-    }
-    // Woken by a ticket's discussion: that ticket's project.
-    let mut project = None;
-    match waking_discussion(conn, run)? {
-        Some(d) if d.ticket().is_none() => return Ok(Ok(d)),
-        Some(d) => project = d.ticket().map(|t| t.project),
-        None => {}
-    }
-    if let Some(project) = project.or(crate::task::task_runs::run_owner(conn, run)?.and_then(|o| o.project)) {
-        if let Some(d) = project_channel(conn, project)? {
-            return Ok(Ok(d));
-        }
-    }
-    Ok(general(conn)?.ok_or_else(|| "There is no group chat.".to_owned()))
-}
-
-/// The thread a run hands work over in: its ticket's discussion, else the channel that woke it.
+/// The thread a run hands work over in: its ticket's discussion (or the task thread it works in).
 pub(crate) fn run_handoff_thread(conn: &rusqlite::Connection, run: RunId) -> Result<Option<Discussion>, StorageError> {
-    Ok(match run_discussion(conn, run)? {
-        Some(d) => Some(d),
-        None => waking_discussion(conn, run)?,
-    })
+    run_discussion(conn, run)
 }
 
 /// The hop of what `run` writes in `d`: one more than the run's, or 1 when a board
@@ -1575,8 +1445,7 @@ fn employee_post(tx: &Tx<'_>, run: RunId, d: &Discussion, message: &str) -> Resu
     Ok(Ok((me, name, text.to_owned())))
 }
 
-/// An employee writes in a discussion during a run (`post_to_group_chat`,
-/// `post_to_discussion`, `post_to_ticket`). It wakes nobody: an @Name only refers to
+/// An employee writes in a discussion during a run (`post_to_discussion`, `post_to_ticket`). It wakes nobody: an @Name only refers to
 /// a colleague, and an @username of a board member notifies them. `hand_off` is what wakes.
 pub(crate) fn post_from_run(tx: &Tx<'_>, store: &Store, run: RunId, d: &Discussion, message: &str) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     let (me, name, text) = match employee_post(tx, run, d, message)? {
@@ -1654,7 +1523,7 @@ pub(crate) fn deliver_scheduled(tx: &Tx<'_>, store: &Store, d: &Discussion, m: &
 /// has unread items in the thread it is held (R5), else it goes out now.
 pub(crate) fn hand_off(tx: &Tx<'_>, store: &Store, run: RunId, to: &str, message: &str) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
     let Some(d) = run_handoff_thread(tx, run)? else {
-        return Ok((false, "A handoff is for a ticket's discussion or a channel of the Team chat, and this run is in neither. To give a colleague work, use delegate_task.".into(), vec![]));
+        return Ok((false, "A handoff is for a ticket's discussion, and this run is not in one. To give a colleague work, use delegate_task.".into(), vec![]));
     };
     let (me, name, text) = match employee_post(tx, run, &d, message)? {
         Ok(post) => post,
@@ -1687,7 +1556,7 @@ pub(crate) fn hand_off(tx: &Tx<'_>, store: &Store, run: RunId, to: &str, message
     } else if of_run >= WAKING_POSTS_PER_RUN {
         Some(format!("you already handed over {WAKING_POSTS_PER_RUN} times in this run; wait for their answers."))
     } else if of_mine >= WAKING_POSTS_PER_WINDOW {
-        Some(format!("you already handed over {WAKING_POSTS_PER_WINDOW} times in the last hour (in all channels and tickets together); wait for them or a board member."))
+        Some(format!("you already handed over {WAKING_POSTS_PER_WINDOW} times in the last hour (in all tickets together); wait for them or a board member."))
     } else {
         None
     };
@@ -1759,7 +1628,7 @@ pub(crate) fn release_handoffs(tx: &Tx<'_>, store: &Store) -> Result<Vec<EventNo
     Ok(notices)
 }
 
-/// `read_group_chat` / `read_discussion`: the latest `last` messages of a
+/// `read_discussion`: the latest `last` messages of a
 /// discussion (default and most 50), oldest first, one JSON object per message.
 pub(crate) fn read_text(conn: &rusqlite::Connection, store: &Store, d: &Discussion, last: Option<u32>) -> Result<String, StorageError> {
     let read = reader(store);
@@ -1891,19 +1760,6 @@ impl CommandService {
             notices.insert(0, notice);
             Ok(Ok((result, notices)))
         })
-    }
-
-    /// A notice of the server to every board member: a system line in the
-    /// general channel of the Team chat (a vault key export, a vault name runs
-    /// may no longer have). Nothing when there is no Team chat (yet).
-    pub fn team_notice(&self, text: &str) -> Result<Vec<EventNotice>, AppError> {
-        let text = text.to_owned();
-        self.store
-            .write(move |tx| {
-                let Some(d) = general(tx)? else { return Ok(Vec::new()) };
-                Ok(vec![system_line(tx, d.id, &SystemLine::new(SystemLineKind::Limit), Some(&text))?])
-            })
-            .map_err(storage_error)
     }
 }
 

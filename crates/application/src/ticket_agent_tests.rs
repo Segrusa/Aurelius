@@ -497,7 +497,8 @@ fn the_project_assistant_without_an_employee_has_no_ticket_tools() {
     s.service
         .store()
         .write(move |tx| {
-            let channel = aurelius_storage::discussions::channel(tx, Some(project))?.expect("a project channel");
+            let channel = aurelius_domain::ConversationId::new();
+            aurelius_storage::conversations::insert_project_conversation(tx, channel, project, "Plans")?;
             tx.execute("INSERT INTO runs(id, conversation_id, attempt, runtime_kind, model_id, resolved_config_json, status, started_at_ms) VALUES (?1, ?2, 1, 'fake', '', '{}', 'running', 1)", rusqlite::params![run.to_string(), channel.to_string()])?;
             Ok(())
         })
