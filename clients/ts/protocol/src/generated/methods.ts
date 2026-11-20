@@ -245,7 +245,9 @@ export const METHODS = {
   "vault.update": "host",
   "work_session.assign": "command",
   "work_session.dispatch": "command",
+  "work_session.history": "read",
   "work_session.list": "read",
+  "work_session.retry_summary": "command",
   "work_session.start": "command",
 } as const satisfies Record<string, MethodGroup>;
 
@@ -1056,9 +1058,21 @@ export interface MethodParams {
   "work_session.assign": M.AssignWorkSession;
   "work_session.dispatch": M.DispatchWorkSession;
   /**
+   * Work sessions in the History (feature `session_history`): every board member's
+   * sessions that were not deleted, the latest activity first, each with the summary
+   * of what was done in it. Every given filter applies: `employee_id` is the employee
+   * who works in it, `from_ms`/`to_ms` the period of its last activity (`to_ms`
+   * excluded), `query` looks in the title and the summary. Keyset paging: the next
+   * page passes the last row's `last_activity_ms` and `conversation_id` as
+   * `before_last_activity_ms`/`before_conversation_id`. `limit`: at most 100, default
+   * 50. The same rights as `ticket.history`.
+   */
+  "work_session.history": { before_conversation_id?: string | null; before_last_activity_ms?: number | null; employee_id?: string | null; from_ms?: number | null; limit?: number | null; project_id?: string | null; query?: string | null; to_ms?: number | null };
+  /**
    * The reader's work sessions, the latest activity first (feature `work_sessions`);
    * `project_id`: only those of that project.
    */
   "work_session.list": { project_id?: string | null };
+  "work_session.retry_summary": M.RetrySessionSummary;
   "work_session.start": M.StartWorkSession;
 }
