@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
+import { openCompanyPage } from "./company";
 import { REPO, TestDaemon } from "./daemon";
 import { expectNewSession } from "./new-session";
 
@@ -62,16 +63,24 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     p.on("pageerror", (e) => consoleErrors.push(String(e)));
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1600, 950));
     const nav = (name: string) => p.getByRole("link", { name: new RegExp(`^${name}`) }).first();
+    // The Inbox is the bell in every screen's head: a row leads to where it is decided.
+    const openInbox = async () => {
+      await p
+        .getByRole("button", { name: /^Inbox/ })
+        .first()
+        .click();
+      await expect(p.getByRole("dialog", { name: "Inbox" })).toBeVisible();
+    };
 
     await step("first board member", async () => {
       await act(() => p.getByLabel("Name").fill("sam"));
       await act(() => p.getByLabel("Password").fill(PASSWORD));
       await act(() => p.getByRole("button", { name: "Create" }).click());
-      await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
+      await expect(p.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     });
 
     await step("add an employee", async () => {
-      await act(() => nav("Employees").click());
+      await act(() => openCompanyPage(p, "Employees"));
       await act(() => p.getByRole("button", { name: "Add employee" }).click());
       const dialog = p.getByRole("dialog");
       await act(() => dialog.getByLabel("Name").fill("Builder"));
@@ -82,7 +91,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     });
 
     await step("add a project", async () => {
-      await act(() => nav("Knowledge").click());
+      await act(() => openCompanyPage(p, "Knowledge"));
       await act(() => p.getByRole("link", { name: "Projects", exact: true }).click());
       await act(() => p.getByRole("button", { name: "New project" }).first().click());
       const dialog = p.getByRole("dialog");
@@ -114,12 +123,13 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     });
 
     await step("what the Inbox shows for it", async () => {
-      await act(() => nav("Inbox").click());
-      await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
+      await act(openInbox);
       // One decision, one row, readable.
-      await expect(p.getByRole("button", { name: /Login page/ })).toHaveCount(1);
-      await expect(p.getByText("#1 #1")).toHaveCount(0);
-      await expect(p.getByText("plan_review")).toHaveCount(0);
+      const inbox = p.getByRole("dialog", { name: "Inbox" });
+      await expect(inbox.getByRole("button", { name: /Login page/ })).toHaveCount(1);
+      await expect(inbox.getByText("#1 #1")).toHaveCount(0);
+      await expect(inbox.getByText("plan_review")).toHaveCount(0);
+      await act(() => p.keyboard.press("Escape"));
     });
 
     await step("the plan in the ticket", async () => {
@@ -178,9 +188,12 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     });
 
     await step("approve a plan from the Inbox", async () => {
-      await act(() => nav("Inbox").click());
-      await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
-      const row = p.getByRole("button", { name: /hosting options/ }).first();
+      await act(openInbox);
+      // The row leads to the ticket, where its plan is approved.
+      const row = p
+        .getByRole("dialog", { name: "Inbox" })
+        .getByRole("button", { name: /hosting options/ })
+        .first();
       await act(() => row.click());
       const approve = p.getByRole("button", { name: /^Approve/ }).first();
       await expect(approve).toBeVisible();
@@ -211,12 +224,19 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
 
     await step("back from Settings", async () => {
       await act(() => p.getByRole("link", { name: "Back to the app" }).click());
-      await expect(nav("Inbox")).toBeVisible();
+      await expect(p.getByRole("button", { name: /^Inbox/ }).first()).toBeVisible();
     });
 
-    for (const screen of ["Inbox", "Board", "Employees", "Knowledge"]) {
+    for (const screen of ["Inbox", "Board"]) {
       await step(`dark ${screen}`, async () => {
-        await act(() => nav(screen).click());
+        await act(() => (screen === "Inbox" ? openInbox() : nav(screen).click()));
+        if (screen === "Inbox") await p.keyboard.press("Escape");
+        await p.waitForTimeout(300);
+      });
+    }
+    for (const screen of ["Employees", "Knowledge"] as const) {
+      await step(`dark ${screen}`, async () => {
+        await act(() => openCompanyPage(p, screen));
         await p.waitForTimeout(300);
       });
     }

@@ -190,8 +190,8 @@ test.describe("a ticket's session", () => {
         },
       }),
     );
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await page.goto(`${site.origin}/new`);
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     await page.keyboard.press("Alt+t");
     await page.getByLabel("Title").fill("From the dialog");
     await page.keyboard.press("Control+Enter");
@@ -238,9 +238,11 @@ test.describe("a ticket's session", () => {
     // The ticket's data is beside the talk.
     const aside = page.getByRole("complementary", { name: "Ticket properties" });
     await expect(aside.getByText("ui, desktop")).toBeVisible();
+    await aside.getByRole("button", { name: /Files written/ }).click();
     await expect(aside.getByText("screens/ticket-session-logic.ts")).toBeVisible();
     await expect(aside.getByText("Guidelines in the runs")).toHaveCount(0);
-    await expect(aside.getByText(/182k in · 24k out/)).toBeVisible();
+    await aside.getByRole("button", { name: "Usage" }).hover();
+    await expect(page.getByRole("tooltip")).toContainText("182k in · 24k out");
   });
 
   test("3. Review → Accept → the session is read-only", async ({ page }) => {
@@ -302,7 +304,7 @@ test.describe("a ticket's session", () => {
       feeds: { d70: feedOf("d70", []), d12: feedOf("d12", []) },
     };
     await scriptServer(page, scripted(world));
-    await page.goto(`${site.origin}/inbox`);
+    await page.goto(`${site.origin}/new`);
     const side = page.getByRole("navigation", { name: "Main" });
     await expect(side.getByText("Tickets", { exact: true })).toBeVisible();
     await expect(side.getByRole("link", { name: /#12 An old ticket/ })).toHaveCount(0);
@@ -325,7 +327,7 @@ test.describe("a ticket's session", () => {
       feeds: { d70: feedOf("d70", []), d60: feedOf("d60", []) },
     };
     await scriptServer(page, scripted(world));
-    await page.goto(`${site.origin}/inbox`);
+    await page.goto(`${site.origin}/new`);
     const side = page.getByRole("navigation", { name: "Main" });
     const today = side.getByRole("link", { name: /#70 A ticket opens/ });
     const older = side.getByRole("link", { name: /#60 An older open ticket/ });

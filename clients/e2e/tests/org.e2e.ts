@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { _electron, expect, type Page, test } from "@playwright/test";
 import { hidden } from "../../ts/app/src/hidden";
+import { openCompanyPage } from "./company";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
 import { message, messages, scriptServer } from "./fake-server";
 
@@ -14,8 +15,6 @@ const PASSWORD = "a-long-enough-password";
 
 const toast = (page: Page, text: string | RegExp) =>
   page.getByRole("region", { name: "Notifications" }).getByText(text);
-
-const go = (page: Page, name: string) => page.getByRole("navigation").getByRole("link", { name }).first().click();
 
 test("employees, projects, guidelines, ideas, memory and the vault over a real daemon", async () => {
   test.setTimeout(120_000);
@@ -39,10 +38,10 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     // A project, opened on creation.
-    await page.getByRole("link", { name: "Knowledge", exact: true }).click();
+    await openCompanyPage(page, "Knowledge");
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     await page.getByRole("button", { name: "New project" }).first().click();
     await page.getByPlaceholder("Name, for example Atlas").fill("Atlas");
@@ -51,7 +50,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByText("WHO WORKS HERE · 0")).toBeVisible();
 
     // A boss and a report, so the org chart has a line.
-    await go(page, "Employees");
+    await openCompanyPage(page, "Employees");
     await page.getByRole("button", { name: "Add employee" }).click();
     await page.getByPlaceholder("Name, for example Alex").fill("Orion");
     await page.getByPlaceholder(/Free-form role/).fill("Lead");
@@ -77,7 +76,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByText("Read only", { exact: true })).toBeVisible();
     await expect(page.getByText("High", { exact: true })).toBeVisible();
 
-    await go(page, "Employees");
+    await openCompanyPage(page, "Employees");
     await page.getByRole("button", { name: "Add employee" }).click();
     await page.getByPlaceholder("Name, for example Alex").fill("Pixel");
     await page.getByPlaceholder(/Free-form role/).fill("Designer");
@@ -92,7 +91,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByRole("link", { name: /Pixel/ })).toBeVisible();
 
     // A start profile fills in the dialog; what the daemon stored comes back on the page.
-    await go(page, "Employees");
+    await openCompanyPage(page, "Employees");
     await page.getByRole("button", { name: "Add employee" }).click();
     await page.getByRole("combobox", { name: "Start from" }).click();
     await page.getByRole("option", { name: "QA", exact: true }).click();
@@ -111,7 +110,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     if (!hidden("EmployeeTools")) await expect(page.getByText("9 on, 2 ask first")).toBeVisible();
 
     // The profile says it was hired, and its name is not offered twice.
-    await go(page, "Employees");
+    await openCompanyPage(page, "Employees");
     await page.getByRole("button", { name: "Add employee" }).click();
     await page.getByRole("combobox", { name: "Start from" }).click();
     await page.getByRole("option", { name: "QA · hired as Quinn" }).click();
@@ -119,7 +118,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByRole("button", { name: "Cancel" }).click();
 
     // A guideline: made, linked, changed to a second version, then archived and restored.
-    await go(page, "Knowledge");
+    await openCompanyPage(page, "Knowledge");
     await expect(page.getByRole("heading", { name: "No guidelines yet" })).toBeVisible();
     await page.getByRole("button", { name: "New guideline" }).first().click();
     await page.getByLabel("Title *").fill("Rust");
@@ -204,7 +203,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
       .run(Date.now() + 3_600_000, Date.now());
     store.close();
     // The Scheduled page is reached from an employee's Inbox tab.
-    await go(page, "Employees");
+    await openCompanyPage(page, "Employees");
     await page.getByRole("link", { name: /Quinn/ }).first().click();
     await page.getByRole("tab", { name: "Inbox" }).click();
     await page.getByRole("link", { name: "Scheduled messages" }).click();

@@ -40,6 +40,24 @@ export function subagentSteps<T extends { parent_call_id?: string | null }>(
   return calls.filter((c) => c.parent_call_id === callId);
 }
 
+/** A subagent's steps in batches of `size`, in order: each batch is one folded line in its log. */
+export function stepBatches<T>(steps: readonly T[], size: number): T[][] {
+  const batches: T[][] = [];
+  for (let i = 0; i < steps.length; i += size) batches.push(steps.slice(i, i + size));
+  return batches;
+}
+
+/** What a subagent reported: the output of the call that started it, once that call ended. */
+export function subagentReport(
+  calls: readonly { call_id: string; ok?: boolean | null; output?: string | null }[],
+  callId: string | null | undefined,
+): string | null {
+  if (!callId) return null;
+  const call = calls.find((c) => c.call_id === callId);
+  if (!call || call.ok == null) return null;
+  return call.output?.trim() || null;
+}
+
 /** Which subagent a row is; the server gives no id, its name and start time tell them apart. */
 export const subagentKey = (a: { name: string; since_ms: number }) => `${a.name}|${a.since_ms}`;
 

@@ -29,7 +29,6 @@ import { GuidelineEditor, GuidelinesScreen } from "./screens/guidelines";
 import { HistoryScreen } from "./screens/history";
 import { historyFilters } from "./screens/history-logic";
 import { IdeasBody } from "./screens/ideas";
-import { InboxScreen } from "./screens/inbox";
 import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
 import { NewSessionScreen } from "./screens/new-session";
@@ -62,26 +61,34 @@ const root = createRootRoute({
 const index = createRoute({
   getParentRoute: () => root,
   path: "/",
+  // The app starts on New session; the Inbox is the bell in every screen's head.
   beforeLoad: () => {
-    throw redirect({ to: "/inbox" });
+    throw redirect({ to: "/new" });
   },
 });
-// The Team chat and the chat with an employee are gone: their old links open the Inbox.
+// The Inbox page is gone: an old link to it starts on New session too.
+const inbox = createRoute({
+  getParentRoute: () => root,
+  path: "/inbox",
+  beforeLoad: () => {
+    throw redirect({ to: "/new" });
+  },
+});
+// The Team chat and the chat with an employee are gone: their old links start on New session.
 const formerChat = createRoute({
   getParentRoute: () => root,
   path: "/chat",
   beforeLoad: () => {
-    throw redirect({ to: "/inbox" });
+    throw redirect({ to: "/new" });
   },
 });
 const formerTalk = createRoute({
   getParentRoute: () => root,
   path: "/talk/$conversationId",
   beforeLoad: () => {
-    throw redirect({ to: "/inbox" });
+    throw redirect({ to: "/new" });
   },
 });
-const inbox = createRoute({ getParentRoute: () => root, path: "/inbox", component: InboxScreen });
 const newSession = createRoute({ getParentRoute: () => root, path: "/new", component: NewSessionScreen });
 const ticketSearch = (search: Record<string, unknown>): { ticket?: string } => ({
   ...(typeof search.ticket === "string" ? { ticket: search.ticket } : {}),

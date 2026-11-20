@@ -424,6 +424,10 @@ pub mod feature {
     /// Claude Code compacting by itself during a turn shows too: `RunProgress::compacting`
     /// while it works and a `compacted` update afterwards. Older servers keep 120k.
     pub const COMPACTION_SETTING: &str = "compaction_setting";
+    /// A board member's answer to a run's questions or decision on its plan comes with
+    /// `MessageView::decision` (protocol 5, additive), so a client shows it as a card.
+    /// Decisions noted earlier have only `text`; a client keeps showing those as before.
+    pub const RUN_DECISIONS: &str = "run_decisions";
 }
 
 /// Every feature this build has.
@@ -478,6 +482,7 @@ pub const FEATURES: &[&str] = &[
     feature::CHAT_FILES,
     feature::SUBAGENT_STEPS,
     feature::COMPACTION_SETTING,
+    feature::RUN_DECISIONS,
 ];
 
 /// Daemon → client.

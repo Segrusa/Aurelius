@@ -61,7 +61,7 @@ test.afterAll(() => {
   console.log(JSON.stringify(results, null, 2));
 });
 
-test("the Inbox with 5,000 rows, in a browser", async ({ page }) => {
+test("the Inbox bell with 5,000 rows, in a browser", async ({ page }) => {
   const site = await serveStatic(WEB_DIST);
   try {
     await scriptServer(page, {
@@ -72,30 +72,36 @@ test("the Inbox with 5,000 rows, in a browser", async ({ page }) => {
       ],
       limits: [{ label: "Weekly limit", percent: 58, resets: "Resets Mon 09:00" }],
     });
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page.getByRole("heading", { name: "Flux wants to run a command" })).toBeVisible();
-    results.inboxScroll5000Rows = await scrollFrames(page, 'section[aria-label="Inbox items"] > div', 3000);
-    const cdp = await page.context().newCDPSession(page);
-    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
-    await page.evaluate(() => {
-      (document.querySelector('section[aria-label="Inbox items"] > div') as HTMLElement).scrollTop = 0;
-    });
-    results.inboxScroll5000RowsCpu4x = await scrollFrames(page, 'section[aria-label="Inbox items"] > div', 3000);
-    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
-    await expect(page.locator('section[aria-label="Inbox items"] button').first()).toBeVisible();
-    expect(await page.locator('section[aria-label="Inbox items"] button').count()).toBeLessThan(80);
+    await page.goto(`${site.origin}/new`);
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
+    // The bell draws a capped number of rows per group, however long the list is.
+    const start = Date.now();
+    await page
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    const inbox = page.getByRole("dialog", { name: "Inbox" });
+    await expect(inbox.getByRole("button", { name: /Flux wants to run a command/ })).toBeVisible();
+    results.inboxBellOpen5000RowsMs = Date.now() - start;
+    // Rows only: an update also has its Dismiss button.
+    const rows = inbox.getByRole("button").filter({ hasNotText: /^$/ });
+    expect(await rows.count()).toBeLessThan(120);
+    await page.keyboard.press("Escape");
 
     // Measured in the page, so it holds no round trips of the test itself: from the click to the
     // frame that shows the other screen.
     const switches = await page.evaluate(async () => {
       const times: number[] = [];
       for (let i = 0; i < 12; i++) {
-        const name = i % 2 === 0 ? "Board" : "Inbox";
-        const link = [...document.querySelectorAll("nav a")].find((a) =>
-          a.textContent?.startsWith(name),
-        ) as HTMLElement;
+        const name = i % 2 === 0 ? "Board" : "New session";
+        // Ctrl+1 goes to New session, the start.
+        const link = [...document.querySelectorAll("nav a")].find((a) => a.textContent?.startsWith("Board"));
         const start = performance.now();
-        link.click();
+        if (name === "Board") (link as HTMLElement).click();
+        else
+          window.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "1", code: "Digit1", ctrlKey: true, bubbles: true }),
+          );
         while (document.querySelector('[role="main"] h1')?.textContent !== name)
           await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
@@ -125,8 +131,8 @@ test("the palette with 3,000 tickets, in a browser", async ({ page }) => {
         project_name: "Northwind API",
       })),
     });
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await page.goto(`${site.origin}/new`);
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     const pressK = () =>
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", code: "KeyK", ctrlKey: true, bubbles: true }));
     // The first open fetches the tickets; only after that counts as a real measurement of the data.
@@ -221,7 +227,7 @@ test("Electron's cold start until the Inbox is usable", async () => {
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
-    await page.getByRole("heading", { name: "Inbox" }).waitFor();
+    await page.getByRole("heading", { level: 1, name: "New session" }).waitFor();
     await first.app.close();
 
     const times: number[] = [];

@@ -55,17 +55,28 @@ export function startOfDay(now: number): number {
   return d.getTime();
 }
 
+/** `items` most recently used first; equal ones keep their order. */
+export function byLastUse<T>(items: T[], usedAt: (item: T) => number): T[] {
+  return [...items].sort((a, b) => usedAt(b) - usedAt(a));
+}
+
 /**
- * The sidebar's sessions: the workspace's project only when one is chosen, the latest `SIDEBAR_SESSIONS`,
- * plus any older one that still has a signal, so an active session is never out of sight. With `since`,
- * only the active ones and those with activity from then on: the default view, today's work.
+ * The sidebar's sessions: the workspace's project only when one is chosen, most recently used first
+ * (`usedAt`, by default the last activity), the latest `SIDEBAR_SESSIONS` plus any older one that still has
+ * a signal, so an active session is never out of sight. With `since`, only the active ones and those used
+ * from then on: the default view, today's work.
  */
 export function sidebarSessions<
   T extends Pick<WorkSessionView, "project_id"> & Partial<SignalFields> & { last_activity_ms?: number },
->(sessions: T[], workspaceId: string | null, since: number | null = null): T[] {
-  const here = workspaceId ? sessions.filter((s) => s.project_id === workspaceId) : sessions;
+>(
+  sessions: T[],
+  workspaceId: string | null,
+  since: number | null = null,
+  usedAt: (s: T) => number = (s) => s.last_activity_ms ?? 0,
+): T[] {
+  const here = byLastUse(workspaceId ? sessions.filter((s) => s.project_id === workspaceId) : sessions, usedAt);
   const active = (s: T) => sessionSignal({ running: s.running ?? false, dispatch: s.dispatch }) !== null;
-  if (since !== null) return here.filter((s) => active(s) || (s.last_activity_ms ?? 0) >= since);
+  if (since !== null) return here.filter((s) => active(s) || usedAt(s) >= since);
   return here.filter((s, i) => i < SIDEBAR_SESSIONS || active(s));
 }
 

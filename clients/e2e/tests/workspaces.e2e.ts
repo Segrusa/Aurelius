@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
+import { openCompanyPage } from "./company";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
 import { boardOf, channel, messages, notification, scriptServer, task, ticket } from "./fake-server";
 import { expectNewSession } from "./new-session";
@@ -135,9 +136,14 @@ test("switching narrows the board and the inbox, and All projects shows everythi
     await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
     await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeHidden();
 
-    await page.getByRole("link", { name: "Inbox" }).click();
-    await expect(page.getByText("Atlas news").first()).toBeVisible();
-    await expect(page.getByText("Zephyr news")).toBeHidden();
+    await page
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    const inbox = page.getByRole("dialog", { name: "Inbox" });
+    await expect(inbox.getByText("Atlas news").first()).toBeVisible();
+    await expect(inbox.getByText("Zephyr news")).toBeHidden();
+    await page.keyboard.press("Escape");
 
     // Remembered per device.
     await choose(page, "Zephyr");
@@ -149,7 +155,7 @@ test("switching narrows the board and the inbox, and All projects shows everythi
 });
 
 test("a link to another project's ticket moves the workspace there", async ({ page }) => {
-  const site = await open(page, "/inbox", ZEPHYR);
+  const site = await open(page, "/new", ZEPHYR);
   try {
     await expect(switcher(page)).toHaveAccessibleName("Workspace: Zephyr");
     await page.goto(`${new URL(page.url()).origin}/board?ticket=t1`);
@@ -252,8 +258,8 @@ test("a real daemon takes the filters of a workspace", async () => {
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-    await page.getByRole("link", { name: "Knowledge" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
+    await openCompanyPage(page, "Knowledge");
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     await page.getByRole("button", { name: "New project" }).first().click();
     await page.getByPlaceholder("Name, for example Atlas").fill("Atlas");
@@ -264,9 +270,15 @@ test("a real daemon takes the filters of a workspace", async () => {
     await choose(page, "Atlas");
     // What refuses an unknown param answers with an error, and each screen would say so.
     const noFailure = () => expect(page.getByText(/did not load|not valid|is not valid/)).toHaveCount(0);
-    await page.getByRole("link", { name: "Inbox" }).click();
-    await expect(page.getByText("Nothing waits for you in Atlas.").first()).toBeVisible();
+    await page
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    await expect(
+      page.getByRole("dialog", { name: "Inbox" }).getByText("Nothing here. You are up to date."),
+    ).toBeVisible();
     await noFailure();
+    await page.keyboard.press("Escape");
     await page.evaluate(() => {
       window.history.pushState({}, "", "/scheduled");
       window.dispatchEvent(new PopStateEvent("popstate"));

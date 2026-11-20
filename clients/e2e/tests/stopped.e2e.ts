@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, test } from "@playwright/test";
+import { openCompanyPage } from "./company";
 import { REPO, TestDaemon } from "./daemon";
 
 test.skip(Boolean(process.env.AURELIUS_JOURNEY), "The test build always has a connection.");
@@ -32,9 +33,9 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
     await p.getByLabel("Name").fill("sam");
     await p.getByLabel("Password").fill("correct horse battery");
     await p.getByRole("button", { name: "Create" }).click();
-    await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(p.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
-    await nav("Employees").click();
+    await openCompanyPage(p, "Employees");
     await p.getByRole("button", { name: "Add employee" }).click();
     // A role is no longer required.
     await p.getByRole("dialog").getByLabel("Name").fill("Builder");
@@ -44,7 +45,7 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
       .click();
     await expect(p.getByRole("dialog")).toHaveCount(0);
 
-    await nav("Knowledge").click();
+    await openCompanyPage(p, "Knowledge");
     await p.getByRole("link", { name: "Projects", exact: true }).click();
     await p.getByRole("button", { name: "New project" }).first().click();
     await p.getByRole("dialog").getByLabel("Name").fill("Atlas");
@@ -76,12 +77,16 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
     await expect(p.getByText(/No connection is configured/).first()).toBeVisible();
     await expect(p.getByRole("button", { name: "Try again" })).toBeVisible();
 
-    await nav("Inbox").click();
+    // The Inbox bell lists it, and its row leads back to the ticket that says why.
     await p
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    await p
+      .getByRole("dialog", { name: "Inbox" })
       .getByRole("button", { name: /Login page/ })
       .first()
       .click();
-    await expect(p.getByText("Why it stopped")).toBeVisible();
     await expect(p.getByRole("button", { name: "Try again" })).toBeVisible();
     await expect(p.getByRole("link", { name: "Set one up" })).toBeVisible();
 

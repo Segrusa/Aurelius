@@ -77,7 +77,7 @@ async function signIn(page: Page): Promise<void> {
   await page.getByLabel("Name").fill("sam");
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 }
 
 test("pairs with a server elsewhere, works there, comes back and forgets it", async () => {

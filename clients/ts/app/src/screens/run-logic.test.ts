@@ -9,7 +9,9 @@ import {
   lastSummaryFailed,
   markdownPaths,
   screenshotId,
+  stepBatches,
   subagentDoingText,
+  subagentReport,
   subagentSteps,
   usageLine,
   usageTotals,
@@ -34,6 +36,27 @@ describe("run texts", () => {
     expect(subagentSteps(calls, "a1").map((c) => c.call_id)).toEqual(["s1", "s2"]);
     expect(subagentSteps(calls, null)).toEqual([]);
     expect(subagentSteps(calls.slice(0, 1), undefined)).toEqual([]);
+  });
+
+  it("cuts a subagent's steps into batches in order, the last one short", () => {
+    const steps = Array.from({ length: 23 }, (_, i) => ({ call_id: `s${i}` }));
+    const batches = stepBatches(steps, 10);
+    expect(batches.map((b) => b.length)).toEqual([10, 10, 3]);
+    expect(batches[2]?.[2]?.call_id).toBe("s22");
+    expect(stepBatches([], 10)).toEqual([]);
+  });
+
+  it("reads a subagent's report from the call that started it, once that call is done", () => {
+    const calls = [
+      { call_id: "a1", ok: true, output: "All 3 files are fixed." },
+      { call_id: "a2", ok: null, output: null },
+      { call_id: "a3", ok: false, output: "It stopped." },
+    ];
+    expect(subagentReport(calls, "a1")).toBe("All 3 files are fixed.");
+    expect(subagentReport(calls, "a2")).toBeNull();
+    expect(subagentReport(calls, "a3")).toBe("It stopped.");
+    expect(subagentReport(calls, "zz")).toBeNull();
+    expect(subagentReport(calls, null)).toBeNull();
   });
 
   it("finds markdown files, not web pages", () => {

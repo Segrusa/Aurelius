@@ -103,6 +103,26 @@ describe("sidebarSessions", () => {
     expect(shown).toContain("choose");
   });
 
+  it("sorts the most recently used first, whatever order the server sends", () => {
+    const list = [
+      { id: "old", project_id: "a", last_activity_ms: 10 },
+      { id: "new", project_id: "a", last_activity_ms: 30 },
+      { id: "mid", project_id: "a", last_activity_ms: 20 },
+    ];
+    expect(sidebarSessions(list, null).map((s) => s.id)).toEqual(["new", "mid", "old"]);
+    expect(sidebarSessions(list, null, 0).map((s) => s.id)).toEqual(["new", "mid", "old"]);
+  });
+
+  it("counts opening a session as using it, also for today's view", () => {
+    const list = [
+      { id: "busy", project_id: "a", last_activity_ms: 30 },
+      { id: "opened", project_id: "a", last_activity_ms: 5 },
+    ];
+    const usedAt = (s: (typeof list)[number]) => Math.max(s.last_activity_ms, s.id === "opened" ? 40 : 0);
+    expect(sidebarSessions(list, null, null, usedAt).map((s) => s.id)).toEqual(["opened", "busy"]);
+    expect(sidebarSessions(list, null, 35, usedAt).map((s) => s.id)).toEqual(["opened"]);
+  });
+
   it("shows earlier ones only on request, keeping all of today's and the list's order", () => {
     const id = (s: string) => s;
     const ordered = ["t1", "t2", "y1", "y2", "y3"];

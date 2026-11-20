@@ -1,4 +1,11 @@
-import type { ApprovalView, MessageView, NotificationView, TaskView } from "@aurelius/protocol";
+import type {
+  ApprovalView,
+  GuidelineProposalView,
+  MessageView,
+  NotificationView,
+  ProposalView,
+  TaskView,
+} from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
   age,
@@ -6,12 +13,15 @@ import {
   approvalSentence,
   buildInbox,
   filterInbox,
+  type InboxRow,
+  type InboxSource,
   isWaiting,
   needsYouCount,
   newNotes,
   notificationHeading,
   notificationPlace,
   openQuestion,
+  rowPlace,
   waitingLabel,
 } from "./inbox-logic";
 
@@ -201,5 +211,70 @@ describe("one question, one row", () => {
     expect(openQuestion([post("a", true), post("b", true), post("c", false)])?.id).toBe("b");
     expect(openQuestion([post("a", true, 5)])).toBeNull();
     expect(openQuestion([])).toBeNull();
+  });
+});
+
+describe("where a row of the bell leads", () => {
+  const row = (source: InboxSource): InboxRow => ({
+    id: "r",
+    title: "T",
+    meta: "",
+    atMs: 1,
+    tone: "amber",
+    glyph: "warn",
+    source,
+  });
+  const of = (approvalOver: Partial<ApprovalView>) =>
+    rowPlace(row({ kind: "approval", approval: approval(approvalOver) }), true);
+
+  it("takes an approval to its run, else its ticket or conversation; one without a place is decided in the bell", () => {
+    expect(of({ task_id: "t1", ticket_id: "k1", conversation_id: "c1" })).toEqual({ kind: "task", id: "t1" });
+    expect(of({ ticket_id: "k1", conversation_id: "c1" })).toEqual({ kind: "ticket", id: "k1", number: null });
+    expect(of({ conversation_id: "c1" })).toEqual({ kind: "conversation", id: "c1" });
+    expect(of({})).toEqual({ kind: "here" });
+  });
+
+  it("takes a waiting task to its ticket, else to its run", () => {
+    expect(rowPlace(row({ kind: "task", task: task({ ticket_id: "k1", ticket_number: 7 }) }), true)).toEqual({
+      kind: "ticket",
+      id: "k1",
+      number: 7,
+    });
+    expect(rowPlace(row({ kind: "task", task: task() }), true)).toEqual({ kind: "task", id: "t" });
+  });
+
+  it("takes a proposal to Employees and a guideline proposal to its guideline", () => {
+    const hire = { id: "p1" } as ProposalView;
+    expect(rowPlace(row({ kind: "proposal", proposal: hire }), true)).toEqual({ kind: "employees" });
+    const change = { id: "g9", guideline_id: "g1" } as GuidelineProposalView;
+    expect(rowPlace(row({ kind: "guideline", proposal: change }), true)).toEqual({
+      kind: "guideline",
+      id: "g1",
+      proposal: "g9",
+    });
+    const fresh = { id: "g9", guideline_id: null } as GuidelineProposalView;
+    expect(rowPlace(row({ kind: "guideline", proposal: fresh }), true)).toEqual({
+      kind: "guideline",
+      id: "new",
+      proposal: "g9",
+    });
+  });
+
+  it("takes a mention to its message where the server can find it, else to its ticket at that message", () => {
+    const mention = note({ reason: "mention", ticket_id: "k1", ticket_number: 3, message_id: "m1" });
+    expect(rowPlace(row({ kind: "notification", notification: mention }), true)).toEqual({ kind: "message", id: "m1" });
+    expect(rowPlace(row({ kind: "notification", notification: mention }), false)).toEqual({
+      kind: "ticket",
+      id: "k1",
+      number: 3,
+      message: "m1",
+    });
+    const review = note({ reason: "review", ticket_id: "k1", ticket_number: 3, message_id: "m1" });
+    expect(rowPlace(row({ kind: "notification", notification: review }), true)).toMatchObject({ kind: "ticket" });
+    expect(rowPlace(row({ kind: "notification", notification: note({ task_id: "t2" }) }), true)).toEqual({
+      kind: "task",
+      id: "t2",
+    });
+    expect(rowPlace(row({ kind: "notification", notification: note() }), true)).toEqual({ kind: "here" });
   });
 });

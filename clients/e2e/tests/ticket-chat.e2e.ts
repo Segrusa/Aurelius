@@ -78,7 +78,7 @@ test("a ticket reads as a chat: the bar above a message is icons and takes a rea
   }
 });
 
-test("a question on a ticket is one row in the Inbox, readable and answerable there", async ({ page }) => {
+test("a question on a ticket is one row in the Inbox bell, and leads to the ticket", async ({ page }) => {
   const site = await serveStatic(WEB_DIST);
   try {
     const open = ticket("t1", 35, "doing", { title: "Trim the texts", conversation_id: "d1" });
@@ -91,7 +91,7 @@ test("a question on a ticket is one row in the Inbox, readable and answerable th
       employee_name: "Pixel",
       conversation_id: "tc",
     });
-    const { writes } = await scriptServer(page, {
+    await scriptServer(page, {
       employees: [pixel],
       tickets: [open],
       tasks: [waiting],
@@ -110,16 +110,18 @@ test("a question on a ticket is one row in the Inbox, readable and answerable th
         ]),
       },
     });
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page.getByText("Pixel mentioned you")).toHaveCount(0);
-    await page.getByText("Trim the texts").first().click();
-    await expect(page.getByText("Which group may I remove first?")).toBeVisible();
+    await page.goto(`${site.origin}/new`);
+    await page
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    const inbox = page.getByRole("dialog", { name: "Inbox" });
+    // One question, one row: the mention of the same ask is left out.
+    await expect(inbox.getByRole("button", { name: /Trim the texts/ })).toHaveCount(1);
+    await expect(inbox.getByText("Pixel mentioned you")).toHaveCount(0);
     await shot(page, "inbox-question");
-    await page.getByRole("textbox", { name: "Your answer to Pixel" }).fill("The first one");
-    await page.getByRole("button", { name: "Send answer" }).click();
-    await expect
-      .poll(() => writes.find((w) => w.method === "ticket.post")?.params)
-      .toMatchObject({ ticket_id: "t1", text: "The first one" });
+    await inbox.getByRole("button", { name: /Trim the texts/ }).click();
+    await expect(page).toHaveURL(/\/ticket\/35$/);
   } finally {
     await site.close();
   }

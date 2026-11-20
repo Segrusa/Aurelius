@@ -4,7 +4,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { expectBody } from "@aurelius/client";
-import type { NotificationView, TaskView, TicketView } from "@aurelius/protocol";
+import type { NotificationView, TaskView, TicketView, WorkSessionView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -38,11 +38,21 @@ import { useWorkspace } from "../workspace";
 import { ActivityBar } from "./activity-bar";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
 import { pinKey, usePins } from "./employees";
-import { useInbox } from "./inbox";
-import { needsYouCount, newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
+import { openInboxBell } from "./inbox-bell";
+import { newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
 import { useOpenNewSession } from "./new-session";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
+import {
+  lastUsed,
+  parseUses,
+  RECENT_USE_KEY,
+  type RecentUses,
+  sessionUseKey,
+  ticketUseKey,
+  touchUse,
+  useKeyOf,
+} from "./recent-use-logic";
 import {
   activeSessions,
   type SessionSignal,
@@ -52,6 +62,7 @@ import {
   withEarlier,
 } from "./session-logic";
 import { SettingsSidebar } from "./settings";
+import { inSettingsArea } from "./settings-logic";
 import { sidebarTickets, ticketSignal } from "./ticket-session-logic";
 import { useTicketNeeds } from "./tickets-kit";
 import { subscriptionFor } from "./usage-logic";
@@ -123,11 +134,11 @@ const styles = stylex.create({
   },
   chevron: { display: "flex", transition: "transform 120ms ease" },
   chevronFolded: { transform: "rotate(-90deg)" },
+  // The "1 working" / "2 need you" count sits at the right end of the section header.
+  summary: { display: "flex", alignItems: "center", gap: 6, marginInlineStart: "auto" },
   more: { marginBlockStart: 2, paddingInlineStart: 22, fontWeight: 400 },
   group: { display: "flex", flexDirection: "column", gap: 1, marginBlockStart: 14 },
-  count: { fontSize: 12, color: "var(--color-text-primary)" },
   dot: { display: "block", width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
-  dotUnread: { backgroundColor: "var(--color-text-secondary)" },
   dotLive: { backgroundColor: "var(--color-text-accent)" },
   dotWorking: {
     width: 8,
@@ -174,10 +185,7 @@ const styles = stylex.create({
   barFill: { height: 3, borderRadius: 2, backgroundColor: "var(--color-text-accent)" },
 });
 
-const NAV_MAIN: { to: string; label: string; icon: IconType }[] = [
-  { to: "/new", label: "New session", icon: NewIcon },
-  { to: "/inbox", label: "Inbox", icon: NAV_ICONS.inbox },
-];
+const NAV_MAIN: { to: string; label: string; icon: IconType }[] = [{ to: "/new", label: "New session", icon: NewIcon }];
 // `server`: the row shows only when the server has that feature.
 const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Feature; server?: string }[] = [
   { to: "/board", label: "Board", icon: "board" },
@@ -185,8 +193,6 @@ const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Featu
   { to: "/tasks", label: "Tasks", icon: "tasks", feature: "TasksInSidebar" },
   { to: "/scheduled", label: "Scheduled", icon: "clock", feature: "ScheduledInSidebar" },
   { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
-  { to: "/employees", label: "Employees", icon: "team" },
-  { to: "/knowledge", label: "Knowledge", icon: "know" },
 ];
 
 // SideNavItem takes a component: one per mark, kept, or every render would remount the rows' icons.
@@ -204,19 +210,9 @@ function markIcon(letter: string, color: string, size: number, radius: number): 
 
 function NavRow({ to, label, icon, end }: { to: string; label: string; icon: IconType; end?: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
-  // The list of projects is a tab of Knowledge; a ticket's session counts as the Board, where it came
-  // from (ticket #70).
-  const on =
-    path === to ||
-    path.startsWith(`${to}/`) ||
-    (to === "/knowledge" && path.startsWith("/projects")) ||
-    (to === "/board" && path.startsWith("/ticket/"));
+  // A ticket's session counts as the Board, where it came from (ticket #70).
+  const on = path === to || path.startsWith(`${to}/`) || (to === "/board" && path.startsWith("/ticket/"));
   return <SideNavItem label={label} href={to} icon={icon} size="sm" isSelected={on} endContent={end} />;
-}
-
-function Counted({ count, dot }: { count?: number; dot?: boolean }) {
-  if (count) return <span {...stylex.props(styles.count)}>{count}</span>;
-  return dot ? <span role="img" aria-label="Unread" {...stylex.props(styles.dot, styles.dotUnread)} /> : null;
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
@@ -321,7 +317,7 @@ function FoldingSection({
           <Icon name="chevronDown" size={12} />
         </span>
         {title}
-        {summary}
+        {summary ? <span {...stylex.props(styles.summary)}>{summary}</span> : null}
       </button>
       {folded ? null : (
         <>
@@ -341,16 +337,37 @@ function FoldingSection({
   );
 }
 
+/**
+ * When you opened which session or ticket on this device, recorded as you open one, so the sidebar lists
+ * them most recently used first.
+ */
+function useRecentUses(): RecentUses {
+  const { storage } = usePlatform();
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const [uses, setUses] = useState(() => parseUses(storage.get(RECENT_USE_KEY)));
+  const key = useKeyOf(path);
+  useEffect(() => {
+    if (!key) return;
+    setUses((was) => {
+      const next = touchUse(was, key, Date.now());
+      storage.set(RECENT_USE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, [key, storage]);
+  return uses;
+}
+
 /** The board member's work sessions (server feature `work_sessions`), the workspace's when one is chosen. */
-function RecentSessions() {
+function RecentSessions({ uses }: { uses: RecentUses }) {
   const workspace = useWorkspace().id;
   const [earlier, setEarlier] = useState(false);
   const all = useWorkSessions().data ?? [];
-  const today = sidebarSessions(all, workspace, startOfDay(Date.now()));
+  const usedAt = (s: WorkSessionView) => lastUsed(uses, sessionUseKey(s.conversation_id), s.last_activity_ms);
+  const today = sidebarSessions(all, workspace, startOfDay(Date.now()), usedAt);
   const { list: sessions, hasEarlier } = withEarlier(
-    sidebarSessions(all, workspace, 0),
+    sidebarSessions(all, workspace, 0, usedAt),
     today,
-    sidebarSessions(all, workspace),
+    sidebarSessions(all, workspace, null, usedAt),
     (s) => s.conversation_id,
     earlier,
   );
@@ -385,17 +402,18 @@ function RecentSessions() {
 }
 
 /** The open tickets (ticket #70: each opens as its own session), the workspace's when one is chosen. */
-function OpenTickets() {
+function OpenTickets({ uses }: { uses: RecentUses }) {
   const workspace = useWorkspace().id;
   const [earlier, setEarlier] = useState(false);
   const all = useTickets().data ?? [];
   const need = useTicketNeeds(all);
   const signal = (t: TicketView) => ticketSignal(t, need.mine(t));
-  const today = sidebarTickets(all, workspace, signal, startOfDay(Date.now()));
+  const usedAt = (t: TicketView) => lastUsed(uses, ticketUseKey(t.number), t.updated_at_ms);
+  const today = sidebarTickets(all, workspace, signal, startOfDay(Date.now()), usedAt);
   const { list: tickets, hasEarlier } = withEarlier(
-    sidebarTickets(all, workspace, signal, 0),
+    sidebarTickets(all, workspace, signal, 0, usedAt),
     today,
-    sidebarTickets(all, workspace, signal),
+    sidebarTickets(all, workspace, signal, null, usedAt),
     (t) => t.id,
     earlier,
   );
@@ -454,7 +472,7 @@ function Usage() {
 const SIDEBAR_KEY = "sidebar";
 
 const GO_TO: Record<string, string> = {
-  GoDashboard: "/inbox",
+  GoDashboard: "/new",
   GoBoard: "/board",
   GoTasks: "/tasks",
   GoEmployees: "/employees",
@@ -467,7 +485,6 @@ const GO_TO: Record<string, string> = {
   OpenBackups: "/settings/backups",
   OpenRemoteAccess: "/settings/remote",
   GoProjects: "/projects",
-  OpenNotifications: "/inbox",
   OpenServers: "/settings/servers",
 };
 
@@ -563,6 +580,8 @@ function useGlobalActions(): void {
   const connection = useConnection();
   const navigate = useNavigate();
   const openNewSession = useOpenNewSession();
+  // The Inbox is the bell in the head: the key opens its dropdown.
+  useAction("OpenNotifications", openInboxBell);
   useAction("Quit", () => platform.quit?.(), platform.quit !== null);
   useAction("OpenUpdates", () => {
     connection
@@ -624,15 +643,14 @@ function useScreenCounter(): void {
 
 function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (collapsed: boolean) => void }) {
   const { open } = overlays;
-  const { groups } = useInbox();
   const { hostName, status, features } = useLinkState();
   const employees = useEmployees();
   const [employeePins] = usePins(pinKey(hostName, "pinned_employees"));
   const pinnedEmployees = employeePins.flatMap(
     (id) => employees.data?.filter((e) => e.id === id && e.status !== "archived") ?? [],
   );
-  const inbox = needsYouCount(groups);
   const openNewSession = useOpenNewSession();
+  const uses = useRecentUses();
   return (
     <SideNav
       aria-label="Main"
@@ -677,13 +695,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
       }
     >
       {NAV_MAIN.map((n) => (
-        <NavRow
-          key={n.to}
-          to={n.to}
-          label={n.label}
-          icon={n.icon}
-          end={n.to === "/inbox" && inbox ? <Counted count={inbox} /> : undefined}
-        />
+        <NavRow key={n.to} to={n.to} label={n.label} icon={n.icon} />
       ))}
       <SideNavSection title="Workspace">
         {offered(shown(NAV_WORKSPACE), features).map((n) => (
@@ -708,8 +720,8 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
               ))}
             </div>
           ) : null}
-          <RecentSessions />
-          <OpenTickets />
+          <RecentSessions uses={uses} />
+          <OpenTickets uses={uses} />
           <Live />
         </>
       )}
@@ -719,7 +731,8 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
 
 export function Frame({ children }: { children: ReactNode }) {
   useLiveQueries();
-  const inSettings = useRouterState({ select: (s) => s.location.pathname.startsWith("/settings") });
+  // Employees and Knowledge sit under Settings › Company, so they show its sidebar.
+  const inSettings = useRouterState({ select: (s) => inSettingsArea(s.location.pathname) });
   useGlobalActions();
   useOpenedWorkspace();
   useScreenCounter();

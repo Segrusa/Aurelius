@@ -305,6 +305,13 @@ describe("the sidebar's tickets", () => {
     expect(sidebarTickets(tickets, null, none).map((t) => t.id)).toEqual(["new", "other", "old"]);
   });
 
+  it("puts a ticket you opened last first, before one that changed earlier", () => {
+    const tickets = [tv({ id: "changed", updated_at_ms: 30 }), tv({ id: "opened", updated_at_ms: 5 })];
+    const usedAt = (t: TicketView) => Math.max(t.updated_at_ms, t.id === "opened" ? 40 : 0);
+    expect(sidebarTickets(tickets, null, none, null, usedAt).map((t) => t.id)).toEqual(["opened", "changed"]);
+    expect(sidebarTickets(tickets, null, none, 35, usedAt).map((t) => t.id)).toEqual(["opened"]);
+  });
+
   it("leaves out the Backlog, Done and archived tickets", () => {
     const tickets = [
       tv({ id: "backlog", column: "backlog" }),

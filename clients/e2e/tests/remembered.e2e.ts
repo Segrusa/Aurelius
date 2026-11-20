@@ -32,12 +32,12 @@ test("closing and opening the app keeps you signed in; signing out does not", as
     await p.getByLabel("Name").fill("sam");
     await p.getByLabel("Password").fill("correct horse battery");
     await p.getByRole("button", { name: "Create" }).click();
-    await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(p.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     await app.close();
 
     app = await open();
     p = await app.firstWindow();
-    await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible({ timeout: 30_000 });
+    await expect(p.getByRole("heading", { level: 1, name: "New session" })).toBeVisible({ timeout: 30_000 });
     await expect(p.getByLabel("Password")).toHaveCount(0);
 
     const secrets = join(daemon.data, "secrets");

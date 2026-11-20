@@ -486,7 +486,7 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
                 COALESCE(m.run_id, CASE WHEN json_extract(m.meta_json, '$.kind') = 'group' THEN json_extract(m.meta_json, '$.run_id') END), m.reply_to_id,
                 c.display_name, r.model_id, COALESCE(json_extract(r.resolved_config_json, '$.persona_name'), (SELECT e.name FROM employees e WHERE e.id = r.employee_id)),
                 json_extract(m.meta_json, '$.kind'), json_extract(m.meta_json, '$.from'), json_extract(m.meta_json, '$.approval_id'), json_extract(m.meta_json, '$.files'), json_extract(m.meta_json, '$.uploads'),
-                json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system'), {parent}, {edits}
+                json_extract(m.meta_json, '$.mode'), json_extract(m.meta_json, '$.system'), {parent}, {edits}, json_extract(m.meta_json, '$.decision')
          FROM messages m LEFT JOIN blobs b ON b.id = m.content_blob_id
          LEFT JOIN runs r ON r.id = m.run_id LEFT JOIN connections c ON c.id = r.connection_id
          WHERE m.conversation_id = ?1 AND {only} ORDER BY m.ordinal"
@@ -514,11 +514,12 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
             r.get::<_, Option<String>>(18)?,
             r.get::<_, Option<i64>>(19)?,
             r.get::<_, Option<i64>>(20)?,
+            r.get::<_, Option<String>>(21)?,
         ))
     })?;
     let mut out = Vec::new();
     for row in rows {
-        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode, system, parent, edited, deleted) = row?;
+        let (id, ordinal, role, status, key, created, run, reply, connection, model, persona, update, from, approval, files, uploads, mode, system, parent, edited, deleted, decision) = row?;
         let produced_by = match (connection, model.filter(|m| !m.is_empty())) {
             (Some(c), Some(m)) => Some(format!("{c} · {m}")),
             (Some(c), None) => Some(format!("{c} · default model")),
@@ -562,6 +563,7 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
             editable: false,
             awaiting_user: false,
             run: None,
+            decision: decision.and_then(|d| serde_json::from_str(&d).ok()),
         });
     }
     // The board members who wrote in a discussion (schema 19).

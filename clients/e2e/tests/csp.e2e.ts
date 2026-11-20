@@ -127,10 +127,8 @@ test("nothing is refused in the built Electron app", async () => {
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-    // A new session's first words show as a code block in the session it opens.
-    await page.keyboard.press("Control+n");
     await expectNewSession(page);
+    // A new session's first words show as a code block in the session it opens.
     await sessionComposer(page).fill("```ts\nconst answer: number = 42;\n```");
     await page.keyboard.press("Control+Enter");
     await expect(page).not.toHaveURL(/\/new$/);

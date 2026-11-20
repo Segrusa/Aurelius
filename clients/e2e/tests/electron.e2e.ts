@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, test } from "@playwright/test";
+import { openCompanyPage } from "./company";
 import { REPO, TestDaemon } from "./daemon";
 
 test("runs over the local socket: first board member, Inbox, reconnect, and no way out for the page", async () => {
@@ -76,7 +77,7 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Nothing waits for you." })).toBeVisible();
 
     // Fonts and styles came through the CSP: the design's type and panel.
@@ -95,10 +96,10 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
     expect(look.bg).toBe("rgb(8, 9, 10)");
 
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     // The title bar moves the window on Windows and macOS, until a dialog or menu needs its clicks.
-    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Employees" }).click();
+    await openCompanyPage(page, "Employees");
     const titleBar = page.locator("[data-titlebar]").first();
     await expect(titleBar).toBeVisible();
     const region = () => titleBar.evaluate((el) => getComputedStyle(el).getPropertyValue("app-region"));

@@ -11,6 +11,7 @@ import { usePlatform } from "../platform";
 import { Icon } from "../ui/icons";
 import { ActivitySection } from "./activity";
 import type { ActivityFilters } from "./activity-logic";
+import { InboxBell } from "./inbox-bell";
 import {
   BackupsSection,
   CompactionSection,
@@ -151,7 +152,10 @@ const styles = stylex.create({
 interface Section {
   key: string;
   label: string;
-  body: (filters: ActivityFilters) => ReactNode;
+  /** What the section shows inside Settings; a section without one is a page of its own at `to`. */
+  body?: (filters: ActivityFilters) => ReactNode;
+  /** The page's own route, for a page too big for a Settings section (Employees, Knowledge). */
+  to?: string;
   feature?: Feature;
   /** A table that needs the room. */
   wide?: boolean;
@@ -167,9 +171,16 @@ const ALL_GROUPS: { label: string; sections: Section[] }[] = [
     ],
   },
   {
-    label: "Workspace",
+    label: "Company",
     sections: [
       { key: "company", label: "Company", body: () => <CompanySection /> },
+      { key: "employees", label: "Employees", to: "/employees" },
+      { key: "knowledge", label: "Knowledge", to: "/knowledge" },
+    ],
+  },
+  {
+    label: "Workspace",
+    sections: [
       { key: "employee-runs", label: "Model & effort", body: () => <EmployeeRunsSection /> },
       { key: "servers", label: "Servers & PC", body: () => <ServerSection /> },
       { key: "remote", label: "Remote access", body: () => <RemoteSection /> },
@@ -191,13 +202,20 @@ const ALL_GROUPS: { label: string; sections: Section[] }[] = [
 ];
 
 const GROUPS = ALL_GROUPS.map((group) => ({ ...group, sections: shown(group.sections) }));
+/** The sections Settings itself shows; Employees and Knowledge are pages of their own. */
+const SECTIONS = GROUPS.flatMap((g) => g.sections).filter((s) => s.body);
+
+// The list of projects is a tab of Knowledge.
+function companyPageOn(to: string, path: string): boolean {
+  return path === to || path.startsWith(`${to}/`) || (to === "/knowledge" && path === "/projects");
+}
 
 export function SettingsSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const { hostName, remote } = useLinkState();
   return (
     <aside {...stylex.props(styles.sidebar)}>
-      <Link to="/inbox" {...stylex.props(styles.back)}>
+      <Link to="/new" {...stylex.props(styles.back)}>
         <Icon name="back" size={14} />
         Back to the app
       </Link>
@@ -206,8 +224,20 @@ export function SettingsSidebar() {
           <div key={group.label} {...stylex.props(styles.group)}>
             <p {...stylex.props(styles.groupName)}>{group.label}</p>
             {group.sections.map((section) => {
-              const to = `/settings/${section.key}`;
-              const on = path === to;
+              if (section.to) {
+                const on = companyPageOn(section.to, path);
+                return (
+                  <Link
+                    key={section.key}
+                    to={section.to}
+                    aria-current={on ? "page" : undefined}
+                    {...stylex.props(styles.link, on && styles.linkOn)}
+                  >
+                    {section.label}
+                  </Link>
+                );
+              }
+              const on = path === `/settings/${section.key}`;
               return (
                 <Link
                   key={section.key}
@@ -248,16 +278,15 @@ export function SettingsScreen({ section, filters }: { section: string; filters:
     // biome-ignore lint/correctness/useHookAtTopLevel: a fixed list: the same hooks in the same order.
     useAction(action, () => pressKeyed(action));
   }
-  useAction("Back", () => void navigate({ to: "/inbox" }));
+  useAction("Back", () => void navigate({ to: "/new" }));
   const stepSection = (by: number) => {
-    const all = GROUPS.flatMap((g) => g.sections);
-    const at = all.findIndex((s) => s.key === section);
-    const next = all[(at + by + all.length) % all.length];
+    const at = SECTIONS.findIndex((s) => s.key === section);
+    const next = SECTIONS[(at + by + SECTIONS.length) % SECTIONS.length];
     if (next) void navigate({ to: "/settings/$section", params: { section: next.key } });
   };
   useAction("NextTab", () => stepSection(1));
   useAction("PrevTab", () => stepSection(-1));
-  const found = GROUPS.flatMap((g) => g.sections).find((s) => s.key === section);
+  const found = SECTIONS.find((s) => s.key === section);
   return (
     <>
       <LayoutHeader hasDivider padding={0} data-titlebar>
@@ -266,11 +295,12 @@ export function SettingsScreen({ section, filters }: { section: string; filters:
           <Heading level={1} xstyle={styles.title}>
             {found?.label ?? "Not found"}
           </Heading>
+          <InboxBell />
         </div>
       </LayoutHeader>
       <div {...stylex.props(styles.scroller)}>
         <div key={section} {...stylex.props(styles.page, found?.wide && styles.wide)}>
-          {found ? found.body(filters) : <p {...stylex.props(styles.missing)}>This section does not exist.</p>}
+          {found?.body ? found.body(filters) : <p {...stylex.props(styles.missing)}>This section does not exist.</p>}
         </div>
       </div>
     </>
