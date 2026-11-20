@@ -33,7 +33,6 @@ import {
   defaultKind,
   defaultProject,
   defaultWho,
-  footerLine,
   offeredKind,
   parseRecent,
   placeholderOf,
@@ -365,14 +364,6 @@ export function NewSessionScreen() {
     setProject(id);
     composer.current?.focus();
   };
-  const footer = footerLine({
-    kind,
-    whoName: whoId === DISPATCHER ? null : (who?.name ?? null),
-    responsible,
-    noConnection,
-    worktree,
-    dispatcher: whoId === DISPATCHER,
-  });
   const noProjects = projects.isSuccess && shown.length === 0;
   const continuing = continueTickets(mine.data?.tickets ?? []);
 
@@ -589,11 +580,13 @@ export function NewSessionScreen() {
               </>
             }
           />
-          <div {...stylex.props(styles.noteLine)}>
-            <span {...stylex.props(styles.note)}>
-              {footer.type === "no_connection" ? <NoConnectionNote /> : footer.text}
-            </span>
-          </div>
+          {noConnection ? (
+            <div {...stylex.props(styles.noteLine)}>
+              <span {...stylex.props(styles.note)}>
+                <NoConnectionNote />
+              </span>
+            </div>
+          ) : null}
         </div>
       </div>
     </Page>

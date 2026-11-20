@@ -96,7 +96,6 @@ const styles = stylex.create({
     textOverflow: "ellipsis",
     userSelect: "none",
   },
-  headActions: { marginInlineStart: "auto", display: "flex", gap: 2 },
   section: {
     display: "flex",
     alignItems: "center",
@@ -577,7 +576,6 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
   const pinnedEmployees = employeePins.flatMap(
     (id) => employees.data?.filter((e) => e.id === id && e.status !== "archived") ?? [],
   );
-  const openNewSession = useOpenNewSession();
   return (
     <SideNav
       aria-label="Main"
@@ -600,13 +598,6 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
             <span title={hostName ?? "Aurelius"} {...stylex.props(styles.brand)}>
               Aurelius
             </span>
-          )}
-          {collapsed ? null : (
-            <div {...stylex.props(styles.headActions)}>
-              <Tooltip content="New session" delay={400} hasHoverIndication={false}>
-                <IconButton label="New session" icon={<NewIcon />} size="sm" onClick={openNewSession} />
-              </Tooltip>
-            </div>
           )}
         </div>
       }

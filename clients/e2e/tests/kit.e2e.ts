@@ -118,8 +118,8 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await page.keyboard.press("Control+1");
     await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
-    // The sidebar's + is New session now (ticket #60), with the composer ready to type in.
-    await page.getByRole("button", { name: "New session" }).first().click();
+    // The sidebar's New session row, with the composer ready to type in.
+    await page.getByRole("link", { name: "New session" }).click();
     await expectNewSession(page);
     await openInbox(page);
 

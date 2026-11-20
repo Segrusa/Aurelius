@@ -12,7 +12,6 @@ import {
   defaultKind,
   defaultProject,
   defaultWho,
-  footerLine,
   noteRecent,
   offeredKind,
   PROJECT_ROWS,
@@ -29,7 +28,7 @@ import {
   startedSession,
   startProblem,
 } from "./new-session-logic";
-import { LAST_QUICK, QUICK_NOTE, quickCreateParams } from "./quick-logic";
+import { LAST_QUICK, quickCreateParams } from "./quick-logic";
 
 const project = (id: string, status = "active") => ({ id, name: id.toUpperCase(), status });
 const employee = (id: string, status = "active") => ({ id, name: `Name ${id}`, status });
@@ -237,33 +236,6 @@ describe("whether Start can go", () => {
   });
 });
 
-describe("the line above the chips (§4.5)", () => {
-  it("says what happens next, in the dialogs' words", () => {
-    expect(footerLine({ kind: "ticket", whoName: null, responsible: true, noConnection: false })).toEqual({
-      type: "text",
-      text: "The dispatcher picks the owner. You are responsible.",
-    });
-    expect(footerLine({ kind: "ticket", whoName: null, responsible: false, noConnection: false })).toEqual({
-      type: "text",
-      text: "The dispatcher picks the owner.",
-    });
-    expect(footerLine({ kind: "ticket", whoName: "Flux", responsible: true, noConnection: false })).toEqual({
-      type: "text",
-      text: "Flux reports back to you when it is done.",
-    });
-    expect(footerLine({ kind: "quick", whoName: "Flux", responsible: true, noConnection: false })).toEqual({
-      type: "text",
-      text: QUICK_NOTE,
-    });
-  });
-
-  it("says first that nothing can start without a connection", () => {
-    expect(footerLine({ kind: "quick", whoName: "Flux", responsible: true, noConnection: true })).toEqual({
-      type: "no_connection",
-    });
-  });
-});
-
 describe("the composer", () => {
   it("asks for what the kind needs", () => {
     expect(placeholderOf("ticket")).toBe("Describe a ticket or give work…");
@@ -344,11 +316,7 @@ describe("work sessions", () => {
     expect(startProblem({ ...ready, files: 0, sessionFiles: false, worktree: true })).toBeNull();
   });
 
-  it("says where the employee works", () => {
-    const line = (worktree: boolean) =>
-      footerLine({ kind: "session", whoName: "Orion", responsible: false, noConnection: false, worktree });
-    expect(line(false)).toEqual({ type: "text", text: expect.stringContaining("project's folder itself") });
-    expect(line(true)).toEqual({ type: "text", text: expect.stringContaining("worktree of its own") });
+  it("asks what to work on, without a ticket", () => {
     expect(placeholderOf("session")).toContain("without a ticket");
   });
 
@@ -415,20 +383,6 @@ describe("a session the dispatcher gives to someone (session_dispatch)", () => {
     expect(startProblem({ ...ready, sessionDispatch: true })).toBeNull();
     expect(startProblem({ ...ready, sessionDispatch: false })).toBe("Choose who does it.");
     expect(startProblem({ ...ready, kind: "quick", sessionDispatch: true })).toBe("Choose who does it.");
-  });
-
-  it("says the dispatcher chooses, and where they work", () => {
-    const line = (worktree: boolean) =>
-      footerLine({
-        kind: "session",
-        whoName: null,
-        responsible: false,
-        noConnection: false,
-        worktree,
-        dispatcher: true,
-      });
-    expect(line(false)).toEqual({ type: "text", text: expect.stringContaining("The dispatcher chooses who takes it") });
-    expect(line(true)).toEqual({ type: "text", text: expect.stringContaining("worktree of its own") });
   });
 
   it("sends a session start without an employee, and reads the session from its receipt", () => {

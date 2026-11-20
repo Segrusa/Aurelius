@@ -176,8 +176,8 @@ test("new work starts in the workspace", async ({ page }) => {
     await expect(dialog.getByRole("button", { name: "Project" })).toContainText("Zephyr");
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
-    // The sidebar's +: New session (ticket #60), in the same workspace.
-    await page.getByRole("button", { name: "New session" }).first().click();
+    // The sidebar's New session row, in the same workspace.
+    await page.getByRole("link", { name: "New session" }).click();
     await expectNewSession(page);
     await expect(page.getByRole("button", { name: /^Project/ })).toContainText("Zephyr");
   } finally {

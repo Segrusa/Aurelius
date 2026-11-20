@@ -3,7 +3,7 @@
 
 import type { AgentMode, MethodParams, Receipt } from "@aurelius/protocol";
 import { giveWorkParams, LAST_GIVEN, taskRun, ticketCreateParams, titleOfGoal } from "./dialog-logic";
-import { LAST_QUICK, QUICK_NOTE, quickAssignee, quickCreateParams } from "./quick-logic";
+import { LAST_QUICK, quickAssignee, quickCreateParams } from "./quick-logic";
 
 /** `session`: a work session (server feature `work_sessions`), which replaces the quick task there. */
 export type SessionKind = "ticket" | "quick" | "session";
@@ -12,21 +12,6 @@ export type SessionKind = "ticket" | "quick" | "session";
 export const SESSIONS_FEATURE = "work_sessions";
 /** The server's dispatcher chooses who takes a session (`work_session.dispatch`). */
 export const SESSION_DISPATCH_FEATURE = "session_dispatch";
-
-/** What a session start says under the composer. */
-export function sessionNote(whoName: string | null, worktree: boolean): string {
-  const who = whoName ?? "The employee";
-  return worktree
-    ? `${who} works in a worktree of its own, on its own branch. No ticket: you talk with them in the session.`
-    : `${who} works in the project's folder itself. No ticket: you talk with them in the session.`;
-}
-
-/** The dispatcher chooses who takes a session: its words after Start. */
-export function dispatchedNote(worktree: boolean): string {
-  return worktree
-    ? "The dispatcher chooses who takes it, in a worktree of its own on its own branch. No ticket: you talk with them in the session."
-    : "The dispatcher chooses who takes it, in the project's folder itself. No ticket: you talk with them in the session.";
-}
 
 /** The Who of a ticket nobody was chosen for: the dispatcher picks the owner. */
 export const DISPATCHER = "dispatcher";
@@ -263,35 +248,6 @@ export function startProblem(state: {
       return "Add files once the session works in its own worktree, or start it in the project folder.";
   }
   return null;
-}
-
-export type FooterLine = { type: "no_connection" } | { type: "text"; text: string };
-
-/** §4.5: the dialogs' words for what happens after Start. */
-export function footerLine(state: {
-  kind: SessionKind;
-  /** Null for the dispatcher. */
-  whoName: string | null;
-  /** The server knows a responsible board member (`ticket_responsible`). */
-  responsible: boolean;
-  noConnection: boolean;
-  /** A session in a worktree of its own. */
-  worktree?: boolean;
-  /** The dispatcher chooses who takes the session. */
-  dispatcher?: boolean;
-}): FooterLine {
-  if (state.noConnection) return { type: "no_connection" };
-  if (state.kind === "quick") return { type: "text", text: QUICK_NOTE };
-  if (state.kind === "session") {
-    const worktree = state.worktree ?? false;
-    const text = state.dispatcher ? dispatchedNote(worktree) : sessionNote(state.whoName, worktree);
-    return { type: "text", text };
-  }
-  if (state.whoName) return { type: "text", text: `${state.whoName} reports back to you when it is done.` };
-  const text = state.responsible
-    ? "The dispatcher picks the owner. You are responsible."
-    : "The dispatcher picks the owner.";
-  return { type: "text", text };
 }
 
 export function placeholderOf(kind: SessionKind): string {

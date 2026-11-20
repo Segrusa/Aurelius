@@ -855,7 +855,6 @@ test.describe("states a test daemon cannot produce", () => {
     await page.goto(`${site.origin}/new`);
     await page.getByRole("radio", { name: "Session" }).click();
     await expect(page.getByRole("button", { name: "Who" })).toHaveText(/Dispatcher/);
-    await expect(page.getByText("The dispatcher chooses who takes it")).toBeVisible();
     await page.getByRole("textbox", { name: "What needs doing" }).fill("The login page is blank.");
     await page.getByRole("button", { name: /^Start/ }).click();
     await expect

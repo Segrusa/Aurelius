@@ -42,8 +42,8 @@ const script = {
 async function drawEverything(page: Page, newTicketKey = "Alt+t") {
   await expect(page.locator(".astryx-code-block code").first()).toBeVisible();
   await expect(page.locator("style:not([data-astryx-highlight-dynamic])").first()).toBeAttached();
-  // The sidebar's + opens New session (ticket #60); New ticket is a dialog on its key (Alt+T on the web).
-  await page.getByRole("button", { name: "New session" }).first().click();
+  // The sidebar's New session row opens it; New ticket is a dialog on its key (Alt+T on the web).
+  await page.getByRole("link", { name: "New session" }).click();
   await expectNewSession(page);
   await page.keyboard.press(newTicketKey);
   await expect(page.getByLabel("Title")).toBeVisible();
