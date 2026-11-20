@@ -6,7 +6,6 @@ import type { ActivityView, ChannelView, MessageView, ReactionView, SystemLine }
 
 export const GROUP_WINDOW_MS = 5 * 60 * 1000;
 const DAY_MS = 86_400_000;
-export const SHOW_MORE_AFTER = 15;
 export const REACTIONS = ["✓", "👀", "👍", "🎉", "❓", "❗", "🙏", "🚀"];
 /** Those the bar above a message offers at one click. */
 export const QUICK_REACTIONS = ["👍", "✓", "👀"];
@@ -346,78 +345,11 @@ export function webSearchSummary(output: string): string {
 // ---- Channels -------------------------------------------------------------------
 
 const kindOf = (c: ChannelView) => c.kind ?? "general";
-const byActivity = (a: ChannelView, b: ChannelView) =>
-  (b.last_activity_ms ?? 0) - (a.last_activity_ms ?? 0) || (b.ticket_number ?? 0) - (a.ticket_number ?? 0);
-const byName = (a: ChannelView, b: ChannelView) => a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-
-export interface Sections {
-  general: ChannelView | null;
-  projects: ChannelView[];
-  /** Archived projects. A ticket's channel is never listed: the ticket opens as its session (TS-06). */
-  archived: ChannelView[];
-}
-
-export function sections(channels: ChannelView[]): Sections {
-  const of = (archived: boolean) => channels.filter((c) => kindOf(c) === "project" && c.archived === archived);
-  return {
-    general: channels.find((c) => kindOf(c) === "general") ?? null,
-    projects: of(false).sort(byName),
-    archived: of(true).sort(byName),
-  };
-}
-
-/** The open tickets' channels, the latest activity first: the chat popout's ticket list (O2). */
-export function ticketChannels(channels: ChannelView[]): ChannelView[] {
-  return channels.filter((c) => kindOf(c) === "ticket" && !c.archived).sort(byActivity);
-}
-
-/** `list` in the frozen order, the ones not in it after: a row never jumps under the pointer. */
-export function keepOrder(list: ChannelView[], frozen: string[]): ChannelView[] {
-  const place = (c: ChannelView) => {
-    const at = frozen.indexOf(c.conversation_id);
-    return at < 0 ? Number.MAX_SAFE_INTEGER : at;
-  };
-  return [...list].sort((a, b) => place(a) - place(b));
-}
-
-export const shownCount = (len: number, expanded: boolean) => (expanded ? len : Math.min(len, SHOW_MORE_AFTER));
-
-export function visibleChannels(s: Sections, archivedOpen: boolean, archivedAll: boolean): ChannelView[] {
-  return [
-    ...(s.general ? [s.general] : []),
-    ...s.projects,
-    ...s.archived.slice(0, archivedOpen ? shownCount(s.archived.length, archivedAll) : 0),
-  ];
-}
 
 export function bareName(c: ChannelView): string {
   const kind = kindOf(c);
   if (kind === "general") return "general";
   return kind === "ticket" ? c.name.replace(/^#+/, "") : c.name;
-}
-
-export function channelLabel(c: ChannelView): string {
-  let name = bareName(c);
-  if (kindOf(c) === "ticket" && c.ticket_number !== null && c.ticket_number !== undefined) {
-    const n = String(c.ticket_number);
-    const slug = name.startsWith(n) ? name.slice(n.length).replace(/^-+/, "") : name;
-    name = slug ? `Ticket ${n}, ${slug}` : `Ticket ${n}`;
-  }
-  const parts = [name];
-  if (c.unread > 0) parts.push(`${c.unread} unread`);
-  if (c.mentions > 0) parts.push(`${c.mentions} mention${c.mentions === 1 ? "" : "s"}`);
-  if (c.archived) parts.push("archived, read-only");
-  return parts.join(", ");
-}
-
-export function chatBadge(channels: ChannelView[]): { mentions: number; unread: boolean } {
-  return { mentions: channels.reduce((n, c) => n + c.mentions, 0), unread: channels.some((c) => c.unread > 0) };
-}
-
-export function stepChannel(visible: string[], current: string | null, down: boolean): string | null {
-  if (visible.length === 0) return null;
-  const at = Math.max(0, current === null ? 0 : visible.indexOf(current));
-  return visible[down ? Math.min(at + 1, visible.length - 1) : Math.max(at - 1, 0)] ?? null;
 }
 
 export function readOnlyBar(c: Pick<ChannelView, "ticket_number">, ticketDone: boolean): string {

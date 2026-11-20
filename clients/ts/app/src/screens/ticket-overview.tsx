@@ -44,7 +44,6 @@ const styles = stylex.create({
     backgroundColor: "var(--color-background-surface)",
     fontSize: 13,
   },
-  cardNarrow: { width: "calc(100% - 16px)" },
   head: {
     display: "flex",
     alignItems: "center",
@@ -298,7 +297,7 @@ export function TaskLinks({ rows }: { rows: { task: TaskView; depth: number }[] 
 const CARD_KEY = "chat.ticket-progress.open";
 
 /** Above the composer of a ticket's chat: what runs now, the owner's todo list, the open tasks. */
-export function ProgressCard({ p, narrow = false }: { p: TicketProgress; narrow?: boolean }) {
+export function ProgressCard({ p }: { p: TicketProgress }) {
   const { storage } = usePlatform();
   const [open, setOpen] = useState(() => storage.get(CARD_KEY) !== "0");
   const toggle = () => {
@@ -309,7 +308,7 @@ export function ProgressCard({ p, narrow = false }: { p: TicketProgress; narrow?
   const head = p.now ?? p.stateLine ?? (p.todos ? "Todo list" : "Open tasks");
   const doing = p.todos?.find((t) => t.state === "doing")?.text;
   return (
-    <section aria-label="Progress" data-ticket-progress {...stylex.props(styles.card, narrow && styles.cardNarrow)}>
+    <section aria-label="Progress" data-ticket-progress {...stylex.props(styles.card)}>
       <button type="button" aria-expanded={open} onClick={toggle} {...stylex.props(styles.head)}>
         <span
           {...stylex.props(

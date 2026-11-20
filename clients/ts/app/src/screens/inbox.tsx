@@ -418,9 +418,8 @@ function NotificationDetail({ row, n }: { row: InboxRow; n: NotificationView }) 
         ticketPlace({ id: n.ticket_id, number: n.ticket_number }, n.message_id ? { message: n.message_id } : undefined),
       );
     else if (n.task_id) void navigate({ to: "/tasks/$taskId", params: { taskId: n.task_id } });
-    else if (n.conversation_id) void navigate({ to: "/chat", search: { channel: n.conversation_id } });
   };
-  useAction("OpenSelected", open, Boolean(n.ticket_id || n.task_id || n.conversation_id));
+  useAction("OpenSelected", open, Boolean(n.ticket_id || n.task_id));
   return (
     <DetailFrame row={row}>
       {n.ticket_id && (n.reason === "plan_review" || n.reason === "review") ? (

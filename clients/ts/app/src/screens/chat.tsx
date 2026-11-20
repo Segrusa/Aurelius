@@ -6,16 +6,15 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
-import { TextInput } from "@astryxdesign/core/TextInput";
 import { ProtocolError } from "@aurelius/client";
 import type { ChannelView, EmployeeSummary, MessageView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
-import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket, useTickets } from "../data";
+import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { AttachmentTray, usePromptAttachments } from "../ui/attach";
@@ -25,7 +24,6 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { PromptBox, PromptTextarea } from "../ui/prompt-box";
 import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
-import { useWorkspace } from "../workspace";
 import { ApprovalCard } from "./approval-card";
 import { foldUpdates } from "./board-logic";
 import { useLiveAll, useLiveStore } from "./chat-live";
@@ -34,7 +32,6 @@ import {
   bareName,
   before,
   type Caps,
-  channelLabel,
   completeMention,
   EVERYONE,
   localDay,
@@ -48,13 +45,9 @@ import {
   replies,
   replyLabel,
   runAuthor,
-  sections,
-  shownCount,
-  stepChannel,
   streamTo,
   unknownMentions,
   unknownWarning,
-  visibleChannels,
 } from "./chat-logic";
 import {
   type ChatContext,
@@ -73,7 +66,6 @@ import { ThreadWaiting } from "./scheduled";
 import { OVERVIEW_KEY, OverviewPanel, ProgressCard, useTicketProgress } from "./ticket-overview";
 import { ticketPlace } from "./ticket-session-logic";
 import { ColumnGlyph } from "./tickets-kit";
-import { homeChannel, narrow } from "./workspace-logic";
 
 const enter = stylex.keyframes({
   from: { opacity: 0, transform: "translateY(4px)" },
@@ -82,68 +74,7 @@ const enter = stylex.keyframes({
 const styles = stylex.create({
   feedTop: { height: 14 },
   feedEnd: { height: 16 },
-  channelRow: {
-    display: "flex",
-    height: 28,
-    width: "100%",
-    cursor: "pointer",
-    alignItems: "center",
-    gap: 8,
-    borderRadius: 6,
-    borderWidth: 0,
-    paddingInline: 8,
-    textAlign: "left",
-    backgroundColor: "transparent",
-    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
-  },
-  channelOn: { backgroundColor: "var(--color-overlay-hover)", color: "var(--color-text-primary)" },
-  channelUnread: { color: "var(--color-text-primary)", fontWeight: 600 },
   hash: { color: "var(--precision-text3)" },
-  channelName: {
-    minWidth: 0,
-    flexGrow: 1,
-    flexBasis: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  readOnlyTag: { fontSize: 11, color: "var(--precision-text3)" },
-  badgeMention: { fontSize: 12, fontWeight: 600, color: "var(--color-text-warning)" },
-  badgeUnread: { fontSize: 12, color: "var(--color-text-secondary)" },
-  list: {
-    display: "flex",
-    width: 220,
-    flexShrink: 0,
-    flexDirection: "column",
-    gap: 14,
-    overflowY: "auto",
-    borderRightWidth: 1,
-    borderRightStyle: "solid",
-    borderRightColor: "var(--color-border)",
-    backgroundColor: "var(--precision-sunk)",
-    paddingInline: 8,
-    paddingBlock: 10,
-  },
-  listGroup: { display: "flex", flexDirection: "column", gap: 1 },
-  eyebrow: {
-    margin: 0,
-    marginBottom: 4,
-    paddingInline: 8,
-    fontSize: 12,
-    fontWeight: 500,
-    color: "var(--precision-text3)",
-  },
-  none: { margin: 0, paddingInline: 8, color: "var(--precision-text3)" },
-  more: {
-    cursor: "pointer",
-    borderWidth: 0,
-    backgroundColor: "transparent",
-    paddingInline: 8,
-    paddingBlock: 4,
-    textAlign: "left",
-    fontSize: 12,
-    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
-  },
   composer: {
     marginInline: "auto",
     display: "flex",
@@ -293,7 +224,6 @@ const styles = stylex.create({
   },
   threadComposer: { paddingTop: 8 },
   channel: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0 },
-  threadFull: { width: "100%", flexShrink: 1, borderLeftWidth: 0 },
   channelMain: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column" },
   top: {
     display: "flex",
@@ -356,7 +286,6 @@ const styles = stylex.create({
   problem: { padding: 24 },
   feed: { height: "100%", scrollbarGutter: "stable both-edges" },
   feedColumn: { marginInline: "auto", width: "100%", maxWidth: 820, paddingInline: 24 },
-  feedNarrow: { paddingInline: 12 },
   earlier: {
     display: "block",
     borderWidth: 0,
@@ -367,7 +296,6 @@ const styles = stylex.create({
     color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
     backgroundColor: "transparent",
   },
-  hiddenMain: { display: "none" },
   topGap: { paddingTop: 8 },
   approvalGap: { paddingTop: 12 },
   readOnlyRow: {
@@ -397,12 +325,10 @@ const styles = stylex.create({
   },
   readOnlyText: { flexGrow: 1, flexBasis: 0 },
   readOnlyLink: { fontSize: 12, color: "var(--color-text-accent)", textDecoration: "none" },
-  screen: { display: "flex", minHeight: 0, flexGrow: 1, flexBasis: 0 },
 });
 
 /** Worked out once: every visible row uses these. */
 const FEED_COLUMN = stylex.props(styles.feedColumn);
-const FEED_NARROW = stylex.props(styles.feedColumn, styles.feedNarrow);
 const TOP_GAP = stylex.props(styles.topGap);
 
 const FEED_PARTS = {
@@ -433,154 +359,12 @@ function usePeople(): { people: Mentionable[]; archived: string[]; first: string
   }, [employees.data]);
 }
 
-function ChannelRow({ c, on, onOpen }: { c: ChannelView; on: boolean; onOpen: (c: ChannelView) => void }) {
-  const unread = !on && c.unread > 0;
-  return (
-    <button
-      type="button"
-      aria-current={on ? "true" : undefined}
-      aria-label={channelLabel(c)}
-      onClick={() => onOpen(c)}
-      {...stylex.props(styles.channelRow, on && styles.channelOn, unread && styles.channelUnread)}
-    >
-      <span {...stylex.props(styles.hash)}>#</span>
-      <span {...stylex.props(styles.channelName)}>{bareName(c)}</span>
-      {c.archived ? <span {...stylex.props(styles.readOnlyTag)}>read-only</span> : null}
-      {on || c.archived ? null : c.mentions > 0 ? (
-        <span {...stylex.props(styles.badgeMention)}>@{c.mentions}</span>
-      ) : c.unread > 0 ? (
-        <span {...stylex.props(styles.badgeUnread)}>{c.unread}</span>
-      ) : null}
-    </button>
-  );
-}
-
-/** A search hit on a ticket: it opens the ticket's session, not a channel (TS-06). */
-function TicketResult({ c, title }: { c: ChannelView; title: string | null }) {
-  const navigate = useNavigate();
-  return (
-    <button
-      type="button"
-      aria-label={`Ticket ${c.ticket_number ?? ""}, ${title ?? bareName(c)}`}
-      onClick={() => void navigate(ticketPlace({ id: c.ticket_id ?? "", number: c.ticket_number }))}
-      {...stylex.props(styles.channelRow)}
-    >
-      {c.ticket_column ? <ColumnGlyph kind={c.ticket_column} /> : <span {...stylex.props(styles.hash)}>#</span>}
-      <span {...stylex.props(styles.channelName)}>
-        {c.ticket_number ? `#${c.ticket_number} ` : ""}
-        {title ?? bareName(c)}
-      </span>
-    </button>
-  );
-}
-
-function ChannelList({
-  channels,
-  open,
-  onOpen,
-}: {
-  channels: ChannelView[];
-  open: string | null;
-  onOpen: (c: ChannelView) => void;
-}) {
-  const connection = useConnection();
-  const { features } = useLinkState();
-  const workspace = useWorkspace().id;
-  const [query, setQuery] = useState("");
-  const [found, setFound] = useState<ChannelView[] | null>(null);
-  const [archivedOpen, setArchivedOpen] = useState(false);
-  const [archivedAll, setArchivedAll] = useState(false);
-  const s = useMemo(() => sections(channels), [channels]);
-  const openId = open ?? s.general?.conversation_id ?? null;
-
-  useEffect(() => {
-    const text = query.trim();
-    if (text === "") return setFound(null);
-    const local = () => channels.filter((c) => bareName(c).toLowerCase().includes(text.toLowerCase()));
-    if (!features.includes("ticket_channels")) return setFound(local());
-    let alive = true;
-    const timer = setTimeout(() => {
-      connection
-        .call("channel.search", { query: text })
-        .then((body) => {
-          if (alive) setFound(body.type === "channels" ? narrow(body.value.channels, workspace) : local());
-        })
-        .catch(() => {
-          if (alive) setFound(local());
-        });
-    }, 150);
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [query, channels, connection, features, workspace]);
-
-  const eyebrow = stylex.props(styles.eyebrow);
-  const more = stylex.props(styles.more);
-  const group = stylex.props(styles.listGroup);
-  // Only a search shows tickets; their titles come from the tickets read the palette uses too.
-  const tickets = useTickets(found?.some((c) => c.kind === "ticket") === true);
-  const titleOf = (id: string | null | undefined) => tickets.data?.find((t) => t.id === id)?.title ?? null;
-  const row = (c: ChannelView) =>
-    c.kind === "ticket" ? (
-      <TicketResult key={c.conversation_id} c={c} title={titleOf(c.ticket_id)} />
-    ) : (
-      <ChannelRow key={c.conversation_id} c={c} on={c.conversation_id === openId} onOpen={onOpen} />
-    );
-  return (
-    <section aria-label="Channels" {...stylex.props(styles.list)}>
-      <TextInput
-        label="Search channels"
-        isLabelHidden
-        placeholder="Search channels"
-        size="sm"
-        startIcon="search"
-        width="100%"
-        value={query}
-        onChange={setQuery}
-      />
-      {found ? (
-        <div {...group}>
-          <p {...eyebrow}>Results</p>
-          {found.length === 0 ? <p {...stylex.props(styles.none)}>No channel matches.</p> : found.map(row)}
-        </div>
-      ) : (
-        <>
-          <div {...group}>
-            <p {...eyebrow}>Channels</p>
-            {s.general ? row(s.general) : null}
-            {s.projects.map(row)}
-          </div>
-          {s.archived.length > 0 ? (
-            <div {...group}>
-              <button
-                type="button"
-                aria-expanded={archivedOpen}
-                {...more}
-                onClick={() => setArchivedOpen(!archivedOpen)}
-              >
-                {archivedOpen ? "▾" : "▸"} Archived ({s.archived.length})
-              </button>
-              {archivedOpen ? s.archived.slice(0, shownCount(s.archived.length, archivedAll)).map(row) : null}
-              {archivedOpen && !archivedAll && s.archived.length > 15 ? (
-                <button type="button" {...more} onClick={() => setArchivedAll(true)}>
-                  Show more ({s.archived.length - 15})
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </>
-      )}
-    </section>
-  );
-}
-
 /** The chat box's words: its own type, borderless inside Astryx's composer. */
 function ChatTextarea(props: Omit<ComponentProps<"textarea">, "className" | "style">) {
   return <textarea {...props} {...stylex.props(styles.textarea)} />;
 }
 
-/** The Team chat has New session's box; it has taken files of any type since it began. */
+/** The ticket's chat has New session's box; it has taken files of any type since it began. */
 const TEAM_PROMPT = { files: true };
 
 export function Composer({
@@ -885,9 +669,7 @@ function ThreadPanel({
   archived,
   everyone,
   onClose,
-  full = false,
 }: {
-  full?: boolean;
   root: string;
   channelName: string;
   readOnly: boolean;
@@ -915,7 +697,7 @@ function ThreadPanel({
   const closed = readOnly || thread.data?.read_only === true;
   const loading = useDelayed(thread.isPending);
   return (
-    <aside aria-label="Thread" {...stylex.props(styles.thread, full && styles.threadFull)}>
+    <aside aria-label="Thread" {...stylex.props(styles.thread)}>
       <div {...stylex.props(styles.threadTop)}>
         <Heading level={2} xstyle={styles.threadTitle}>
           Thread · #{channelName}
@@ -983,13 +765,10 @@ interface ChannelProps {
   c: ChannelView | null;
   thread: string | null;
   onThread: (id: string | null) => void;
-  general: boolean;
   message?: string | null;
-  /** Inside a ticket's panel or the popout: no head of its own, narrow, and a thread takes the whole width. */
-  embedded?: boolean;
   /** The ticket, when `c` may not be known yet. */
   ticketId?: string | null;
-  /** A ticket's session fills these (ticket #70); the Team chat leaves them out. */
+  /** A ticket's session fills these (ticket #70); a channel's own chat leaves them out. */
   session?: SessionSlots;
 }
 
@@ -1010,41 +789,6 @@ export interface SessionSlots {
   readOnlyEnd?: ReactNode;
   placeholder: string;
   hint: string;
-}
-
-function Channel(props: ChannelProps) {
-  useKeyContext("TeamChat");
-  return <ChannelBody {...props} />;
-}
-
-/** A ticket's discussion, as a chat: the compact session in the popout. */
-export function TicketChat({
-  conversationId,
-  ticketId,
-  message = null,
-  session,
-}: {
-  conversationId: string;
-  ticketId: string;
-  message?: string | null;
-  session?: SessionSlots;
-}) {
-  const channels = useChannels();
-  const c = channels.data?.find((x) => x.conversation_id === conversationId) ?? null;
-  const [thread, setThread] = useState<string | null>(null);
-  return (
-    <ChannelBody
-      channel={conversationId}
-      c={c}
-      ticketId={ticketId}
-      thread={thread}
-      onThread={setThread}
-      general={false}
-      message={message}
-      embedded
-      {...(session ? { session } : {})}
-    />
-  );
 }
 
 /** A ticket's session: its channel's feed and composer, with the session's head, gate and panel around them. */
@@ -1072,24 +816,13 @@ export function TicketSessionBody({
       ticketId={ticketId}
       thread={thread}
       onThread={onThread}
-      general={false}
       message={message}
       session={session}
     />
   );
 }
 
-function ChannelBody({
-  channel,
-  c,
-  thread,
-  onThread,
-  general,
-  message = null,
-  embedded = false,
-  ticketId = null,
-  session,
-}: ChannelProps) {
+function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = null, session }: ChannelProps) {
   const { user, features, status } = useLinkState();
   const connection = useConnection();
   const client = useQueryClient();
@@ -1258,27 +991,19 @@ function ChannelBody({
     [...list2].reverse().find((m) => m.status === "partial" && m.run_id)?.run_id ?? live.at(-1)?.run_id ?? null;
   const retryAnswer = useRetryAnswer(feed.data?.conversation_id, list2, { channel });
   const [contextOf, setContextOf] = useState<string | null>(null);
-  useAction(
-    "ShowContext",
-    () => {
-      const run = [...list2].reverse().find((m) => m.role === "assistant" && m.run_id)?.run_id;
-      if (run) setContextOf(run);
-      else toast("Open a conversation with an answer to see the context it used.");
-    },
-    !embedded,
-  );
-  useAction("RetryAnswer", retryAnswer, !embedded);
-  useAction(
-    "StopGeneration",
-    () => {
-      if (running)
-        connection
-          .write("run.stop", { run_id: running }, { retry: false })
-          .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
-      else toast("No answer is running here.");
-    },
-    !embedded,
-  );
+  useAction("ShowContext", () => {
+    const run = [...list2].reverse().find((m) => m.role === "assistant" && m.run_id)?.run_id;
+    if (run) setContextOf(run);
+    else toast("Open a conversation with an answer to see the context it used.");
+  });
+  useAction("RetryAnswer", retryAnswer);
+  useAction("StopGeneration", () => {
+    if (running)
+      connection
+        .write("run.stop", { run_id: running }, { retry: false })
+        .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
+    else toast("No answer is running here.");
+  });
 
   const lastAnswer = [...list2].reverse().find((m) => !m.update);
   const quick =
@@ -1293,9 +1018,7 @@ function ChannelBody({
     ? session.placeholder
     : isTicket && owner
       ? `Message ${owner} (owner)… · @ to mention`
-      : general
-        ? "Message the team · @ to mention"
-        : `Message #${name} · @ to mention`;
+      : `Message #${name} · @ to mention`;
   const hint = session
     ? session.hint
     : isTicket
@@ -1308,10 +1031,10 @@ function ChannelBody({
 
   return (
     <section aria-label={`#${name}`} {...stylex.props(styles.channel)}>
-      <div {...stylex.props(styles.channelMain, embedded && thread !== null && styles.hiddenMain)}>
+      <div {...stylex.props(styles.channelMain)}>
         {session?.head ? (
           session.head
-        ) : embedded ? null : (
+        ) : (
           <header data-titlebar {...stylex.props(styles.top)}>
             <Heading level={1} xstyle={styles.title}>
               <span {...stylex.props(styles.hash)}>#</span> {name}
@@ -1369,7 +1092,7 @@ function ChannelBody({
                   <Banner
                     status="error"
                     role="alert"
-                    title="The Team chat did not load."
+                    title="The ticket chat did not load."
                     description={feed.error.message}
                     endContent={<Button label="Try again" onClick={() => void feed.refetch()} />}
                   />
@@ -1411,7 +1134,7 @@ function ChannelBody({
                   computeItemKey={(_, row) => (row.kind === "message" ? row.m.id : row.id)}
                   components={FEED_PARTS}
                   itemContent={(_, row) => (
-                    <div {...(embedded ? FEED_NARROW : FEED_COLUMN)}>
+                    <div {...FEED_COLUMN}>
                       {row.kind === "message" ? (
                         <>
                           {row.earlier > 0 ? (
@@ -1446,7 +1169,7 @@ function ChannelBody({
               )}
             </div>
           </FeedIdsProvider>
-          {isTicket && !readOnly ? <ProgressCard p={progress} narrow={embedded} /> : null}
+          {isTicket && !readOnly ? <ProgressCard p={progress} /> : null}
           {session?.gate}
           {readOnly ? (
             <div {...stylex.props(styles.readOnlyRow)}>
@@ -1459,7 +1182,7 @@ function ChannelBody({
                       : "This channel is read-only."}
                 </span>
                 {session?.readOnlyEnd}
-                {c?.ticket_id && !embedded && !session ? (
+                {c?.ticket_id && !session ? (
                   <Link
                     {...ticketPlace({ id: c.ticket_id, number: c.ticket_number })}
                     {...stylex.props(styles.readOnlyLink)}
@@ -1477,7 +1200,7 @@ function ChannelBody({
               threadParent={null}
               waiting={!running && list2.at(-1)?.role === "user"}
               placeholder={placeholder}
-              hint={embedded ? null : hint}
+              hint={hint}
               activeRun={running}
               people={people}
               archived={archived}
@@ -1507,93 +1230,13 @@ function ChannelBody({
             archived={archived}
             everyone={everyone}
             onClose={() => onThread(null)}
-            full={embedded}
           />
         </ChatProvider>
       ) : session ? (
         (session.aside ?? null)
-      ) : isTicket && !embedded && overviewOpen ? (
+      ) : isTicket && overviewOpen ? (
         <OverviewPanel p={progress} onClose={() => showOverview(false)} />
       ) : null}
     </section>
-  );
-}
-
-export function ChatScreen({
-  channel,
-  thread,
-  message = null,
-}: {
-  channel: string | null;
-  thread: string | null;
-  message?: string | null;
-}) {
-  const navigate = useNavigate();
-  const channels = useChannels();
-  const workspace = useWorkspace().id;
-  const all = useMemo(() => channels.data ?? [], [channels.data]);
-  const list = useMemo(() => narrow(all, workspace), [all, workspace]);
-  const s = useMemo(() => sections(list), [list]);
-  const general = s.general;
-  // general reads as "no channel": the one older servers have. A workspace opens on its project's.
-  const home = workspace === null ? general : homeChannel(list, workspace);
-  const shownChannel = channel ?? (workspace === null ? null : (home?.conversation_id ?? null));
-  // A linked channel of another project shows while the workspace moves to it.
-  const openC = channel ? (all.find((c) => c.conversation_id === channel) ?? null) : home;
-  const asParam = (c: ChannelView) => (c === general || c.kind === "general" ? undefined : c.conversation_id);
-  const open = (c: ChannelView) => {
-    const param = asParam(c);
-    void navigate({ to: "/chat", search: param ? { channel: param } : {} });
-  };
-  const onThread = useMemo(
-    () => (id: string | null) =>
-      void navigate({
-        to: "/chat",
-        search: (old: { channel?: string; thread?: string }) => ({
-          ...(old.channel ? { channel: old.channel } : {}),
-          ...(id ? { thread: id } : {}),
-        }),
-      }),
-    [navigate],
-  );
-  // A channel that went away: back to general.
-  const gone = channel !== null && channels.data !== undefined && !all.some((c) => c.conversation_id === channel);
-  useEffect(() => {
-    if (gone) void navigate({ to: "/chat", search: {} });
-  }, [gone, navigate]);
-
-  const visible = useMemo(() => visibleChannels(s, false, false), [s]);
-  const step = (down: boolean) => {
-    const next = stepChannel(
-      visible.map((c) => c.conversation_id),
-      openC?.conversation_id ?? null,
-      down,
-    );
-    const target = list.find((c) => c.conversation_id === next);
-    if (target) open(target);
-  };
-  useAction("NextChannel", () => step(true));
-  useAction("PrevChannel", () => step(false));
-
-  return (
-    <div {...stylex.props(styles.screen)}>
-      {list.length > 0 ? <ChannelList channels={list} open={shownChannel} onOpen={open} /> : null}
-      {workspace !== null && shownChannel === null ? (
-        // Without this the feed would be the general channel's.
-        channels.data ? (
-          <EmptyState isCompact title="No channel in this workspace yet." />
-        ) : null
-      ) : (
-        <Channel
-          key={shownChannel ?? "general"}
-          channel={shownChannel}
-          c={openC}
-          thread={thread}
-          message={message}
-          onThread={onThread}
-          general={shownChannel === null}
-        />
-      )}
-    </div>
   );
 }

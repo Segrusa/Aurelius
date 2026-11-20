@@ -35,7 +35,6 @@ const styles = stylex.create({
 
 function placeLink(m: ScheduledMessageView) {
   if (m.ticket_id) return <Link href={`/board?ticket=${m.ticket_id}`}>{m.place}</Link>;
-  if (m.channel_id) return <Link href={`/chat?channel=${m.channel_id}`}>{m.place}</Link>;
   return m.place;
 }
 

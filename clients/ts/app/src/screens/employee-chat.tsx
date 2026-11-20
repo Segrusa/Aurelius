@@ -3,17 +3,13 @@ import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
-import type { EmployeeChatView, MessagesSnapshot } from "@aurelius/protocol";
+import type { MessagesSnapshot } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
-import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
 import { useApprovals, useEmployees, useMessages } from "../data";
-import { useKeyContext } from "../keys/provider";
 import { CHAT_FILES_FEATURE } from "../ui/attach-logic";
-import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
 import { Composer } from "./chat";
@@ -52,7 +48,6 @@ const styles = stylex.create({
   feedBox: { minHeight: 0, flexGrow: 1, flexBasis: 0 },
   feed: { height: "100%", scrollbarGutter: "stable both-edges" },
   feedColumn: { marginInline: "auto", width: "100%", maxWidth: 820, paddingInline: 24 },
-  feedCompact: { paddingInline: 12 },
   topGap: { paddingTop: 8 },
   approvalGap: { paddingTop: 12 },
   edge: { height: 14 },
@@ -85,32 +80,6 @@ type Row =
   | { kind: "live"; id: string }
   | { kind: "approval"; id: string };
 
-/** The acting board member's chat with an employee, made the first time; `go` gets where it is. */
-export function useChatOpener(go: (conversationId: string) => void): (employeeId: string) => void {
-  const connection = useConnection();
-  return (employeeId) => {
-    connection
-      .write("employee.open_chat", { employee_id: employeeId })
-      .then((receipt) => {
-        const made = receipt.result;
-        if (made.kind === "command" && made.value.type === "employee_chat_opened") go(made.value.conversation_id);
-      })
-      .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
-  };
-}
-
-/** Opens that chat on its own screen. */
-export function useOpenChat(): (employeeId: string) => void {
-  const navigate = useNavigate();
-  return useChatOpener((conversationId) => void navigate({ to: "/talk/$conversationId", params: { conversationId } }));
-}
-
-/** A board member's lasting chat with one employee, on its own screen. */
-export function EmployeeChatScreen({ conversationId }: { conversationId: string }) {
-  useKeyContext("TeamChat");
-  return <EmployeeChat conversationId={conversationId} />;
-}
-
 /** What another kind of conversation with one employee (a work session) shows instead of a chat's words. */
 export interface ChatFrame {
   /** The head's title; the employee's name when not given. */
@@ -125,21 +94,11 @@ export interface ChatFrame {
 }
 
 /**
- * The chat itself: only the two of them read it. `compact`: in the popout, which has its own head.
- * `frame`: a work session, which is this same conversation with its own head and empty state.
+ * The chat itself: only the two of them read it. `frame`: a work session, which is this same conversation with its own head and empty state.
  */
-export function EmployeeChat({
-  conversationId,
-  compact = false,
-  frame,
-}: {
-  conversationId: string;
-  compact?: boolean;
-  frame?: ChatFrame;
-}) {
+export function EmployeeChat({ conversationId, frame }: { conversationId: string; frame?: ChatFrame }) {
   const { user, features } = useLinkState();
   const connection = useConnection();
-  const client = useQueryClient();
   const feed = useMessages(conversationId);
   const approvals = useApprovals();
   const employees = useEmployees();
@@ -154,14 +113,6 @@ export function EmployeeChat({
   useEffect(() => {
     store.settle(new Set(list.filter((m) => m.status !== "partial").map((m) => m.id)));
   }, [list, store]);
-
-  // Open means read: no dot from a list read just before.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: every new message read counts as read too.
-  useEffect(() => {
-    client.setQueryData<EmployeeChatView[]>(["messages", "employee_chats"], (old) =>
-      old?.map((c) => (c.conversation_id === conversationId && c.unread > 0 ? { ...c, unread: 0 } : c)),
-    );
-  }, [conversationId, client, list.length]);
 
   const pending = useMemo(
     () => approvalsFor(approvals.data ?? [], { conversationId }),
@@ -231,18 +182,16 @@ export function EmployeeChat({
 
   return (
     <section aria-label={frame?.title ?? `Chat with ${name}`} {...stylex.props(styles.screen)}>
-      {compact ? null : (
-        <header data-titlebar {...stylex.props(styles.top)}>
-          <Heading level={1} xstyle={styles.title}>
-            {frame?.title || name}
-          </Heading>
-          <span {...stylex.props(styles.subtitle)}>
-            {live.length > 0
-              ? `${name} answering`
-              : (frame?.subtitle ?? (employee ? (employee.title ?? employee.role) : ""))}
-          </span>
-        </header>
-      )}
+      <header data-titlebar {...stylex.props(styles.top)}>
+        <Heading level={1} xstyle={styles.title}>
+          {frame?.title || name}
+        </Heading>
+        <span {...stylex.props(styles.subtitle)}>
+          {live.length > 0
+            ? `${name} answering`
+            : (frame?.subtitle ?? (employee ? (employee.title ?? employee.role) : ""))}
+        </span>
+      </header>
       <ThreadWaiting conversationId={conversationId} />
       <ChatProvider value={ctx}>
         <FeedIdsProvider value={{ conversationId }}>
@@ -285,7 +234,7 @@ export function EmployeeChat({
                 computeItemKey={(_, row) => (row.kind === "message" ? row.m.id : row.id)}
                 components={FEED_PARTS}
                 itemContent={(_, row) => (
-                  <div {...stylex.props(styles.feedColumn, compact && styles.feedCompact)}>
+                  <div {...stylex.props(styles.feedColumn)}>
                     {row.kind === "message" ? (
                       <>
                         {row.day ? <DayLine ms={row.m.created_at_ms} /> : null}

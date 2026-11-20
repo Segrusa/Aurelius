@@ -19,7 +19,6 @@ import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
-import { useOpenChat } from "./employee-chat";
 import { EmployeeDialog } from "./employee-dialog";
 import { EmployeeGuidelinesTab } from "./employee-guidelines";
 import { EmployeeInboxTab, EmployeeMemoryTab } from "./employee-inbox";
@@ -74,11 +73,6 @@ const styles = stylex.create({
   },
   separator: { color: "var(--precision-text3)" },
   note: { margin: 0, padding: 24, color: "var(--color-text-secondary)" },
-  headLink: {
-    fontSize: 12,
-    color: { default: "var(--color-text-secondary)", ":hover": "var(--color-text-primary)" },
-    textDecoration: "none",
-  },
   main: { display: "flex", minWidth: 0, flexDirection: "column", gap: 16 },
   identity: { display: "flex", alignItems: "center", gap: 14 },
   identityText: { minWidth: 0 },
@@ -167,7 +161,6 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
   const folders = useFolderChooser();
   const { hostName, features } = useLinkState();
   const employees = useEmployees();
-  const openChat = useOpenChat();
   const connections = useSetting(
     "connections",
     async () => expectBody(await connection.call("connection.list"), "connections").value,
@@ -312,12 +305,6 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
               </>
             }
           >
-            <Link to="/chat" {...stylex.props(styles.headLink)}>
-              Talk in Team chat
-            </Link>
-            {features.includes("employee_chats") && e.status === "active" ? (
-              <Button size="sm" label="Chat" onClick={() => openChat(e.id)} />
-            ) : null}
             <Button size="sm" label="Edit" onClick={() => setEditing(true)} />
             <Menu
               label={`More for ${e.name}`}

@@ -8,15 +8,12 @@ import {
   bareName,
   before,
   canMakeTicket,
-  channelLabel,
-  chatBadge,
   clock,
   completeMention,
   dayLabel,
   fold,
   indexOfByte,
   isSystemLine,
-  keepOrder,
   lineMark,
   localDay,
   markMentions,
@@ -34,10 +31,8 @@ import {
   replyLabel,
   rowActions,
   saveOf,
-  sections,
   splitBlocks,
   statusLine,
-  stepChannel,
   streamTo,
   systemText,
   threadLabel,
@@ -46,7 +41,6 @@ import {
   typingMention,
   unknownMentions,
   unknownWarning,
-  visibleChannels,
   webSearchSummary,
 } from "./chat-logic";
 
@@ -219,63 +213,11 @@ describe("web search", () => {
 });
 
 describe("channels", () => {
-  const list = [
-    chan({ conversation_id: "g", kind: "general", name: "general" }),
-    chan({ conversation_id: "b", kind: "project", name: "beta" }),
-    chan({ conversation_id: "a", kind: "project", name: "Alpha" }),
-    chan({ conversation_id: "t1", kind: "ticket", name: "#1-old", ticket_number: 1, last_activity_ms: 1 }),
-    chan({
-      conversation_id: "t2",
-      kind: "ticket",
-      name: "#2-new",
-      ticket_number: 2,
-      last_activity_ms: 2,
-      unread: 3,
-      mentions: 1,
-    }),
-    chan({ conversation_id: "x", kind: "project", name: "gone", archived: true }),
-    chan({ conversation_id: "y", kind: "ticket", name: "#3-done", ticket_number: 3, archived: true }),
-  ];
-  it("orders the sections", () => {
-    const s = sections(list);
-    expect(s.general?.conversation_id).toBe("g");
-    expect(s.projects.map((c) => c.conversation_id)).toEqual(["a", "b"]);
-    expect(s.archived.map((c) => c.conversation_id)).toEqual(["x"]);
-  });
-  it("leaves out every ticket's channel, open and archived: a ticket opens as its session (TS-06)", () => {
-    const s = sections(list);
-    const shown = [s.general, ...s.projects, ...s.archived].map((c) => c?.kind);
-    expect(shown).not.toContain("ticket");
-    expect(visibleChannels(s, true, true).some((c) => c.kind === "ticket")).toBe(false);
-  });
-  it("shows fifteen archived and the archived only unfolded", () => {
-    const gone = Array.from({ length: 20 }, (_, i) =>
-      chan({ conversation_id: `p${i}`, kind: "project", name: `p${i}`, archived: true }),
-    );
-    const s = sections(gone);
-    expect(visibleChannels(s, true, false)).toHaveLength(15);
-    expect(visibleChannels(s, true, true)).toHaveLength(20);
-    expect(visibleChannels(sections(list), false, false).map((c) => c.conversation_id)).not.toContain("x");
-    expect(visibleChannels(sections(list), true, false).map((c) => c.conversation_id)).toContain("x");
-  });
-  it("keeps the frozen order", () => {
-    const [a, b, c] = [chan({ conversation_id: "a" }), chan({ conversation_id: "b" }), chan({ conversation_id: "c" })];
-    expect(keepOrder([a, b, c], ["c", "a"]).map((x) => x.conversation_id)).toEqual(["c", "a", "b"]);
-  });
-  it("names and counts", () => {
+  it("names a channel and words the read-only bar", () => {
     expect(bareName(chan({ kind: "ticket", name: "#42-login" }))).toBe("42-login");
-    expect(channelLabel(list[4] as ChannelView)).toBe("Ticket 2, new, 3 unread, 1 mention");
-    expect(channelLabel(list[6] as ChannelView)).toBe("Ticket 3, done, archived, read-only");
-    expect(chatBadge(list)).toEqual({ mentions: 1, unread: true });
     expect(readOnlyBar(chan({ ticket_number: 12 }), true)).toBe("#12 is Done · read-only.");
     expect(readOnlyBar(chan({ ticket_number: 12 }), false)).toBe("#12 is archived · read-only.");
     expect(readOnlyBar(chan({}), false)).toBe("This project is archived · read-only.");
-  });
-  it("steps and stops at the ends", () => {
-    expect(stepChannel(["a", "b"], "a", true)).toBe("b");
-    expect(stepChannel(["a", "b"], "b", true)).toBe("b");
-    expect(stepChannel(["a", "b"], "a", false)).toBe("a");
-    expect(stepChannel([], null, true)).toBeNull();
   });
 });
 

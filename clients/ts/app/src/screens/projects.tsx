@@ -13,7 +13,6 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import {
-  useChannels,
   useCompany,
   useEffectiveSets,
   useEmployees,
@@ -895,7 +894,6 @@ function Overview({
   const employees = useEmployees();
   const tasks = useOpenTasks();
   const ideas = useIdeas(project.id);
-  const channels = useChannels();
   const guidelines = useGuidelines();
   const team = (employees.data ?? []).filter((e) => e.projects_active.includes(project.id) && e.status !== "archived");
   const open = (tasks.data ?? []).filter((t) => t.project_id === project.id && isActive(t));
@@ -910,7 +908,6 @@ function Overview({
   const largest = sizes.sort((a, b) => b.total_chars - a.total_chars)[0];
   const largestName = team.find((e) => e.id === largest?.employee_id)?.name;
   const added = linked.reduce((n, g) => n + g.chars, 0);
-  const channel = channels.data?.find((c) => c.project_id === project.id && !c.ticket_id);
   const row = stylex.props(styles.rowLink);
   const { windowProject } = usePlatform();
   const workspace = useWorkspace();
@@ -938,16 +935,7 @@ function Overview({
           />
         </div>
       ) : null}
-      <Panel
-        title={`WHO WORKS HERE · ${team.length}`}
-        right={
-          channel ? (
-            <Link to="/chat" search={{ channel: channel.conversation_id }} {...stylex.props(styles.link)}>
-              Open #{channel.name}
-            </Link>
-          ) : null
-        }
-      >
+      <Panel title={`WHO WORKS HERE · ${team.length}`}>
         {team.length === 0 ? (
           <p {...stylex.props(styles.note)}>Nobody works here yet. Start a ticket to put someone to work.</p>
         ) : null}

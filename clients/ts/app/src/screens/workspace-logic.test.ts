@@ -1,10 +1,9 @@
-import type { ChannelView, GuidelineProposalView, ProjectSummary } from "@aurelius/protocol";
+import type { GuidelineProposalView, ProjectSummary } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
   guidelineProposalsIn,
   guidelineReach,
   guidelinesIn,
-  homeChannel,
   inWorkspace,
   narrow,
   openProjects,
@@ -18,7 +17,6 @@ import {
 
 const project = (id: string, status: ProjectSummary["status"] = "active") =>
   ({ id, name: id, status, created_at_ms: 0, employees_active: 0, version: 1 }) as ProjectSummary;
-const channel = (over: Partial<ChannelView>) => ({ conversation_id: "c", name: "c", ...over }) as ChannelView;
 const onProject = (id: string) => ({ kind: "project", id }) as const;
 const onEmployee = (id: string) => ({ kind: "employee", id }) as const;
 
@@ -62,16 +60,6 @@ describe("what a workspace shows", () => {
     expect(inWorkspace("atlas", null)).toBe(false);
     expect(inWorkspace("atlas", undefined)).toBe(false);
   });
-
-  it("opens on the project's channel; general only under All projects", () => {
-    const general = channel({ conversation_id: "g", kind: "general" });
-    const own = channel({ conversation_id: "a", project_id: "atlas" });
-    const thread = channel({ conversation_id: "t", project_id: "atlas", ticket_id: "t1" });
-    const list = [general, thread, own];
-    expect(homeChannel(list, null)).toBe(general);
-    expect(homeChannel(list, "atlas")).toBe(own);
-    expect(homeChannel(list, "zephyr")).toBeNull();
-  });
 });
 
 describe("the guidelines of a workspace", () => {
@@ -107,7 +95,6 @@ describe("following a link", () => {
   it("reads what a location points at", () => {
     expect(targetOf("/board", { ticket: "t1" })).toEqual({ kind: "ticket", id: "t1" });
     expect(targetOf("/tasks/k1", {})).toEqual({ kind: "task", id: "k1" });
-    expect(targetOf("/chat", { channel: "c1" })).toEqual({ kind: "channel", id: "c1" });
     expect(targetOf("/knowledge/memory", { project: "atlas" })).toEqual({ kind: "project", id: "atlas" });
   });
 
@@ -136,7 +123,6 @@ describe("following a link", () => {
 describe("switching under an open screen", () => {
   it("drops the opened item of the old workspace", () => {
     expect(pathAfterSwitch("/board", "atlas")).toBe("/board");
-    expect(pathAfterSwitch("/chat", "atlas")).toBe("/chat");
     expect(pathAfterSwitch("/tasks/k1", "atlas")).toBe("/tasks");
     // A ticket's session is of one project: the Board of the new workspace instead.
     expect(pathAfterSwitch("/ticket/70", "atlas")).toBe("/board");

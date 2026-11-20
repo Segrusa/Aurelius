@@ -92,7 +92,6 @@ import {
   latestRunAcross,
   readOnly,
   resolveNumber,
-  sessionRedirect,
   ticketConversations,
   ticketPlace,
   ticketUsage,
@@ -162,7 +161,6 @@ const styles = stylex.create({
     paddingInline: 24,
     paddingBottom: 8,
   },
-  gateNarrow: { paddingInline: 12 },
   centre: {
     display: "flex",
     minHeight: 0,
@@ -264,28 +262,6 @@ export function TicketRedirect({ ticketId }: { ticketId: string }) {
   useEffect(() => {
     if (number !== null) void navigate({ ...ticketPlace({ id: ticketId, number }), replace: true });
   }, [number, ticketId, navigate]);
-  return null;
-}
-
-/** `/chat?channel=<a ticket's channel>[&message][&thread]` opens that ticket's session at the same place (BR6). */
-export function ChatRedirect({
-  channel,
-  message,
-  thread,
-}: {
-  channel: string | null;
-  message: string | null;
-  thread: string | null;
-}) {
-  const navigate = useNavigate();
-  const channels = useChannels();
-  const target = channel ? sessionRedirect("/chat", { channel }, channels.data) : null;
-  const number = target && "number" in target ? target.number : null;
-  useEffect(() => {
-    if (number === null) return;
-    const search = { ...(message ? { message } : {}), ...(thread ? { thread } : {}) };
-    void navigate({ ...ticketPlace({ id: "", number }, search), replace: true });
-  }, [number, message, thread, navigate]);
   return null;
 }
 
@@ -526,25 +502,8 @@ function Head({
   );
 }
 
-/**
- * The compact session in the chat popout (O2): the same timeline, progress, gate and composer rules
- * in the narrow column, without a head or side panel. None until the ticket is read.
- */
-export function useCompactSession(ticketId: string): SessionSlots | undefined {
-  const detail = useTicket(ticketId);
-  const t = detail.data?.ticket;
-  if (!t || !detail.data) return undefined;
-  return {
-    gate: <TicketGate detail={detail.data} t={t} narrow />,
-    readOnly: readOnly(t, null),
-    readOnlyText: readOnlyBar({ ticket_number: t.number }, t.column === "done"),
-    placeholder: composerPlaceholder(t),
-    hint: composerHint(t),
-  };
-}
-
 /** The decision of the moment, right above the composer: the column's gate, or what the column says. */
-export function TicketGate({ detail, t, narrow = false }: { detail: TicketDetail; t: TicketView; narrow?: boolean }) {
+export function TicketGate({ detail, t }: { detail: TicketDetail; t: TicketView }) {
   const { status } = useLinkState();
   const { choosing, line } = useDispatcherLine(t);
   const kind = gateOf(t);
@@ -575,7 +534,7 @@ export function TicketGate({ detail, t, narrow = false }: { detail: TicketDetail
     );
   if (!body) return null;
   return (
-    <section aria-label="Your decision" {...stylex.props(styles.gate, narrow && styles.gateNarrow)}>
+    <section aria-label="Your decision" {...stylex.props(styles.gate)}>
       {body}
     </section>
   );

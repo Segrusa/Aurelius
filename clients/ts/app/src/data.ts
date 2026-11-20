@@ -6,7 +6,6 @@ import { ACTIVITY_LIMIT } from "./screens/board-logic";
 import { expectBody } from "@aurelius/client";
 import type {
   ApprovalView,
-  EmployeeChatView,
   EmployeeSummary,
   EventKind,
   GuidelineProposalView,
@@ -359,18 +358,6 @@ export function useChannels() {
   );
 }
 
-/** A channel's messages; reading marks it read on the server. `channel` null: general. */
-/** The signed-in board member's chats with employees, the latest first. */
-export function useEmployeeChats() {
-  const connection = useConnection();
-  const { features } = useLinkState();
-  return useKeyed<EmployeeChatView[]>(
-    ["messages", "employee_chats"],
-    async () => expectBody(await connection.call("employee.chats"), "employee_chats").value.chats,
-    features.includes("employee_chats"),
-  );
-}
-
 /** The reader's work sessions (server feature `work_sessions`), the latest activity first; `projectId`: one project's. */
 export function useWorkSessions(projectId: string | null = null) {
   const connection = useConnection();
@@ -386,6 +373,7 @@ export function useWorkSessions(projectId: string | null = null) {
   );
 }
 
+/** A channel's messages; reading marks it read on the server. `channel` null: general. */
 export function useChannelFeed(channel: string | null) {
   const connection = useConnection();
   return useKeyed(

@@ -154,32 +154,11 @@ describe("the composer's words", () => {
 });
 
 describe("sessionRedirect (BR6)", () => {
-  const channels = [
-    chan({ conversation_id: "d70", kind: "ticket", ticket_id: "t70", ticket_number: 70 }),
-    chan({ conversation_id: "pa", kind: "project", project_id: "p" }),
-  ];
-
-  it("sends a ticket's channel to its session and keeps message and thread", () => {
-    expect(sessionRedirect("/chat", { channel: "d70" }, channels)).toEqual({ number: 70 });
-    expect(sessionRedirect("/chat", { channel: "d70", message: "m1", thread: "m0" }, channels)).toEqual({
-      number: 70,
-      message: "m1",
-      thread: "m0",
-    });
-  });
-
-  it("leaves a project channel, general and an unknown channel in the Team chat", () => {
-    expect(sessionRedirect("/chat", { channel: "pa" }, channels)).toBeNull();
-    expect(sessionRedirect("/chat", {}, channels)).toBeNull();
-    expect(sessionRedirect("/chat", { channel: "zz" }, channels)).toBeNull();
-    expect(sessionRedirect("/chat", { channel: "d70" }, undefined)).toBeNull();
-  });
-
   it("asks to resolve the id of /board?ticket= and /history?ticket=", () => {
-    expect(sessionRedirect("/board", { ticket: "t70" }, channels)).toEqual({ ticketId: "t70" });
-    expect(sessionRedirect("/history", { ticket: "t70" }, undefined)).toEqual({ ticketId: "t70" });
-    expect(sessionRedirect("/board", {}, channels)).toBeNull();
-    expect(sessionRedirect("/tasks", { ticket: "t70" }, channels)).toBeNull();
+    expect(sessionRedirect("/board", { ticket: "t70" })).toEqual({ ticketId: "t70" });
+    expect(sessionRedirect("/history", { ticket: "t70" })).toEqual({ ticketId: "t70" });
+    expect(sessionRedirect("/board", {})).toBeNull();
+    expect(sessionRedirect("/tasks", { ticket: "t70" })).toBeNull();
   });
 });
 

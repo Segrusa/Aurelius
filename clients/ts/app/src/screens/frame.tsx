@@ -36,7 +36,6 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { ToastBridge, toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { ActivityBar } from "./activity-bar";
-import { ChatDock } from "./chat-dock";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
 import { pinKey, usePins } from "./employees";
 import { useInbox } from "./inbox";
@@ -458,7 +457,6 @@ const GO_TO: Record<string, string> = {
   GoDashboard: "/inbox",
   GoBoard: "/board",
   GoTasks: "/tasks",
-  GoTeamChat: "/chat",
   GoEmployees: "/employees",
   OpenUsage: "/usage",
   GoOrgChart: "/employees/org",
@@ -763,7 +761,6 @@ export function Frame({ children }: { children: ReactNode }) {
       <NewTicketDialog />
       <GiveWorkDialog />
       <ToastBridge />
-      {windowProject === null ? <ChatDock /> : null}
     </>
   );
 }

@@ -29,8 +29,6 @@ const styles = stylex.create({
 
 function placeLink(place: ThreadPlace) {
   if (place.ticket_id) return <Link href={`/board?ticket=${place.ticket_id}`}>{place.label}</Link>;
-  if (place.channel_id) return <Link href={`/chat?channel=${place.channel_id}`}>{place.label}</Link>;
-  if (place.chat_id) return <Link href={`/talk/${place.chat_id}`}>{place.label}</Link>;
   return place.label;
 }
 
