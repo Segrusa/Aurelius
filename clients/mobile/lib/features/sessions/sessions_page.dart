@@ -145,9 +145,9 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
     if (board.board == null) return const Center(child: CircularProgressIndicator());
     if (ticketSections(board.tickets, DateTime.now(), needsYou: (_) => false).isEmpty) {
       return EmptyState(
-        'No open tickets',
+        'No tickets yet',
         key: const ValueKey('tickets-empty'),
-        detail: 'Tickets in Todo, Doing, Plan review, Testing or Review show here.',
+        detail: 'Tickets from Todo up to Done show here.',
         action: FilledButton(onPressed: () => context.push('/board/new'), child: const Text('New ticket')),
       );
     }
@@ -204,7 +204,7 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
 /// The bold-ish title of a session or ticket row.
 TextStyle _rowTitle() => TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Tokens.label);
 
-/// One open ticket: its number and title, owner and project, and its signal.
+/// One ticket: its number and title, owner and project (and Done once it is), and its signal.
 class TicketRow extends StatelessWidget {
   const TicketRow({super.key, required this.ticket, required this.needsYou});
 
@@ -220,7 +220,7 @@ class TicketRow extends StatelessWidget {
       key: ValueKey('ticket-row-${t.id}'),
       title: '#${t.number} ${t.title}',
       titleStyle: _rowTitle(),
-      subtitle: '${t.ownerName ?? 'No owner yet'} · ${t.projectName} · ${Fmt.ago(t.updatedAtMs)}',
+      subtitle: '${t.column == ColumnKind.done ? 'Done · ' : ''}${t.ownerName ?? 'No owner yet'} · ${t.projectName} · ${Fmt.ago(t.updatedAtMs)}',
       leading: SessionMark.lead(ticketSignal(t, needsYou: needsYou)),
       chevron: true,
       onTap: () => context.push('/ticket/${t.id}'),

@@ -225,7 +225,7 @@ void main() {
       expect(find.text('page chat'), findsOneWidget);
     });
 
-    testWidgets('Tickets lists the open tickets: what needs you or works first, no Backlog, Done or archived', (tester) async {
+    testWidgets('Tickets lists the open and Done tickets: what needs you or works first, no Backlog or archived', (tester) async {
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day, 0, 1).millisecondsSinceEpoch;
       final repo = repoWith(board: boardOf([
@@ -239,7 +239,9 @@ void main() {
       expect(find.text('#2 Report waits'), findsOneWidget);
       expect(find.text('#1 Quiet in Todo'), findsOneWidget);
       expect(find.textContaining('Backlog'), findsNothing);
-      expect(find.textContaining('All done'), findsNothing);
+      expect(find.text('#4 All done'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('ticket-row-k4')), matching: find.textContaining('Done · ')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('ticket-row-k1')), matching: find.textContaining('Done · ')), findsNothing);
       expect(find.textContaining('Archived one'), findsNothing);
       expect(find.text('RUNNING · 1'), findsOneWidget);
       final running = tester.getTopLeft(find.byKey(const ValueKey('sessions-running'))).dy;

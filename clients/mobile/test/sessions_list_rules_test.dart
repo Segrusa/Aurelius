@@ -23,13 +23,20 @@ void main() {
   });
 
   group('ticket list', () {
-    test('only open columns and no archived tickets are listed', () {
+    test('open and Done tickets are listed, not the Backlog nor an archived ticket (ticket #75)', () {
       final tickets = [
         for (final c in ColumnKind.values) ticketOf(id: c.wire, column: c, updatedAtMs: at(DateTime(2026, 11, 18, 10))),
         ticketOf(id: 'archived', column: ColumnKind.doing, archivedAtMs: 1),
+        ticketOf(id: 'done-archived', column: ColumnKind.done, archivedAtMs: 1),
       ];
       final listed = ticketSections(tickets, now, needsYou: (_) => false).expand((s) => s.$2).map((t) => t.id).toSet();
-      expect(listed, {'todo', 'doing', 'plan_review', 'testing', 'review'});
+      expect(listed, {'todo', 'doing', 'plan_review', 'testing', 'review', 'done'});
+    });
+
+    test('a Done ticket goes by the day it last changed, as a finished session does', () {
+      final done = ticketOf(id: 'done', column: ColumnKind.done, updatedAtMs: at(DateTime(2026, 11, 17, 10)));
+      final sections = ticketSections([done], now, needsYou: (_) => false);
+      expect(sections.single.$1, SessionPeriod.yesterday);
     });
 
     test('a ticket that needs you or works is Active, the rest by last use', () {
