@@ -11,22 +11,28 @@ export const STALE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 /** The page reads the repository again this often while it is visible. */
 export const CODE_REFRESH_MS = 15_000;
 
-export type BranchStatus = "default" | "working" | "merged" | "stale" | "behind" | "ready";
+export type BranchStatus = "default" | "working" | "fresh" | "merged" | "stale" | "behind" | "ready";
 
 /** The words of each status, as in the design. */
 export const STATUS_LABEL: Record<BranchStatus, string> = {
   default: "Default",
   working: "Agent working",
+  fresh: "Nothing to merge yet",
   merged: "Merged",
   stale: "Stale",
   behind: "Needs rebase",
   ready: "Ready to merge",
 };
 
-/** Where a branch stands, first match wins: main, working, merged, stale, behind and ahead, ahead. */
+/**
+ * Where a branch stands, first match wins: main, working, fresh, merged, stale, behind and ahead, ahead.
+ * Fresh: nothing ahead of main yet while its ticket or session is open. Git calls such a branch merged, but
+ * its work has not started (or not been committed), so it is neither Merged nor Stale.
+ */
 export function branchStatus(b: CodeBranch, now: number): BranchStatus {
   if (b.is_main) return "default";
   if (b.working) return "working";
+  if (b.ahead === 0 && b.open) return "fresh";
   if (b.merged) return "merged";
   if (now - b.at_ms > STALE_AFTER_MS) return "stale";
   if (b.ahead > 0 && b.behind > 0) return "behind";
@@ -125,6 +131,7 @@ export type DangerAction =
   | { kind: "prune_merged"; label: string; disabledWhy: null };
 
 const WORKING_WHY = "An employee works on this branch now.";
+const OPEN_WHY = "Its ticket is still open.";
 
 /**
  * The Details card's danger button. A branch in a worktree: remove the worktree (the branch stays). Another
@@ -132,7 +139,8 @@ const WORKING_WHY = "An employee works on this branch now.";
  */
 export function dangerAction(b: CodeBranch): DangerAction {
   if (b.is_main) return { kind: "prune_merged", label: "Clean up merged", disabledWhy: null };
-  const why = b.working ? WORKING_WHY : null;
+  // The server refuses both for a branch whose ticket or session is open, also before its first commit.
+  const why = b.working ? WORKING_WHY : b.open ? OPEN_WHY : null;
   if (b.worktree_path)
     return { kind: "remove_worktree", label: "Remove worktree", path: b.worktree_path, disabledWhy: why };
   return { kind: "delete_branch", label: "Delete branch", force: !b.merged && b.ahead > 0, disabledWhy: why };

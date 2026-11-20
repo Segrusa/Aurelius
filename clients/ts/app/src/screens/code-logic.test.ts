@@ -19,6 +19,7 @@ import {
   primaryAction,
   repoName,
   STALE_AFTER_MS,
+  STATUS_LABEL,
   selectedBranch,
   worktreeCards,
 } from "./code-logic";
@@ -61,6 +62,30 @@ describe("a branch's status", () => {
 
   it("is Merged when nothing is ahead of main", () => {
     expect(branchStatus(branch("f", { behind: 3 }), NOW)).toBe("merged");
+  });
+});
+
+describe("a fresh branch of an open ticket", () => {
+  const ticket = { ticket_id: "t80", number: 80, title: "New" };
+  const fresh = branch("feat/ticket-80-x", { merged: true, open: true, ticket, worktree_path: "/wt/80" });
+
+  it("a fresh branch of an open ticket is not Merged, stays in Active and cannot be removed from here", () => {
+    expect(branchStatus(fresh, NOW)).toBe("fresh");
+    expect(STATUS_LABEL.fresh).toBe("Nothing to merge yet");
+    // Even when main's last commit (its head) is older than Stale.
+    expect(branchStatus({ ...fresh, at_ms: 0 }, NOW)).toBe("fresh");
+    expect(filterBranches([fresh], "active", NOW)).toHaveLength(1);
+    expect(dangerAction(fresh)).toMatchObject({ kind: "remove_worktree", disabledWhy: "Its ticket is still open." });
+    const noWorktree = { ...fresh, worktree_path: null };
+    expect(dangerAction(noWorktree)).toMatchObject({ kind: "delete_branch", disabledWhy: "Its ticket is still open." });
+    expect(primaryAction(fresh, "fresh", "main")?.kind).toBe("open_ticket");
+  });
+
+  it("is Merged again once its ticket is closed, and a branch with commits keeps its status", () => {
+    expect(branchStatus({ ...fresh, open: false }, NOW)).toBe("merged");
+    expect(dangerAction({ ...fresh, open: false }).disabledWhy).toBeNull();
+    expect(branchStatus({ ...fresh, merged: false, ahead: 2 }, NOW)).toBe("ready");
+    expect(branchStatus({ ...fresh, merged: false, ahead: 2, behind: 1 }, NOW)).toBe("behind");
   });
 });
 

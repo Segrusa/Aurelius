@@ -209,6 +209,7 @@ const styles = stylex.create({
   pill_working: { backgroundColor: "var(--color-success-muted)", color: "var(--color-text-success)" },
   pill_ready: { backgroundColor: "var(--color-info-muted)", color: "var(--color-text-info)" },
   pill_behind: { backgroundColor: "var(--color-warning-muted)", color: "var(--color-text-warning)" },
+  pill_fresh: { backgroundColor: "var(--color-background-muted)", color: "var(--color-text-info)" },
   pill_merged: { backgroundColor: "var(--color-background-muted)", color: "var(--precision-text3)" },
   pill_stale: { backgroundColor: "var(--color-background-muted)", color: "var(--precision-text3)" },
   pill_default: { backgroundColor: "var(--color-background-muted)", color: "var(--color-text-secondary)" },
