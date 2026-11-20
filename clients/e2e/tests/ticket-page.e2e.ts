@@ -9,7 +9,7 @@ import { expect, test } from "@playwright/test";
 import { REPO, serveStatic, WEB_DIST } from "./daemon";
 import { boardOf, channel, message, messages, scriptServer, task, ticket } from "./fake-server";
 
-const SHOTS = process.env.AURELIUS_SHOTS ?? join(REPO, "target/ticket-74");
+const SHOTS = process.env.AURELIUS_SHOTS ?? join(REPO, "target/ticket-76");
 const FEATURES = ["ticket_channels", "ticket_discussion", "chat_threads", "ticket_responsible", "run_cards"];
 const flux = { id: "e1", name: "Flux", role: "engineer", title: "Frontend Developer", status: "active", agents: [] };
 const nexus = { id: "e2", name: "Nexus", role: "engineer", title: "API Engineer", status: "active", agents: [] };
@@ -17,10 +17,24 @@ const project = { id: "p", name: "Aurelius", status: "active", created_at_ms: 0,
 const sam = { author_user: { id: "u", username: "Sam", created_at_ms: 0 } };
 
 const started = Date.now() - 372_000;
+// What Flux wrote between its calls; the calls after it start at its end (UTF-8 bytes, all ASCII here).
+const FINDING = "Found the likely cause: the tile's rounded corners fall outside its hit area.";
+const AFTER = FINDING.length;
+const NEW_LINES = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n");
 const todos = (states: string[], words: string[]) =>
   words.map((content, i) => ({ content, activeForm: content.replace(/^Fix/, "Fixing"), status: states[i] }));
 
-function script() {
+const SHORT = "Clicking a workspace in the sidebar sometimes does nothing. Is it the radius animation?";
+const LONG = [
+  "Clicking a workspace in the sidebar sometimes does nothing.",
+  "It happens on Windows and on macOS.",
+  "Mostly right after the app starts.",
+  "Is it the radius animation?",
+  "Check the corners of every tile.",
+  "The last line of the description.",
+].join("\n\n");
+
+function script(description = SHORT) {
   const t = ticket("t73", 73, "doing", {
     owner_employee_id: "e1",
     owner_name: "Flux",
@@ -31,7 +45,7 @@ function script() {
     project_name: "Aurelius",
     root_task_status: "running",
     title: "Clicking a workspace in the sidebar sometimes does nothing",
-    description: "Clicking a workspace in the sidebar sometimes does nothing. Is it the radius animation?",
+    description,
   });
   const root = task("k73", {
     title: t.title,
@@ -85,7 +99,7 @@ function script() {
     },
     conversations: {
       c73: messages("c73", [
-        message("w1", "assistant", "Working on it.", {
+        message("w1", "assistant", FINDING, {
           run_id: "r1",
           status: "partial",
           created_at_ms: started,
@@ -107,16 +121,24 @@ function script() {
                 ),
               },
             },
-            { call_id: "r1", tool: "Read", offset: 1, ok: true, input: { file_path: "sidebar.tsx" } },
-            { call_id: "r2", tool: "Read", offset: 2, ok: true, input: { file_path: "rail.css" } },
+            { call_id: "r1", tool: "Read", offset: 0, ok: true, input: { file_path: "src/sidebar.tsx" } },
+            { call_id: "r2", tool: "Read", offset: 0, ok: true, input: { file_path: "src/rail.css" } },
             {
               call_id: "e1",
               tool: "Edit",
-              offset: 3,
+              offset: AFTER,
               ok: true,
-              input: { file_path: "sidebar.tsx", old_string: "a\nb", new_string: "a\nb\nc\nd" },
+              input: { file_path: "src/sidebar.tsx", old_string: "radius: 50%;\nclip: round;", new_string: NEW_LINES },
             },
-            { call_id: "b1", tool: "Bash", offset: 4, ok: null, input: { command: "pnpm test rail --run" } },
+            {
+              call_id: "b0",
+              tool: "Bash",
+              offset: AFTER,
+              ok: true,
+              output: "Found 0 errors.",
+              input: { command: "pnpm tsc --noEmit" },
+            },
+            { call_id: "b1", tool: "Bash", offset: AFTER, ok: null, input: { command: "pnpm test rail --run" } },
           ],
         }),
       ]),
@@ -187,14 +209,47 @@ test.describe("the ticket page", () => {
     await expect(main).toContainText("Main task");
     await expect(main).toContainText("Step 3 of 4");
     await expect(main).toContainText("2 files read");
-    await expect(main).toContainText("1 file changed +4 −2");
-    await expect(main).toContainText("1 command run");
+    await expect(main).toContainText("1 file changed +10 −2");
+    await expect(main).toContainText("2 commands run");
     await expect(main.getByRole("progressbar", { name: "Plan progress" })).toHaveAttribute("aria-valuenow", "2");
     const sub = now.locator("[data-now-task=s73]");
     await expect(sub).toContainText("Nexus · Open the app on Windows");
     await expect(sub).toContainText("Delegated task");
     await expect(sub.getByRole("button", { name: "1 question for you" })).toBeVisible();
     await expect(now.locator("[data-now-task=d1]")).toHaveCount(0);
+  });
+
+  test("folds a long description to three lines until Show more", async ({ page }) => {
+    await scriptServer(page, script(LONG));
+    await page.goto(`${site.origin}/ticket/73`);
+    const region = page.getByRole("region", { name: "Description" });
+    const more = region.getByRole("button", { name: "Show more" });
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    const text = region.getByRole("button", { name: "Edit Description" });
+    const folded = (await text.boundingBox())?.height ?? 0;
+    const line = await region
+      .getByText("Clicking a workspace")
+      .evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+    // Three lines (with the paragraphs' spacing inside them), never all six paragraphs.
+    expect(folded).toBeGreaterThan(line * 2.5);
+    expect(folded).toBeLessThan(line * 5);
+    mkdirSync(SHOTS, { recursive: true });
+    await region.screenshot({ path: join(SHOTS, "description-folded.png") });
+    await more.click();
+    const less = region.getByRole("button", { name: "Show less" });
+    await expect(less).toHaveAttribute("aria-expanded", "true");
+    expect((await text.boundingBox())?.height ?? 0).toBeGreaterThan(folded * 1.5);
+    await region.screenshot({ path: join(SHOTS, "description-unfolded.png") });
+    await less.click();
+    await expect(region.getByRole("button", { name: "Show more" })).toBeVisible();
+  });
+
+  test("a short description has no Show more", async ({ page }) => {
+    await scriptServer(page, script());
+    await page.goto(`${site.origin}/ticket/73`);
+    const region = page.getByRole("region", { name: "Description" });
+    await expect(region).toContainText("Is it the radius animation?");
+    await expect(region.getByRole("button", { name: /Show (more|less)/ })).toHaveCount(0);
   });
 
   test("the live bar names the call each task runs, and Live output opens the task", async ({ page }) => {
@@ -231,6 +286,53 @@ test.describe("the ticket page", () => {
     await expect(moved).toHaveCount(0);
     await expect(said).toBeVisible();
     await expect(filter.getByRole("button", { name: "Messages" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("Activity shows what the tasks read, edited and ran, and what the owner found", async ({ page }) => {
+    await scriptServer(page, script());
+    await page.goto(`${site.origin}/ticket/73`);
+    const read = page.getByRole("article", { name: "Flux · Read 2 files" });
+    const files = read.getByRole("list", { name: "Files" });
+    await expect(files.getByRole("listitem")).toHaveText(["sidebar.tsx", "rail.css"]);
+    const found = page.getByRole("article", { name: "Flux · Note" });
+    await expect(found).toContainText("Found the likely cause");
+    const edit = page.getByRole("article", { name: "Flux · Edited 1 file" });
+    const diff = edit.getByRole("figure", { name: "Diff" });
+    await expect(diff).toContainText("- radius: 50%;");
+    await expect(diff).toContainText("+ line 1");
+    await expect(diff).not.toContainText("+ line 10");
+    await expect(edit).toContainText("+10");
+    await edit.getByRole("button", { name: "View diff" }).click();
+    await expect(diff).toContainText("+ line 10");
+    const ran = page.getByRole("article", { name: "Flux · Ran a command" });
+    await expect(ran).toContainText("$ pnpm tsc --noEmit");
+    await expect(ran).toContainText("Found 0 errors.");
+    const running = page.getByRole("article", { name: "Flux · Running a command" });
+    await expect(running).toContainText("pnpm test rail --run");
+    // The work is in time order, after what was said before it.
+    const order = await page.getByRole("article").evaluateAll((rows) => rows.map((r) => r.getAttribute("aria-label")));
+    expect(order).toEqual([
+      "Flux · Read 2 files",
+      "Flux · Note",
+      "Flux · Edited 1 file",
+      "Flux · Ran a command",
+      "Flux · Running a command",
+    ]);
+  });
+
+  test("the work counts as Changes and stays out of Messages", async ({ page }) => {
+    await scriptServer(page, script());
+    await page.goto(`${site.origin}/ticket/73`);
+    const read = page.getByRole("article", { name: "Flux · Read 2 files" });
+    await expect(read).toBeVisible();
+    const filter = page.getByRole("group", { name: "Filter activity" });
+    await filter.getByRole("button", { name: "Changes" }).click();
+    await expect(read).toBeVisible();
+    await expect(page.getByText("Ticket moved from Todo to Doing.")).toBeVisible();
+    await expect(page.getByText("@Flux is it the radius animation?")).toHaveCount(0);
+    await filter.getByRole("button", { name: "Messages" }).click();
+    await expect(page.getByText("@Flux is it the radius animation?")).toBeVisible();
+    await expect(page.getByRole("article")).toHaveCount(0);
   });
 
   test("the plan shows the main task's steps and every delegation, each opening to its own plan", async ({ page }) => {
@@ -270,6 +372,7 @@ test.describe("the ticket page", () => {
     await page.goto(`${site.origin}/ticket/73`);
     await expect(page.getByRole("region", { name: "Current status" })).toBeVisible();
     await expect(page.getByText("Likely: the corners fall outside the hit area")).toBeVisible();
-    await page.screenshot({ path: join(SHOTS, "ticket-page.png") });
+    await expect(page.getByRole("article", { name: "Flux · Running a command" })).toBeVisible();
+    await page.screenshot({ path: join(SHOTS, "ticket-page.png"), fullPage: true });
   });
 });

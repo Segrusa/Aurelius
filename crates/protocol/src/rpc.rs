@@ -446,6 +446,12 @@ pub mod feature {
     /// when a write it does not resend lost its answer to a dropped link or a
     /// timeout; without this feature it can only say the write may have arrived.
     pub const COMMAND_APPLIED: &str = "command_applied";
+    /// A ticket's title made from its description (protocol 5, additive): `ticket.create`
+    /// with an empty title and a description starts with the description's first line as
+    /// its title, and a model replaces it with a short title shortly after
+    /// (`ticket.updated { changed: ["title"] }`), unless someone renamed it meanwhile.
+    /// Older servers refuse an empty title, so a client without this feature sends one.
+    pub const TICKET_MADE_TITLE: &str = "ticket_made_title";
 }
 
 /// Every feature this build has.
@@ -503,6 +509,7 @@ pub const FEATURES: &[&str] = &[
     feature::COMPACTION_SETTING,
     feature::RUN_DECISIONS,
     feature::COMMAND_APPLIED,
+    feature::TICKET_MADE_TITLE,
     feature::CODE_VIEW,
 ];
 

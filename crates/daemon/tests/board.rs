@@ -535,3 +535,37 @@ async fn a_ticket_in_done_leaves_one_summary_in_its_projects_memory() {
     drop(client);
     common::stop(dir.path(), daemon).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ticket_without_a_title_gets_one_made_from_its_description() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = common::start(dir.path()).await;
+    let client = common::connect_as(dir.path(), "grace").await;
+    let builder = employee(&client, "Builder").await;
+    let atlas = project(&client, "Atlas").await;
+
+    // Feature `ticket_made_title`: an empty title starts as the description's first line ...
+    let id = ticket(&client, atlas, "", "Make the export faster.\nEspecially for big projects.", Some(builder), false).await;
+    let mut detail = client.ticket(id).await.unwrap();
+    assert_eq!(detail.ticket.title, "Make the export faster.");
+    // ... until the made title replaces it (the fake answers with the first line, quoted and labelled).
+    for _ in 0..400 {
+        if detail.ticket.title != "Make the export faster." {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        detail = client.ticket(id).await.unwrap();
+    }
+    assert_eq!(detail.ticket.title, "Make the export faster", "the fake's made title, cleaned");
+    let updated: Vec<String> = common::db(dir.path())
+        .prepare("SELECT json_extract(metadata_json, '$.changed[0]') FROM events WHERE aggregate_type = 'ticket' AND aggregate_id = ?1 AND type = 'ticket.updated'")
+        .unwrap()
+        .query_map([id.to_string()], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(updated, ["title"], "open boards hear of it once");
+
+    drop(client);
+    common::stop(dir.path(), daemon).await;
+}

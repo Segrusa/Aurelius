@@ -21,7 +21,7 @@ import { expectBody } from "@aurelius/client";
 import type { AgentMode, TaskView, TicketDetail, TicketPriority, TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import {
   useBoard,
@@ -72,7 +72,7 @@ import {
 import { FileChips } from "./run-tools";
 import { taskStateLine } from "./tasks-logic";
 import { branchOf, latestTodos } from "./ticket-overview-logic";
-import { LiveBar, NowCard, PageSection, PlanPanel } from "./ticket-page";
+import { LiveBar, NowCard, PageSection, PlanPanel, useTicketWork } from "./ticket-page";
 import { planStep } from "./ticket-page-logic";
 import {
   Activity,
@@ -191,7 +191,13 @@ const styles = stylex.create({
   olderTop: { marginInline: "auto", width: "100%", maxWidth: 820, boxSizing: "border-box", paddingInline: 24 },
   plan: { paddingBottom: 12 },
   count: { marginInlineStart: 4, color: "var(--precision-text3)" },
+  // DESCRIPTION_LINES: StyleX needs the literal here.
+  folded: { display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 3, overflow: "hidden" },
+  foldButton: { marginTop: 4 },
 });
+
+/** How many lines of the description the ticket page shows until "Show more". */
+export const DESCRIPTION_LINES = 3;
 
 /**
  * What the ticket page shows above its talk: the description (editable while the ticket is open),
@@ -202,6 +208,21 @@ function PageTop({ detail, t }: { detail: TicketDetail; t: TicketView }) {
   const write = useTicketWrite();
   const open = !readOnly(t, null) && status === "online";
   const activity = useTicketActivity(t.review_feedback ? t.id : null);
+  // Folded to DESCRIPTION_LINES lines per ticket; "Show more" only when the text is longer.
+  const [unfoldedFor, setUnfoldedFor] = useState<string | null>(null);
+  const unfolded = unfoldedFor === t.id;
+  const [long, setLong] = useState(false);
+  const folded = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the text changes what overflows.
+  useLayoutEffect(() => {
+    const box = folded.current;
+    if (!box || unfolded) return;
+    const measure = () => setLong(box.scrollHeight > box.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [t.description, unfolded]);
   return (
     <>
       <PageSection title="Description">
@@ -218,10 +239,25 @@ function PageTop({ detail, t }: { detail: TicketDetail; t: TicketView }) {
           multiline
           display={
             t.description?.trim() ? (
-              <Markdown text={t.description} />
+              <div ref={folded} {...stylex.props(!unfolded && styles.folded)}>
+                <Markdown text={t.description} />
+              </div>
             ) : (
               <span {...stylex.props(styles.third)}>No description.</span>
             )
+          }
+          footer={
+            t.description?.trim() && (long || unfolded) ? (
+              <div {...stylex.props(styles.foldButton)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-expanded={unfolded}
+                  label={unfolded ? "Show less" : "Show more"}
+                  onClick={() => setUnfoldedFor(unfolded ? null : t.id)}
+                />
+              </div>
+            ) : null
           }
           onSave={(description) =>
             write("ticket.update", { ticket_id: t.id, description }, { expectedVersion: t.version })
@@ -373,6 +409,7 @@ function Session({
   const gate = <TicketGate detail={detail} t={t} />;
   const rootId = detail.root_task?.id ?? t.root_task_id ?? null;
   const top = <PageTop detail={detail} t={t} />;
+  const work = useTicketWork(detail.tasks);
   const aside = (
     <PropertiesPanel dock={dock} label="Ticket properties" wide>
       <Properties detail={detail} t={t} />
@@ -381,6 +418,7 @@ function Session({
   const slots: SessionSlots = {
     head: null,
     top,
+    work,
     live: <LiveBar tasks={detail.tasks} rootId={rootId} />,
     gate,
     chips: <RunChips t={t} />,

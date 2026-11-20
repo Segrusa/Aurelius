@@ -259,11 +259,14 @@ export function Editable({
   placeholder,
   opened = false,
   onClose,
+  footer,
 }: {
   value: string;
   enabled: boolean;
   multiline?: boolean;
   display: ReactNode;
+  /** Under the display while it is not edited, outside its click target (a "Show more"). */
+  footer?: ReactNode;
   onSave: (next: string) => Promise<boolean>;
   label: string;
   placeholder?: string;
@@ -277,7 +280,7 @@ export function Editable({
     if (next === null) onClose?.();
   };
   if (draft === null) {
-    return enabled ? (
+    const shown = enabled ? (
       <button
         type="button"
         aria-label={`Edit ${label}`}
@@ -288,6 +291,13 @@ export function Editable({
       </button>
     ) : (
       <div>{display}</div>
+    );
+    // Always the same shape, so a footer that comes or goes does not remount the display.
+    return (
+      <>
+        {shown}
+        {footer}
+      </>
     );
   }
   const save = async () => {

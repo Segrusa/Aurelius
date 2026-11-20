@@ -336,4 +336,11 @@ describe("the sidebar's tickets", () => {
     expect(ticketSignal({ root_task_status: "review" }, false)).toBeNull();
     expect(ticketSignal({}, false)).toBeNull();
   });
+
+  it("keeps a ticket working while its main task waits for the parts it delegated", () => {
+    expect(ticketSignal({ root_task_status: "waiting" }, false, "dependency")).toBe("working");
+    expect(ticketSignal({ root_task_status: "waiting" }, true, "dependency")).toBe("needs_you");
+    expect(ticketSignal({ root_task_status: "waiting" }, false, "input")).toBeNull();
+    expect(ticketSignal({ root_task_status: "waiting" }, false)).toBeNull();
+  });
 });

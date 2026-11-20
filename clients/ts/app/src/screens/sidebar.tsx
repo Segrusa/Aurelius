@@ -352,7 +352,7 @@ function useSidebarItems(): SidebarItem[] {
   const tickets = useTickets().data;
   const need = useTicketNeeds(tickets ?? []);
   return useMemo(() => {
-    const signal = (t: TicketView) => ticketSignal(t, need.mine(t));
+    const signal = (t: TicketView) => ticketSignal(t, need.mine(t), need.rootWaiting(t));
     const fromSessions: SidebarItem[] = (sessions ?? []).map((s) => ({
       key: `s:${s.conversation_id}`,
       section: "sessions",

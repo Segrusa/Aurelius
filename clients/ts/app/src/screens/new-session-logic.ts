@@ -12,6 +12,8 @@ export type SessionKind = "ticket" | "quick" | "session";
 export const SESSIONS_FEATURE = "work_sessions";
 /** The server's dispatcher chooses who takes a session (`work_session.dispatch`). */
 export const SESSION_DISPATCH_FEATURE = "session_dispatch";
+/** The server makes a ticket's title from its description when the title is empty. */
+export const MADE_TITLE_FEATURE = "ticket_made_title";
 
 /** The Who of a ticket nobody was chosen for: the dispatcher picks the owner. */
 export const DISPATCHER = "dispatcher";
@@ -172,6 +174,8 @@ export interface SessionStart {
   files: string[];
   /** The board member, on a server with `ticket_responsible`; otherwise null. */
   responsibleUserId: string | null;
+  /** On a server with `ticket_made_title`: the title is left empty, so the server makes one. */
+  madeTitle?: boolean;
 }
 
 /**
@@ -206,7 +210,7 @@ export function sessionRequest(
       params: ticketCreateParams(
         {
           projectId: start.projectId,
-          title: titleOfGoal(start.text),
+          title: start.madeTitle ? "" : titleOfGoal(start.text),
           description: start.text,
           priority: "normal",
           labels: [],
@@ -222,18 +226,19 @@ export function sessionRequest(
       done: "Ticket created and started.",
     };
   }
+  const given = giveWorkParams(
+    {
+      projectId: start.projectId,
+      goal: start.text,
+      employeeId: start.who.id,
+      run,
+      files: start.files,
+      responsibleUserId: start.responsibleUserId,
+    },
+    confirmSecret,
+  );
   return {
-    params: giveWorkParams(
-      {
-        projectId: start.projectId,
-        goal: start.text,
-        employeeId: start.who.id,
-        run,
-        files: start.files,
-        responsibleUserId: start.responsibleUserId,
-      },
-      confirmSecret,
-    ),
+    params: start.madeTitle ? { ...given, title: "" } : given,
     done: `Created and started with ${start.who.name}.`,
   };
 }
