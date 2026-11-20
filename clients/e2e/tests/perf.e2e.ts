@@ -91,11 +91,14 @@ test("the Inbox with 5,000 rows, in a browser", async ({ page }) => {
       const times: number[] = [];
       for (let i = 0; i < 12; i++) {
         const name = i % 2 === 0 ? "Board" : "Inbox";
-        const link = [...document.querySelectorAll("nav a")].find((a) =>
-          a.textContent?.startsWith(name),
-        ) as HTMLElement;
+        // The Inbox has no sidebar row (it is behind the bell in the head): Ctrl+1 goes there.
+        const link = [...document.querySelectorAll("nav a")].find((a) => a.textContent?.startsWith("Board"));
         const start = performance.now();
-        link.click();
+        if (name === "Board") (link as HTMLElement).click();
+        else
+          window.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "1", code: "Digit1", ctrlKey: true, bubbles: true }),
+          );
         while (document.querySelector('[role="main"] h1')?.textContent !== name)
           await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);

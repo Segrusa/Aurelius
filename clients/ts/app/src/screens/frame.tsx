@@ -39,8 +39,7 @@ import { ActivityBar } from "./activity-bar";
 import { ChatDock } from "./chat-dock";
 import { GiveWorkDialog, NewTicketDialog } from "./dialogs";
 import { pinKey, usePins } from "./employees";
-import { useInbox } from "./inbox";
-import { needsYouCount, newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
+import { newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
 import { useOpenNewSession } from "./new-session";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
@@ -127,9 +126,7 @@ const styles = stylex.create({
   chevronFolded: { transform: "rotate(-90deg)" },
   more: { marginBlockStart: 2, paddingInlineStart: 22, fontWeight: 400 },
   group: { display: "flex", flexDirection: "column", gap: 1, marginBlockStart: 14 },
-  count: { fontSize: 12, color: "var(--color-text-primary)" },
   dot: { display: "block", width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
-  dotUnread: { backgroundColor: "var(--color-text-secondary)" },
   dotLive: { backgroundColor: "var(--color-text-accent)" },
   dotWorking: {
     width: 8,
@@ -176,10 +173,7 @@ const styles = stylex.create({
   barFill: { height: 3, borderRadius: 2, backgroundColor: "var(--color-text-accent)" },
 });
 
-const NAV_MAIN: { to: string; label: string; icon: IconType }[] = [
-  { to: "/new", label: "New session", icon: NewIcon },
-  { to: "/inbox", label: "Inbox", icon: NAV_ICONS.inbox },
-];
+const NAV_MAIN: { to: string; label: string; icon: IconType }[] = [{ to: "/new", label: "New session", icon: NewIcon }];
 // `server`: the row shows only when the server has that feature.
 const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Feature; server?: string }[] = [
   { to: "/board", label: "Board", icon: "board" },
@@ -207,11 +201,6 @@ function NavRow({ to, label, icon, end }: { to: string; label: string; icon: Ico
   // A ticket's session counts as the Board, where it came from (ticket #70).
   const on = path === to || path.startsWith(`${to}/`) || (to === "/board" && path.startsWith("/ticket/"));
   return <SideNavItem label={label} href={to} icon={icon} size="sm" isSelected={on} endContent={end} />;
-}
-
-function Counted({ count, dot }: { count?: number; dot?: boolean }) {
-  if (count) return <span {...stylex.props(styles.count)}>{count}</span>;
-  return dot ? <span role="img" aria-label="Unread" {...stylex.props(styles.dot, styles.dotUnread)} /> : null;
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
@@ -620,14 +609,12 @@ function useScreenCounter(): void {
 
 function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (collapsed: boolean) => void }) {
   const { open } = overlays;
-  const { groups } = useInbox();
   const { hostName, status, features } = useLinkState();
   const employees = useEmployees();
   const [employeePins] = usePins(pinKey(hostName, "pinned_employees"));
   const pinnedEmployees = employeePins.flatMap(
     (id) => employees.data?.filter((e) => e.id === id && e.status !== "archived") ?? [],
   );
-  const inbox = needsYouCount(groups);
   const openNewSession = useOpenNewSession();
   return (
     <SideNav
@@ -673,13 +660,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
       }
     >
       {NAV_MAIN.map((n) => (
-        <NavRow
-          key={n.to}
-          to={n.to}
-          label={n.label}
-          icon={n.icon}
-          end={n.to === "/inbox" && inbox ? <Counted count={inbox} /> : undefined}
-        />
+        <NavRow key={n.to} to={n.to} label={n.label} icon={n.icon} />
       ))}
       <SideNavSection title="Workspace">
         {offered(shown(NAV_WORKSPACE), features).map((n) => (

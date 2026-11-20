@@ -63,6 +63,14 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     p.on("pageerror", (e) => consoleErrors.push(String(e)));
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1600, 950));
     const nav = (name: string) => p.getByRole("link", { name: new RegExp(`^${name}`) }).first();
+    // The Inbox is behind the bell in every screen's head: its dropdown opens the page.
+    const openInbox = async () => {
+      await p
+        .getByRole("button", { name: /^Inbox/ })
+        .first()
+        .click();
+      await p.getByRole("button", { name: "Open Inbox" }).click();
+    };
 
     await step("first board member", async () => {
       await act(() => p.getByLabel("Name").fill("sam"));
@@ -115,7 +123,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     });
 
     await step("what the Inbox shows for it", async () => {
-      await act(() => nav("Inbox").click());
+      await act(openInbox);
       await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
       // One decision, one row, readable.
       await expect(p.getByRole("button", { name: /Login page/ })).toHaveCount(1);
@@ -179,7 +187,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     });
 
     await step("approve a plan from the Inbox", async () => {
-      await act(() => nav("Inbox").click());
+      await act(openInbox);
       await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
       const row = p.getByRole("button", { name: /hosting options/ }).first();
       await act(() => row.click());
@@ -236,12 +244,12 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
 
     await step("back from Settings", async () => {
       await act(() => p.getByRole("link", { name: "Back to the app" }).click());
-      await expect(nav("Inbox")).toBeVisible();
+      await expect(p.getByRole("button", { name: /^Inbox/ }).first()).toBeVisible();
     });
 
     for (const screen of ["Inbox", "Board"]) {
       await step(`dark ${screen}`, async () => {
-        await act(() => nav(screen).click());
+        await act(() => (screen === "Inbox" ? openInbox() : nav(screen).click()));
         await p.waitForTimeout(300);
       });
     }

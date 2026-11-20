@@ -393,7 +393,11 @@ test.describe("scripted", () => {
         .poll(() => writesOf(writes, "approval.decide_plan")[0]?.params)
         .toMatchObject({ approval_id: "p1", decision: "revise", feedback: "Smaller" });
 
-      await page.getByRole("link", { name: "Inbox" }).click();
+      await page
+        .getByRole("button", { name: /^Inbox/ })
+        .first()
+        .click();
+      await page.getByRole("button", { name: "Open Inbox" }).click();
       await page.getByRole("button", { name: /Flux/ }).first().click();
       await expect(page.getByRole("radio", { name: /Green/ })).toBeVisible();
       await expect(page.getByRole("button", { name: /^Allow once/ })).toHaveCount(0);

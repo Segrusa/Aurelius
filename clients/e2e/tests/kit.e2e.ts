@@ -9,6 +9,15 @@ import { REPO, serveStatic, TestDaemon, until, WEB_DIST } from "./daemon";
 import { scriptServer } from "./fake-server";
 import { expectNewSession, openGiveWork } from "./new-session";
 
+/** The Inbox is behind the bell in every screen's head: its dropdown opens the page. */
+async function openInbox(page: Page): Promise<void> {
+  await page
+    .getByRole("button", { name: /^Inbox/ })
+    .first()
+    .click();
+  await page.getByRole("button", { name: "Open Inbox" }).click();
+}
+
 const PASSWORD = "a-long-enough-password";
 
 const palette = (page: Page) => page.getByRole("combobox", { name: "Command palette" });
@@ -111,7 +120,7 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     // The sidebar's + is New session now (ticket #60), with the composer ready to type in.
     await page.getByRole("button", { name: "New session" }).first().click();
     await expectNewSession(page);
-    await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
+    await openInbox(page);
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
     // New ticket: the choices arrive, a wrong date is said, and the fields end up on the server.
@@ -159,11 +168,11 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     );
 
     // n on the Inbox is New session now (ticket #60), not Give work. The create above opened the ticket's chat.
-    await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
+    await openInbox(page);
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
     await page.keyboard.press("n");
     await expectNewSession(page);
-    await page.getByRole("navigation").getByRole("link", { name: "Inbox" }).first().click();
+    await openInbox(page);
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
     // Give work: the top of the org chart by default, a ticket started at once. Its own way in is the
