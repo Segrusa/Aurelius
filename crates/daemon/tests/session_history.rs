@@ -2,7 +2,7 @@
 //! session's summary waits until the session has gone quiet; every board member
 //! reads every session in `work_session.history`, may ask for its summary at once
 //! with `work_session.retry_summary`, and may read the session without writing in
-//! it. Runs use the fake runtime, which answers a summary prompt by its marker.
+//! it. Runs use the fake runtime, which answers a summary or title prompt by its marker.
 
 mod common;
 
@@ -58,10 +58,20 @@ async fn every_board_member_sees_a_session_in_the_history_and_its_summary_comes_
         .unwrap();
     assert!(due > aurelius_storage::now_ms() + SESSION_SUMMARY_QUIET_MS / 2, "it waits for the quiet time");
 
-    // Ada did not start it, but the History shows it to her, with who did.
+    // Ada did not start it, but the History shows it to her, with who did, under
+    // the title made from its content after the first answer (in place of the first line).
     let ada = common::connect_as(dir.path(), "ada").await;
-    let seen = row(&ada, conversation).await;
-    assert_eq!(seen.title, "Make the export faster.");
+    let mut seen = row(&ada, conversation).await;
+    for _ in 0..400 {
+        if seen.title != "Make the export faster." {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        seen = row(&ada, conversation).await;
+    }
+    assert_eq!(seen.title, "Make the export faster", "the fake's made title, cleaned");
+    let titles: i64 = common::db(dir.path()).query_row("SELECT COUNT(*) FROM jobs WHERE kind = 'session.title' AND state = 'done'", [], |r| r.get(0)).unwrap();
+    assert_eq!(titles, 1, "one title job per session");
     assert_eq!(seen.employee_name, "Orion");
     assert_eq!(seen.project_name, "Atlas");
     assert_eq!(seen.started_by_name.as_deref(), Some("grace"));

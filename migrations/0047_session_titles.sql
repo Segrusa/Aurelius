@@ -1,0 +1,12 @@
+-- Protocol 5 (additive): a work session gets a title made from its content.
+--
+-- A session starts with the first line of its first message as its title. After
+-- the first answer, the job `session.title` asks a model for a short title from
+-- the opening of the conversation and puts it on the conversation.
+--
+-- * work_sessions.title_asked_at_ms: when that job was queued; NULL: never. It is
+--   asked for once per session; a session from before this migration gets its
+--   title after its next answer.
+--
+-- Additive only: one new column with a CHECK, no rebuild, no data touched.
+ALTER TABLE work_sessions ADD COLUMN title_asked_at_ms INTEGER CHECK(title_asked_at_ms IS NULL OR title_asked_at_ms >= 0);
