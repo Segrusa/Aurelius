@@ -261,7 +261,7 @@ const styles = stylex.create({
   },
   dotRunning: { backgroundColor: "var(--color-text-success)" },
   dotNeedsYou: { backgroundColor: "var(--color-text-error)" },
-  dotDone: { backgroundColor: "var(--color-dot-orange)" },
+  dotDone: { backgroundColor: "var(--precision-dot-orange)" },
   empty: { margin: 0, paddingInline: 10, fontSize: 12, color: "var(--precision-text3)" },
   reconnect: { margin: 0, paddingInline: 8, fontSize: 12, color: "var(--color-text-warning)" },
 });

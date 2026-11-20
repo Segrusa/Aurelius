@@ -236,8 +236,6 @@
     --color-border-orange: light-dark(#ffc7a1, #df843f);
     --color-icon-orange: light-dark(#622700, #ff9e55);
     --color-text-orange: light-dark(#622700, #ffb37e);
-    /* A small mark that must read as orange on both themes (a session's finished, unopened answer). */
-    --color-dot-orange: light-dark(#e8730c, #ff9e55);
     --color-background-yellow: light-dark(#fae19e, #453a1c);
     --color-border-yellow: light-dark(#e3c36c, #c29900);
     --color-icon-yellow: light-dark(#9a5800, #e8a84a);
@@ -310,6 +308,7 @@
     --precision-card-shadow: light-dark(0 1px 2px rgb(0 0 0 / 0.05), none);
     --precision-amber-soft: light-dark(rgb(196 122 0 / 0.08), rgb(229 162 58 / 0.1));
     --precision-violet: light-dark(#6d4ac9, #b39dfa);
+    --precision-dot-orange: light-dark(#e8730c, #ff9e55);
   }
 
   :scope {
