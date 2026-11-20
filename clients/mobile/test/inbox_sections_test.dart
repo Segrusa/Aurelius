@@ -104,7 +104,9 @@ void main() {
     expect(s.done, 2);
   });
 
-  testWidgets('The inbox shows Needs you, Running and Done in order, with counts', (tester) async {
+  Finder count(String key, String value) => find.descendant(of: find.byKey(ValueKey('inbox-count-$key')), matching: find.text(value));
+
+  testWidgets('The inbox counts Needs you, Updates and Done on top, then shows Needs you and Done in order; what runs is on Sessions', (tester) async {
     await show(
       tester,
       InboxState(loading: false, approvals: [approvalOf('a1')], notifications: [result('n1', taskId: 'ok')]),
@@ -115,17 +117,16 @@ void main() {
         tasks: [task('run', TaskStatus.running), task('q', TaskStatus.queued), task('ok', TaskStatus.succeeded)],
       ),
     );
-    expect(find.text('Needs you  1'), findsOneWidget);
-    expect(find.text('Running  3'), findsOneWidget);
-    expect(find.text('Done  1'), findsOneWidget);
-    expect(top(tester, header('needs-you')), lessThan(top(tester, header('running'))));
-    expect(top(tester, header('running')), lessThan(top(tester, header('done'))));
-    // Rows sit under their own header and carry the usual marks.
-    expect(top(tester, find.byKey(const ValueKey('inbox-task-run'))), greaterThan(top(tester, header('running'))));
-    expect(top(tester, find.byKey(const ValueKey('inbox-task-run'))), lessThan(top(tester, header('done'))));
-    expect(find.descendant(of: find.byKey(const ValueKey('inbox-task-run')), matching: find.byKey(const ValueKey('task-mark-working'))), findsOneWidget);
-    expect(find.descendant(of: find.byKey(const ValueKey('inbox-task-q')), matching: find.byKey(const ValueKey('task-mark-queued'))), findsOneWidget);
-    expect(find.byKey(const ValueKey('inbox-answer-m1-c-1')), findsOneWidget);
+    expect(count('needs-you', '1'), findsOneWidget);
+    expect(count('updates', '0'), findsOneWidget);
+    expect(count('done', '1'), findsOneWidget);
+    expect(find.text('NEEDS YOU'), findsOneWidget);
+    expect(top(tester, find.byKey(const ValueKey('inbox-count-needs-you'))), lessThan(top(tester, header('needs-you'))));
+    expect(top(tester, header('needs-you')), lessThan(top(tester, header('done'))));
+    expect(find.byKey(const ValueKey('inbox-section-running')), findsNothing);
+    expect(find.byKey(const ValueKey('inbox-task-run')), findsNothing);
+    expect(find.byKey(const ValueKey('inbox-task-q')), findsNothing);
+    expect(find.byKey(const ValueKey('inbox-answer-m1-c-1')), findsNothing);
     expect(find.descendant(of: find.byKey(const ValueKey('notification-n1')), matching: find.byKey(const ValueKey('task-mark-done'))), findsOneWidget);
     expect(top(tester, find.byKey(const ValueKey('notification-n1'))), greaterThan(top(tester, header('done'))));
   });
@@ -136,28 +137,29 @@ void main() {
       const InboxState(loading: false),
       CompanyState(loading: false, projects: [project], tasks: [task('run', TaskStatus.running)]),
     );
-    expect(find.text('Needs you  0'), findsOneWidget);
-    expect(find.text('Nothing needs you.'), findsOneWidget);
-    expect(find.text('Done  0'), findsOneWidget);
-    expect(find.text('No results yet.'), findsOneWidget);
-    expect(find.text('Nothing running.'), findsNothing);
+    expect(count('needs-you', '0'), findsOneWidget);
+    expect(count('done', '0'), findsOneWidget);
+    expect(find.text('Nothing needs you right now.'), findsOneWidget);
+    expect(find.text('Results land here when an employee finishes.'), findsOneWidget);
     expect(find.text('Clear all'), findsNothing);
   });
 
-  testWidgets('A task moves from Running to Needs you live, and opens the task', (tester) async {
+  testWidgets('A task that starts waiting on you appears in Needs you live, and opens the task', (tester) async {
     final (_, company) = await show(
       tester,
       const InboxState(loading: false),
       CompanyState(loading: false, projects: [project], tasks: [task('t', TaskStatus.running)]),
     );
-    expect(find.text('Running  1'), findsOneWidget);
-    expect(find.text('Needs you  0'), findsOneWidget);
+    expect(count('needs-you', '0'), findsOneWidget);
+    expect(find.byKey(const ValueKey('inbox-task-t')), findsNothing);
     company.add(CompanyState(loading: false, projects: [project], tasks: [task('t', TaskStatus.waiting, waitingReason: 'input')]));
+    // The first frame delivers the new state to the bloc's listeners; the page shows it on the next.
     await tester.pump();
-    expect(find.text('Running  0'), findsOneWidget);
-    expect(find.text('Needs you  1'), findsOneWidget);
+    await tester.pump();
+    expect(count('needs-you', '1'), findsOneWidget);
     final row = find.byKey(const ValueKey('inbox-task-t'));
-    expect(top(tester, row), lessThan(top(tester, header('running'))));
+    expect(top(tester, row), greaterThan(top(tester, header('needs-you'))));
+    expect(top(tester, row), lessThan(top(tester, header('done'))));
     expect(find.descendant(of: row, matching: find.byKey(const ValueKey('task-mark-needsYou'))), findsOneWidget);
     await tester.tap(row);
     await tester.pumpAndSettle();

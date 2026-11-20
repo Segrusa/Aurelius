@@ -43,9 +43,10 @@ TicketDraft ticketDraftOf(String text, String? projectId) {
   return TicketDraft(title: title, description: description, projectId: projectId);
 }
 
-/// The Chat tab (desktop's New session): "What should happen next?", a row of
-/// projects (recently used first), your tickets to continue, and at the bottom
-/// the composer with who takes it, model, effort and mode. Start opens the
+/// The Chat tab (desktop's New session): the mark and "What should happen
+/// next?", the project (a picker, recently used first), Session | Ticket, your
+/// tickets to continue, and at the bottom the chips for who takes it, model,
+/// effort and mode over a pill-shaped composer. Start opens the
 /// session; Ticket hands the text to New ticket. A server without work
 /// sessions only offers the ticket.
 class NewSessionPage extends StatefulWidget {
@@ -291,6 +292,17 @@ class _NewSessionPageState extends State<NewSessionPage> {
     if (picked != null && mounted) setState(() => chosen(picked.$1));
   }
 
+  /// The project picker: every open project, the recently used first.
+  Future<void> _pickProject(BuildContext anchor, List<ProjectSummary> projects) async {
+    final ordered = projectRows(projects, _recent, _project, id: (p) => p.id, max: projects.length).rows;
+    final picked = await showGlassMenu<String>(
+      anchor,
+      [for (final p in ordered) GlassMenuItem(p.id, p.name, selected: p.id == _project)],
+      matchWidth: true,
+    );
+    if (picked != null && mounted) setState(() => _project = picked);
+  }
+
   @override
   Widget build(BuildContext context) {
     final company = context.watch<CompanyBloc>().state;
@@ -312,70 +324,80 @@ class _NewSessionPageState extends State<NewSessionPage> {
             ? dispatchedNote(false)
             : sessionNote(whoName, false);
     final can = !_busy && !_uploading && (kind == StartKind.ticket ? _text.text.trim().isNotEmpty : problem == null);
-    final rows = projectRows(projects, _recent, _project, id: (p) => p.id);
     final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final project = projects.where((p) => p.id == _project).firstOrNull;
 
     return Scaffold(
-      appBar: GlassAppBar(title: const Text('Chat')),
-      body: Column(children: [
-        Expanded(
-          child: ListView(
-            key: const ValueKey('chat-body'),
-            padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
-                child: Text('What should happen next?', key: const ValueKey('chat-heading'), style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: Tokens.label)),
+      backgroundColor: Tokens.bg,
+      body: SafeArea(
+        bottom: false,
+        child: Column(children: [
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, box) => SingleChildScrollView(
+                key: const ValueKey('chat-body'),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: box.maxHeight - 32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (!keyboard) const Center(child: AureliusMark(size: 56)),
+                      if (!keyboard) const SizedBox(height: 16),
+                      Text('What should happen next?',
+                          key: const ValueKey('chat-heading'), textAlign: TextAlign.center, style: TextStyle(fontSize: 20, height: 1.3, fontWeight: FontWeight.w600, color: Tokens.label)),
+                      const Eyebrow('Project', padding: EdgeInsets.fromLTRB(4, 20, 4, 10)),
+                      if (projects.isEmpty)
+                        Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: Text('No open projects yet.', style: TextStyle(color: Tokens.label2)))
+                      else
+                        Builder(
+                          builder: (anchor) => _ProjectField(
+                            name: project?.name,
+                            warn: _tried && _project == null && kind == StartKind.session,
+                            onTap: () => _pickProject(anchor, projects),
+                          ),
+                        ),
+                      if (_tried && _project == null && kind == StartKind.session)
+                        Padding(padding: const EdgeInsets.fromLTRB(4, 6, 4, 0), child: Text('Choose a project.', style: TextStyle(fontSize: 13, color: Tokens.negative))),
+                      if (sessionsOn) ...[
+                        const SizedBox(height: 12),
+                        BrandSegments<StartKind>(
+                          key: const ValueKey('chat-kind'),
+                          segments: const [(StartKind.session, 'Session'), (StartKind.ticket, 'Ticket')],
+                          selected: kind,
+                          onChanged: (v) => setState(() => _kind = v),
+                        ),
+                      ],
+                      if (_continue.isNotEmpty && !keyboard) ...[
+                        const Eyebrow('Continue', padding: EdgeInsets.fromLTRB(4, 24, 4, 8)),
+                        InsetGroup(margin: EdgeInsets.zero, children: [
+                          for (final t in _continue)
+                            GroupRow(
+                              key: ValueKey('chat-continue-${t.id}'),
+                              title: '#${t.number} ${t.title}',
+                              subtitle: t.projectName,
+                              value: continueColumnLabel(t.column),
+                              chevron: true,
+                              onTap: () => context.push('/ticket/${t.id}'),
+                            ),
+                        ]),
+                      ],
+                    ],
+                  ),
+                ),
               ),
-              const Eyebrow('Project'),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Wrap(spacing: 8, runSpacing: 8, children: [
-                  for (final p in rows.rows)
-                    ChoiceChip(
-                      key: ValueKey('chat-project-${p.id}'),
-                      label: Text(p.name),
-                      selected: p.id == _project,
-                      showCheckmark: false,
-                      onSelected: (_) => setState(() => _project = p.id),
-                    ),
-                  if (rows.more)
-                    ActionChip(
-                      key: const ValueKey('chat-project-all'),
-                      label: const Text('All projects…'),
-                      onPressed: () => _pick<String?>('Project', [for (final p in projects) (p.id, p.name)], _project, (v) => _project = v),
-                    ),
-                  if (projects.isEmpty) Text('No open projects yet.', style: TextStyle(color: Tokens.label2)),
-                ]),
-              ),
-              if (_tried && _project == null && kind == StartKind.session)
-                Padding(padding: const EdgeInsets.fromLTRB(20, 6, 20, 0), child: Text('Choose a project.', style: TextStyle(fontSize: 13, color: Tokens.negative))),
-              if (_continue.isNotEmpty) ...[
-                const Eyebrow('Continue'),
-                InsetGroup(children: [
-                  for (final t in _continue)
-                    GroupRow(
-                      key: ValueKey('chat-continue-${t.id}'),
-                      title: '#${t.number} ${t.title}',
-                      subtitle: t.projectName,
-                      value: continueColumnLabel(t.column),
-                      chevron: true,
-                      onTap: () => context.push('/ticket/${t.id}'),
-                    ),
-                ]),
-              ],
-            ],
+            ),
           ),
-        ),
-        _composer(context, kind: kind, sessionsOn: sessionsOn, dispatchOn: dispatchOn, filesOn: filesOn, models: models, employees: employees, whoName: whoName, problem: problem, note: note, can: can, keyboard: keyboard),
-      ]),
+          _composer(context, kind: kind, dispatchOn: dispatchOn, filesOn: filesOn, models: models, employees: employees, whoName: whoName, problem: problem, note: note, can: can, keyboard: keyboard),
+        ]),
+      ),
     );
   }
 
   Widget _composer(
     BuildContext context, {
     required StartKind kind,
-    required bool sessionsOn,
     required bool dispatchOn,
     required bool filesOn,
     required List<String> models,
@@ -388,15 +410,48 @@ class _NewSessionPageState extends State<NewSessionPage> {
   }) {
     // Above the tab bar; with the keyboard up the bar is under it, so only a margin.
     final bottom = keyboard ? 8.0 : MediaQuery.paddingOf(context).bottom + 8;
-    return Container(
+    final showProblem = _tried && problem != null;
+    // Who takes it and how only matters once there is something to start.
+    final showNote = showProblem || _text.text.trim().isNotEmpty;
+    return Padding(
       key: const ValueKey('chat-composer'),
-      margin: EdgeInsets.fromLTRB(12, 0, 12, bottom),
-      padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-      decoration: BoxDecoration(color: Tokens.cell, borderRadius: BorderRadius.circular(22), border: Border.all(color: Tokens.sep)),
+      padding: EdgeInsets.fromLTRB(20, 0, 20, bottom),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (kind == StartKind.session)
+          SizedBox(
+            height: 40,
+            // Every choice built, as the Board's filters: a lazy list would leave some out for screen readers.
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
+              child: Row(children: [
+                _TrayChip(
+                  key: const ValueKey('new-session-who'),
+                  label: whoName ?? 'Who?',
+                  warn: _tried && whoName == null,
+                  onTap: () => _pick<String?>('Who', [if (dispatchOn) (dispatcherWho, 'Dispatcher'), for (final e in employees) (e.id, e.name)], _who, (v) => _who = v),
+                ),
+                _TrayChip(
+                  key: const ValueKey('new-session-model'),
+                  label: _model == 'default' ? 'Model' : ModelCatalog.friendly(_model),
+                  onTap: () => _pick('Model', [('default', employeeDefault), for (final m in models) (m, ModelCatalog.friendly(m))], _model, (v) => _model = v),
+                ),
+                _TrayChip(
+                  key: const ValueKey('new-session-effort'),
+                  label: _effort == 'default' ? 'Effort' : ModelCatalog.effortLabel(_effort),
+                  onTap: () => _pick('Effort', [('default', employeeDefault), for (final (v, label, _) in ModelCatalog.efforts) (v, label)], _effort, (v) => _effort = v),
+                ),
+                _TrayChip(
+                  key: const ValueKey('new-session-mode'),
+                  label: _mode == 'default' ? 'Mode' : AgentMode.fromJson(_mode).label,
+                  onTap: () => _pick('Mode', [('default', employeeDefault), for (final m in agentModes) (m.wire, m.label)], _mode, (v) => _mode = v),
+                ),
+              ]),
+            ),
+          ),
         if (_images.isNotEmpty || _files.isNotEmpty || _uploading)
           Padding(
-            padding: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.only(bottom: 8),
             child: Wrap(spacing: 6, runSpacing: 6, children: [
               for (final (list, f) in [for (final i in _images) (_images, i), for (final f in _files) (_files, f)])
                 InputChip(
@@ -408,82 +463,197 @@ class _NewSessionPageState extends State<NewSessionPage> {
               if (_uploading) const Padding(padding: EdgeInsets.all(8), child: SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))),
             ]),
           ),
-        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          if (kind == StartKind.session)
-            IconButton(
-              key: const ValueKey('new-session-attach'),
-              tooltip: filesOn ? 'Add photos or files' : 'Add photos',
-              onPressed: _busy || _uploading ? null : () => _attach(filesOn),
-              icon: const Icon(CupertinoIcons.paperclip),
-            ),
-          Expanded(
-            child: TextField(
-              key: const ValueKey('new-session-text'),
-              controller: _text,
-              minLines: 1,
-              maxLines: 8,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(hintText: kind == StartKind.ticket ? 'Describe the ticket: the first line is its title' : newSessionHint, border: InputBorder.none, isDense: true),
-            ),
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: Tokens.cell,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Tokens.sep),
+            boxShadow: Tokens.dark ? null : const [BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)), BoxShadow(color: Color(0x0D000000), blurRadius: 16, offset: Offset(0, 6))],
           ),
-          IconButton.filled(
-            key: const ValueKey('new-session-start'),
-            tooltip: kind == StartKind.ticket ? 'Continue in New ticket' : 'Start',
-            onPressed: can ? _start : (_busy || _uploading ? null : () => setState(() => _tried = true)),
-            icon: _busy ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(CupertinoIcons.arrow_up),
-          ),
-        ]),
-        const SizedBox(height: 4),
-        SizedBox(
-          height: 36,
-          // Every choice built, as the Board's filters: a lazy list would leave some out for screen readers.
-          child: SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
-            if (sessionsOn)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: CupertinoSlidingSegmentedControl<StartKind>(
-                  key: const ValueKey('chat-kind'),
-                  groupValue: kind,
-                  children: const {StartKind.session: Text('Session'), StartKind.ticket: Text('Ticket')},
-                  onValueChanged: (v) => setState(() => _kind = v ?? StartKind.session),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            if (kind == StartKind.session)
+              _RoundButton(
+                key: const ValueKey('new-session-attach'),
+                tooltip: filesOn ? 'Add photos or files' : 'Add photos',
+                onPressed: _busy || _uploading ? null : () => _attach(filesOn),
+                child: Icon(CupertinoIcons.paperclip, size: 20, color: Tokens.ink2),
+              ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                child: TextField(
+                  key: const ValueKey('new-session-text'),
+                  controller: _text,
+                  minLines: 1,
+                  maxLines: 6,
+                  textCapitalization: TextCapitalization.sentences,
+                  style: TextStyle(fontSize: 16, color: Tokens.label),
+                  decoration: InputDecoration(
+                    hintText: kind == StartKind.ticket ? 'Describe the ticket: the first line is its title' : newSessionHint,
+                    hintStyle: TextStyle(fontSize: 16, color: Tokens.label2),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    filled: false,
+                    isDense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
                 ),
               ),
-            if (kind == StartKind.session) ...[
-              _TrayChip(
-                key: const ValueKey('new-session-who'),
-                label: whoName ?? 'Who?',
-                warn: _tried && whoName == null,
-                onTap: () => _pick<String?>('Who', [if (dispatchOn) (dispatcherWho, 'Dispatcher'), for (final e in employees) (e.id, e.name)], _who, (v) => _who = v),
-              ),
-              _TrayChip(
-                key: const ValueKey('new-session-model'),
-                label: _model == 'default' ? 'Model' : ModelCatalog.friendly(_model),
-                onTap: () => _pick('Model', [('default', employeeDefault), for (final m in models) (m, ModelCatalog.friendly(m))], _model, (v) => _model = v),
-              ),
-              _TrayChip(
-                key: const ValueKey('new-session-effort'),
-                label: _effort == 'default' ? 'Effort' : ModelCatalog.effortLabel(_effort),
-                onTap: () => _pick('Effort', [('default', employeeDefault), for (final (v, label, _) in ModelCatalog.efforts) (v, label)], _effort, (v) => _effort = v),
-              ),
-              _TrayChip(
-                key: const ValueKey('new-session-mode'),
-                label: _mode == 'default' ? 'Mode' : AgentMode.fromJson(_mode).label,
-                onTap: () => _pick('Mode', [('default', employeeDefault), for (final m in agentModes) (m.wire, m.label)], _mode, (v) => _mode = v),
-              ),
-            ],
-          ])),
+            ),
+            _RoundButton(
+              key: const ValueKey('new-session-start'),
+              tooltip: kind == StartKind.ticket ? 'Continue in New ticket' : 'Start',
+              brand: true,
+              onPressed: can ? _start : (_busy || _uploading ? null : () => setState(() => _tried = true)),
+              child: _busy
+                  ? SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Tokens.accentInk))
+                  : Icon(CupertinoIcons.arrow_up, size: 20, color: Tokens.accentInk),
+            ),
+          ]),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
-          child: Text(
-            _tried && problem != null ? problem : note,
-            key: const ValueKey('new-session-note'),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: _tried && problem != null ? Tokens.negative : Tokens.label2),
+        if (showNote)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+            child: Text(
+              showProblem ? problem : note,
+              key: const ValueKey('new-session-note'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: showProblem ? Tokens.negative : Tokens.label2),
+            ),
+          ),
+      ]),
+    );
+  }
+}
+
+/// The Aurelius mark: a white chevron on a green rounded square.
+class AureliusMark extends StatelessWidget {
+  const AureliusMark({super.key, this.size = 56});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        label: 'Aurelius',
+        image: true,
+        child: CustomPaint(size: Size.square(size), painter: _MarkPainter(Tokens.accent)),
+      );
+}
+
+class _MarkPainter extends CustomPainter {
+  _MarkPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Drawn on a 24-unit grid, as the design's SVG.
+    final u = size.width / 24;
+    canvas.drawRRect(RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(6 * u)), Paint()..color = color);
+    final chevron = Path()
+      ..moveTo(7.5 * u, 15.5 * u)
+      ..lineTo(12 * u, 8.5 * u)
+      ..lineTo(16.5 * u, 15.5 * u);
+    canvas.drawPath(
+      chevron,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.6 * u
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_MarkPainter old) => old.color != color;
+}
+
+/// The chosen project as a glass field with a folder tile; a tap opens the list.
+class _ProjectField extends StatelessWidget {
+  const _ProjectField({required this.name, required this.onTap, this.warn = false});
+
+  final String? name;
+  final VoidCallback onTap;
+  final bool warn;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        label: 'Project: ${name ?? 'none chosen'}',
+        excludeSemantics: true,
+        child: GestureDetector(
+          key: const ValueKey('chat-project'),
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Glass(
+            radius: 18,
+            tint: Tokens.dark ? Tokens.glass : Colors.white.withValues(alpha: 0.6),
+            padding: const EdgeInsets.fromLTRB(8, 7, 14, 7),
+            child: Row(children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(color: Tokens.accentTint, borderRadius: BorderRadius.circular(11)),
+                child: Icon(CupertinoIcons.folder, size: 18, color: Tokens.accent),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  name ?? 'Choose a project',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: warn ? Tokens.negative : (name == null ? Tokens.label2 : Tokens.label)),
+                ),
+              ),
+              Icon(CupertinoIcons.chevron_down, size: 16, color: Tokens.label2),
+            ]),
           ),
         ),
-      ]),
+      );
+}
+
+/// A 40 pt round button in the composer: glass, or the accent for Start.
+class _RoundButton extends StatelessWidget {
+  const _RoundButton({super.key, required this.tooltip, required this.onPressed, required this.child, this.brand = false});
+
+  final String tooltip;
+  final VoidCallback? onPressed;
+  final Widget child;
+  final bool brand;
+
+  @override
+  Widget build(BuildContext context) {
+    final off = onPressed == null;
+    return Tooltip(
+      message: tooltip,
+      child: Semantics(
+        button: true,
+        enabled: !off,
+        label: tooltip,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onPressed,
+          child: Opacity(
+            opacity: off ? 0.5 : 1,
+            child: Container(
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: brand ? Tokens.accent.withValues(alpha: 0.92) : (Tokens.dark ? Tokens.cell2 : Colors.white.withValues(alpha: 0.6)),
+                border: Border.all(color: brand ? Colors.white.withValues(alpha: 0.3) : Tokens.sep),
+                boxShadow: brand ? [BoxShadow(color: Tokens.accent.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))] : null,
+              ),
+              child: child,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -499,10 +669,23 @@ class _TrayChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.only(right: 6),
-        child: ActionChip(
-          label: Text(label, style: TextStyle(fontSize: 13, color: warn ? Tokens.negative : null)),
-          visualDensity: VisualDensity.compact,
-          onPressed: onTap,
+        child: Semantics(
+          button: true,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTap,
+            child: Glass(
+              radius: 15,
+              flat: true,
+              tint: Tokens.dark ? Tokens.glass : Colors.white.withValues(alpha: 0.6),
+              padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(label, style: TextStyle(fontSize: 13, color: warn ? Tokens.negative : Tokens.ink2)),
+                const SizedBox(width: 4),
+                Icon(CupertinoIcons.chevron_down, size: 11, color: warn ? Tokens.negative : Tokens.ink2),
+              ]),
+            ),
+          ),
         ),
       );
 }

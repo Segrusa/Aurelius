@@ -52,25 +52,48 @@ class _InboxPageState extends State<InboxPage> {
               bloc.add(const InboxRefreshed());
               context.read<CompanyBloc>().add(const CompanyRefreshed());
             }, busy: (s) => s.loading);
-        final subtitle = [
-          if (s.needsYou > 0) '${s.needsYou} need${s.needsYou == 1 ? 's' : ''} you',
-          if (s.running > 0) '${s.running} running',
-          if (state.unread > 0) '${state.unread} unread',
-        ].join(' · ');
+        Future<void> clearDone() async {
+          final count = s.done;
+          if (await confirm(context, title: 'Clear all $count result${count == 1 ? '' : 's'}?', body: 'Approvals are not touched.', action: 'Clear all', danger: true)) {
+            bloc.add(const NotificationsCleared());
+          }
+        }
+
+        // What runs is on the Sessions tab (its badge and Active); the Inbox
+        // keeps what needs you and what came back.
         return LargeTitleScaffold(
           title: 'Inbox',
-          subtitle: subtitle.isEmpty ? null : subtitle,
           onRefresh: refresh,
           fill: state.loading && s.isEmpty
               ? const Center(child: CupertinoActivityIndicator())
               : state.loadFailed && s.isEmpty
                   ? EmptyState('Could not load the Inbox.', key: const ValueKey('inbox-load-failed'), action: OutlinedButton(onPressed: () => bloc.add(const InboxRefreshed()), child: const Text('Try again')))
-                  : s.isEmpty
-                      ? EmptyState('Nothing waiting', detail: state.personalOn ? "You get one when you're made responsible or @mentioned, and when a ticket you follow needs review, is sent back or fails." : 'What needs you, what runs and finished results show up here.')
-                      : null,
+                  : null,
+          header: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Row(children: [
+                Expanded(child: _CountTile(key: const ValueKey('inbox-count-needs-you'), count: s.needsYou, label: 'Needs you')),
+                const SizedBox(width: 8),
+                Expanded(child: _CountTile(key: const ValueKey('inbox-count-updates'), count: s.updates.length, label: 'Updates')),
+                const SizedBox(width: 8),
+                Expanded(child: _CountTile(key: const ValueKey('inbox-count-done'), count: s.done, label: 'Done')),
+              ]),
+            ),
+          ],
           children: [
-            GroupHeader('Needs you', key: const ValueKey('inbox-section-needs-you'), count: s.needsYou),
-            if (s.needsYou == 0) const _EmptyLine('Nothing needs you.'),
+            GroupHeader('Needs you', key: const ValueKey('inbox-section-needs-you'), caps: true),
+            if (s.needsYou == 0)
+              InsetGroup(children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(children: [
+                    Icon(CupertinoIcons.checkmark_circle, size: 20, color: Tokens.accent),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text('Nothing needs you right now.', style: TextStyle(fontSize: 14, color: Tokens.ink2))),
+                  ]),
+                ),
+              ]),
             for (final a in s.approvals) Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 12), child: _ApprovalCard(approval: a)),
             for (final p in s.proposals)
               Padding(
@@ -79,44 +102,25 @@ class _InboxPageState extends State<InboxPage> {
               ),
             if (s.rowsNeedingYou.isNotEmpty)
               InsetGroup(dividerIndent: 28, children: [for (final n in s.rowsNeedingYou) _swipeAway(bloc, n, _PersonalTile(row: n))]),
-            if (s.waitingTasks.isNotEmpty)
+            if (s.waitingTasks.isNotEmpty) ...[
+              if (s.rowsNeedingYou.isNotEmpty) const SizedBox(height: 12),
               InsetGroup(children: [for (final t in s.waitingTasks) _TaskRow(task: t, company: company)]),
-            if (state.personalOn) ...[
-              GroupHeader('Updates', key: const ValueKey('inbox-section-updates'), count: s.updates.length),
-              if (s.updates.isEmpty)
-                const _EmptyLine('No updates.')
-              else
-                InsetGroup(dividerIndent: 28, children: [for (final n in s.updates) _swipeAway(bloc, n, _PersonalTile(row: n))]),
             ],
-            GroupHeader('Running', key: const ValueKey('inbox-section-running'), count: s.running),
-            if (s.running == 0)
-              const _EmptyLine('Nothing running.')
-            else
-              InsetGroup(
-                children: [
-                  for (final t in s.runningTasks) _TaskRow(task: t, company: company),
-                  for (final a in s.answers) _AnswerRow(answer: a, company: company),
-                ],
-              ),
             GroupHeader(
-              'Done',
+              state.personalOn ? 'Updates and done' : 'Done',
               key: const ValueKey('inbox-section-done'),
-              count: s.done,
+              caps: true,
               action: s.done == 0 ? null : 'Clear all',
-              onAction: () async {
-                final count = s.done;
-                if (await confirm(context,
-                    title: 'Clear all $count result${count == 1 ? '' : 's'}?',
-                    body: 'Approvals are not touched.',
-                    action: 'Clear all',
-                    danger: true)) {
-                  bloc.add(const NotificationsCleared());
-                }
-              },
+              onAction: clearDone,
             ),
-            if (s.done == 0)
-              const _EmptyLine('No results yet.')
-            else
+            if (s.updates.isEmpty && s.done == 0)
+              _EmptyLine(state.personalOn
+                  ? "Results land here when an employee finishes. You get one when you're made responsible or @mentioned, and when a ticket you follow needs review, is sent back or fails."
+                  : 'Results land here when an employee finishes.'),
+            if (s.updates.isNotEmpty)
+              InsetGroup(key: const ValueKey('inbox-section-updates'), dividerIndent: 28, children: [for (final n in s.updates) _swipeAway(bloc, n, _PersonalTile(row: n))]),
+            if (s.updates.isNotEmpty && s.done > 0) const SizedBox(height: 12),
+            if (s.done > 0)
               InsetGroup(
                 dividerIndent: 28,
                 children: [
@@ -128,6 +132,33 @@ class _InboxPageState extends State<InboxPage> {
       },
     );
   }
+}
+
+/// One of the Inbox's three counts at the top.
+class _CountTile extends StatelessWidget {
+  const _CountTile({super.key, required this.count, required this.label});
+
+  final int count;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        label: '$label: $count',
+        excludeSemantics: true,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: Tokens.cell,
+            borderRadius: BorderRadius.circular(14),
+            border: Tokens.dark ? null : Border.all(color: Tokens.sep),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('$count', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: Tokens.label, fontFeatures: Tokens.tabular)),
+            const SizedBox(height: 2),
+            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: Tokens.label2)),
+          ]),
+        ),
+      );
 }
 
 /// A row that goes with a swipe to the left.
@@ -289,8 +320,8 @@ class _EmptyLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(32, 0, 24, 4),
-        child: Text(text, style: TextStyle(fontSize: 15, color: Tokens.label2)),
+        padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+        child: Text(text, style: TextStyle(fontSize: 14, color: Tokens.label2)),
       );
 }
 
@@ -314,32 +345,6 @@ class _TaskRow extends StatelessWidget {
         t.employeeName ?? '',
       ].where((s) => s.isNotEmpty).join(' · '),
       trailing: TaskStatusMark(t),
-    );
-  }
-}
-
-/// An employee answering in a conversation outside a task; opens it. Its own
-/// chat is where it answers the group chat, so that opens Team.
-class _AnswerRow extends StatelessWidget {
-  const _AnswerRow({required this.answer, required this.company});
-
-  final RunningAnswer answer;
-  final CompanyState company;
-
-  @override
-  Widget build(BuildContext context) {
-    final m = answer.employee;
-    final conversationId = answer.agent.conversationId;
-    return GroupRow(
-      key: ValueKey('inbox-answer-${m.id}-$conversationId'),
-      onTap: () => conversationId == null || conversationId == m.conversationId ? context.go('/sessions') : context.push('/conversation/$conversationId'),
-      title: '${m.name} · ${answer.agent.label}',
-      subtitle: conversationId == null ? null : m.threadTitle(conversationId),
-      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-        const StatusDot(pulse: true, size: 7.5),
-        const SizedBox(width: 4),
-        Text('Working', style: TextStyle(color: Tokens.text2, fontSize: 12.5, fontWeight: FontWeight.w500)),
-      ]),
     );
   }
 }

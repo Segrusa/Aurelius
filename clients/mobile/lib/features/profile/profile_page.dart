@@ -79,7 +79,7 @@ class ProfilePage extends StatelessWidget {
         // The PC's name, with the PC above. Lazy: a server without the feature is never asked its name (SN-02 AC4).
         BlocProvider(create: (_) => ServerNameBloc(repository)..add(const ServerNameRefreshed()), child: ServerNameSection(link: link)),
         if (user != null) ...[
-          const GroupHeader('Account'),
+          const GroupHeader('Account', caps: true),
           InsetGroup(
             dividerIndent: 60,
             children: [
@@ -100,7 +100,7 @@ class ProfilePage extends StatelessWidget {
               ),
               GroupRow(
                 key: const ValueKey('account-password'),
-                leading: const IconTile(CupertinoIcons.lock_fill),
+                leading: const IconTile(CupertinoIcons.lock),
                 title: 'Change password',
                 chevron: true,
                 onTap: () => context.push('/account/password'),
@@ -108,15 +108,14 @@ class ProfilePage extends StatelessWidget {
             ],
           ),
         ],
-        const SizedBox(height: 8),
-        const GroupHeader('Workspace'),
+        const GroupHeader('Workspace', caps: true),
         InsetGroup(
           dividerIndent: 60,
           children: [
             // The way to the chat with an employee, and to Give work from an employee's page.
             GroupRow(
               key: const ValueKey('profile-employees'),
-              leading: const IconTile(CupertinoIcons.person_2_fill),
+              leading: const IconTile(CupertinoIcons.person_2),
               title: 'Employees',
               value: employees == 0 ? null : '$employees',
               chevron: true,
@@ -124,7 +123,7 @@ class ProfilePage extends StatelessWidget {
             ),
             GroupRow(
               key: const ValueKey('profile-projects'),
-              leading: const IconTile(CupertinoIcons.folder_fill),
+              leading: const IconTile(CupertinoIcons.folder),
               title: 'Projects',
               value: projects == 0 ? null : '$projects',
               chevron: true,
@@ -132,7 +131,7 @@ class ProfilePage extends StatelessWidget {
             ),
             GroupRow(
               key: const ValueKey('settings-board-members'),
-              leading: const IconTile(CupertinoIcons.person_crop_circle_fill),
+              leading: const IconTile(CupertinoIcons.person_crop_circle),
               title: 'Board members',
               chevron: true,
               onTap: () => context.push('/settings/board-members'),
@@ -143,8 +142,7 @@ class ProfilePage extends StatelessWidget {
             GroupRow(key: const ValueKey('profile-paired'), leading: const IconTile(CupertinoIcons.device_laptop), title: 'Paired PCs', value: '$paired', chevron: true, onTap: () => context.push('/hosts')),
           ],
         ),
-        const SizedBox(height: 8),
-        const GroupHeader('App'),
+        const GroupHeader('App', caps: true),
         InsetGroup(
           dividerIndent: 60,
           children: [
@@ -152,7 +150,7 @@ class ProfilePage extends StatelessWidget {
               valueListenable: push.state,
               builder: (context, state, _) => GroupRow(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                leading: const IconTile(CupertinoIcons.bell_fill),
+                leading: const IconTile(CupertinoIcons.bell),
                 title: 'Notifications',
                 subtitle: switch (state) {
                   PushState.unsupported => 'Not available on this phone yet.',
@@ -171,12 +169,12 @@ class ProfilePage extends StatelessWidget {
           ],
         ),
         if (user != null) ...[
-          const SizedBox(height: 28),
+          const SizedBox(height: 24),
           InsetGroup(children: [
             GroupRow(
               key: const ValueKey('account-sign-out'),
               title: 'Sign out',
-              titleStyle: TextStyle(fontSize: 17, color: Tokens.negative),
+              titleStyle: TextStyle(fontSize: 15, color: Tokens.negative),
               chevron: false,
               onTap: () => _signOut(context),
             ),
@@ -202,36 +200,40 @@ class _Hero extends StatelessWidget {
     final link = context.watch<ConnectionBloc>().state;
     final name = username;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
       child: Material(
         color: Tokens.cell,
         clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Tokens.cardRadius)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Tokens.cardRadius), side: Tokens.dark ? BorderSide.none : BorderSide(color: Tokens.sep)),
         child: Column(children: [
           if (name != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 14),
-              child: Column(children: [
-                Monogram(_monogram(name), active: true, size: 72),
-                const SizedBox(height: 10),
-                Text(name, key: const ValueKey('profile-name'), style: Tokens.title(size: 24)),
-                const SizedBox(height: 2),
-                Text('Board member', style: TextStyle(color: Tokens.label2, fontSize: 14)),
+              padding: const EdgeInsets.all(16),
+              child: Row(children: [
+                Monogram(_monogram(name), active: true, size: 52),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(name, key: const ValueKey('profile-name'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Tokens.label)),
+                    const SizedBox(height: 2),
+                    Text('Board member', style: TextStyle(color: Tokens.label2, fontSize: 13)),
+                  ]),
+                ),
               ]),
             ),
-          if (name != null) Divider(height: 1, thickness: 0.5, color: Tokens.sep, indent: 16, endIndent: 16),
+          if (name != null) Divider(height: 1, thickness: 1, color: Tokens.sep),
           InkWell(
             key: const ValueKey('profile-pc'),
             onTap: () => context.push('/hosts'),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+              padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
               child: Row(children: [
-                Icon(CupertinoIcons.desktopcomputer, size: 22, color: Tokens.accent),
+                IconTile(CupertinoIcons.desktopcomputer, color: Tokens.accent),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Row(children: [
-                      Flexible(child: Text(host.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
+                      Flexible(child: Text(host.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Tokens.label))),
                       if (host.isDev) ...[
                         const SizedBox(width: 8),
                         Text('DEV', style: TextStyle(color: Tokens.devBadge, fontWeight: FontWeight.w700, fontSize: 12)),
@@ -246,7 +248,7 @@ class _Hero extends StatelessWidget {
                           link.isOnline ? 'Connected${link.daemonVersion != null ? ' · Aurelius ${link.daemonVersion}' : ''}' : (link.message ?? 'Not connected'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: Tokens.label2, fontSize: 13),
+                          style: TextStyle(color: Tokens.label2, fontSize: 13, fontFeatures: Tokens.tabular),
                         ),
                       ),
                     ]),

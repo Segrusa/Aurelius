@@ -30,9 +30,9 @@ class ServerNameSection extends StatelessWidget {
       builder: (context, state) {
         final view = state.view;
         final chosen = view?.chosen;
-        return Padding(
-          padding: const EdgeInsets.only(top: 20),
-          child: InsetGroup(
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const GroupHeader('Server', caps: true),
+          InsetGroup(
             dividerIndent: 60,
             children: [
               GroupRow(
@@ -49,7 +49,7 @@ class ServerNameSection extends StatelessWidget {
               ),
             ],
           ),
-        );
+        ]);
       },
     );
   }

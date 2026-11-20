@@ -121,10 +121,13 @@ class GlassButton extends StatelessWidget {
 
 /// One choice of a [GlassMenuButton].
 class GlassMenuItem<T> {
-  const GlassMenuItem(this.value, this.label, {this.danger = false});
+  const GlassMenuItem(this.value, this.label, {this.danger = false, this.selected = false});
 
   final T value;
   final String label;
+
+  /// The current choice: tinted, with a check (the Chat tab's project menu).
+  final bool selected;
 
   /// Shown in red (archive, delete).
   final bool danger;
@@ -154,18 +157,20 @@ class GlassMenuButton<T> extends StatelessWidget {
 
 /// A Liquid Glass menu beside the widget of [context]: a rounded, blurred,
 /// translucent panel that grows from the button. Below it when there is
-/// room, else above. Resolves to the chosen value, or null when dismissed.
-Future<T?> showGlassMenu<T>(BuildContext context, List<GlassMenuItem<T>> items) {
+/// room, else above. [matchWidth] makes it as wide as the button (a picker
+/// field). Resolves to the chosen value, or null when dismissed.
+Future<T?> showGlassMenu<T>(BuildContext context, List<GlassMenuItem<T>> items, {bool matchWidth = false}) {
   final box = context.findRenderObject() as RenderBox;
   final anchor = box.localToGlobal(Offset.zero) & box.size;
-  return Navigator.of(context).push(_GlassMenuRoute<T>(anchor: anchor, items: items, barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel));
+  return Navigator.of(context).push(_GlassMenuRoute<T>(anchor: anchor, items: items, matchWidth: matchWidth, barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel));
 }
 
 class _GlassMenuRoute<T> extends PopupRoute<T> {
-  _GlassMenuRoute({required this.anchor, required this.items, required this.barrierLabel});
+  _GlassMenuRoute({required this.anchor, required this.items, required this.barrierLabel, this.matchWidth = false});
 
   final Rect anchor;
   final List<GlassMenuItem<T>> items;
+  final bool matchWidth;
 
   @override
   final String? barrierLabel;
@@ -189,7 +194,7 @@ class _GlassMenuRoute<T> extends PopupRoute<T> {
     final size = MediaQuery.sizeOf(context);
     final pad = MediaQuery.paddingOf(context);
     final right = anchor.center.dx > size.width / 2;
-    final height = items.length * _rowHeight + 12;
+    final height = math.min(items.length * _rowHeight + 12, size.height * 0.6);
     final below = anchor.bottom + 8 + height <= size.height - pad.bottom - 12 || anchor.top - 8 - height < pad.top;
     final alignment = below ? (right ? Alignment.topRight : Alignment.topLeft) : (right ? Alignment.bottomRight : Alignment.bottomLeft);
     final curve = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeIn);
@@ -206,29 +211,53 @@ class _GlassMenuRoute<T> extends PopupRoute<T> {
               alignment: alignment,
               scale: Tween(begin: 0.85, end: 1.0).animate(curve),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 200, maxWidth: 280),
+                constraints: matchWidth ? BoxConstraints.tightFor(width: anchor.width) : const BoxConstraints(minWidth: 200, maxWidth: 280),
                 child: Glass(
                   radius: 18,
                   tint: Tokens.glass.withValues(alpha: Tokens.dark ? 0.72 : 0.78),
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Material(
                     type: MaterialType.transparency,
-                    child: IntrinsicWidth(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: height),
+                      child: SingleChildScrollView(
+                      child: IntrinsicWidth(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           for (final item in items)
-                            InkWell(
-                              onTap: () => Navigator.pop(context, item.value),
-                              child: Container(
-                                height: _rowHeight,
-                                alignment: Alignment.centerLeft,
-                                padding: const EdgeInsets.symmetric(horizontal: 18),
-                                child: Text(item.label, maxLines: 1, style: TextStyle(fontSize: 17, color: item.danger ? Tokens.negative : Tokens.label)),
+                            Semantics(
+                              selected: item.selected,
+                              child: InkWell(
+                                key: ValueKey('menu-${item.value}'),
+                                onTap: () => Navigator.pop(context, item.value),
+                                child: Container(
+                                  height: _rowHeight,
+                                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  decoration: BoxDecoration(color: item.selected ? Tokens.accent.withValues(alpha: 0.1) : null, borderRadius: BorderRadius.circular(12)),
+                                  child: Row(children: [
+                                    Expanded(
+                                      child: Text(
+                                        item.label,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: item.selected ? FontWeight.w600 : FontWeight.w400,
+                                          color: item.danger ? Tokens.negative : (item.selected ? Tokens.accentDeep : Tokens.label),
+                                        ),
+                                      ),
+                                    ),
+                                    if (item.selected) Padding(padding: const EdgeInsets.only(left: 10), child: Icon(CupertinoIcons.checkmark_alt, size: 18, color: Tokens.accentDeep)),
+                                  ]),
+                                ),
                               ),
                             ),
                         ],
+                      ),
+                      ),
                       ),
                     ),
                   ),
@@ -315,10 +344,14 @@ class LargeTitleScaffold extends StatefulWidget {
     this.fill,
     this.onRefresh,
     this.plain = false,
+    this.header = const [],
   });
 
   final String title;
   final String? subtitle;
+
+  /// Under the title and always shown, also above [fill] (a view switch).
+  final List<Widget> header;
 
   /// [GlassButton]s, right aligned.
   final List<Widget> actions;
@@ -366,6 +399,10 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold> {
     final pad = MediaQuery.paddingOf(context);
     final background = widget.plain ? Tokens.plain : Tokens.bg;
     const bar = 52.0;
+    // The title sits in the bar's place while the bar has nothing to show
+    // above it (no buttons, no way back): the bar only appears on scroll.
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
+    final top = widget.actions.isEmpty && !canPop ? 14.0 : bar;
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: Tokens.dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
       child: Scaffold(
@@ -378,7 +415,7 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold> {
               controller: _scroll,
               physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
               slivers: [
-                SliverToBoxAdapter(child: SizedBox(height: pad.top + bar)),
+                SliverToBoxAdapter(child: SizedBox(height: pad.top + top)),
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 2, 20, 0),
@@ -386,13 +423,14 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(children: [
-                          Flexible(child: Text(widget.title, style: Tokens.title(size: 34))),
+                          Flexible(child: Text(widget.title, style: TextStyle(fontSize: 30, height: 1.2, fontWeight: FontWeight.w600, letterSpacing: -0.3, color: Tokens.label))),
                           if (widget.subtitle != null) InfoIcon(widget.subtitle!, label: widget.title),
                         ]),
                       ],
                     ),
                   ),
                 ),
+                for (final h in widget.header) SliverToBoxAdapter(child: h),
                 if (widget.fill != null)
                   SliverFillRemaining(hasScrollBody: false, child: Padding(padding: EdgeInsets.only(bottom: pad.bottom), child: widget.fill))
                 else ...[
@@ -441,7 +479,7 @@ class _LargeTitleScaffoldState extends State<LargeTitleScaffold> {
                               child: Text(widget.title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: Tokens.label)),
                             ),
                             // Pushed (a page from Profile): a way back.
-                            if (ModalRoute.of(context)?.canPop ?? false)
+                            if (canPop)
                               Align(
                                 alignment: Alignment.centerLeft,
                                 child: GlassButton(tooltip: 'Back', icon: CupertinoIcons.chevron_back, onPressed: () => Navigator.of(context).maybePop()),
@@ -506,11 +544,15 @@ class TabScaffold extends StatelessWidget {
 
 /// One item of [GlassTabBar] and [AppTabBar].
 class GlassTab {
-  const GlassTab(this.icon, this.label, {this.badge = 0, this.dot = false, this.symbol});
+  const GlassTab(this.icon, this.label, {this.badge = 0, this.dot = false, this.symbol, this.calm = false});
 
   final IconData icon;
   final String label;
   final int badge;
+
+  /// [badge] counts what runs, not what waits for you: green instead of red.
+  /// The native iOS bar only draws red badges, so it leaves a calm one out.
+  final bool calm;
 
   /// The SF Symbol of the tab on the native iOS bar ([AppTabBar]); [icon] where there is none.
   final String? symbol;
@@ -549,7 +591,7 @@ class AppTabBar extends StatelessWidget {
               label: t.label,
               icon: switch (t.symbol) { final s? => CNSymbol(s), null => null },
               customIcon: t.symbol == null ? t.icon : null,
-              badge: t.badge > 0 ? '${t.badge}' : (t.dot ? CNTabBarItem.dotBadge : null),
+              badge: t.badge > 0 && !t.calm ? '${t.badge}' : (t.dot ? CNTabBarItem.dotBadge : null),
             ),
         ],
       ),
@@ -601,7 +643,7 @@ class GlassTabBar extends StatelessWidget {
                       },
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 180),
-                        decoration: BoxDecoration(color: i == current ? Tokens.glassSel : Colors.transparent, borderRadius: BorderRadius.circular(27)),
+                        decoration: BoxDecoration(color: i == current ? Tokens.accent.withValues(alpha: 0.12) : Colors.transparent, borderRadius: BorderRadius.circular(27)),
                         child: _TabFace(tab: t, selected: i == current),
                       ),
                     ),
@@ -623,20 +665,20 @@ class _TabFace extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? Tokens.accent : Tokens.label;
+    final color = selected ? Tokens.accent : Tokens.ink2;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Badge(
           isLabelVisible: tab.badge > 0 || tab.dot,
           smallSize: 8,
-          label: tab.badge > 0 ? Text('${tab.badge}') : null,
-          backgroundColor: Tokens.red,
+          label: tab.badge > 0 ? Text('${tab.badge}', style: const TextStyle(fontFeatures: Tokens.tabular)) : null,
+          backgroundColor: tab.calm ? Tokens.accent : Tokens.red,
           textColor: Colors.white,
-          child: Icon(tab.icon, size: 24, color: color),
+          child: Icon(tab.icon, size: 22, color: color),
         ),
         const SizedBox(height: 2),
-        ExcludeSemantics(child: Text(tab.label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color))),
+        ExcludeSemantics(child: Text(tab.label, style: TextStyle(fontSize: 10.5, fontWeight: selected ? FontWeight.w600 : FontWeight.w500, color: color))),
       ],
     );
   }
@@ -650,7 +692,7 @@ class GroupHeader extends StatelessWidget {
   final String? action;
   final VoidCallback? onAction;
 
-  /// Settings style: small uppercase gray ("THIS PC").
+  /// Kept for old callers: since the redesign every header is small uppercase gray ("THIS PC").
   final bool caps;
 
   /// A gray count after the title ("Running 2").
@@ -659,26 +701,28 @@ class GroupHeader extends StatelessWidget {
   /// Explanation behind an (i) after the title.
   final String? info;
 
+  /// The words as shown: caps, with the count after a middle dot ("ACTIVE · 2").
+  static String shown(String title, int? count) => [title.toUpperCase(), if (count != null) '$count'].join(' · ');
+
   @override
   Widget build(BuildContext context) => Padding(
-        padding: EdgeInsets.fromLTRB(32, caps ? 24 : 22, 24, 8),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
-              child: caps
-                  ? Text(title.toUpperCase(), style: Tokens.eyebrow())
-                  : Text.rich(TextSpan(
-                      text: title,
-                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: Tokens.label),
-                      children: [if (count != null) TextSpan(text: '  $count', style: TextStyle(fontWeight: FontWeight.w500, color: Tokens.label2))],
-                    )),
+              child: Semantics(
+                header: true,
+                label: count == null ? title : '$title, $count',
+                excludeSemantics: true,
+                child: Text(shown(title, count), style: Tokens.eyebrow()),
+              ),
             ),
             if (info != null) InfoIcon(info!, label: title),
             if (action != null)
               GestureDetector(
                 onTap: onAction,
-                child: Padding(padding: const EdgeInsets.only(left: 12), child: Text(action!, style: TextStyle(fontSize: 15, color: Tokens.accent))),
+                child: Padding(padding: const EdgeInsets.only(left: 12), child: Text(action!, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Tokens.accent))),
               ),
           ],
         ),
@@ -697,10 +741,13 @@ class InsetGroup extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: margin,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(Tokens.cardRadius),
-          child: Material(
-            color: Tokens.cell,
+        child: Material(
+          color: Tokens.cell,
+          clipBehavior: Clip.antiAlias,
+          // A hairline edge on the light grey page; dark cells stand out alone.
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Tokens.cardRadius), side: Tokens.dark ? BorderSide.none : BorderSide(color: Tokens.sep)),
+          child: Builder(builder: (context) => Material(
+            type: MaterialType.transparency,
             child: Padding(
               padding: padding ?? EdgeInsets.zero,
               child: Column(
@@ -713,7 +760,7 @@ class InsetGroup extends StatelessWidget {
                 ],
               ),
             ),
-          ),
+          )),
         ),
       );
 }
@@ -731,7 +778,7 @@ class GroupRow extends StatelessWidget {
     this.chevron,
     this.titleStyle,
     this.titleLines = 1,
-    this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    this.padding = const EdgeInsets.fromLTRB(16, 13, 14, 13),
   });
 
   final String title;
@@ -764,16 +811,16 @@ class GroupRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(title, maxLines: titleLines, overflow: TextOverflow.ellipsis, style: titleStyle ?? TextStyle(fontSize: 17, color: Tokens.label)),
+                  Text(title, maxLines: titleLines, overflow: TextOverflow.ellipsis, style: titleStyle ?? TextStyle(fontSize: 15, color: Tokens.label)),
                   if (subtitle != null && subtitle!.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.only(top: 2),
+                      padding: const EdgeInsets.only(top: 3),
                       child: Text(subtitle!, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: Tokens.label2)),
                     ),
                 ],
               ),
             ),
-            if (value != null) Padding(padding: const EdgeInsets.only(left: 8), child: Text(value!, style: TextStyle(fontSize: 17, color: Tokens.label2))),
+            if (value != null) Padding(padding: const EdgeInsets.only(left: 8), child: Text(value!, style: TextStyle(fontSize: 14, color: Tokens.label2, fontFeatures: Tokens.tabular))),
             if (trailing != null) ...[const SizedBox(width: 8), trailing!],
             if (showChevron) const Padding(padding: EdgeInsets.only(left: 6), child: Chevron()),
           ],
@@ -787,14 +834,16 @@ class Chevron extends StatelessWidget {
   const Chevron({super.key});
 
   @override
-  Widget build(BuildContext context) => Icon(CupertinoIcons.chevron_forward, size: 17, color: Tokens.label3);
+  Widget build(BuildContext context) => Icon(CupertinoIcons.chevron_forward, size: 16, color: Tokens.label2);
 }
 
-/// Settings-style icon: white glyph on a rounded colored square.
+/// Settings-style icon: a quiet glyph on a soft grey rounded square.
 class IconTile extends StatelessWidget {
-  const IconTile(this.icon, {super.key, this.color, this.size = 30});
+  const IconTile(this.icon, {super.key, this.color, this.size = 32});
 
   final IconData icon;
+
+  /// The glyph's colour; [Tokens.ink2] by default, the accent for the PC.
   final Color? color;
   final double size;
 
@@ -802,8 +851,8 @@ class IconTile extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         width: size,
         height: size,
-        decoration: BoxDecoration(color: color ?? Tokens.gray, borderRadius: BorderRadius.circular(size * 0.27)),
-        child: Icon(icon, size: size * 0.6, color: Colors.white),
+        decoration: BoxDecoration(color: Tokens.dark ? Tokens.cell2 : Tokens.bg, borderRadius: BorderRadius.circular(size * 0.25)),
+        child: Icon(icon, size: size * 0.56, color: color ?? Tokens.ink2),
       );
 }
 
@@ -872,4 +921,50 @@ class PillSegments<T> extends StatelessWidget {
           : Row(children: [for (final s in segments) Expanded(child: seg(s))]),
     );
   }
+}
+
+/// A two-or-more way switch in a glass pill with the chosen side in the
+/// accent (the Chat tab's Session | Ticket, the Sessions tab's Sessions | Tickets).
+class BrandSegments<T> extends StatelessWidget {
+  const BrandSegments({super.key, required this.segments, required this.selected, required this.onChanged, this.height = 36});
+
+  final List<(T, String)> segments;
+  final T selected;
+  final ValueChanged<T> onChanged;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) => Glass(
+        radius: height / 2 + 4,
+        flat: true,
+        tint: Tokens.dark ? Tokens.glass : Colors.white.withValues(alpha: 0.5),
+        padding: const EdgeInsets.all(4),
+        child: Row(children: [
+          for (final (value, label) in segments)
+            Expanded(
+              child: Semantics(
+                selected: value == selected,
+                button: true,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    if (value != selected) HapticFeedback.selectionClick();
+                    onChanged(value);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    height: height,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: value == selected ? Tokens.accent.withValues(alpha: 0.92) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(height / 2),
+                      boxShadow: value == selected ? [BoxShadow(color: Tokens.accent.withValues(alpha: 0.25), blurRadius: 12, offset: const Offset(0, 4))] : null,
+                    ),
+                    child: Text(label, maxLines: 1, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: value == selected ? Tokens.accentInk : Tokens.ink2)),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+      );
 }
