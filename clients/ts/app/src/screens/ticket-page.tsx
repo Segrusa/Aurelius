@@ -783,8 +783,10 @@ const zone = () => -new Date().getTimezoneOffset();
 
 /** One row of a task's work in the ticket's Activity. */
 export function WorkItem({ row }: { row: WorkRow }) {
+  const title =
+    row.kind === "finding" ? "Note" : row.kind === "running" ? runningTitle(row.step) : workTitle(row.work, row.steps);
   return (
-    <div data-work-row={row.kind === "steps" ? row.work : row.kind} {...stylex.props(styles.work)}>
+    <article aria-label={row.who ? `${row.who} · ${title}` : title} {...stylex.props(styles.work)}>
       <span aria-hidden="true" {...stylex.props(styles.workMark, row.kind === "running" && styles.workMarkLive)}>
         {row.kind === "running" ? (
           <StatusGlyph glyph="dot" color="var(--color-text-accent)" />
@@ -797,11 +799,7 @@ export function WorkItem({ row }: { row: WorkRow }) {
           <span {...stylex.props(styles.workTitle)}>
             {row.who ? <span {...stylex.props(styles.workWho)}>{row.who}</span> : null}
             {row.who ? " · " : ""}
-            {row.kind === "finding"
-              ? "noted"
-              : row.kind === "running"
-                ? runningTitle(row.step)
-                : workTitle(row.work, row.steps)}
+            {title}
           </span>
           <span {...stylex.props(styles.grow)} />
           {Number.isFinite(row.atMs) ? (
@@ -823,7 +821,7 @@ export function WorkItem({ row }: { row: WorkRow }) {
           </>
         )}
       </div>
-    </div>
+    </article>
   );
 }
 
