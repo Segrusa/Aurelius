@@ -1,4 +1,4 @@
-import type { CodeBranch, CodeCommit } from "@aurelius/protocol";
+import type { CodeBranch, CodeCommit, CodeWorktree } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
   ago,
@@ -16,12 +16,15 @@ import {
   layoutGraph,
   lostCommitsText,
   MAIN_COLOR,
+  mergeBlockedWhy,
   primaryAction,
   repoName,
   STALE_AFTER_MS,
   STATUS_LABEL,
   selectedBranch,
+  worktreeAction,
   worktreeCards,
+  writtenView,
 } from "./code-logic";
 
 const NOW = Date.UTC(2026, 10, 20, 12, 0);
@@ -141,10 +144,22 @@ describe("the worktrees", () => {
 });
 
 describe("a write's answer", () => {
+  const view = { project_id: "p", repo_path: "/repo" };
+
   it("is the new view when it is Code, else nothing", () => {
-    const view = { project_id: "p", repo_path: "/repo" };
     expect(codeOf({ kind: "host", value: { type: "code", ...view } })).toEqual(view);
     expect(codeOf({ kind: "command", value: { type: "none" } } as never)).toBeNull();
+  });
+
+  it("is used only from a fresh receipt: a replayed one has no lists, so the page reads again", () => {
+    const receipt = (replayed: boolean) => ({
+      committed_seq: 1,
+      idempotency_key: "k",
+      replayed,
+      result: { kind: "host" as const, value: { type: "code" as const, ...view } },
+    });
+    expect(writtenView(receipt(false))).toEqual(view);
+    expect(writtenView(receipt(true))).toBeNull();
   });
 });
 
@@ -189,6 +204,7 @@ describe("the Details card's actions", () => {
     expect(primaryAction(branch("f", { ahead: 2 }), "ready", "master")).toEqual({
       kind: "merge",
       label: "Merge into master",
+      disabledWhy: null,
     });
   });
 
@@ -221,6 +237,68 @@ describe("the Details card's actions", () => {
 
   it("cleans up merged branches from main", () => {
     expect(dangerAction(branch("main", { is_main: true }))).toMatchObject({ kind: "prune_merged" });
+  });
+});
+
+describe("what the server would refuse", () => {
+  const repo = (over: Partial<CodeWorktree> = {}) => ({
+    repo_path: "/repo",
+    main_branch: "main",
+    worktrees: [
+      { path: "/repo", branch: "main", head: "h", is_main: true, ...over },
+      { path: "/wt/f", branch: "f", head: "h", changed_count: 2 },
+      { path: "/wt/g", branch: "g", head: "h", changed_files: ["a"] },
+      { path: "/wt/clean", branch: "c", head: "h", changed_count: 0 },
+      { path: "/wt/detached", branch: null, head: "h", changed_count: 0 },
+    ],
+  });
+
+  it("Remove worktree is off while the worktree has uncommitted files, with how many", () => {
+    expect(dangerAction(branch("f", { worktree_path: "/wt/f" }), repo())).toMatchObject({
+      kind: "remove_worktree",
+      disabledWhy: "This worktree has 2 uncommitted files.",
+    });
+    expect(dangerAction(branch("g", { worktree_path: "/wt/g/" }), repo()).disabledWhy).toBe(
+      "This worktree has 1 uncommitted file.",
+    );
+    expect(dangerAction(branch("c", { worktree_path: "/wt/clean" }), repo()).disabledWhy).toBeNull();
+  });
+
+  it("a branch checked out in the project folder itself cannot have that folder removed", () => {
+    const own = dangerAction(branch("feature", { worktree_path: "/repo" }), repo({ branch: "feature" }));
+    expect(own).toMatchObject({ kind: "remove_worktree", disabledWhy: "This is the project's own folder." });
+  });
+
+  it("someone working or an open ticket is the first reason given", () => {
+    const b = branch("f", { worktree_path: "/wt/f" });
+    expect(dangerAction({ ...b, working: true }, repo()).disabledWhy).toBe("An employee works on this branch now.");
+    expect(dangerAction({ ...b, open: true }, repo()).disabledWhy).toBe("Its ticket is still open.");
+  });
+
+  it("a detached worktree can be removed by its path, by the same rules", () => {
+    const [, , , , detached] = repo().worktrees;
+    expect(worktreeAction(detached as CodeWorktree, repo())).toEqual({
+      kind: "remove_worktree",
+      label: "Remove worktree",
+      path: "/wt/detached",
+      disabledWhy: null,
+    });
+    const dirty = { path: "/wt/d2", branch: null, head: "h", changed_count: 3 };
+    expect(worktreeAction(dirty, repo()).disabledWhy).toBe("This worktree has 3 uncommitted files.");
+  });
+
+  it("merging needs the project folder clean and on main", () => {
+    expect(mergeBlockedWhy(repo())).toBeNull();
+    expect(mergeBlockedWhy(repo({ changed_count: 1 }))).toBe(
+      "The project folder has 1 uncommitted file. Commit or discard it first.",
+    );
+    expect(mergeBlockedWhy(repo({ branch: "spike" }))).toBe("The project folder is on spike, not main.");
+    expect(mergeBlockedWhy(repo({ branch: null }))).toBe("The project folder is on a detached HEAD, not main.");
+    expect(primaryAction(branch("f", { ahead: 1 }), "ready", "main", repo({ branch: "spike" }))).toEqual({
+      kind: "merge",
+      label: "Merge into main",
+      disabledWhy: "The project folder is on spike, not main.",
+    });
   });
 });
 

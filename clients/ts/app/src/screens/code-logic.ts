@@ -2,7 +2,7 @@
 // The server reads git; the client decides a branch's status, the filters, the actions and the lanes of the
 // commit graph, so they are tested here without a repository.
 
-import type { CodeBranch, CodeCommit, CodeView, CodeWorktree, WriteResult } from "@aurelius/protocol";
+import type { CodeBranch, CodeCommit, CodeView, CodeWorktree, Receipt, WriteResult } from "@aurelius/protocol";
 
 /** The server feature of the Code tab. */
 export const CODE_VIEW = "code_view";
@@ -10,6 +10,8 @@ export const CODE_VIEW = "code_view";
 export const STALE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
 /** The page reads the repository again this often while it is visible. */
 export const CODE_REFRESH_MS = 15_000;
+/** The sidebar's worktree count reads the repository this often on every other page. */
+export const SIDEBAR_COUNT_REFRESH_MS = 60_000;
 
 export type BranchStatus = "default" | "working" | "fresh" | "merged" | "stale" | "behind" | "ready";
 
@@ -71,6 +73,14 @@ export function codeOf(result: WriteResult): CodeView | null {
   return view;
 }
 
+/**
+ * The view to show after a write. A replayed receipt (an earlier identical write) is stored without the
+ * view's lists, so its worktrees, branches and commits would read as empty: null, and the page reads again.
+ */
+export function writtenView(receipt: Receipt): CodeView | null {
+  return receipt.replayed ? null : codeOf(receipt.result);
+}
+
 /** "aurelius" for "/home/me/projects/aurelius". */
 export function repoName(path: string): string {
   const parts = path.split(/[/\\]/).filter((p) => p !== "");
@@ -113,14 +123,50 @@ export function dirtyText(w: Pick<CodeWorktree, "changed_count" | "changed_files
 /** The first seven characters, as git shows a hash. */
 export const shortHash = (hash: string) => hash.slice(0, 7);
 
-export type PrimaryAction = { kind: "merge"; label: string } | { kind: "open_ticket"; label: string };
+export type PrimaryAction =
+  | { kind: "merge"; label: string; disabledWhy: string | null }
+  | { kind: "open_ticket"; label: string };
+
+/** What the page knows of the repository besides the branch itself. */
+export type RepoFacts = Pick<CodeView, "repo_path" | "main_branch" | "worktrees">;
+
+const NO_FACTS: RepoFacts = { repo_path: "", worktrees: [] };
+
+/** Two spellings of one folder: git and the project may differ in a trailing slash. */
+const samePath = (a: string, b: string) => a.replace(/[/\\]+$/, "") === b.replace(/[/\\]+$/, "");
+
+const changedOf = (w: Pick<CodeWorktree, "changed_count" | "changed_files">) =>
+  w.changed_count ?? w.changed_files?.length ?? 0;
+
+const files = (n: number) => `${n} uncommitted ${n === 1 ? "file" : "files"}`;
 
 /**
- * The Details card's main button. Ready to merge: merge into main. Otherwise the ticket, when one is known.
- * There is no rebase in v1, so Needs rebase and Stale only show their state.
+ * Why a merge into main would be refused now: it runs in the project's folder, so that folder must be clean
+ * and on main. Null when nothing stands in the way (or the folder is unknown: the server decides).
  */
-export function primaryAction(b: CodeBranch, status: BranchStatus, main: string): PrimaryAction | null {
-  if (status === "ready") return { kind: "merge", label: `Merge into ${main}` };
+export function mergeBlockedWhy(repo: RepoFacts): string | null {
+  const home = (repo.worktrees ?? []).find((w) => w.is_main);
+  if (!home) return null;
+  const main = repo.main_branch ?? "main";
+  const n = changedOf(home);
+  if (n > 0) return `The project folder has ${files(n)}. Commit or discard ${n === 1 ? "it" : "them"} first.`;
+  if (!home.branch) return `The project folder is on a detached HEAD, not ${main}.`;
+  if (home.branch !== main) return `The project folder is on ${home.branch}, not ${main}.`;
+  return null;
+}
+
+/**
+ * The Details card's main button. Ready to merge: merge into main, off with the reason when the project
+ * folder is not ready for it. Otherwise the ticket, when one is known. There is no rebase in v1, so Needs
+ * rebase and Stale only show their state.
+ */
+export function primaryAction(
+  b: CodeBranch,
+  status: BranchStatus,
+  main: string,
+  repo: RepoFacts = NO_FACTS,
+): PrimaryAction | null {
+  if (status === "ready") return { kind: "merge", label: `Merge into ${main}`, disabledWhy: mergeBlockedWhy(repo) };
   if (status === "default") return null;
   return b.ticket ? { kind: "open_ticket", label: "Open ticket" } : null;
 }
@@ -132,18 +178,36 @@ export type DangerAction =
 
 const WORKING_WHY = "An employee works on this branch now.";
 const OPEN_WHY = "Its ticket is still open.";
+const OWN_FOLDER_WHY = "This is the project's own folder.";
+
+/** Why the server would refuse to remove the worktree at `path` (its folder or uncommitted files); null: it would not. */
+function removeWhy(path: string, repo: RepoFacts, known?: CodeWorktree): string | null {
+  if (repo.repo_path && samePath(path, repo.repo_path)) return OWN_FOLDER_WHY;
+  const w = known ?? (repo.worktrees ?? []).find((x) => samePath(x.path, path));
+  if (w?.is_main) return OWN_FOLDER_WHY;
+  const n = w ? changedOf(w) : 0;
+  return n > 0 ? `This worktree has ${files(n)}.` : null;
+}
 
 /**
  * The Details card's danger button. A branch in a worktree: remove the worktree (the branch stays). Another
  * branch: delete it, with force when main lacks some of its commits. Main: clean up the merged branches.
+ * Each is off, with the reason, when the server would refuse it.
  */
-export function dangerAction(b: CodeBranch): DangerAction {
+export function dangerAction(b: CodeBranch, repo: RepoFacts = NO_FACTS): DangerAction {
   if (b.is_main) return { kind: "prune_merged", label: "Clean up merged", disabledWhy: null };
   // The server refuses both for a branch whose ticket or session is open, also before its first commit.
   const why = b.working ? WORKING_WHY : b.open ? OPEN_WHY : null;
-  if (b.worktree_path)
-    return { kind: "remove_worktree", label: "Remove worktree", path: b.worktree_path, disabledWhy: why };
+  if (b.worktree_path) {
+    const path = b.worktree_path;
+    return { kind: "remove_worktree", label: "Remove worktree", path, disabledWhy: why ?? removeWhy(path, repo) };
+  }
   return { kind: "delete_branch", label: "Delete branch", force: !b.merged && b.ahead > 0, disabledWhy: why };
+}
+
+/** A worktree without a branch (a detached HEAD): it can only be removed, by its path, by the same rules. */
+export function worktreeAction(w: CodeWorktree, repo: RepoFacts): Extract<DangerAction, { kind: "remove_worktree" }> {
+  return { kind: "remove_worktree", label: "Remove worktree", path: w.path, disabledWhy: removeWhy(w.path, repo, w) };
 }
 
 /** What the confirm of a forced delete says is lost. */

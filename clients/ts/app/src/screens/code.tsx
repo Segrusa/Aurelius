@@ -30,7 +30,6 @@ import {
   CODE_REFRESH_MS,
   CODE_VIEW,
   changesText,
-  codeOf,
   type DangerAction,
   dangerAction,
   dirtyText,
@@ -42,13 +41,17 @@ import {
   layoutGraph,
   lostCommitsText,
   primaryAction,
+  type RepoFacts,
   repoName,
   rowY,
+  SIDEBAR_COUNT_REFRESH_MS,
   STATUS_LABEL,
   selectedBranch,
   shortHash,
   type WorktreeCard,
+  worktreeAction,
   worktreeCards,
+  writtenView,
 } from "./code-logic";
 import { Confirm, failureOf, Loading, Page } from "./org-kit";
 import { ticketPlace } from "./ticket-session-logic";
@@ -102,6 +105,7 @@ const styles = stylex.create({
     cursor: "pointer",
     minWidth: 0,
   },
+  cardStill: { cursor: "default", borderColor: "var(--color-border)" },
   cardOn: { borderColor: "var(--color-border-success)", backgroundColor: "var(--color-overlay-hover)" },
   line: { display: "flex", alignItems: "center", gap: 8, width: "100%", minWidth: 0 },
   dot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
@@ -301,7 +305,10 @@ const styles = stylex.create({
   failed: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 10 },
 });
 
-/** The project's git state: read on open, every 15 s while the page is visible, and when the window comes back. */
+/**
+ * The project's git state: read on open, every 15 s while the page is visible, and when the window comes back.
+ * Elsewhere (the sidebar's count) every 60 s, so a worktree an employee makes or removes shows up there too.
+ */
 function useCode(projectId: string | null, live: boolean) {
   const connection = useConnection();
   const { status, user, features } = useLinkState();
@@ -310,7 +317,7 @@ function useCode(projectId: string | null, live: boolean) {
     enabled: projectId !== null && features.includes(CODE_VIEW) && status === "online" && user !== null,
     staleTime: live ? 0 : 30_000,
     // Paused while the document is hidden (TanStack's default), so only while visible.
-    refetchInterval: live ? CODE_REFRESH_MS : false,
+    refetchInterval: live ? CODE_REFRESH_MS : SIDEBAR_COUNT_REFRESH_MS,
     queryFn: async () =>
       expectBody(await connection.call("code.get", { project_id: projectId as string }), "code").value,
   });
@@ -347,7 +354,8 @@ function useCodeWrite(projectId: string | null) {
     setError(null);
     try {
       const receipt = await connection.write(method, params, { retry: false, timeoutMs: GIT_WRITE_TIMEOUT_MS });
-      const view = codeOf(receipt.result);
+      // A replayed receipt carries no lists: read the repository again instead.
+      const view = writtenView(receipt);
       if (view) client.setQueryData(["code", projectId], view);
       else void client.invalidateQueries({ queryKey: ["code", projectId] });
     } catch (e) {
@@ -399,6 +407,8 @@ function Worktrees({
   selected,
   onSelect,
   onCleanUp,
+  onRemoveDetached,
+  repo,
   busy,
 }: {
   cards: WorktreeCard[];
@@ -406,6 +416,8 @@ function Worktrees({
   selected: string | null;
   onSelect: (branch: string) => void;
   onCleanUp: () => void;
+  onRemoveDetached: (path: string, head: string) => void;
+  repo: RepoFacts;
   busy: boolean;
 }) {
   return (
@@ -427,18 +439,47 @@ function Worktrees({
       ) : (
         <div {...stylex.props(styles.cards)}>
           {cards.map(({ worktree: w, branch: b }) => {
-            const name = w.branch ?? "detached HEAD";
-            const on = w.branch !== null && w.branch !== undefined && w.branch === selected;
+            if (!w.branch) {
+              // A detached HEAD has no branch to show in Details: the card itself offers what can be done.
+              const remove = worktreeAction(w, repo);
+              return (
+                <div key={w.path} {...stylex.props(styles.card, styles.cardStill)}>
+                  <span {...stylex.props(styles.line)}>
+                    <Dot color={color(null)} />
+                    <span {...stylex.props(styles.mono, styles.strong)}>detached</span>
+                    <span {...stylex.props(styles.mono, styles.faint)}>{shortHash(w.head)}</span>
+                  </span>
+                  <span title={w.path} {...stylex.props(styles.mono, styles.faint, styles.small)}>
+                    {w.path}
+                  </span>
+                  <span {...stylex.props(styles.numbers)}>
+                    <span>{dirtyText(w)}</span>
+                    <span {...stylex.props(styles.spacer)} />
+                    <WithReason why={remove.disabledWhy}>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        label={remove.label}
+                        isDisabled={busy || remove.disabledWhy !== null}
+                        onClick={() => onRemoveDetached(remove.path, w.head)}
+                      />
+                    </WithReason>
+                  </span>
+                </div>
+              );
+            }
+            const name = w.branch;
+            const on = w.branch === selected;
             return (
               <button
                 key={w.path}
                 type="button"
                 aria-pressed={on}
-                onClick={() => w.branch && onSelect(w.branch)}
+                onClick={() => onSelect(name)}
                 {...stylex.props(styles.card, on && styles.cardOn)}
               >
                 <span {...stylex.props(styles.line)}>
-                  <Dot color={color(w.branch ?? null)} />
+                  <Dot color={color(name)} />
                   <span {...stylex.props(styles.mono, styles.strong)}>{name}</span>
                 </span>
                 <span title={w.path} {...stylex.props(styles.mono, styles.faint, styles.small)}>
@@ -704,8 +745,9 @@ function Details({
 }) {
   const main = view.main_branch ?? "main";
   const status = branchStatus(branch, now);
-  const primary = primaryAction(branch, status, main);
-  const danger = dangerAction(branch);
+  const primary = primaryAction(branch, status, main, view);
+  const danger = dangerAction(branch, view);
+  const primaryWhy = primary?.kind === "merge" ? primary.disabledWhy : null;
   const own = branch.commits ?? [];
   return (
     <aside aria-label="Branch details" {...stylex.props(styles.aside)}>
@@ -748,13 +790,15 @@ function Details({
         </div>
         <div {...stylex.props(styles.block)}>
           {primary ? (
-            <Button
-              variant="primary"
-              width="100%"
-              label={primary.label}
-              isDisabled={primary.kind === "merge" && busy}
-              onClick={() => (primary.kind === "merge" ? onMerge(branch) : onOpenTicket(branch))}
-            />
+            <WithReason why={primaryWhy}>
+              <Button
+                variant="primary"
+                width="100%"
+                label={primary.label}
+                isDisabled={primary.kind === "merge" && (busy || primaryWhy !== null)}
+                onClick={() => (primary.kind === "merge" ? onMerge(branch) : onOpenTicket(branch))}
+              />
+            </WithReason>
           ) : null}
           <WithReason why={danger.disabledWhy}>
             <Button
@@ -775,6 +819,7 @@ type Asking =
   | { kind: "merge"; branch: CodeBranch }
   | { kind: "force_delete"; branch: CodeBranch }
   | { kind: "prune" }
+  | { kind: "remove_detached"; path: string; head: string }
   | null;
 
 export function CodeScreen() {
@@ -819,6 +864,8 @@ export function CodeScreen() {
     if (!asking || !projectId) return;
     setAsking(null);
     if (asking.kind === "merge") void write.run("code.merge", { project_id: projectId, branch: asking.branch.name });
+    else if (asking.kind === "remove_detached")
+      void write.run("code.remove_worktree", { project_id: projectId, path: asking.path });
     else if (asking.kind === "force_delete")
       void write.run("code.delete_branch", { project_id: projectId, branch: asking.branch.name, force: true });
     else void write.run("code.prune_merged", { project_id: projectId });
@@ -923,6 +970,8 @@ export function CodeScreen() {
           selected={selected?.name ?? null}
           onSelect={setWanted}
           onCleanUp={() => setAsking({ kind: "prune" })}
+          onRemoveDetached={(path, head) => setAsking({ kind: "remove_detached", path, head })}
+          repo={view}
           busy={busy}
         />
         <Branches branches={branches} color={color} now={now} selected={selected?.name ?? null} onSelect={setWanted} />
@@ -977,8 +1026,19 @@ export function CodeScreen() {
         <Confirm
           danger
           title="Clean up merged branches?"
-          body={`Removes the clean worktrees of merged branches nobody works on, then deletes every merged branch. ${main ?? "main"} stays. Nothing that ${main ?? "main"} lacks is lost.`}
+          body={`Removes the clean worktrees of merged branches nobody works on, then deletes every merged branch nobody works on and whose ticket or session is closed. ${main ?? "main"} stays. Nothing that ${main ?? "main"} lacks is lost.`}
           action="Clean up merged"
+          busy={busy}
+          onConfirm={confirmAsked}
+          onClose={() => setAsking(null)}
+        />
+      ) : null}
+      {asking?.kind === "remove_detached" ? (
+        <Confirm
+          danger
+          title="Remove the detached worktree?"
+          body={`Removes ${asking.path}. It is on ${shortHash(asking.head)}, not on a branch: a commit made only there is no longer on any branch afterwards.`}
+          action="Remove worktree"
           busy={busy}
           onConfirm={confirmAsked}
           onClose={() => setAsking(null)}
