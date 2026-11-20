@@ -34,6 +34,7 @@ import {
   defaultProject,
   defaultWho,
   keptChoice,
+  MADE_TITLE_FEATURE,
   offeredKind,
   parseRecent,
   placeholderOf,
@@ -321,6 +322,7 @@ export function NewSessionScreen() {
           // A ticket keeps photos as files.
           files: [...attach.images, ...attach.files],
           responsibleUserId: responsible ? (user?.id ?? null) : null,
+          madeTitle: features.includes(MADE_TITLE_FEATURE),
         },
         confirmSecret,
       );
