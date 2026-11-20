@@ -10,6 +10,26 @@ use std::path::{Path, PathBuf};
 pub const AUTO_KEEP: usize = 7;
 pub const MANUAL_KEEP: usize = 20;
 const MANIFEST: &str = "manifest.json";
+/// How long a restore keeps trying to move a folder that something still holds open.
+const RESTORE_RENAME_WAIT_MS: u64 = 10_000;
+/// The pause between two tries.
+const RESTORE_RENAME_RETRY_MS: u64 = 100;
+
+/// `rename`, tried again for a while when the answer is "Access is denied": on Windows a folder
+/// cannot move while any file in it is open, and a virus scanner, an indexer or the previous
+/// session's last handle often holds one for a moment.
+fn rename_patiently(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut waited = 0;
+    loop {
+        match std::fs::rename(from, to) {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && waited < RESTORE_RENAME_WAIT_MS => {
+                std::thread::sleep(std::time::Duration::from_millis(RESTORE_RENAME_RETRY_MS));
+                waited += RESTORE_RENAME_RETRY_MS;
+            }
+            done => return done,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -212,7 +232,7 @@ pub fn perform_pending_restore(root: &Path) -> Result<Option<Manifest>, StorageE
     for name in ["data", "blobs"] {
         let path = root.join(name);
         if path.exists() {
-            std::fs::rename(&path, aside.join(name))?;
+            rename_patiently(&path, &aside.join(name))?;
         }
     }
     let (mut count, mut bytes) = (0u64, 0u64);

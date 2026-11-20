@@ -114,13 +114,16 @@ async fn backup_restore_paused_scrub_and_export() {
     let snap = client.restore_backup(backup_id.clone()).await.unwrap();
     assert!(snap.error.is_none(), "{:?}", snap.error);
     assert_eq!(snap.restore_pending.as_deref(), Some(backup_id.as_str()));
-    tokio::time::timeout(Duration::from_secs(10), &mut daemon).await.expect("the service stops for the restore").unwrap().unwrap();
+    // The connection goes first: its task in the daemon holds the database open until it ends.
     drop(client);
+    tokio::time::timeout(Duration::from_secs(10), &mut daemon).await.expect("the service stops for the restore").unwrap().unwrap();
 
     daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let projects = client.projects().await.unwrap().projects;
-    assert!(projects.iter().any(|p| p.name == "Atlas") && !projects.iter().any(|p| p.name == "After"));
+    // A restore sets the old folders aside in before-restore-*: the listing says how far it came.
+    let entries = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect::<Vec<_>>();
+    assert!(projects.iter().any(|p| p.name == "Atlas") && !projects.iter().any(|p| p.name == "After"), "the restore did not happen; the root holds {entries:?}");
     assert!(client.tasks(None).await.unwrap().tasks.iter().any(|t| t.title == "Onboarding" && t.status == TaskStatus::Succeeded));
     let listed = |snapshot: aurelius_protocol::ProjectConversationsSnapshot, id| snapshot.conversations.iter().any(|c| c.id == id);
     assert!(listed(client.project_conversations(keep_project).await.unwrap(), keep), "the kept conversation is back");
