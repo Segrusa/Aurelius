@@ -6,6 +6,7 @@ import {
   filesWrittenAcross,
   gateKeyAllowed,
   gateOf,
+  inTicketsSection,
   latestRunAcross,
   ownerAnswers,
   readOnly,
@@ -297,6 +298,16 @@ describe("the sidebar's tickets", () => {
       tv({ id: "todo", column: "todo" }),
     ];
     expect(sidebarTickets(tickets, null, none).map((t) => t.id)).toEqual(["todo"]);
+  });
+
+  it("lists the Done tickets beside the open ones, as the finished sessions are (ticket #75)", () => {
+    const tickets = [
+      tv({ id: "backlog", column: "backlog" }),
+      tv({ id: "done", column: "done" }),
+      tv({ id: "done-archived", column: "done", archived_at_ms: 5 }),
+      tv({ id: "todo", column: "todo" }),
+    ];
+    expect(tickets.filter(inTicketsSection).map((t) => t.id)).toEqual(["done", "todo"]);
   });
 
   it("keeps an older ticket past the limit when it needs you or works", () => {

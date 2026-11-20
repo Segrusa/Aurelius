@@ -40,7 +40,7 @@ import {
   sectionKey,
   workspaceGroups,
 } from "./sidebar-logic";
-import { sidebarTickets, ticketSignal } from "./ticket-session-logic";
+import { inTicketsSection, ticketSignal } from "./ticket-session-logic";
 import { useTicketNeeds } from "./tickets-kit";
 import { UserMenu } from "./user-menu";
 import { useSwitchWorkspace, WorkspaceMark } from "./workspace-kit";
@@ -249,6 +249,7 @@ const styles = stylex.create({
   rows: { display: "flex", flexDirection: "column", gap: 1, paddingInlineStart: 16 },
   subRows: { paddingInlineStart: 24 },
   dot: { display: "block", width: 6, height: 6, borderRadius: "50%", flexShrink: 0 },
+  doneMark: { display: "flex", flexShrink: 0, color: "var(--precision-text3)" },
   dotWorking: {
     backgroundColor: "var(--color-text-success)",
     animationName: pulse,
@@ -317,8 +318,19 @@ function SignalDot({ signal }: { signal: SessionSignal | null }) {
   );
 }
 
+/** A ticket on Done: a quiet check where an open row has its dot. */
+function DoneMark() {
+  return (
+    <Tooltip content="Done" delay={400} hasHoverIndication={false}>
+      <span role="img" aria-label="Done" {...stylex.props(styles.doneMark)}>
+        <Icon name="check" size={12} weight={2} />
+      </span>
+    </Tooltip>
+  );
+}
+
 /**
- * Every work session and open ticket session as one list of sidebar rows, of all workspaces: the rail
+ * Every work session and open or Done ticket session as one list of sidebar rows, of all workspaces: the rail
  * counts per workspace and All workspaces lists them all.
  */
 function useSidebarItems(): SidebarItem[] {
@@ -338,8 +350,8 @@ function useSidebarItems(): SidebarItem[] {
       signal: sessionSignal(s),
       at: s.last_activity_ms,
     }));
-    // Since 0: every open ticket, not only the latest few.
-    const fromTickets: SidebarItem[] = sidebarTickets(tickets ?? [], null, signal, 0).map((t) => ({
+    // Open and Done tickets alike (ticket #75); Earlier caps how many old ones show.
+    const fromTickets: SidebarItem[] = (tickets ?? []).filter(inTicketsSection).map((t) => ({
       key: `t:${t.id}`,
       section: "tickets",
       to: `/ticket/${t.number}`,
@@ -349,6 +361,7 @@ function useSidebarItems(): SidebarItem[] {
       projectId: t.project_id ?? null,
       signal: signal(t),
       at: t.updated_at_ms,
+      done: t.column === "done",
     }));
     return [...fromSessions, ...fromTickets];
   }, [sessions, tickets, need]);
@@ -388,7 +401,7 @@ function Rows({ items, sub }: { items: SidebarItem[]; sub?: boolean }) {
           to={i.to}
           label={i.label}
           icon={markIcon(initial(i.who), markColor(i.whoId))}
-          end={<SignalDot signal={i.signal} />}
+          end={i.done && i.signal === null ? <DoneMark /> : <SignalDot signal={i.signal} />}
         />
       ))}
     </div>
@@ -485,7 +498,7 @@ function WorkspaceFold({
 }
 
 const SECTION_TITLES: Record<SidebarSection, string> = { sessions: "Sessions", tickets: "Tickets" };
-const SECTION_EMPTY: Record<SidebarSection, string> = { sessions: "No sessions yet", tickets: "No open tickets" };
+const SECTION_EMPTY: Record<SidebarSection, string> = { sessions: "No sessions yet", tickets: "No tickets yet" };
 
 /** One section's rows, cut into Running, Today and Earlier, per workspace under All workspaces. */
 function SectionList({

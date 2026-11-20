@@ -185,6 +185,15 @@ export function sidebarTickets<
   return open.filter((t, i) => i < SIDEBAR_TICKETS || signal(t) !== null);
 }
 
+/**
+ * Whether the sidebar's Tickets section lists a ticket: the open ones and those on Done (ticket #75), as the
+ * Sessions section keeps a finished session; not the Backlog nor an archived ticket. The section's Earlier caps
+ * how many old ones show; the History has the rest.
+ */
+export function inTicketsSection(t: Pick<TicketView, "column" | "archived_at_ms">): boolean {
+  return !t.archived_at_ms && (t.column === "done" || OPEN_COLUMNS.includes(t.column));
+}
+
 /** The first `#N` a line names (a system line, the "→ #N" chip), so its link opens the session directly. */
 export function ticketNumberIn(text: string): number | null {
   const n = /#(\d+)/.exec(text)?.[1];

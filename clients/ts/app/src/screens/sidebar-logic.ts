@@ -20,6 +20,8 @@ export interface SidebarItem {
   signal: SessionSignal | null;
   /** Its own last activity: opening it must not move it. */
   at: number;
+  /** A ticket on Done: the row shows a check instead of a dot. */
+  done?: boolean;
 }
 
 export type Bucket = "running" | "today" | "earlier";
