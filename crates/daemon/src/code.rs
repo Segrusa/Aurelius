@@ -384,7 +384,7 @@ fn fetch(repo: &Path, deadline: Duration) -> Result<(), ProtocolError> {
     let own_ssh = std::env::var_os("GIT_SSH_COMMAND").is_some()
         || std::env::var_os("GIT_SSH").is_some()
         || !read(repo, &["config", "--get", "core.sshCommand"]).unwrap_or_default().is_empty();
-    let skipped = read(repo, &["config", "--get-regexp", r"^remote\..*\.skipfetchall$"]).unwrap_or_default();
+    let skipped = read(repo, &["config", "--type=bool", "--get-regexp", r"^remote\..*\.skipfetchall$"]).unwrap_or_default();
     let skipped = skipped_remotes(&skipped);
     let started = Instant::now();
     let mut failed = Vec::new();
@@ -397,7 +397,8 @@ fn fetch(repo: &Path, deadline: Duration) -> Result<(), ProtocolError> {
     if failed.is_empty() { Ok(()) } else { Err(invalid(format!("The fetch failed for {}", failed.join("; ")))) }
 }
 
-/// The remotes `git config --get-regexp 'remote\..*\.skipfetchall'` names with a true value.
+/// The remotes `git config --type=bool --get-regexp 'remote\..*\.skipfetchall'` names with a
+/// true value (`--type=bool` makes git print `true`/`false` for every form it accepts).
 fn skipped_remotes(config: &str) -> Vec<&str> {
     config
         .lines()

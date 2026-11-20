@@ -355,11 +355,16 @@ fn a_failing_remote_does_not_stop_the_next_one_and_a_skipped_one_is_left_out() {
     run(&repo, &["remote", "add", "b", &good.to_string_lossy()]);
     run(&repo, &["remote", "add", "c", &good.to_string_lossy()]);
     run(&repo, &["config", "remote.c.skipFetchAll", "true"]);
+    // A key without a value and a nonzero number are true for git too.
+    run(&repo, &["remote", "add", "d", &good.to_string_lossy()]);
+    run(&repo, &["remote", "add", "e", &good.to_string_lossy()]);
+    std::fs::OpenOptions::new().append(true).open(repo.join(".git/config")).and_then(|mut f| std::io::Write::write_all(&mut f, b"[remote \"d\"]\n\tskipFetchAll\n[remote \"e\"]\n\tskipFetchAll = 2\n")).unwrap();
     let e = apply(&repo, HostWrite::CodeFetch { project_id: ProjectId::new() }, &nobody(), Duration::from_secs(20)).expect_err("a failed");
     assert!(e.message.starts_with("The fetch failed for a: "), "{}", e.message);
     assert!(!e.message.contains("b:"), "b was fetched: {}", e.message);
     assert!(!run(&repo, &["for-each-ref", "refs/remotes/b"]).is_empty(), "b fetched after a failed");
     assert!(run(&repo, &["for-each-ref", "refs/remotes/c"]).is_empty(), "c skips fetch --all");
+    assert!(run(&repo, &["for-each-ref", "refs/remotes/d", "refs/remotes/e"]).is_empty(), "so do a bare key and a 2");
 }
 
 #[test]
