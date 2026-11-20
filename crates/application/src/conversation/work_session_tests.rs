@@ -240,3 +240,35 @@ fn chat_send_refuses_a_folder_as_a_file() {
     let refused = exec_as(&s, Some(s.user), send).unwrap_err();
     assert!(refused.message.contains("not a folder"), "{}", refused.message);
 }
+
+fn send_in(conversation: ConversationId) -> Command {
+    Command::SendChatMessage(aurelius_domain::conversation::SendChatMessage { conversation_id: conversation, text: "Nog iets.".into(), images: vec![], files: vec![], interrupt: false, confirm_secret: false })
+}
+
+#[test]
+fn writing_in_a_session_is_refused_while_its_employee_is_paused_or_archived() {
+    use aurelius_domain::employee::{LifecycleStatus, SetEmployeeStatus};
+    let s = setup();
+    let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
+    for (status, said) in [(LifecycleStatus::Paused, "is paused"), (LifecycleStatus::Archived, "is archived")] {
+        exec_as(&s, Some(s.user), Command::SetEmployeeStatus(SetEmployeeStatus { employee_id: s.orion, status })).unwrap();
+        let refused = exec_as(&s, Some(s.user), send_in(conversation)).unwrap_err();
+        assert!(refused.message.contains(said), "{}", refused.message);
+    }
+}
+
+#[test]
+fn writing_in_a_session_the_dispatcher_has_not_filled_is_refused() {
+    let s = setup();
+    let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
+    s.service.store().write(move |tx| Ok(tx.execute("UPDATE work_sessions SET dispatch = 'nobody' WHERE conversation_id = ?1", [conversation.to_string()])?)).unwrap();
+    let refused = exec_as(&s, Some(s.user), send_in(conversation)).unwrap_err();
+    assert!(refused.message.contains(crate::conversation::session_dispatch::NOBODY_YET), "{}", refused.message);
+}
+
+#[test]
+fn writing_in_a_conversation_that_does_not_exist_is_not_found() {
+    let s = setup();
+    let refused = exec_as(&s, Some(s.user), send_in(ConversationId::new())).unwrap_err();
+    assert_eq!(refused.code, aurelius_domain::ErrorCode::NotFound);
+}

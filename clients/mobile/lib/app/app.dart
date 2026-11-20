@@ -22,7 +22,6 @@ import '../features/pairing/pair_page.dart';
 import '../features/pairing/pairing_bloc.dart';
 import '../features/runtime/runtime_bloc.dart';
 import '../features/links/link_actions.dart' show aureliusLinkReady, pendingAureliusLink, takePendingAureliusLink;
-import '../features/team/channels_bloc.dart';
 import 'router.dart';
 
 /// Root: paired hosts decide between onboarding and the app for the active
@@ -166,7 +165,6 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
           BlocProvider(create: (_) => InboxBloc(_repository)),
           BlocProvider(create: (_) => CompanyBloc(_repository, order: ProjectOrderStore(widget.host.hostId))),
           BlocProvider(create: (_) => RuntimeBloc(_repository)),
-          BlocProvider(create: (_) => ChannelsBloc(_repository)),
           BlocProvider(create: (_) => ActivityBloc(_repository)),
         ],
         child: MaterialApp.router(

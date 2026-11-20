@@ -13,8 +13,7 @@
 //! `hand_over_task`, `hand_off`, `propose_colleague`, `propose_instructions` and `propose_guideline`;
 //! `list_guidelines` and `read_guideline` (reading the guidelines, information only); `list_tickets`,
 //! `read_ticket`, `create_ticket`, `update_ticket`, `move_ticket` and `post_to_ticket` (the board; the daemon
-//! decides who may use each); `read_group_chat`
-//! and `post_to_group_chat` (a channel of the company's group chat); `read_discussion` and
+//! decides who may use each); `read_discussion` and
 //! `post_to_discussion` with `--discussion` (a run under a ticket); `report_test_result`
 //! with `--testing` (a ticket's test task in the Testing column); `report_ready` with `--report`
 //! (the owner's run of a ticket's main task). `--project` (the
@@ -163,8 +162,7 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
     tools.extend(memory_tool_definitions());
     tools.push(suggest_replies_definition());
     tools.extend(project_tool_definitions());
-    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || !matches!(t["name"].as_str(), Some("hand_over_task" | "hand_off" | "tell_responsible" | "schedule_message" | "scratchpad"))));
-    tools.extend(group_chat_tool_definitions());
+    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || !matches!(t["name"].as_str(), Some("hand_over_task" | "hand_off" | "schedule_message" | "scratchpad"))));
     tools.extend(vault_tool_definitions());
     tools.extend(board_tool_definitions());
     if discussion {
@@ -296,8 +294,6 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
             EmployeeTaskOp::Delegate { employee: text("employee"), title: text("title"), goal: text("goal"), criteria, project: optional("project"), ticket: optional("ticket") }
         }
         "set_mode" if set_mode => EmployeeTaskOp::SetMode { mode: text("mode"), reason: text("reason") },
-        "read_group_chat" => EmployeeTaskOp::ReadGroupChat { last: args["last"].as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32), channel: optional("channel") },
-        "post_to_group_chat" => EmployeeTaskOp::PostToGroupChat { message: text("message"), channel: optional("channel") },
         "read_discussion" if discussion => EmployeeTaskOp::ReadDiscussion { last: args["last"].as_u64().map(|n| n.min(u64::from(u32::MAX)) as u32) },
         "post_to_discussion" if discussion => EmployeeTaskOp::PostToDiscussion { message: text("message") },
         "list_tickets" | "read_ticket" | "create_ticket" | "update_ticket" | "move_ticket" | "post_to_ticket" => match board_op(name, &args) {
@@ -308,7 +304,6 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "vault_read" => EmployeeTaskOp::VaultRead { item: text("item"), project: optional("project") },
         "hand_over_task" if !project => EmployeeTaskOp::HandOver { employee: text("employee"), reason: text("reason") },
         "hand_off" if !project => EmployeeTaskOp::HandOff { to: text("to"), message: text("message") },
-        "tell_responsible" if !project => EmployeeTaskOp::TellResponsible { message: text("message") },
         "schedule_message" if !project => EmployeeTaskOp::ScheduleMessage { delay: text("delay"), content: text("content"), to: optional("to") },
         "scratchpad" if !project => EmployeeTaskOp::Scratchpad { content: text("content") },
         "propose_colleague" => EmployeeTaskOp::ProposeColleague {
@@ -399,7 +394,7 @@ fn board_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "create_ticket",
-            "description": "Make a ticket in Backlog: for management, and for anyone in a board member's lasting chat with them. It starts nothing: no run, no owner; a manager starts it with move_ticket (todo) or a board member decides. Elsewhere, colleagues who are not management ask a manager to make it.",
+            "description": "Make a ticket in Backlog: for management. It starts nothing: no run, no owner; a manager starts it with move_ticket (todo) or a board member decides. Colleagues who are not management ask a manager to make it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -681,7 +676,7 @@ fn task_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "hand_off",
-            "description": "Hand the work in this thread (a ticket's discussion or a channel of the Team chat) to a colleague who should act next. It wakes them in the same thread and shows there as \"You handed over to Them\" with your message. This is the only way to wake a colleague: a name with @ in what you write only refers to them. Do it when someone else really has to act; a reply without a handoff ends the conversation, which is right when the work is done. They do not see your conversation: the message must stand on its own, with the goal, the paths or PR number and branch involved, the acceptance criteria and what to report back. Limited to a few in a row and per run; if you still have unread messages in the thread, it is delivered unchanged once you have read them. To give a colleague a task of its own, use delegate_task.",
+            "description": "Hand the work in this thread (a ticket's discussion) to a colleague who should act next. It wakes them in the same thread and shows there as \"You handed over to Them\" with your message. This is the only way to wake a colleague: a name with @ in what you write only refers to them. Do it when someone else really has to act; a reply without a handoff ends the conversation, which is right when the work is done. They do not see your conversation: the message must stand on its own, with the goal, the paths or PR number and branch involved, the acceptance criteria and what to report back. Limited to a few in a row and per run; if you still have unread messages in the thread, it is delivered unchanged once you have read them. To give a colleague a task of its own, use delegate_task.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -693,7 +688,7 @@ fn task_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "schedule_message",
-            "description": "Send yourself or a colleague a message later, in the thread you work in now: \"check the CI again in 10 minutes\", \"Bo, look at the deploy tomorrow\". It wakes them then with this message, in a ticket's discussion or channel (visible there), or for yourself in your own chat. It uses the login of this run. For what comes back regularly a recurring task is meant. Limited per run and per thread; the Scheduled page shows what waits and what came of it.",
+            "description": "Send yourself or a colleague a message later, in the thread you work in now: \"check the CI again in 10 minutes\", \"Bo, look at the deploy tomorrow\". It wakes them then with this message, in a ticket's discussion (visible there), or for yourself in your own chat. It uses the login of this run. For what comes back regularly a recurring task is meant. Limited per run and per thread; the Scheduled page shows what waits and what came of it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -711,42 +706,6 @@ fn task_tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": { "content": { "type": "string", "description": "The complete new text." } },
                 "required": ["content"]
-            }
-        }),
-        json!({
-            "name": "tell_responsible",
-            "description": "On a ticket: send its responsible board member a short message in their private chat with you, when something is for them personally and not for the ticket's discussion. It shows there with a link to this ticket and marked unread. It starts no run, wakes nobody and completes nothing; a question that needs an answer on the ticket belongs in post_to_discussion.",
-            "inputSchema": {
-                "type": "object",
-                "properties": { "message": { "type": "string", "description": "What they should read, on its own." } },
-                "required": ["message"]
-            }
-        }),
-    ]
-}
-
-/// The company's group chat (Team chat): read a channel, post in one.
-fn group_chat_tool_definitions() -> Vec<Value> {
-    let channel = json!({ "type": "string", "description": "The channel: General, or a project's name. Default: the channel that brought you in, else your project's, else General." });
-    vec![
-        json!({
-            "name": "read_group_chat",
-            "description": "Read a channel of the company's group chat (Team chat), where the board members talk with the whole team: its latest messages, oldest first, each with who wrote it.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "last": { "type": "integer", "minimum": 1, "maximum": 50, "description": "How many of the latest messages (default and at most 50)." },
-                    "channel": channel
-                }
-            }
-        }),
-        json!({
-            "name": "post_to_group_chat",
-            "description": "Post a short message in a channel of the company's group chat under your name, when the group needs to know something. It wakes nobody: a @Name only refers to a colleague, and @username of a board member notifies them. To have a colleague act, use hand_off. An answer to a group chat message is posted there by itself; do not post it again.",
-            "inputSchema": {
-                "type": "object",
-                "properties": { "message": { "type": "string", "description": "A few sentences at most." }, "channel": channel },
-                "required": ["message"]
             }
         }),
     ]
@@ -860,7 +819,7 @@ mod tests {
         assert!(!names(true).contains(&"hand_over_task".to_owned()));
         assert!(names(false).contains(&"hand_off".to_owned()));
         assert!(!names(true).contains(&"hand_off".to_owned()), "the project assistant is in no thread");
-        for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "suggest_replies", "screenshot", "list_windows", "read_group_chat", "post_to_group_chat", "vault_list", "vault_read"] {
+        for tool in ["approve", "remember", "recall", "propose_colleague", "propose_instructions", "suggest_replies", "screenshot", "list_windows", "vault_list", "vault_read"] {
             assert!(names(true).contains(&tool.to_owned()), "{tool}");
         }
     }
@@ -880,12 +839,11 @@ mod tests {
         assert!(!names.contains(&"create_ticket") && names.contains(&"move_ticket") && names.contains(&"approve"));
     }
 
-    /// SEC0 E10/E12: the employee's tool, not the project assistant's or the dispatcher's, and no links to choose.
+    /// SEC0 E10/E12: the employee's tools, not the project assistant's or the dispatcher's.
     #[test]
-    fn tell_responsible_is_an_employees_tool_not_the_project_assistants() {
+    fn schedule_message_and_scratchpad_are_an_employees_tools_and_tell_responsible_is_gone() {
         let names = |project| tool_definitions(project, false, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
-        assert!(names(false).contains(&"tell_responsible".to_owned()));
-        assert!(!names(true).contains(&"tell_responsible".to_owned()));
+        assert!(!names(false).contains(&"tell_responsible".to_owned()), "chatting with an employee is gone");
         for tool in ["schedule_message", "scratchpad"] {
             assert!(names(false).contains(&tool.to_owned()), "{tool}");
             assert!(!names(true).contains(&tool.to_owned()), "{tool}: the project assistant is nobody");

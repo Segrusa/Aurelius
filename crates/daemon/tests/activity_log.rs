@@ -1,12 +1,12 @@
 //! The activity log and an employee's mailbox through the real dispatcher: what one
-//! message goes through is findable per employee and run, and a board member's private
-//! chat stays out of what another board member reads.
+//! message goes through is findable per employee and run. Chatting with an employee is
+//! gone: opening a chat is refused.
 
 mod common;
 use common::*;
 
 use aurelius_client::{Client, envelope};
-use aurelius_domain::conversation::{MessageRole, MessageStatus, SendChatMessage};
+use aurelius_domain::conversation::{MessageRole, MessageStatus};
 use aurelius_domain::employee::{ActivityState, CreateEmployee, OpenEmployeeChat, SendEmployeeMessage};
 use aurelius_domain::{Command, CommandResult, ConversationId, EmployeeId, RunId};
 use std::time::Duration;
@@ -68,20 +68,14 @@ async fn one_message_is_in_the_log_from_delivery_to_the_end_of_its_run() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_private_chat_stays_out_of_what_another_board_member_reads() {
+async fn opening_a_chat_with_an_employee_is_refused_and_no_chat_is_listed() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let grace = connect_as(dir.path(), "grace").await;
-    let robin = connect_as(dir.path(), "robin").await;
     let (ann, _) = hire(&grace, "Ann").await;
-    let CommandResult::EmployeeChatOpened { conversation_id: chat } = grace.execute(envelope(Command::OpenEmployeeChat(OpenEmployeeChat { employee_id: ann }), None)).await.unwrap().result else { panic!() };
-    let send = SendChatMessage { conversation_id: chat, text: "just between us".into(), images: vec![], files: vec![], interrupt: false, confirm_secret: false };
-    grace.execute(envelope(Command::SendChatMessage(send), None)).await.unwrap();
-    answered(&grace, chat).await;
-
-    let mine = grace.activity_log(None, Some(ann)).await.unwrap();
-    assert!(steps(&mine).contains(&"delivered"), "{:?}", steps(&mine));
-    assert!(mine.entries.iter().any(|e| e.place.as_ref().is_some_and(|p| p.chat_id == Some(chat))));
-    assert!(robin.activity_log(None, Some(ann)).await.unwrap().entries.is_empty());
+    let refused = grace.execute(envelope(Command::OpenEmployeeChat(OpenEmployeeChat { employee_id: ann }), None)).await;
+    let message = format!("{:?}", refused.err().expect("refused"));
+    assert!(message.contains("Chatting with an employee is no longer available."), "{message}");
+    assert!(grace.employee_chats().await.unwrap().chats.is_empty());
     stop(dir.path(), daemon).await;
 }

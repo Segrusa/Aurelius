@@ -73,7 +73,7 @@ import { lastFailure, lastSummaryFailed } from "./run-logic";
 import { FileChips, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
-import { gateKeyAllowed } from "./ticket-session-logic";
+import { gateKeyAllowed, ticketPlace } from "./ticket-session-logic";
 import {
   ColumnGlyph,
   NoConnectionNote,
@@ -586,12 +586,7 @@ export function ReviewGate({
           }}
         />
         {lastMessage && !session ? (
-          <Button
-            label="Open discussion"
-            onClick={() =>
-              void navigate({ to: "/chat", search: { channel: t.conversation_id, message: lastMessage.id } })
-            }
-          />
+          <Button label="Open discussion" onClick={() => void navigate(ticketPlace(t, { message: lastMessage.id }))} />
         ) : null}
         {t.root_task_id ? (
           <Link href={`/tasks/${t.root_task_id}`} xstyle={styles.linkEnd}>

@@ -195,19 +195,6 @@ fn a_run_without_a_login_plans_a_message_that_borrows_none() {
 }
 
 #[test]
-fn someone_elses_private_chat_stays_out_of_the_list() {
-    let s = setup();
-    let chat = s.service.store().write({
-        let (ann, user) = (s.ann, s.user);
-        move |tx| aurelius_storage::employee_chats::ensure(tx, ann, user)
-    }).unwrap().unwrap();
-    let run = run_in(&s, chat, Some(s.user));
-    assert!(schedule(&s, run, "10m", "Mine.", None).0);
-    assert_eq!(listed(&s, Some(s.user)).len(), 1);
-    assert!(listed(&s, Some(UserId::new())).is_empty());
-}
-
-#[test]
 fn the_scratchpad_is_in_every_prompt_and_a_tool_replaces_it() {
     let s = setup();
     let (_, runs) = send(&s, None, "@Ann hello").unwrap();

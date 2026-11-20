@@ -3,7 +3,6 @@
 pub mod chat;
 pub mod files;
 pub mod discussion;
-pub(crate) mod employee_chat;
 pub mod message_files;
 pub mod message_images;
 pub mod message_uploads;

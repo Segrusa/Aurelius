@@ -70,27 +70,11 @@ export function composerHint(t: Talked): string {
   return `@Name asks that employee${ownerAnswersText(ownerAnswers(t))}.`;
 }
 
-/** Where an old link goes: a ticket's session by number, or an id still to resolve. */
-export type Redirect = { number: number; message?: string; thread?: string } | { ticketId: string };
+/** Where an old link goes: an id still to resolve into a ticket's session. */
+export type Redirect = { ticketId: string };
 
-/**
- * BR6. `/chat?channel=` of a ticket's channel (known from the cached list) keeps `message` and
- * `thread`; `/board?ticket=` and `/history?ticket=` carry an id, which `ticket.get` turns into a number.
- */
-export function sessionRedirect(
-  path: string,
-  search: { channel?: string; message?: string; thread?: string; ticket?: string },
-  channels: ChannelView[] | undefined,
-): Redirect | null {
-  if (path === "/chat" && search.channel) {
-    const c = channels?.find((x) => x.conversation_id === search.channel);
-    if (c?.kind !== "ticket" || c.ticket_number === null || c.ticket_number === undefined) return null;
-    return {
-      number: c.ticket_number,
-      ...(search.message ? { message: search.message } : {}),
-      ...(search.thread ? { thread: search.thread } : {}),
-    };
-  }
+/** BR6. `/board?ticket=` and `/history?ticket=` carry an id, which `ticket.get` turns into a number. */
+export function sessionRedirect(path: string, search: { ticket?: string }): Redirect | null {
   if ((path === "/board" || path === "/history") && search.ticket) return { ticketId: search.ticket };
   return null;
 }

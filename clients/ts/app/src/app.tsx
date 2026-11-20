@@ -20,8 +20,6 @@ import { KeysProvider } from "./keys/provider";
 import { type Platform, PlatformProvider } from "./platform";
 import { activityFilters } from "./screens/activity-logic";
 import { BoardScreen } from "./screens/board";
-import { ChatScreen } from "./screens/chat";
-import { EmployeeChatScreen } from "./screens/employee-chat";
 import { type EmployeeTab, isEmployeeTab } from "./screens/employee-logic";
 import { EmployeePage } from "./screens/employee-page";
 import { EmployeesScreen, OrgChartScreen } from "./screens/employees";
@@ -40,7 +38,7 @@ import { SessionScreen } from "./screens/session";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
 import { TasksScreen } from "./screens/tasks";
-import { ChatRedirect, TicketRedirect, TicketSessionScreen } from "./screens/ticket-session";
+import { TicketRedirect, TicketSessionScreen } from "./screens/ticket-session";
 import { UsageScreen } from "./screens/usage";
 import { VaultScreen } from "./screens/vault";
 import { precisionTheme } from "./theme/precision/precision";
@@ -72,6 +70,21 @@ const index = createRoute({
 const inbox = createRoute({
   getParentRoute: () => root,
   path: "/inbox",
+  beforeLoad: () => {
+    throw redirect({ to: "/new" });
+  },
+});
+// The Team chat and the chat with an employee are gone: their old links start on New session.
+const formerChat = createRoute({
+  getParentRoute: () => root,
+  path: "/chat",
+  beforeLoad: () => {
+    throw redirect({ to: "/new" });
+  },
+});
+const formerTalk = createRoute({
+  getParentRoute: () => root,
+  path: "/talk/$conversationId",
   beforeLoad: () => {
     throw redirect({ to: "/new" });
   },
@@ -113,24 +126,6 @@ const taskRun = createRoute({
     return <TaskRunScreen key={taskId} taskId={taskId} />;
   },
 });
-const chat = createRoute({
-  getParentRoute: () => root,
-  path: "/chat",
-  validateSearch: (search: Record<string, unknown>): { channel?: string; thread?: string; message?: string } => ({
-    ...(typeof search.channel === "string" ? { channel: search.channel } : {}),
-    ...(typeof search.thread === "string" ? { thread: search.thread } : {}),
-    ...(typeof search.message === "string" ? { message: search.message } : {}),
-  }),
-  component: function ChatRoute() {
-    const { channel, thread, message } = chat.useSearch();
-    return (
-      <>
-        <ChatRedirect channel={channel ?? null} message={message ?? null} thread={thread ?? null} />
-        <ChatScreen channel={channel ?? null} thread={thread ?? null} message={message ?? null} />
-      </>
-    );
-  },
-});
 // A ticket opens as its own session (ticket #70); the number is the one people see on the card.
 const ticketSession = createRoute({
   getParentRoute: () => root,
@@ -162,14 +157,6 @@ const employee = createRoute({
     const { id } = employee.useParams();
     const { tab } = employee.useSearch();
     return <EmployeePage key={id} id={id} {...(tab ? { tab } : {})} />;
-  },
-});
-const employeeChat = createRoute({
-  getParentRoute: () => root,
-  path: "/talk/$conversationId",
-  component: function EmployeeChatRoute() {
-    const { conversationId } = employeeChat.useParams();
-    return <EmployeeChatScreen key={conversationId} conversationId={conversationId} />;
   },
 });
 const workSession = createRoute({
@@ -285,6 +272,8 @@ function ScreenFailed({ reset }: { reset: () => void }) {
 const router = createRouter({
   routeTree: root.addChildren([
     index,
+    formerChat,
+    formerTalk,
     newSession,
     inbox,
     board,
@@ -292,9 +281,7 @@ const router = createRouter({
     history,
     tasks,
     taskRun,
-    chat,
     ticketSession,
-    employeeChat,
     workSession,
     settingsIndex,
     settings,

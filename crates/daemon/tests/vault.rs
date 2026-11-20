@@ -21,6 +21,14 @@ const OTHER: &str = "sk-test-FAKE-1111-other-value";
 const T1_VALUE: &str = "sk-test-FAKE-4444-sealed-value";
 const T1_OTHER: &str = "sk-test-FAKE-5555-sealed-other";
 const E18_VALUE: &str = "sk-test-FAKE-2222-description";
+/// A project to write in.
+async fn project_of(client: &Client) -> aurelius_domain::ProjectId {
+    use aurelius_domain::{Command, CommandResult, project::CreateProject};
+    let created = client.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: "Talk".into(), description: None, folder: None }), None)).await.unwrap();
+    let CommandResult::ProjectCreated { project_id, .. } = created.result else { panic!() };
+    project_id
+}
+
 const B10_VALUE: &str = "sk-test-FAKE-3333-pasted-b10";
 
 fn create(kind: VaultKind, name: &str, env: &str, value: &str) -> VaultCreateParams {
@@ -216,7 +224,7 @@ async fn a_missing_or_open_key_never_makes_a_new_one() {
 }
 
 /// SEC0 E9: the export needs the password again (counted like a sign-in), is
-/// one line with the key's id, is audited and told to every board member.
+/// one line with the key's id, is audited and told to every board member in their Inbox.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_key_export_asks_the_password_counts_it_and_tells_every_board_member() {
     let dir = tempfile::tempdir().unwrap();
@@ -233,8 +241,8 @@ async fn the_key_export_asks_the_password_counts_it_and_tells_every_board_member
     assert!(!format!("{export:?}").contains(parts[4]));
     let audit = client.vault_audit(None, true, None, None, None).await.unwrap();
     assert!(audit.rows.iter().any(|r| r.action == aurelius_domain::vault::VaultAuditAction::KeyExport && r.item_id.is_none()));
-    let general = client.group_chat().await.unwrap();
-    assert!(general.messages.iter().any(|m| m.text.contains("exported the vault key")), "every board member sees it");
+    let inbox = client.notifications().await.unwrap().notifications;
+    assert!(inbox.iter().any(|n| n.title.contains("exported the vault key") && n.reason.as_deref() == Some("server_notice")), "every board member sees it: {inbox:?}");
     // Counted: the connection's tries run out.
     let mut refused = None;
     for _ in 0..6 {
@@ -278,7 +286,9 @@ async fn a_pasted_secret_is_named_and_with_confirmation_stored_redacted() {
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     client.vault_create(create(VaultKind::Secret, "Canary", "CANARY_TOKEN", B10_VALUE)).await.unwrap();
-    let send = |confirm| aurelius_domain::group_chat::SendGroupMessage { text: format!("here: {B10_VALUE}"), images: vec![], files: vec![], channel: None, confirm_secret: confirm, thread_parent: None };
+    let project = project_of(&client).await;
+    let channel = talk_channel(&client, project).await;
+    let send = |confirm| aurelius_domain::group_chat::SendGroupMessage { text: format!("here: {B10_VALUE}"), images: vec![], files: vec![], channel: Some(channel), confirm_secret: confirm, thread_parent: None };
     let err = client.send_group_message(send(false)).await.unwrap_err();
     let aurelius_client::ClientError::Protocol(err) = err else { panic!() };
     assert_eq!((err.code, err.matched_items.clone()), (ErrorCode::LooksLikeSecret, vec!["Canary".to_owned()]), "the item's name");
@@ -288,8 +298,8 @@ async fn a_pasted_secret_is_named_and_with_confirmation_stored_redacted() {
     let with_file = aurelius_domain::group_chat::SendGroupMessage { text: "see file".into(), files: vec![file.display().to_string()], ..send(true) };
     assert_eq!(code(client.send_group_message(with_file).await.unwrap_err()), ErrorCode::LooksLikeSecret);
     client.send_group_message(send(true)).await.unwrap();
-    let general = client.group_chat().await.unwrap();
-    assert!(general.messages.iter().any(|m| m.text == "here: «secret:CANARY_TOKEN»"), "{:?}", general.messages.iter().map(|m| &m.text).collect::<Vec<_>>());
+    let talk = client.channel_messages(channel).await.unwrap();
+    assert!(talk.messages.iter().any(|m| m.text == "here: «secret:CANARY_TOKEN»"), "{:?}", talk.messages.iter().map(|m| &m.text).collect::<Vec<_>>());
     stop(dir.path(), daemon).await;
     let bytes = database_bytes(dir.path());
     assert!(!holds(&bytes, "FAKE-3333"), "nothing of the value in the database, its receipts or events");
@@ -508,28 +518,24 @@ async fn text_and_url_trade_places_without_a_new_value_and_a_secret_stays_one() 
 
 const EXPORT_VALUE: &str = "sk-test-FAKE-1313-export-told";
 
-/// SEC1 m4: the key goes out only with its line in the general Team chat;
-/// without that chat, nothing is exported and nothing is audited as exported.
+/// SEC1 m4: the key goes out only with its notification to every board member;
+/// when that cannot be written, nothing is exported and nothing is audited as exported.
 #[tokio::test(flavor = "multi_thread")]
-async fn no_key_export_without_its_line_in_the_team_chat() {
-    use aurelius_domain::{Command, CommandResult, project::CreateProject};
+async fn no_key_export_when_its_notification_cannot_be_written() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     client.vault_create(create(VaultKind::Secret, "Told", "TOLD_TOKEN", EXPORT_VALUE)).await.unwrap();
-    let created = client.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: "Elsewhere".into(), description: None, folder: None }), None)).await.unwrap();
-    let CommandResult::ProjectCreated { project_id, .. } = created.result else { panic!() };
-    // The general chat made a project's conversation: there is no general one.
     let conn = rusqlite::Connection::open(dir.path().join("data/aurelius.sqlite")).unwrap();
     conn.busy_timeout(std::time::Duration::from_secs(5)).unwrap();
-    let general: String = conn.query_row("SELECT id FROM conversations WHERE kind = 'group' AND project_id IS NULL", [], |r| r.get(0)).unwrap();
-    conn.execute("UPDATE conversations SET kind = 'project', project_id = ?2 WHERE id = ?1", rusqlite::params![general, project_id.to_string()]).unwrap();
+    // The Inbox cannot take a row: no board member can be told.
+    conn.execute_batch("CREATE TRIGGER no_notifications BEFORE INSERT ON notifications BEGIN SELECT RAISE(ABORT, 'the inbox is closed'); END;").unwrap();
 
     assert_eq!(code(client.vault_key_export(BOARD_PASSWORD.into()).await.unwrap_err()), ErrorCode::Validation);
     let exports: i64 = conn.query_row("SELECT COUNT(*) FROM vault_audit WHERE action = 'key_export'", [], |r| r.get(0)).unwrap();
     assert_eq!(exports, 0, "nothing exported, nothing audited");
 
-    conn.execute("UPDATE conversations SET kind = 'group', project_id = NULL WHERE id = ?1", [general]).unwrap();
+    conn.execute_batch("DROP TRIGGER no_notifications;").unwrap();
     client.vault_key_export(BOARD_PASSWORD.into()).await.unwrap();
     let exports: i64 = conn.query_row("SELECT COUNT(*) FROM vault_audit WHERE action = 'key_export'", [], |r| r.get(0)).unwrap();
     assert_eq!(exports, 1);

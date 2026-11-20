@@ -24,6 +24,12 @@ use rusqlite::OptionalExtension;
 pub const TASK_GUIDANCE: &str = "This conversation is a task you took on. Start with one or two sentences on how you will approach it. Do the work yourself with your own tools; use subagents (the Task tool) only for a broad search across many files, not by default. You can give a part to a colleague with delegate_task (you get their result here) or hand the whole task over with hand_over_task. Message a part you gave away with message_task (it interrupts them by default). Everything you do is visible in this conversation, so keep your closing answer short: say whether it worked, in one or two sentences, and what the user must still do or decide, if anything. No report, no headings, and do not repeat what is already above it (steps, tool calls, files, screenshots, ids). That closing answer is the task's result.";
 
 /// What an employee is told when the colleagues' results are in.
+/// What an old `tell_responsible` call is told: the tool is retired.
+const TELL_RESPONSIBLE_GONE: &str = "tell_responsible no longer exists: post in the ticket's discussion with post_to_discussion instead.";
+
+/// What an old `read_group_chat` or `post_to_group_chat` call is told: the Team chat is gone.
+const TEAM_CHAT_TOOLS_GONE: &str = "The Team chat no longer exists. Use read_discussion and post_to_discussion in a ticket's discussion.";
+
 const COLLEAGUES_DONE: &str = "Your colleagues finished their parts (their results are above). Bring everything together and finish with your report.";
 
 /// What the owner is told when the colleagues it handed work to are done.
@@ -740,10 +746,9 @@ pub enum EmployeeAction {
     ProposeInstructions { employee: Option<String>, instructions: String, reason: String, evidence: Vec<String> },
     /// Management chooses the mode (`auto` or `plan`) of its own task, with a reason.
     SetMode { mode: String, reason: String },
-    /// The latest messages of a channel of the Team chat (nothing changes); `channel`
-    /// none: the run's own (see `discussion::run_channel`).
+    /// The retired `read_group_chat` (the Team chat is gone): an old call is refused.
     ReadGroupChat { last: Option<u32>, channel: Option<String> },
-    /// A message in a channel under the employee's name; it wakes nobody.
+    /// The retired `post_to_group_chat`: an old call is refused.
     PostToGroupChat { message: String, channel: Option<String> },
     /// The latest messages of the discussion of the run's ticket (nothing changes).
     ReadDiscussion { last: Option<u32> },
@@ -751,7 +756,7 @@ pub enum EmployeeAction {
     PostToDiscussion { message: String },
     /// Hand the work in the run's thread to a colleague (`discussion::hand_off`).
     HandOff { to: String, message: String },
-    /// Send the responsible board member of the run's ticket a message in their chat (`employee_chat`).
+    /// The retired `tell_responsible` (chatting with an employee is gone): an old call is refused.
     TellResponsible { message: String },
     /// A message to itself or a colleague later in this thread (`conversation::scheduled`).
     ScheduleMessage { delay: String, content: String, to: Option<String> },
@@ -881,30 +886,9 @@ impl CommandService {
                 })
                 .map_err(storage_error);
         }
-        if let EmployeeAction::ReadGroupChat { last, channel } = &action {
-            let (last, channel) = (*last, channel.clone());
-            return self
-                .store
-                .read(|conn| {
-                    if run_owner(conn, run)?.and_then(|o| o.employee).is_none() {
-                        return Ok((false, "Only an employee can read the group chat.".to_string(), vec![]));
-                    }
-                    match crate::conversation::discussion::run_channel(conn, run, channel.as_deref())? {
-                        Ok(d) => Ok((true, crate::conversation::discussion::read_text(conn, &st, &d, last)?, vec![])),
-                        Err(why) => Ok((false, why, vec![])),
-                    }
-                })
-                .map_err(storage_error);
-        }
-        if let EmployeeAction::PostToGroupChat { message, channel } = &action {
-            let (message, channel) = (message.clone(), channel.clone());
-            return self
-                .store
-                .write(move |tx| match crate::conversation::discussion::run_channel(tx, run, channel.as_deref())? {
-                    Ok(d) => crate::conversation::discussion::post_from_run(tx, &st, run, &d, &message),
-                    Err(why) => Ok((false, why, vec![])),
-                })
-                .map_err(storage_error);
+        // The Team chat is gone: an old call to its tools is refused.
+        if let EmployeeAction::ReadGroupChat { .. } | EmployeeAction::PostToGroupChat { .. } = &action {
+            return Ok((false, TEAM_CHAT_TOOLS_GONE.to_string(), vec![]));
         }
         const NO_DISCUSSION: &str = "This run has no ticket discussion: only a run under a ticket, or one woken from its discussion, can use it.";
         if let EmployeeAction::ReadDiscussion { last } = &action {
@@ -932,8 +916,8 @@ impl CommandService {
             return self.store.write(move |tx| crate::conversation::discussion::hand_off(tx, &st, run, &to, &message)).map_err(storage_error);
         }
         if let EmployeeAction::TellResponsible { message } = &action {
-            let message = message.clone();
-            return self.store.write(move |tx| crate::conversation::employee_chat::tell_responsible(tx, &st, run, &message)).map_err(storage_error);
+            let _ = message;
+            return Ok((false, TELL_RESPONSIBLE_GONE.to_string(), vec![]));
         }
         if let EmployeeAction::ScheduleMessage { delay, content, to } = &action {
             let (delay, content, to) = (delay.clone(), content.clone(), to.clone());

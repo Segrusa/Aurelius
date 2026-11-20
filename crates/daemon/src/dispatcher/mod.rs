@@ -86,11 +86,6 @@ pub async fn run(shared: Arc<Shared>) {
         if let Ok(Ok(notices)) = tokio::task::spawn_blocking(move || s.service.release_handoffs()).await {
             shared.publish(notices);
         }
-        // Chats whose tickets reached Review get their update.
-        let s = shared.clone();
-        if let Ok(Ok(notices)) = tokio::task::spawn_blocking(move || s.service.deliver_chat_updates()).await {
-            shared.publish(notices);
-        }
         // Scheduled messages that came due go out as items of their mailboxes (R7).
         let s = shared.clone();
         if let Ok(Ok(notices)) = tokio::task::spawn_blocking(move || s.service.deliver_scheduled_messages()).await {

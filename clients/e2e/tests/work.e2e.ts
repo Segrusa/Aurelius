@@ -482,7 +482,7 @@ test.describe("states a test daemon cannot produce", () => {
     await properties.getByRole("button", { name: "Usage" }).hover();
     await expect(page.getByRole("tooltip")).toContainText("$0.12 API-equivalent");
 
-    await page.goto(`${site.origin}/chat?channel=d3`);
+    await page.goto(`${site.origin}/ticket/23`);
     const chat = page.getByRole("main");
     // A discussion is a chat: that someone is at work, and how to stop it, but not what they ran.
     const note = chat.locator("[data-run-note]").first();

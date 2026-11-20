@@ -4,7 +4,7 @@ import 'package:aurelius_mobile/data/channels.dart';
 import 'package:aurelius_mobile/data/everyone.dart';
 import 'package:aurelius_mobile/data/protocol/models.dart';
 import 'package:aurelius_mobile/features/chat/everyone_audience.dart';
-import 'package:aurelius_mobile/features/team/mentions.dart';
+import 'package:aurelius_mobile/features/chat/mentions.dart';
 
 DiscussionAudience audience({int employees = 5, int paused = 1, int boardMembers = 2, String? coordinator}) => DiscussionAudience(
       boardMembers: boardMembers,
@@ -45,10 +45,8 @@ void main() {
   });
 
   test('@Everyone is marked as a mention in any case when it is known', () {
-    final segments = mentionSegments('ping @everyone now', known: withEveryone(['Eva'], enabled: true));
-    expect(segments.map((s) => s.$1), ['ping ', '@everyone', ' now']);
-    expect(segments[1].$2, MentionMark.other);
-    expect(mentionSegments('ping @everyone now', known: ['Eva']).length, 1);
+    expect(mentionMarkOf('everyone', known: withEveryone(['Eva'], enabled: true)), MentionMark.other);
+    expect(mentionMarkOf('everyone', known: ['Eva']), isNull);
   });
 
   testWidgets('the audience is asked once per mention, not per keystroke, and a failure shows nothing', (tester) async {

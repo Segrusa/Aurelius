@@ -159,7 +159,9 @@ fn an_older_client_still_reads_the_group_chat_and_its_views() {
     let send: aurelius_domain::group_chat::SendGroupMessage = serde_json::from_value(serde_json::json!({ "text": "Hi" })).unwrap();
     assert_eq!(send.channel, None);
     assert!(serde_json::to_value(&send).unwrap().get("channel").is_none());
-    assert!(crate::rpc::FEATURES.contains(&"ticket_discussion") && crate::rpc::FEATURES.contains(&"team_channels"));
+    // The Team chat's features are no longer advertised (the constants stay); the ticket ones are.
+    assert!(crate::rpc::FEATURES.contains(&"ticket_discussion") && crate::rpc::FEATURES.contains(&"ticket_channels"));
+    assert!(!crate::rpc::FEATURES.contains(&"team_channels") && !crate::rpc::FEATURES.contains(&"employee_chats"));
 }
 
 #[test]

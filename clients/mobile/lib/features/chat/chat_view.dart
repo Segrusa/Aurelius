@@ -34,7 +34,7 @@ import '../connection/connection_bloc.dart';
 import '../company_org/employee_run_sheet.dart';
 import '../inbox/inbox_bloc.dart';
 import '../load/load_widgets.dart';
-import '../team/mentions.dart';
+import 'mentions.dart';
 import 'answer_body.dart';
 import 'chat_bloc.dart';
 import 'collapse.dart';
@@ -103,7 +103,6 @@ class ChatView extends StatefulWidget {
     this.composerActions,
     this.aboveComposer,
     this.draftSlot,
-    this.channel,
     this.readOnlyAction,
     this.revealMessage,
   });
@@ -139,10 +138,6 @@ class ChatView extends StatefulWidget {
   /// Right above the composer: the decision of the moment in a ticket's session (its gate).
   final Widget? aboveComposer;
 
-  /// A channel of the Slack-style Team chat (AUR-CHAT-001): flat rows, days,
-  /// "New messages", compact system lines and Enter sends. Null: as before.
-  final ChannelChatOptions? channel;
-
   /// After [readOnlyNote]: a link, such as "Open ticket".
   final Widget? readOnlyAction;
 
@@ -151,40 +146,6 @@ class ChatView extends StatefulWidget {
 
   @override
   State<ChatView> createState() => _ChatViewState();
-}
-
-/// How a channel of the Slack-style Team chat shows (AUR-CHAT-001 §2–§4).
-class ChannelChatOptions {
-  const ChannelChatOptions({this.readThrough, required this.closedNote, this.openChannel, this.threads = false, this.reactions = false, this.openThread, this.thread = false, this.revealThread = false});
-
-  /// The reader's last read message before the channel opened (`ChannelView.read_through`):
-  /// "New messages" goes after it, and stays there while the channel is open.
-  final int? readThrough;
-
-  /// The read-only bar once a write was refused with `channel_archived`.
-  final String closedNote;
-
-  /// Opens the channel a line links to (the "opened" and "closed" lines in
-  /// General); false when it cannot, and the line opens its ticket instead.
-  final bool Function(String conversationId)? openChannel;
-
-  /// The server has threads (feature `chat_threads`, AUR-CHAT-002 §5): the
-  /// line under a root, and "Reply in thread" on a long press.
-  final bool threads;
-
-  /// The server has reactions (feature `chat_reactions`, §5): the pills under
-  /// a message, and "React" on a long press.
-  final bool reactions;
-
-  /// Opens the thread of [root] (its own screen); [context] is under the channel's [ChatBloc].
-  final void Function(BuildContext context, MessageView root)? openThread;
-
-  /// This list is one thread: its root on top, then "n replies" and the replies.
-  final bool thread;
-
-  /// [ChatView.revealMessage] is a thread's root and a link went to a reply in
-  /// it: open that thread as well.
-  final bool revealThread;
 }
 
 class _ChatViewState extends State<ChatView> {
@@ -204,7 +165,7 @@ class _ChatViewState extends State<ChatView> {
     // A write refused with `channel_archived`: the read-only bar, never the error (AUR-CHAT-001 §8).
     final closed = context.select<ChatBloc, bool>((b) => b.state.closed);
     final composer = widget.composer && !closed;
-    final readOnlyNote = closed ? widget.channel?.closedNote ?? widget.readOnlyNote : widget.readOnlyNote;
+    final readOnlyNote = widget.readOnlyNote;
     final bloc = context.read<ChatBloc>();
     return BlocListener<ChatBloc, ChatState>(
       listenWhen: (a, b) => b.notice != null && a.notice != b.notice,
@@ -253,14 +214,14 @@ class _ChatViewState extends State<ChatView> {
               Container(
                 key: const Key('chat-read-only'),
                 width: double.infinity,
-                decoration: BoxDecoration(color: widget.channel != null ? Tokens.surface : Tokens.plain, border: Border(top: BorderSide(color: widget.channel != null ? Tokens.border : Tokens.sep, width: widget.channel != null ? 1 : 0.5))),
+                decoration: BoxDecoration(color: Tokens.plain, border: Border(top: BorderSide(color: Tokens.sep, width: 0.5))),
                 padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + MediaQuery.paddingOf(context).bottom),
                 child: Wrap(
                   alignment: WrapAlignment.center,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   spacing: 8,
                   children: [
-                    Text(readOnlyNote, textAlign: TextAlign.center, style: TextStyle(color: Tokens.label2, fontSize: widget.channel != null ? 12.5 : 13.5)),
+                    Text(readOnlyNote, textAlign: TextAlign.center, style: TextStyle(color: Tokens.label2, fontSize: 13.5)),
                     ?widget.readOnlyAction,
                   ],
                 ),
@@ -402,9 +363,7 @@ class _MessagesState extends State<_Messages> {
     _revealed = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final channel = widget.config.channel;
       unawaited(_goTo(target));
-      if (channel != null && channel.revealThread) channel.openThread?.call(context, message);
     });
   }
 
@@ -458,9 +417,6 @@ class _MessagesState extends State<_Messages> {
       );
     }
     if (state.messages.isEmpty && state.unsent.isEmpty) return EmptyState(widget.emptyTitle, detail: widget.emptyDetail);
-    final channel = widget.config.channel;
-    if (channel != null && group) return _channelList(state, channel, approvals, mainChats);
-
     final versions = _versions(state.messages);
     // What a run in an employee's own chat asks with no answer streaming here to show it under.
     final asks = [
@@ -528,113 +484,6 @@ class _MessagesState extends State<_Messages> {
     return group && _everyone ? MentionScope(known: const [everyoneName], child: list) : list;
   }
 
-  /// A channel of the Slack-style Team chat (AUR-CHAT-001 §2): everyone
-  /// left-aligned in flat rows, grouped by author, with day separators, the
-  /// "New messages" line and compact system lines; @names are marked.
-  Widget _channelList(ChatState state, ChannelChatOptions channel, List<ApprovalView> approvals, List<String> mainChats) {
-    final company = context.watch<CompanyBloc>().state;
-    final me = _me;
-    final employees = [for (final p in mentionables(company)) p.$1];
-    final known = withEveryone([...employees, ...state.boardMembers], enabled: _everyone);
-    final source = widget.config.source;
-    final made = source == null ? const <String, TicketRef>{} : ticketsFromMessages(state.messages);
-    final lastSummary = state.messages.where((m) => m.system?.kind == SystemLineKind.summary || m.system?.kind == SystemLineKind.summaryFailed).lastOrNull?.id;
-    final asks = [
-      for (final a in approvals)
-        if (mainChats.contains(a.conversationId) && !state.messages.any((m) => m.isStreaming && m.runId == a.runId)) a,
-    ];
-    bool named(MessageView m) => authorOf(m) != me && mentionsName(m.text, me);
-    // Nothing is written in a closed channel: no React, no Reply (§3, §5).
-    final writable = widget.config.composer && !state.closed;
-    final bloc = context.read<ChatBloc>();
-    final openThread = channel.threads && !channel.thread ? channel.openThread : null;
-    ChannelMessageActions? actions(MessageView m) {
-      if (!writable || m.isStreaming || m.isDeleted) return null;
-      final react = channel.reactions ? () => _react(context, bloc, m) : null;
-      final reply = openThread != null && canStartThread(m) ? () => openThread(context, m) : null;
-      return react == null && reply == null ? null : ChannelMessageActions(react: react, reply: reply);
-    }
-
-    Widget extras(MessageView m, Widget child) {
-      final reactions = channel.reactions && m.reactions.isNotEmpty && !m.isDeleted;
-      final line = openThread == null ? null : threadLine(m, DateTime.now());
-      if (!reactions && line == null) return child;
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        child,
-        if (reactions) ReactionsRow(message: m, writable: writable, onToggle: (emoji, on) => bloc.add(ChatReacted(m.id, emoji, on: on)), onPick: () => _react(context, bloc, m)),
-        if (line != null) ThreadLine(root: m, label: line, repliers: threadRepliers(m, employees), onTap: () => openThread!(context, m)),
-      ]);
-    }
-
-    Widget row(MessageView m, bool grouped) {
-      if (m.system != null) {
-        return SystemLineView(message: m, ticketId: context.read<ChatBloc>().ticketId, taskProjectId: widget.config.taskProjectId, summarized: m.id != lastSummary, compact: true, openChannel: channel.openChannel);
-      }
-      if (decisionOf(m) case final d?) return DecisionCard(message: m, decision: d);
-      if (!m.isUser && isSystemLine(m, inGroup: true)) return _SystemLine(message: m);
-      if (!m.isUser && m.update != null && m.update != 'group') return _TaskUpdate(message: m);
-      final author = m.isUser ? (m.authorUser?.username ?? me ?? 'You') : (m.author?.trim().isNotEmpty == true ? m.author!.trim() : 'Employee');
-      final role = m.isUser ? 'board member' : employeeRole(company, author);
-      return _ChannelMessage(
-        key: ValueKey('channel-row-${m.id}'),
-        author: author,
-        role: role,
-        atMs: m.createdAtMs,
-        grouped: grouped,
-        own: named(m),
-        child: extras(
-          m,
-          m.isUser
-              ? _UserBubble(id: m.id, text: m.text, files: m.files, uploads: m.uploads, queuedId: m.queued ? m.id : null, message: m, source: source, ticket: made[m.id], flat: true, actions: actions(m))
-              : _AssistantMessage(message: m, group: true, flat: true, grouped: grouped, source: source, ticket: made[m.id], blocking: m.isStreaming ? approvals.where((a) => a.runId == m.runId).firstOrNull : null, actions: actions(m)),
-        ),
-      );
-    }
-
-    final rows = channelRows(state.messages, readThrough: channel.readThrough, me: me, now: DateTime.now());
-    // A thread: "n replies" between the root and its replies (§5).
-    final rootAt = channel.thread ? rows.indexWhere((r) => r is MessageRow) : -1;
-
-    final items = <FollowItem>[
-      for (final (i, r) in rows.indexed) ...[
-        switch (r) {
-          DayRow(:final label, :final day) => FollowItem('day-${day.millisecondsSinceEpoch}', _DaySeparator(label: label)),
-          NewMessagesRow() => const FollowItem('new-messages', _NewMessagesLine()),
-          // A thread's reply never joins its root's header.
-          MessageRow(:final message, :final grouped) => FollowItem(message.id, row(message, grouped && i != rootAt + 1)),
-        },
-        if (i == rootAt) FollowItem('thread-replies', _DaySeparator(key: const Key('thread-replies'), label: state.messages.length == 2 ? '1 reply' : '${state.messages.length - 1} replies')),
-      ],
-      for (final a in asks) FollowItem('ask-${a.id}', _GroupAsk(approval: a)),
-      for (final u in state.unsent)
-        FollowItem(
-          'unsent-${u.localId}',
-          _ChannelMessage(author: me ?? 'You', role: 'board member', atMs: null, child: _UserBubble(id: 'unsent-${u.localId}', text: u.text, unsent: u, flat: true)),
-        ),
-    ];
-    final live = state.messages.where((m) => m.isStreaming).firstOrNull?.id;
-    final liveAt = live == null ? -1 : items.indexWhere((i) => i.key == live);
-    return MentionScope(
-      known: known,
-      me: me,
-      child: FollowingList(
-        key: _list,
-        items: items,
-        liveFrom: liveAt < 0 ? items.length - state.unsent.length - asks.length : liveAt,
-        resetKey: state.conversationId,
-      ),
-    );
-  }
-
-  /// React (§5): the picker of the fixed reactions; a pick turns yours on, or off when it was on.
-  static Future<void> _react(BuildContext context, ChatBloc bloc, MessageView m) async {
-    final emoji = await showReactionPicker(context, mine: {for (final r in m.reactions) if (r.mine) r.emoji});
-    if (emoji == null) return;
-    final current = bloc.state.messages.where((x) => x.id == m.id).firstOrNull ?? m;
-    final mine = current.reactions.any((r) => r.emoji == emoji && r.mine);
-    bloc.add(ChatReacted(m.id, emoji, on: !mine));
-  }
-
   /// "Version 2 of 3" for retried answers to the same user message.
   static Map<String, (int, int)> _versions(List<MessageView> messages) {
     final groups = <String, List<String>>{};
@@ -685,107 +534,6 @@ class _SystemLine extends StatelessWidget {
       child: Text(text.isEmpty ? '…' : text, textAlign: TextAlign.center, style: TextStyle(fontSize: 12.5, height: 1.4, color: Tokens.muted)),
     );
   }
-}
-
-/// The line between two days of a channel (AUR-CHAT-001 §2): a centred eyebrow between 1 px lines.
-class _DaySeparator extends StatelessWidget {
-  const _DaySeparator({super.key, required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 18, bottom: 2),
-        child: Row(children: [
-          Expanded(child: Divider(height: 1, thickness: 1, color: Tokens.border)),
-          Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text(label.toUpperCase(), style: Tokens.eyebrow().copyWith(fontSize: 11, color: Tokens.text2))),
-          Expanded(child: Divider(height: 1, thickness: 1, color: Tokens.border)),
-        ]),
-      );
-}
-
-/// "New messages" (AUR-CHAT-001 §2): an ACCENT line before what came after the last read.
-class _NewMessagesLine extends StatelessWidget {
-  const _NewMessagesLine();
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 14, bottom: 2),
-        child: Row(children: [
-          Expanded(child: Divider(height: 1, thickness: 1, color: Tokens.accent)),
-          Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text('New messages', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Tokens.accentText))),
-          Expanded(child: Divider(height: 1, thickness: 1, color: Tokens.accent)),
-        ]),
-      );
-}
-
-/// A message of a channel as a flat row (AUR-CHAT-001 §2): monogram, name,
-/// role and time, then the text aligned with the name. A [grouped] row has no
-/// header; a message that names the signed-in member ([own]) gets the "@ you"
-/// tag, a 2 px ACCENT bar and the ACCENT_HALO background.
-class _ChannelMessage extends StatelessWidget {
-  const _ChannelMessage({super.key, required this.author, this.role, required this.atMs, this.grouped = false, this.own = false, required this.child});
-
-  final String author;
-  final String? role;
-
-  /// When it was written; null while it is on its way.
-  final int? atMs;
-  final bool grouped;
-  final bool own;
-  final Widget child;
-
-  /// The gutter of the monogram; a grouped row's text aligns with the name.
-  static const gutter = 28.0;
-
-  @override
-  Widget build(BuildContext context) {
-    final letter = author.isEmpty ? '?' : author.characters.first.toUpperCase();
-    final header = Row(children: [
-      Flexible(
-        child: Text.rich(
-          TextSpan(children: [
-            TextSpan(text: author, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Tokens.text)),
-            if (role != null && role!.trim().isNotEmpty) TextSpan(text: role == 'board member' ? ' · board member' : ' — $role', style: TextStyle(fontSize: 13, color: Tokens.text2)),
-          ]),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      if (own) Padding(padding: const EdgeInsets.only(left: 6), child: Text('@ you', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Tokens.accentText))),
-      if (atMs != null) Padding(padding: const EdgeInsets.only(left: 6), child: Text(Fmt.clock(atMs!), style: TextStyle(fontSize: 11, color: Tokens.text2))),
-    ]);
-    return Semantics(
-      label: own ? '$author, mentions you' : null,
-      child: Container(
-        margin: EdgeInsets.only(top: grouped ? 2 : 12),
-        padding: EdgeInsets.only(left: own ? 6 : 0, top: own ? 2 : 0, bottom: own ? 4 : 0),
-        decoration: own ? BoxDecoration(color: Tokens.accentHalo, border: Border(left: BorderSide(color: Tokens.accent, width: 2))) : null,
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          SizedBox(width: gutter, child: grouped ? null : Padding(padding: const EdgeInsets.only(top: 1), child: Align(alignment: Alignment.topLeft, child: Monogram(letter, size: 20)))),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (!grouped) header,
-              child,
-            ]),
-          ),
-        ]),
-      ),
-    );
-  }
-}
-
-/// What a long press on a channel's message offers beyond Copy and Create
-/// ticket (AUR-CHAT-002 §5); null each when the server lacks the feature or
-/// the channel is closed.
-class ChannelMessageActions {
-  const ChannelMessageActions({this.react, this.reply});
-
-  /// Opens the reaction picker.
-  final VoidCallback? react;
-
-  /// Opens the message's thread to reply in it.
-  final VoidCallback? reply;
 }
 
 /// The picker of the fixed reactions (§5): one tap picks one; [mine] are
@@ -888,51 +636,6 @@ class ReactionsRow extends StatelessWidget {
             child: pill(key: ValueKey('reaction-add-${message.id}'), onTap: onPick, child: Icon(Icons.add_reaction_outlined, size: 14, color: Tokens.text2)),
           ),
       ]),
-    );
-  }
-}
-
-/// The line under a thread's root in its channel (§5): "↳ 3 replies · last
-/// 11:02" in ACCENT_TEXT, the monograms of up to three who replied (the
-/// server's `thread_repliers`; a board member's is outlined, as on the
-/// desktop), and a marker while replies are unread. A tap opens the thread.
-class ThreadLine extends StatelessWidget {
-  const ThreadLine({super.key, required this.root, required this.label, this.repliers = const [], required this.onTap});
-
-  final MessageView root;
-  final String label;
-  /// Who replied, the latest first, with whether each is a board member (see [threadRepliers]).
-  final List<(String, bool)> repliers;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final unread = root.threadUnread ?? 0;
-    return Semantics(
-      button: true,
-      label: '${label.replaceFirst('↳ ', '')}${unread > 0 ? ', $unread unread' : ''}. Open the thread',
-      excludeSemantics: true,
-      child: InkWell(
-        key: ValueKey('thread-line-${root.id}'),
-        onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 36),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            for (final (name, member) in repliers.take(threadMonogramMax))
-              Padding(padding: const EdgeInsets.only(right: 3), child: Monogram(name.characters.first.toUpperCase(), size: 16, member: member)),
-            if (repliers.isNotEmpty) const SizedBox(width: 3),
-            Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Tokens.accentText))),
-            if (unread > 0)
-              Container(
-                key: ValueKey('thread-unread-${root.id}'),
-                margin: const EdgeInsets.only(left: 6),
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(color: Tokens.accent, borderRadius: BorderRadius.circular(8)),
-                child: Text('$unread new', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white)),
-              ),
-          ]),
-        ),
-      ),
     );
   }
 }
@@ -1040,13 +743,7 @@ class _TaskUpdate extends StatelessWidget {
 }
 
 class _UserBubble extends StatelessWidget {
-  const _UserBubble({required this.id, required this.text, this.files = const [], this.uploads = const [], this.unsent, this.queuedId, this.message, this.author, this.mentioned = false, this.source, this.ticket, this.flat = false, this.actions});
-
-  /// In a channel with threads or reactions: React and Reply in thread on a long press.
-  final ChannelMessageActions? actions;
-
-  /// In a channel row of the Slack-style Team chat: left-aligned Markdown, no bubble (the row has the header).
-  final bool flat;
+  const _UserBubble({required this.id, required this.text, this.files = const [], this.uploads = const [], this.unsent, this.queuedId, this.message, this.author, this.mentioned = false, this.source, this.ticket});
 
   /// The message itself (not for one still on its way), for "Create ticket".
   final MessageView? message;
@@ -1079,19 +776,15 @@ class _UserBubble extends StatelessWidget {
 
   void _longPress(BuildContext context) async {
     final ticketable = source != null && message != null;
-    final react = actions?.react;
-    final reply = actions?.reply;
     final link = messageLinkable(context, message);
     final editable = messageEditable(context, message);
-    if (queuedId == null && !ticketable && react == null && reply == null && !link && !editable) {
+    if (queuedId == null && !ticketable && !link && !editable) {
       Clipboard.setData(ClipboardData(text: text));
       toast(context, 'Copied.');
       return;
     }
     final bloc = context.read<ChatBloc>();
     final choice = await showGlassMenu<String>(context, [
-      if (react != null) const GlassMenuItem('react', 'React'),
-      if (reply != null) const GlassMenuItem('reply', 'Reply in thread'),
       if (queuedId != null) const GlassMenuItem('now', 'Send now'),
       const GlassMenuItem('copy', 'Copy'),
       if (link) const GlassMenuItem('link', 'Copy link'),
@@ -1102,10 +795,6 @@ class _UserBubble extends StatelessWidget {
     ]);
     if (!context.mounted) return;
     switch (choice) {
-      case 'react':
-        react!();
-      case 'reply':
-        reply!();
       case 'link':
         await copyMessageLink(context, message!.id);
       case 'ticket':
@@ -1132,15 +821,15 @@ class _UserBubble extends StatelessWidget {
       for (final u in uploads) (u.name, u.byteLength, u.path, u),
       for (final f in unsent?.files ?? const <PendingFile>[]) (f.name, f.byteLength, null, null),
     ];
-    final end = flat ? WrapAlignment.start : WrapAlignment.end;
+    const end = WrapAlignment.end;
     // Deleted (A6): the place stays, the words, files and copy do not.
     if (message?.isDeleted == true) {
       return Padding(
-        padding: flat ? const EdgeInsets.only(top: 2) : const EdgeInsets.only(top: 14, left: 48),
+        padding: const EdgeInsets.only(top: 14, left: 48),
         child: Column(
-          crossAxisAlignment: flat ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (!flat && author != null) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text('$author · board member', style: Tokens.monoSmall())),
+            if (author != null) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text('$author · board member', style: Tokens.monoSmall())),
             DeletedMessageLine(message: message!, author: author ?? message!.authorUser?.username),
             if (ticket != null) TicketPill(ticket: ticket!),
           ],
@@ -1148,11 +837,11 @@ class _UserBubble extends StatelessWidget {
       );
     }
     return Padding(
-      padding: flat ? const EdgeInsets.only(top: 2) : const EdgeInsets.only(top: 14, left: 48),
+      padding: const EdgeInsets.only(top: 14, left: 48),
       child: Column(
-        crossAxisAlignment: flat ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (!flat && (author != null || mentioned))
+          if ((author != null || mentioned))
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text([if (author != null) '$author · board member', if (mentioned) '@ you'].join(' · '), style: Tokens.monoSmall().copyWith(color: mentioned ? Tokens.accentText : null)),
@@ -1160,17 +849,12 @@ class _UserBubble extends StatelessWidget {
           if (text.isNotEmpty || (files.isEmpty && sentFiles.isEmpty && unsent?.images.isEmpty != false)) Collapsible(
             id: id,
             text: text,
-            alignment: flat ? CrossAxisAlignment.start : CrossAxisAlignment.end,
+            alignment: CrossAxisAlignment.end,
             // Long-press copies the whole message, also while it is folded.
             builder: (context, cut) => GestureDetector(
               onLongPress: () => _longPress(context),
               // Markdown as it was written (AUR-CHAT-001 §4), its @names marked.
-              child: flat
-                  ? Opacity(
-                      opacity: muted ? 0.6 : 1,
-                      child: MessageMarkdown(data: cut == null ? text : text.substring(0, cut), scope: chatFileScope(context), styleSheet: markdownStyle(context)),
-                    )
-                  : Container(
+              child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
                   color: queuedId != null ? Tokens.cell2.withValues(alpha: 0.55) : Tokens.cell2,
@@ -1178,7 +862,7 @@ class _UserBubble extends StatelessWidget {
                   borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20), bottomLeft: Radius.circular(20), bottomRight: Radius.circular(6)),
                 ),
                 child: LinkedText(cut == null ? text : text.substring(0, cut), scope: chatFileScope(context), style: TextStyle(fontSize: 16, height: 1.4, color: muted ? Tokens.label2 : Tokens.label)),
-                    ),
+              ),
             ),
           ),
           if (text.isNotEmpty) CopyButton(key: const Key('copy-user'), text: text),
@@ -1264,16 +948,7 @@ class _UserBubble extends StatelessWidget {
 }
 
 class _AssistantMessage extends StatelessWidget {
-  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking, this.mentioned = false, this.source, this.ticket, this.flat = false, this.grouped = false, this.actions});
-
-  /// In a channel with threads or reactions: React and Reply in thread on a long press.
-  final ChannelMessageActions? actions;
-
-  /// In a channel row of the Slack-style Team chat: the row has the name and time.
-  final bool flat;
-
-  /// A later message of a group in a channel: the mode shows only in the group's first row.
-  final bool grouped;
+  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking, this.mentioned = false, this.source, this.ticket});
 
   final MessageView message;
 
@@ -1309,26 +984,6 @@ class _AssistantMessage extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (actions?.react case final react?)
-              ListTile(
-                key: const Key('message-react'),
-                leading: const Icon(Icons.add_reaction_outlined),
-                title: const Text('React'),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  react();
-                },
-              ),
-            if (actions?.reply case final reply?)
-              ListTile(
-                key: const Key('message-reply-thread'),
-                leading: const Icon(Icons.subdirectory_arrow_right),
-                title: const Text('Reply in thread'),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  reply();
-                },
-              ),
             ListTile(
               leading: const Icon(Icons.copy),
               title: const Text('Copy'),
@@ -1384,15 +1039,15 @@ class _AssistantMessage extends StatelessWidget {
     final author = message.author?.trim();
     final role = group && author != null && author.isNotEmpty ? context.select<CompanyBloc, String?>((b) => employeeRole(b.state, author)) : null;
     final header = [
-      if (!flat && author != null && author.isNotEmpty) withRole(author, role),
+      if (author != null && author.isNotEmpty) withRole(author, role),
       // A group chat answer: the mode the employee answered in.
-      if (message.mode case final mode? when !grouped) '${mode.label} mode',
+      if (message.mode case final mode?) '${mode.label} mode',
       if (message.producedBy != null) message.producedBy!,
       if (version != null) 'version ${version!.$1}/${version!.$2}',
       if (mentioned) '@ you',
     ].join(' · ');
     return Padding(
-      padding: EdgeInsets.only(top: flat ? 2 : 18),
+      padding: const EdgeInsets.only(top: 18),
       child: GestureDetector(
         onLongPress: () => _actions(context),
         child: Column(
@@ -1578,7 +1233,6 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
   static String? _chatSlot(ChatBloc bloc) => switch (bloc) {
         ChatBloc(:final ticketId?) => 'ticket:$ticketId',
         ChatBloc(state: ChatState(:final conversationId?)) => 'conversation:$conversationId',
-        ChatBloc(:final channel?) => 'channel:$channel',
         ChatBloc(:final employeeId?) => 'employee:$employeeId',
         ChatBloc(:final projectId?) => 'project:$projectId',
         _ => null,
@@ -1810,13 +1464,8 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
     final link = context.watch<ConnectionBloc>().state;
     final readOnly = state.history || (link.isOnline && !link.can('chat'));
     final group = context.read<ChatBloc>().group;
-    // A channel of the Team chat: a hardware Enter sends, Shift+Enter is a new
-    // line (AUR-CHAT-001 §8 O-2); the on-screen Return stays a new line.
-    final channel = widget.config.channel != null && group;
     return CallbackShortcuts(
       bindings: {
-        if (channel) const SingleActivator(LogicalKeyboardKey.enter): _sendDefault,
-        if (channel) const SingleActivator(LogicalKeyboardKey.numpadEnter): _sendDefault,
         const SingleActivator(LogicalKeyboardKey.enter, meta: true): _sendDefault,
         const SingleActivator(LogicalKeyboardKey.enter, control: true): _sendDefault,
         const SingleActivator(LogicalKeyboardKey.enter, alt: true): _queue,
@@ -1860,7 +1509,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
             if (group && context.read<ConnectionBloc>().state.has(everyoneFeature))
               EveryoneAudienceLine(
                 text: _text,
-                channel: context.read<ChatBloc>().discussion ? state.conversationId : context.read<ChatBloc>().channel,
+                channel: state.conversationId,
                 load: (channel) => context.read<AureliusRepository>().discussionAudienceOf(channel: channel),
               ),
             if (state.images.isNotEmpty)
@@ -2466,11 +2115,7 @@ class TicketPill extends StatelessWidget {
 /// task opens it; the plan and the report that wait for a board member are a
 /// card with their action; a failed summary has Try again (MU2-12 AC4).
 class SystemLineView extends StatelessWidget {
-  const SystemLineView({super.key, required this.message, this.ticketId, this.taskProjectId, this.summarized = false, this.compact = false, this.openChannel});
-
-  /// In a channel of the Slack-style Team chat: a shape before the text and
-  /// the time after it, NEGATIVE for a failure (AUR-CHAT-001 §2).
-  final bool compact;
+  const SystemLineView({super.key, required this.message, this.ticketId, this.taskProjectId, this.summarized = false});
 
   final MessageView message;
 
@@ -2483,16 +2128,11 @@ class SystemLineView extends StatelessWidget {
   /// A later line says the summary went to memory (or failed again): Try again is gone.
   final bool summarized;
 
-  /// See [ChannelChatOptions.openChannel].
-  final bool Function(String conversationId)? openChannel;
-
   @override
   Widget build(BuildContext context) {
     final line = message.system!;
     final plain = message.text.trim().isEmpty ? '…' : message.text.trim();
-    final text = compact ? compactSystemLine(message) : plain;
-    final negative = compact && systemLineShape(line, plain).negative;
-    final color = negative ? Tokens.negative : null;
+    final text = plain;
     final ticket = line.ticketId ?? ticketId;
     final project = taskProjectId;
     return switch (line.kind) {
@@ -2513,25 +2153,15 @@ class SystemLineView extends StatelessWidget {
       SystemLineKind.summaryFailed => _Line(
           key: ValueKey('system-summary-failed-${message.id}'),
           message: message,
-          text: compact ? text : '⚠ $text',
+          text: '⚠ $text',
           color: Tokens.warning,
           action: summarized || ticket == null ? null : ('Try again', () => retrySummary(context, ticket)),
         ),
-      // A line in General that links to a ticket's channel (opened, closed): the channel opens.
-      _ when compact && line.channelId != null && openChannel != null => _Line(
-          message: message,
-          text: text,
-          onTap: () {
-            if (!openChannel!(line.channelId!) && line.ticketId != null) context.push('/ticket/${line.ticketId}');
-          },
-        ),
       SystemLineKind.ticketCreated when line.ticketId != null => _Line(message: message, text: text, onTap: () => context.push('/ticket/${line.ticketId}')),
       SystemLineKind.reported when line.taskId != null && project != null =>
-        _Line(message: message, text: compact ? '$text · Open task' : '$text · Report ›', color: color, onTap: () => context.push('/project/$project/task/${line.taskId}')),
+        _Line(message: message, text: '$text · Report ›', onTap: () => context.push('/project/$project/task/${line.taskId}')),
       SystemLineKind.delegated when line.taskId != null && project != null => _Line(message: message, text: text, onTap: () => context.push('/project/$project/task/${line.taskId}')),
-      // Without a way to the channel: the ticket opens.
-      _ when compact && line.channelId != null && line.ticketId != null => _Line(message: message, text: text, onTap: () => context.push('/ticket/${line.ticketId}')),
-      _ => _Line(message: message, text: text, color: color),
+      _ => _Line(message: message, text: text),
     };
   }
 }

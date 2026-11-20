@@ -10,8 +10,6 @@
 //!   it, the run that delegated it or a schedule's), else its parent's.
 //! - A run the Team chat or a discussion woke: the login of the board member of
 //!   hop 0, carried in the marking (`GroupRun::login_user`), also at hop 2–3.
-//! - A run in a board member's lasting chat with an employee: that board member,
-//!   also for an update nobody wrote (a ticket that reached Review).
 //! - A chat run (an employee, the project assistant): the board member who wrote
 //!   the message; else the one whose command queued it (a decision); a report of
 //!   a delegated task: that task's login (B5).
@@ -80,9 +78,6 @@ pub(crate) fn of_company(conn: &Connection) -> Result<Option<UserId>, StorageErr
 pub(crate) fn for_run(conn: &Connection, conversation: ConversationId, reply_to: MessageId, group: Option<UserId>, meta: &serde_json::Value) -> Result<Option<UserId>, StorageError> {
     if let Some(login) = group {
         return Ok(Some(login));
-    }
-    if let Some(chat) = aurelius_storage::employee_chats::of_conversation(conn, conversation)? {
-        return Ok(Some(chat.user));
     }
     // Set by the caller (a scheduled message: the login it was planned with, null when none).
     if let Some(login) = meta.get("login_user") {

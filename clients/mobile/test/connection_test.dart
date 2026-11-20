@@ -98,12 +98,11 @@ void main() {
   test('asks for activity changes and merges them into whole lists (activity_preview)', () async {
     connection.start();
     await until(() => connection.state.isOnline);
-    // team_channels: only then do the live events of project channels come (MU2-08, impactanalyse §2);
     // server_name: only then does server.renamed come (SN-02 AC3);
     // ticket_channels: only then does channel.list list ticket channels (AUR-CHAT-001);
     // chat_threads / chat_reactions: only then do thread streams and message.reacted come (AUR-CHAT-002).
     // ticket_follow: only then does ticket.follow_changed come (AUR-FA-M1).
-    expect(daemon.hello?['accepts'], ['activity_changes', 'team_channels', 'server_name', 'ticket_channels', 'chat_threads', 'chat_reactions', 'ticket_follow', 'message_edits']);
+    expect(daemon.hello?['accepts'], ['activity_changes', 'server_name', 'ticket_channels', 'chat_threads', 'chat_reactions', 'ticket_follow', 'message_edits']);
     final got = <List<String>?>[];
     final sub = connection.appends.listen((a) => got.add(a.activity?.map((c) => '${c.callId}:${c.ok}').toList()));
     addTearDown(sub.cancel);

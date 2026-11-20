@@ -200,8 +200,7 @@ fn incompatible(server: Option<u16>, message: Option<&str>) -> ClientError {
 impl Client {
     /// Connect to the server in `target` and handshake. `accepts`: the client
     /// features it names in its hello besides `activity_changes`
-    /// (`aurelius_protocol::client_feature`, e.g. `TEAM_CHANNELS` for the live
-    /// messages of the projects' channels).
+    /// (`aurelius_protocol::client_feature`, e.g. `TICKET_CHANNELS`).
     pub async fn open(
         target: &Target,
         client_name: &str,
@@ -616,12 +615,12 @@ impl Client {
         self.read(Method::ActivityLogList { project_id: None, employee_id, thread_key: None, ticket_number: None, run_id, category: None, before_seq: None, limit: None }, body!(ActivityLog)).await
     }
 
-    /// The company's group chat (Team chat): the user and every employee.
+    /// The company's group chat (Team chat): gone, the server answers `not_found`.
     pub async fn group_chat(&self) -> Result<MessagesSnapshot, ClientError> {
         self.read(Method::GroupChatGet { channel: None }, body!(Messages)).await
     }
 
-    /// One channel of the Team chat (feature `team_channels`); reading it marks it read.
+    /// One channel, a ticket's discussion; reading it marks it read.
     pub async fn channel_messages(&self, channel: aurelius_domain::ConversationId) -> Result<MessagesSnapshot, ClientError> {
         self.read(Method::GroupChatGet { channel: Some(channel) }, body!(Messages)).await
     }
@@ -651,7 +650,8 @@ impl Client {
         self.read(Method::TicketFollowers { ticket_id }, body!(TicketFollowers)).await
     }
 
-    /// The Team chat's channels (feature `team_channels`): General first, then one per project.
+    /// The channels: a ticket's, for a connection that accepts `ticket_channels` (the Team chat's General
+    /// and project channels are gone).
     pub async fn channels(&self) -> Result<aurelius_domain::views::ChannelsSnapshot, ClientError> {
         self.read(Method::ChannelList, body!(Channels)).await
     }

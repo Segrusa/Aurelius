@@ -107,10 +107,10 @@ pub(crate) fn schedule_message(tx: &Tx<'_>, run: RunId, delay: &str, content: &s
         (None, Some(conversation)) => is_own_chat(tx, conversation)?.then_some(conversation),
     };
     if thread.is_none() && own_chat.is_none() {
-        return refuse("A scheduled message comes back in a ticket's discussion, a channel of the Team chat or your own chat, and this run is in none of those.".into());
+        return refuse("A scheduled message comes back in a ticket's discussion or your own chat, and this run is in none of those.".into());
     }
     if own_chat.is_some() && target != me {
-        return refuse("In a chat you can only schedule a message for yourself. For a colleague, do it from a ticket or a channel.".into());
+        return refuse("In a chat you can only schedule a message for yourself. For a colleague, do it from a ticket.".into());
     }
     if let Some(d) = &thread
         && let Some(why) = d.read_only()

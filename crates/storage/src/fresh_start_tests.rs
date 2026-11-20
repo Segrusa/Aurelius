@@ -143,8 +143,8 @@ fn a_dry_run_counts_and_writes_nothing_in_the_source() {
     for t in ["tasks", "messages", "runs", "users", "tickets"] {
         assert_eq!(report.new_database[t], 0, "{t}");
     }
-    // The new conversations are the empty Team chat and each employee's main chat.
-    assert_eq!(report.new_database["conversations"], 3);
+    // The new conversations are each employee's main chat; there is no Team chat any more.
+    assert_eq!(report.new_database["conversations"], 2);
     for t in ["tasks", "events", "messages", "conversations", "departments", "function_calls", "command_receipts", "heartbeat_wakes", "file_grants", "message_sources", "run_activity", "task_dependencies", "task_variants", "task_variant_sets"] {
         assert!(report.not_copied.contains_key(t), "{t} is reported as not copied");
     }
@@ -248,11 +248,11 @@ fn the_fresh_start_sets_the_old_workspace_aside_and_imports_it() {
             assert_eq!((paused, last_task), (1, None));
             assert_eq!(one::<i64>(c, "SELECT enabled FROM agent_functions"), 0);
 
-            // Work and history stay behind; the Team chat is new and empty.
+            // Work and history stay behind; there is no Team chat.
             for table in ["tasks", "runs", "messages", "approvals", "artifacts", "attachments", "shares", "usage_records", "jobs", "notifications", "proposals", "command_receipts", "function_calls", "heartbeat_wakes", "file_grants", "message_sources", "run_activity", "run_traces", "task_dependencies", "task_variant_sets", "task_variants", "conversation_sessions", "app_key_threads", "webhook_outbox"] {
                 assert_eq!(one::<i64>(c, &format!("SELECT COUNT(*) FROM {table}")), 0, "{table}");
             }
-            assert_eq!(one::<i64>(c, "SELECT COUNT(*) FROM conversations WHERE kind = 'group'"), 1);
+            assert_eq!(one::<i64>(c, "SELECT COUNT(*) FROM conversations WHERE kind = 'group'"), 0);
             assert_eq!(one::<i64>(c, "SELECT COUNT(*) FROM events"), 1, "only the import's audit event");
             assert_eq!(one::<i64>(c, "SELECT COUNT(*) FROM pragma_foreign_key_check"), 0);
             Ok(())

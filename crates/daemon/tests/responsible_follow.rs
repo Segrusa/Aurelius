@@ -7,7 +7,6 @@ mod common;
 use common::*;
 
 use aurelius_client::{Client, ClientError};
-use aurelius_domain::group_chat::SendGroupMessage;
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::ticket::{
     ArchiveTicket, ColumnKind, CreateTicket, FollowTicket, PostTicketMessage, SetTicketResponsible,
@@ -42,15 +41,7 @@ async fn project(client: &Client) -> (ProjectId, ConversationId) {
     let CommandResult::ProjectCreated { project_id, .. } = created.result else {
         panic!("{:?}", created.result)
     };
-    let channel = client
-        .channels()
-        .await
-        .unwrap()
-        .channels
-        .into_iter()
-        .find(|c| c.project_id == Some(project_id))
-        .expect("its channel")
-        .conversation_id;
+    let channel = talk_channel(client, project_id).await;
     (project_id, channel)
 }
 
@@ -930,30 +921,12 @@ async fn only_a_new_name_in_the_description_makes_someone_follow() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_mention_in_a_channel_or_of_a_disabled_member_makes_nobody_follow() {
+async fn a_mention_of_a_disabled_member_makes_nobody_follow() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let (alex, _, bea, bea_id) = two_members(dir.path()).await;
-    let (project_id, channel) = project(&alex).await;
+    let (project_id, _) = project(&alex).await;
     let (ticket_id, _) = ticket(&alex, project_id).await;
-
-    let send = SendGroupMessage {
-        confirm_secret: false,
-        text: "@bea see the ticket".into(),
-        images: vec![],
-        files: vec![],
-        channel: Some(channel),
-        thread_parent: None,
-    };
-    run(&alex, Command::SendGroupMessage(send)).await.unwrap();
-    assert_eq!(
-        count(
-            dir.path(),
-            "SELECT COUNT(*) FROM ticket_followers WHERE user_id = ?1",
-            &bea_id.to_string()
-        ),
-        0
-    );
 
     drop(bea);
     alex.disable_user(bea_id).await.unwrap();
@@ -1133,8 +1106,8 @@ async fn a_client_without_accepts_never_gets_a_follow_event_live_or_in_the_repla
             .iter()
             .filter(|k| **k == EventKind::TicketFollowChanged)
             .count(),
-        1,
-        "the creator: {replayed:?}"
+        2,
+        "the creators of the two tickets (the channel's and this one): {replayed:?}"
     );
 
     // Live: the older client gets the handover it knows, not the follow that came with it.

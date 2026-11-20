@@ -3,17 +3,12 @@ import 'package:intl/intl.dart';
 import '../core/net/protocol.dart';
 import 'views.dart';
 
-// Phase 2 (docs/product/fase-2): a ticket's discussion, the Team chat's
-// channels and a ticket made from a chat message. What the screens decide
-// from the wire, kept apart so it is tested without widgets.
+// Phase 2 (docs/product/fase-2): a ticket's discussion and a ticket made from
+// a chat message. What the screens decide from the wire, kept apart so it is
+// tested without widgets.
 
 /// The server has a discussion per ticket (`ticket.post`, `MessageView.system`).
 const ticketDiscussionFeature = 'ticket_discussion';
-
-/// The server has channels in the Team chat (`channel.list`, `group_chat.get {channel}`).
-/// This app also names it in `HelloParams.accepts`: only then do the live
-/// events of project channels come.
-const teamChannelsFeature = 'team_channels';
 
 /// Why nobody can write in [ticket]'s discussion any more (B7): Done or
 /// archived, as the server refuses a post there; null while it is open.
@@ -203,38 +198,3 @@ String? authorOf(MessageView m) {
   final author = m.author?.trim();
   return author == null || author.isEmpty ? null : author;
 }
-
-/// The Team tab's badge (B8, P-24): the mentions of a board member over
-/// every channel; [unread] adds a dot when something is unread and nobody is named.
-({int mentions, bool unread}) teamBadge(List<ChannelView> channels) => (
-      mentions: channels.fold(0, (n, c) => n + c.mentions),
-      unread: channels.any((c) => c.unread > 0),
-    );
-
-/// The channels in the sheet's groups (ui-ontwerp §3): General first, then
-/// the active projects by name, then the archived ones (read-only).
-({List<ChannelView> general, List<ChannelView> projects, List<ChannelView> archived}) channelGroups(List<ChannelView> channels) {
-  int byName(ChannelView a, ChannelView b) => a.name.toLowerCase().compareTo(b.name.toLowerCase());
-  return (
-    general: [for (final c in channels) if (c.projectId == null) c],
-    projects: [for (final c in channels) if (c.projectId != null && !c.archived) c]..sort(byName),
-    archived: [for (final c in channels) if (c.projectId != null && c.archived) c]..sort(byName),
-  );
-}
-
-/// "#general", "#atlas", "#42-login-per-board-member": a channel as the picker
-/// shows it. A ticket's name comes from the server (AUR-CHAT-001 §8 O-1).
-String channelLabel(ChannelView c) {
-  if (c.kind == ChannelKind.ticket || c.ticketId != null) return c.name.startsWith('#') ? c.name : '#${c.name}';
-  return '#${c.projectId == null ? 'general' : c.name.toLowerCase().replaceAll(RegExp(r'\s+'), '-')}';
-}
-
-/// What a screen reader says for a channel (ui-ontwerp §5): "atlas, 3 unread,
-/// 1 mention"; a ticket's: "Ticket 42, 42-login-per-board-member, 5 unread".
-String channelSemantics(ChannelView c) => [
-      if (c.ticketNumber != null && (c.kind == ChannelKind.ticket || c.ticketId != null)) 'Ticket ${c.ticketNumber}',
-      channelLabel(c).substring(1),
-      if (c.unread > 0) '${c.unread} unread',
-      if (c.mentions > 0) '${c.mentions} mention${c.mentions == 1 ? '' : 's'}',
-      if (c.archived) 'read-only',
-    ].join(', ');

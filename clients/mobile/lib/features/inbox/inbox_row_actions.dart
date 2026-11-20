@@ -20,7 +20,11 @@ Future<void> openInboxRow(BuildContext context, NotificationView row) async {
   // A reply in a thread has its own place; only the server knows it.
   if (message != null && repository.linkState.has(messageLocateFeature)) return openMessageAt(context, repository, message);
   final place = inboxPlace(reason: row.reason, ticketId: row.ticketId, conversationId: row.conversationId, messageId: message);
-  if (place != null) context.push(place);
+  if (place == inboxRoute) {
+    context.go(place!);
+  } else if (place != null) {
+    context.push(place);
+  }
 }
 
 /// The `+n` of a ticket's row: its Activity (freeze §4). It opens the row as well.

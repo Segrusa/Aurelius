@@ -28,7 +28,8 @@ fn a_schema_42_store_keeps_its_conversations_and_takes_sessions() {
     assert!(conn.prepare("SELECT conversation_id FROM work_sessions").is_err(), "new in 43");
     drop(conn);
 
-    let store = Store::open(dir.path()).unwrap();
+    // Up to 44: migration 45 deletes a board member's chat with an employee.
+    let store = Store::open_until(dir.path(), 44).unwrap();
     let kept: (String, i64, String, i64) = store
         .read(|c| Ok(c.query_row("SELECT kind, version, agent_mode, created_at_ms FROM conversations WHERE id = ?1", [CHAT], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?))
         .unwrap();

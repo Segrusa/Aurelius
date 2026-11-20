@@ -37,14 +37,17 @@ export function LinkFollower({ children }: { children: ReactNode }) {
       try {
         const body = await connection.call("message.locate", { message_id: link.id });
         const place = expectBody(body, "message_location").value;
-        void navigate({
-          to: "/chat",
-          search: {
-            channel: place.conversation_id,
-            message: place.message_id,
-            ...(place.thread_root ? { thread: place.thread_root } : {}),
-          },
-        });
+        // Only a ticket's discussion is left to open; a message of a former channel is not found.
+        if (!place.ticket_id) {
+          toast("This message was not found.");
+          return;
+        }
+        void navigate(
+          ticketPlace(
+            { id: place.ticket_id, number: place.ticket_number },
+            { message: place.message_id, ...(place.thread_root ? { thread: place.thread_root } : {}) },
+          ),
+        );
       } catch (error) {
         toast(error instanceof Error ? error.message : "This message was not found.");
       }

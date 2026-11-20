@@ -26,7 +26,7 @@ async fn run(client: &Client, command: Command) -> CommandResult {
 
 async fn project(client: &Client, name: &str) -> (ProjectId, ConversationId) {
     let CommandResult::ProjectCreated { project_id, .. } = run(client, Command::CreateProject(CreateProject { name: name.into(), description: None, folder: None })).await else { panic!() };
-    let channel = client.channels().await.unwrap().channels.into_iter().find(|c| c.project_id == Some(project_id)).expect("its channel").conversation_id;
+    let channel = talk_channel(client, project_id).await;
     (project_id, channel)
 }
 
@@ -153,20 +153,19 @@ async fn the_reads_of_a_workspace_show_only_that_project() {
     assert!(activity_threads(&alex, Some(atlas)).await.contains(&of_ticket));
     assert!(!activity_threads(&alex, Some(zephyr)).await.contains(&of_ticket));
 
-    // Notifications: tickets and channels, and the general channel belongs to no project.
+    // Notifications: tickets, and their channels.
     post(&alex, in_atlas, "@bea look").await;
     post(&alex, in_zephyr, "@bea look").await;
     say(&alex, Some(atlas_channel), "@bea here").await;
     say(&alex, Some(zephyr_channel), "@bea there").await;
-    say(&alex, None, "@bea everyone").await;
     let everything = notifications(&bea, None).await;
-    // Two tickets, three channels, and the approval of the run: no ticket on it, it belongs through its task.
-    assert_eq!(everything.len(), 6, "{everything:?}");
+    // Two tickets, two more channels, and the approval of the run: no ticket on it, it belongs through its task.
+    assert_eq!(everything.len(), 5, "{everything:?}");
     let only_atlas = notifications(&bea, Some(atlas)).await;
     assert_eq!(only_atlas.len(), 3, "{only_atlas:?}");
     assert_eq!(notifications(&bea, Some(zephyr)).await.len(), 2);
     assert!(only_atlas.iter().any(|(t, _)| *t == Some(in_atlas)));
-    assert!(only_atlas.iter().any(|(t, c)| t.is_none() && *c == Some(atlas_channel)));
+    assert!(only_atlas.iter().any(|(_, c)| *c == Some(atlas_channel)));
     assert!(!only_atlas.iter().any(|(t, c)| *t == Some(in_zephyr) || *c == Some(zephyr_channel)));
     assert!(notifications(&bea, Some(ProjectId::new())).await.is_empty(), "an unknown project has nothing, it is no error");
 

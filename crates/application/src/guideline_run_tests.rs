@@ -128,8 +128,25 @@ fn the_block_comes_after_the_identity_with_the_set_of_the_run() {
     assert!(system.find("## Guidelines").unwrap() < system.find("## This conversation is about your task").unwrap());
     assert!(system.find("</guideline>\n\n").is_some(), "a blank line after the block: {system}");
 
-    // Woken in the project's channel: the project is the channel's.
-    let channel = s.service.store().read(|c| aurelius_storage::discussions::channel(c, Some(s.project))).unwrap().unwrap();
+    // Woken in a ticket's discussion: the project is the ticket's.
+    let CommandResult::TicketCreated { ticket_id, .. } = exec(&s, Command::CreateTicket(aurelius_domain::ticket::CreateTicket {
+        responsible_user_id: None,
+        confirm_secret: false,
+        project_id: s.project,
+        title: "Talk".into(),
+        description: None,
+        priority: Default::default(),
+        labels: vec![],
+        deadline_ms: None,
+        owner_employee_id: None,
+        run: Default::default(),
+        files: vec![],
+        start: false,
+        from_message: None,
+        from_idea: None,
+        kind: None,
+    })) else { panic!() };
+    let channel = s.service.store().read(move |c| aurelius_storage::discussions::ticket_conversation(c, ticket_id)).unwrap().unwrap();
     let CommandResult::GroupMessageSent { run_ids, .. } = exec(&s, Command::SendGroupMessage(SendGroupMessage { confirm_secret: false, text: "@Ann how is it going?".into(), images: vec![], files: vec![], channel: Some(channel), thread_parent: None })) else { panic!() };
     let woken = plan(&s, run_ids[0]);
     assert_eq!(titles_in(woken.system.as_deref().unwrap()), vec!["Own rule", "Project rule"]);

@@ -6,7 +6,7 @@ import type { ProjectSummary } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAllTasks, useChannels, useProjects, useTicket } from "../data";
+import { useAllTasks, useProjects, useTicket } from "../data";
 import { useAction } from "../keys/provider";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
@@ -124,7 +124,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-/** Opening a ticket, task or channel of another project moves the workspace there, so nothing shows empty. */
+/** Opening a ticket or task of another project moves the workspace there, so nothing shows empty. */
 export function useOpenedWorkspace(): void {
   const { id, available, locked, choose } = useWorkspace();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -133,7 +133,6 @@ export function useOpenedWorkspace(): void {
   const key = target ? `${target.kind}:${target.id}` : null;
   const ticket = useTicket(target?.kind === "ticket" ? target.id : null);
   const tasks = useAllTasks();
-  const channels = useChannels();
   const projects = useProjects();
   // Known: a project, or null for what has none. Undefined: not known (yet), so nothing moves.
   let owner: string | null | undefined;
@@ -142,10 +141,6 @@ export function useOpenedWorkspace(): void {
   if (target?.kind === "task") {
     const task = tasks.data?.find((t) => t.id === target.id);
     owner = task ? task.project_id : undefined;
-  }
-  if (target?.kind === "channel") {
-    const channel = channels.data?.find((c) => c.conversation_id === target.id);
-    owner = channel ? (channel.project_id ?? null) : undefined;
   }
   const handled = useRef<string | null>(null);
   useEffect(() => {

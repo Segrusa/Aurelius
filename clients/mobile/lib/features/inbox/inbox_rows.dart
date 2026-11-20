@@ -42,8 +42,12 @@ extension PersonalRow on NotificationView {
       ].join(', ');
 }
 
+/// The Inbox tab: where a link to a chat that no longer exists lands.
+const inboxRoute = '/inbox';
+
 /// Where a row or a push of the personal Inbox opens: the ticket on the right
-/// place, or the channel; null when it names neither.
+/// place; a conversation that is no ticket's (chat is gone) opens the Inbox;
+/// null when it names neither.
 String? inboxPlace({String? reason, String? ticketId, String? conversationId, String? messageId}) {
   if (ticketId != null) {
     return switch (reason) {
@@ -53,7 +57,7 @@ String? inboxPlace({String? reason, String? ticketId, String? conversationId, St
       _ => '/ticket/$ticketId',
     };
   }
-  if (conversationId != null) return messageId == null ? '/channel/$conversationId' : '/channel/$conversationId?message=$messageId';
+  if (conversationId != null) return inboxRoute;
   return null;
 }
 

@@ -38,7 +38,7 @@ pub struct Vault {
     owner: String,
     /// The database, to fill the redactor when the key becomes readable.
     db: Arc<aurelius_storage::Store>,
-    /// The items whose env name a run may no longer have that the Team chat
+    /// The items whose env name a run may no longer have that the Inbox
     /// was told about, with that name: once each, not at every run (SEC1 m4).
     told_refused: Mutex<std::collections::HashSet<(String, String)>>,
 }
@@ -668,10 +668,9 @@ pub fn archive(shared: &Shared, key: CommandId, item_id: VaultItemId, by: BoardA
         .map_err(storage)?
 }
 
-/// `vault.key_export` once the password was checked again: a line in the
-/// Team chat every board member sees (E9), an audit row `key_export`, then
-/// the key's line. No line in the Team chat (none, or it could not be
-/// written): no key (SEC1 m4). The answer is never logged.
+/// `vault.key_export` once the password was checked again: a notification in the
+/// Inbox of every board member (E9), an audit row `key_export`, then the key's line.
+/// No notification (it could not be written): no key (SEC1 m4). The answer is never logged.
 pub fn key_export(shared: &Shared, by: &BoardActor) -> Result<(aurelius_domain::vault::VaultKeyExport, Vec<EventNotice>), ProtocolError> {
     let loaded = shared.vault.loaded().map_err(unavailable)?;
     let Some(loaded) = loaded else {
@@ -685,13 +684,13 @@ pub fn key_export(shared: &Shared, by: &BoardActor) -> Result<(aurelius_domain::
     let username = shared.store().read(|c| Ok(aurelius_storage::users::get(c, &user)?.map(|u| u.username).unwrap_or_default())).map_err(storage)?;
     let via = by.via.as_deref().map(|v| format!(" ({v})")).unwrap_or_default();
     let text = format!("{username} exported the vault key{via}. Whoever has it can open every vault value and every backup of this server.");
-    let notices = match shared.service.team_notice(&text) {
+    let notices = match shared.service.board_notice(&text) {
         Ok(notices) if !notices.is_empty() => notices,
         outcome => {
             if let Err(e) = outcome {
-                tracing::warn!(error = %e.message, "the key export notice could not be posted");
+                tracing::warn!(error = %e.message, "the key export notice could not be written");
             }
-            return Err(ProtocolError::new(ErrorCode::Validation, "The key is only exported with a line in the Team chat every board member sees, and that line could not be posted."));
+            return Err(ProtocolError::new(ErrorCode::Validation, "The key is only exported with a notification every board member gets, and that notification could not be written."));
         }
     };
     let line = key::export_line(&loaded.master);
@@ -802,7 +801,7 @@ pub fn deliver(shared: &Shared, run: aurelius_domain::RunId) -> Option<Delivery>
     let mut notices = Vec::new();
     if !refused.is_empty() {
         let text = format!("A run did not get {} from the vault: Aurelius no longer lets runs have these names. Rename the item(s).", refused.join(", "));
-        notices.extend(shared.service.team_notice(&text).unwrap_or_default());
+        notices.extend(shared.service.board_notice(&text).unwrap_or_default());
     }
     if delivered.is_empty() {
         return (!notices.is_empty()).then(|| Delivery { env: Default::default(), names: Vec::new(), notices });

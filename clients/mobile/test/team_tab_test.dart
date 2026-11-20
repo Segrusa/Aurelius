@@ -14,7 +14,7 @@ import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
 import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/project/task_page.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
-import 'package:aurelius_mobile/features/team/mentions.dart';
+import 'package:aurelius_mobile/features/chat/mentions.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -64,14 +64,13 @@ void main() {
     when(() => repo.appends).thenAnswer((_) => const Stream.empty());
   });
 
-  // Ticket #71 took the Team tab away; General opens from a link, as this group chat view.
-  group('a group chat (General)', () {
+  group('a ticket discussion', () {
     // Orion answers the group in its own chat 'own-orion', in run r-orion.
     final orion = employeeOf(id: 'o', name: 'Orion', role: 'Project Manager', conversationId: 'own-orion', agents: const [AgentView(kind: 'conversation', name: 'Conversation', detail: '', sinceMs: 1, steps: 0, runId: 'r-orion', conversationId: 'own-orion')]);
     final atlas = employeeOf(id: 'a', name: 'Atlas', conversationId: 'own-atlas');
 
     Future<void> pump(WidgetTester tester, List<MessageView> messages, {List<ApprovalView> approvals = const []}) async {
-      when(() => repo.groupChat()).thenAnswer((_) async => snapshotOf('team', messages: messages));
+      when(() => repo.messages('team')).thenAnswer((_) async => snapshotOf('team', messages: messages));
       when(() => repo.loadChanges).thenAnswer((_) => const Stream.empty());
       when(() => repo.load()).thenAnswer((_) async => loadOf());
       when(() => repo.powerChanges).thenAnswer((_) => const Stream.empty());
@@ -94,7 +93,7 @@ void main() {
           ],
           child: MaterialApp(
             theme: aureliusTheme(),
-            home: Scaffold(body: BlocProvider(create: (_) => ChatBloc.group(repo, runAuthor: (runId) => runAuthorOf(company.state, runId)), child: const ChatView())),
+            home: Scaffold(body: BlocProvider(create: (_) => ChatBloc.discussion(repo, ticketId: 'k1', conversationId: 'team', runAuthor: (runId) => runAuthorOf(company.state, runId)), child: const ChatView())),
           ),
         ),
       ));
@@ -235,7 +234,8 @@ void main() {
       expect(shellTabs.map((t) => t.label), ['Sessions', 'Inbox', 'Board', 'Profile']);
       expect(router.config.routeInformationProvider.value.uri.path, '/sessions', reason: 'the app opens on Sessions');
       final paths = pathsOf(router.config.configuration.routes);
-      expect(paths, containsAll(['/sessions/new', '/session/:cid', '/board/new', '/ticket/:tid', '/ticket/:tid/plan', '/settings/board', '/channel/:cid']));
+      expect(paths, containsAll(['/sessions/new', '/session/:cid', '/board/new', '/ticket/:tid', '/ticket/:tid/plan', '/settings/board']));
+      expect(paths, isNot(contains('/channel/:cid')), reason: 'chat is gone: no channel screen');
       expect(first.length, shellTabs.length, reason: 'one tab per branch');
     });
 

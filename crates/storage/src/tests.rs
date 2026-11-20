@@ -1166,8 +1166,8 @@ fn migration_17_adds_one_group_chat_and_keeps_every_conversation_and_message() {
     assert_eq!(count(&store, "SELECT COUNT(*) FROM conversations"), conversations_before + 1);
     assert_eq!(count(&store, "SELECT COUNT(*) FROM messages"), messages_before);
     assert_eq!(count(&store, "SELECT COUNT(*) FROM conversations WHERE kind = 'group' AND project_id IS NULL AND employee_id IS NULL"), 1);
-    let group = store.read(conversations::group_conversation).unwrap().expect("the group chat exists");
-    assert!(group.to_string().len() == 36);
+    let group: String = store.read(|c| Ok(c.query_row("SELECT id FROM conversations WHERE kind = 'group' AND project_id IS NULL", [], |r| r.get(0))?)).unwrap();
+    assert!(group.len() == 36);
     // The employee keeps its main chat, with its settings (a full load needs schema 36).
     let main: String = store.read(move |c| Ok(c.query_row("SELECT id FROM conversations WHERE employee_id = ?1 AND kind = 'employee' ORDER BY created_at_ms, id LIMIT 1", [employee.to_string()], |r| r.get(0))?)).unwrap();
     assert_eq!(main, chat.to_string());
@@ -1217,22 +1217,13 @@ fn a_deleted_task_conversation_leaves_the_task_but_not_its_conversation_also_aft
 }
 
 #[test]
-fn the_group_chat_exists_in_a_fresh_database_and_comes_back_when_its_row_is_missing() {
+fn a_fresh_database_has_no_group_chat_and_none_is_made_when_it_opens() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
-    let fresh = store.read(conversations::group_conversation).unwrap().expect("migration 17 makes the group chat");
     let groups = |store: &Store| store.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'group'", [], |r| r.get::<_, i64>(0))?)).unwrap();
-    // Opening again keeps the one there is.
+    // Migration 17 made one and migration 45 took it away with the Team chat.
+    assert_eq!(groups(&store), 0);
     drop(store);
     let store = Store::open(dir.path()).unwrap();
-    assert_eq!((store.read(conversations::group_conversation).unwrap(), groups(&store)), (Some(fresh), 1));
-
-    // Its row gone (a database edited or restored by hand): the next open makes it again.
-    store.write(|tx| Ok(tx.execute("DELETE FROM conversations WHERE kind = 'group'", [])?)).unwrap();
-    assert_eq!(store.read(conversations::group_conversation).unwrap(), None);
-    drop(store);
-    let store = Store::open(dir.path()).unwrap();
-    let again = store.read(conversations::group_conversation).unwrap().expect("made again on open");
-    assert_ne!(again, fresh);
-    assert_eq!(groups(&store), 1);
+    assert_eq!(groups(&store), 0, "opening again makes none");
 }

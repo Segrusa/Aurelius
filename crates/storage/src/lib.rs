@@ -19,7 +19,6 @@ pub mod threads;
 pub mod message_edits;
 pub mod conversation_sessions;
 pub mod employees;
-pub mod employee_chats;
 pub mod work_sessions;
 pub mod employee_profiles;
 pub mod activity_log;
@@ -139,9 +138,6 @@ impl Store {
         let mut write_conn = Connection::open(&db_path)?;
         configure(&write_conn)?;
         migrate::run_until(&mut write_conn, Some(&blobs), until)?;
-        if until >= conversations::GROUP_CHAT_SCHEMA && conversations::ensure_group_conversation(&write_conn)? {
-            tracing::warn!("the group chat was missing; made it again");
-        }
 
         let readers = (0..READERS)
             .map(|_| {
@@ -263,6 +259,8 @@ mod schema37_tests;
 mod schema43_tests;
 #[cfg(test)]
 mod schema44_tests;
+#[cfg(test)]
+mod schema45_tests;
 #[cfg(test)]
 mod schema38_tests;
 #[cfg(test)]

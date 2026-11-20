@@ -1,13 +1,7 @@
 // What a workspace is, without a screen: which project is current, what belongs to it, and where a
 // link takes it. A workspace is a project; null is All projects, where everything shows as it always did.
 
-import type {
-  ChannelView,
-  EmployeeSummary,
-  GuidelineProposalView,
-  GuidelineView,
-  ProjectSummary,
-} from "@aurelius/protocol";
+import type { EmployeeSummary, GuidelineProposalView, GuidelineView, ProjectSummary } from "@aurelius/protocol";
 
 export type Workspace = string | null;
 
@@ -35,12 +29,6 @@ export function inWorkspace(workspace: Workspace, projectId: string | null | und
 
 export function narrow<T extends { project_id?: string | null }>(items: T[], workspace: Workspace): T[] {
   return workspace === null ? items : items.filter((item) => item.project_id === workspace);
-}
-
-/** The channel a workspace opens on: the project's own. The general channel only under All projects. */
-export function homeChannel(channels: ChannelView[], workspace: Workspace): ChannelView | null {
-  if (workspace === null) return channels.find((c) => (c.kind ?? "general") === "general") ?? null;
-  return channels.find((c) => c.project_id === workspace && !c.ticket_id && !c.archived) ?? null;
 }
 
 /** A proposed guideline counts for the workspace it suggests a link to. */
@@ -77,7 +65,7 @@ export function guidelinesIn<T extends Pick<GuidelineView, "links">>(
 }
 
 /** What a location points at, when it can only show in one project. */
-export type OpenTarget = { kind: "ticket" | "task" | "channel"; id: string } | { kind: "project"; id: string };
+export type OpenTarget = { kind: "ticket" | "task"; id: string } | { kind: "project"; id: string };
 
 export function targetOf(pathname: string, search: Record<string, unknown>): OpenTarget | null {
   const text = (key: string) =>
@@ -88,10 +76,6 @@ export function targetOf(pathname: string, search: Record<string, unknown>): Ope
   }
   const task = /^\/tasks\/([^/]+)$/.exec(pathname)?.[1];
   if (task) return { kind: "task", id: task };
-  if (pathname === "/chat") {
-    const id = text("channel");
-    return id ? { kind: "channel", id } : null;
-  }
   if (pathname === "/knowledge/memory") {
     const id = text("project");
     return id ? { kind: "project", id } : null;
@@ -110,7 +94,7 @@ export function workspaceAfterOpening(current: Workspace, owner: string | null, 
 
 /** Where to go when the workspace changes under a screen that shows one thing of the old one. */
 export function pathAfterSwitch(pathname: string, next: Workspace): string | null {
-  if (pathname === "/board" || pathname === "/chat") return pathname;
+  if (pathname === "/board") return pathname;
   if (/^\/tasks\/[^/]+$/.test(pathname)) return "/tasks";
   if (/^\/ticket\/[^/]+$/.test(pathname)) return "/board";
   if (/^\/projects\/[^/]+$/.test(pathname)) return next === null ? "/projects" : `/projects/${next}`;

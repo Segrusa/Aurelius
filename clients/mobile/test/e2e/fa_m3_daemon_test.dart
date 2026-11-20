@@ -20,7 +20,6 @@ import 'package:aurelius_mobile/core/net/gateway_api.dart';
 import 'package:aurelius_mobile/core/push/push_service.dart';
 import 'package:aurelius_mobile/core/widgets/ios.dart';
 import 'package:aurelius_mobile/features/pairing/pairing_bloc.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -68,21 +67,7 @@ void main() {
   void go(WidgetTester tester, String location) => GoRouter.of(pageContext(tester)).go(location);
   void step(String text) => debugPrint('e2e: $text');
 
-  Future<void> longPress(WidgetTester tester, String text) async {
-    final gesture = await tester.startGesture(tester.getCenter(find.text(text).first));
-    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
-    await gesture.up();
-    await tester.pump(const Duration(milliseconds: 500));
-  }
-
-  /// The menu row [label] as the app's own InkWell takes it (a tap in the live binding does not reach a popup route).
-  Future<void> choose(WidgetTester tester, String label) async {
-    final row = find.ancestor(of: find.text(label), matching: find.byType(InkWell)).first;
-    tester.widget<InkWell>(row).onTap!();
-    await tester.pump(const Duration(milliseconds: 800));
-  }
-
-  testWidgets('A4 and A6 against the F3 daemon', (tester) async {
+  testWidgets('A4 against the F3 daemon', (tester) async {
     HttpOverrides.global = null;
     tester.view.physicalSize = const Size(600, 2200);
     tester.view.devicePixelRatio = 1;
@@ -134,45 +119,5 @@ void main() {
     await tap(tester, find.byKey(const ValueKey('my-tab-responsible')));
     await waitFor(tester, find.text('E2E followed'), what: 'live: the ticket robin handed to alex');
     step('A4: a handover by robin shows up live in Responsible');
-
-    // A6: robin's message cannot be edited by alex; alex's can, until deleted.
-    await as('robin', 'group_chat.send', {'text': 'robin says hello'});
-    await as('alex', 'group_chat.send', {'text': 'alex first draft'});
-    go(tester, '/channel/dde88fb3-3a20-447a-a9db-c04e265ce8c4');
-    await waitFor(tester, find.text('alex first draft'), what: 'alex message in General');
-    await longPress(tester, 'robin says hello');
-    expect(find.text('Edit'), findsNothing);
-    expect(find.text('Delete'), findsNothing);
-    step("A6: robin's message offers no Edit or Delete");
-    await tester.tapAt(const Offset(10, 10));
-    await tester.pump(const Duration(milliseconds: 500));
-    await longPress(tester, 'alex first draft');
-    await tester.pump(const Duration(milliseconds: 500));
-    await choose(tester, 'Edit');
-    await waitFor(tester, find.byKey(const ValueKey('message-edit-field')), what: 'the edit sheet');
-    await tester.enterText(find.byKey(const ValueKey('message-edit-field')), 'alex second draft');
-    await tap(tester, find.byKey(const ValueKey('message-edit-save')));
-    await waitFor(tester, find.text('alex second draft'), what: 'the edited text');
-    await waitFor(tester, find.text('edited'), what: 'the edited mark');
-    step('A6: edit saved, "edited" shown');
-    tester.widget<InkWell>(find.ancestor(of: find.text('edited'), matching: find.byType(InkWell)).first).onTap!();
-    await tester.pump(const Duration(milliseconds: 800));
-    await waitFor(tester, find.text('Earlier versions'), what: 'earlier versions');
-    expect(find.text('alex first draft'), findsOneWidget);
-    step('A6: tapping "edited" shows the earlier version');
-    step('versions open: ${find.text('Earlier versions').evaluate().length}; text: ${find.text('alex second draft').evaluate().length}');
-    if (find.text('Earlier versions').evaluate().isNotEmpty) Navigator.of(tester.element(find.text('Earlier versions')), rootNavigator: true).pop();
-    await tester.pump(const Duration(seconds: 1));
-    await tester.pump(const Duration(seconds: 1));
-    await tester.pump(const Duration(milliseconds: 500));
-    await as('alex', 'group_chat.send', {'text': 'alex to delete'});
-    await waitFor(tester, find.text('alex to delete'), what: 'the message to delete');
-    await longPress(tester, 'alex to delete');
-    await choose(tester, 'Delete');
-    await waitFor(tester, find.byKey(const ValueKey('message-delete-confirm')), what: 'the delete dialog');
-    await tap(tester, find.byKey(const ValueKey('message-delete-confirm')));
-    await waitFor(tester, find.text('This message was deleted.'), what: 'the placeholder');
-    expect(find.text('alex to delete'), findsNothing);
-    step('A6: delete leaves "This message was deleted." and no text');
   }, skip: url.isEmpty);
 }

@@ -11,7 +11,6 @@ const confirmSecretMethods = {
   Methods.chatSend,
   Methods.workSessionStart,
   Methods.workSessionDispatch,
-  Methods.groupChatSend,
   Methods.ticketPost,
   Methods.messageEdit,
   Methods.projectConversationSend,

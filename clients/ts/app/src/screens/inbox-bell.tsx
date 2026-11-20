@@ -174,9 +174,10 @@ export function InboxBell() {
         void navigate({ to: "/tasks/$taskId", params: { taskId: place.id } });
         break;
       case "conversation":
+        // Only a work session is still a place of its own: the Team chat is gone.
         if (sessions.some((s) => s.conversation_id === place.id)) {
           void navigate({ to: "/session/$conversationId", params: { conversationId: place.id } });
-        } else void navigate({ to: "/chat", search: { channel: place.id } });
+        }
         break;
       case "message":
         if (hostId && follow) follow(messageLink(hostId, place.id));

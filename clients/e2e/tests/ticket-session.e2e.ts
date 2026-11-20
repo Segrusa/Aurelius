@@ -20,8 +20,6 @@ const FEATURES = [
 const pixel = { id: "e1", name: "Pixel", role: "designer", title: "UI/UX Designer", status: "active", agents: [] };
 const flux = { id: "e2", name: "Flux", role: "engineer", title: "Frontend Developer", status: "active", agents: [] };
 const project = { id: "p", name: "Aurelius", status: "active", created_at_ms: 0, employees_active: 2, version: 1 };
-const general = channel("g", "general", { kind: "general" });
-const alpha = channel("pa", "aurelius", { kind: "project", project_id: "p" });
 
 const owned = {
   owner_employee_id: "e1",
@@ -115,8 +113,6 @@ function scripted(world: World) {
       return tickets();
     },
     channels: [
-      general,
-      alpha,
       ...tickets().map((t) =>
         ticketChannel(t.conversation_id as string, t.number, t.column, {
           archived: t.column === "done",
@@ -287,55 +283,30 @@ test.describe("a ticket's session", () => {
     await expect(page.getByRole("button", { name: "Add files…" })).toHaveCount(0);
   });
 
-  test("4. old /chat?channel= and /board?ticket= links open the session", async ({ page }) => {
+  test("4. old /board?ticket= and /history?ticket= links open the session", async ({ page }) => {
     const world: World = {
       tickets: { t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }) },
-      feeds: { d70: feedOf("d70", [message("m1", "user", "Linked message.", sam)]), general: feedOf("g", []) },
+      feeds: { d70: feedOf("d70", [message("m1", "user", "Linked message.", sam)]) },
     };
     await scriptServer(page, scripted(world));
-    await page.goto(`${site.origin}/chat?channel=d70&message=m1`);
-    await expect(page).toHaveURL(/\/ticket\/70\?message=m1$/);
-    await expect(page.getByText("Linked message.")).toBeVisible();
     await page.goto(`${site.origin}/board?ticket=t70`);
     await expect(page).toHaveURL(/\/ticket\/70$/);
     await page.goto(`${site.origin}/history?ticket=t70`);
     await expect(page).toHaveURL(/\/ticket\/70$/);
-    // A project channel stays in the Team chat.
-    await page.goto(`${site.origin}/chat?channel=pa`);
-    await expect(page).toHaveURL(/\/chat\?channel=pa$/);
   });
 
-  test("5. the Team chat lists no ticket channels", async ({ page }) => {
-    const world: World = {
-      tickets: {
-        t70: ticket("t70", 70, "doing", { ...owned }),
-        t12: ticket("t12", 12, "done", { ...owned, conversation_id: "d12" }),
-      },
-      feeds: { general: feedOf("g", []), d70: feedOf("d70", []), d12: feedOf("d12", []) },
-    };
-    await scriptServer(page, scripted(world));
-    await page.goto(`${site.origin}/chat`);
-    const list = page.getByRole("region", { name: "Channels" });
-    await expect(list.getByRole("button", { name: /general/ })).toBeVisible();
-    await expect(list.getByRole("button", { name: /aurelius/ })).toBeVisible();
-    await expect(list.getByText("Tickets")).toHaveCount(0);
-    await expect(list.getByRole("button", { name: /Ticket 70|Ticket 12/ })).toHaveCount(0);
-    await expect(list.getByRole("button", { name: /Archived/ })).toHaveCount(0);
-  });
-
-  test("the sidebar lists the open tickets and no Team chat row; a row opens the session", async ({ page }) => {
+  test("the sidebar lists the open tickets; a row opens the session", async ({ page }) => {
     const world: World = {
       tickets: {
         t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }),
         t12: ticket("t12", 12, "done", { ...owned, title: "An old ticket", conversation_id: "d12" }),
       },
-      feeds: { general: feedOf("g", []), d70: feedOf("d70", []), d12: feedOf("d12", []) },
+      feeds: { d70: feedOf("d70", []), d12: feedOf("d12", []) },
     };
     await scriptServer(page, scripted(world));
     await page.goto(`${site.origin}/new`);
     const side = page.getByRole("navigation", { name: "Main" });
     await expect(side.getByText("Tickets", { exact: true })).toBeVisible();
-    await expect(side.getByRole("link", { name: /Team chat/ })).toHaveCount(0);
     await expect(side.getByRole("link", { name: /#12 An old ticket/ })).toHaveCount(0);
     await side.getByRole("link", { name: /#70 A ticket opens as its own session/ }).click();
     await expect(page).toHaveURL(/\/ticket\/70$/);
@@ -353,7 +324,7 @@ test.describe("a ticket's session", () => {
           updated_at_ms: yesterday,
         }),
       },
-      feeds: { general: feedOf("g", []), d70: feedOf("d70", []), d60: feedOf("d60", []) },
+      feeds: { d70: feedOf("d70", []), d60: feedOf("d60", []) },
     };
     await scriptServer(page, scripted(world));
     await page.goto(`${site.origin}/new`);
@@ -381,34 +352,17 @@ test.describe("a ticket's session", () => {
     await expect(today).toBeVisible();
   });
 
-  test("a Board card and a Team chat search hit open the session", async ({ page }) => {
+  test("a Board card opens the session", async ({ page }) => {
     const world: World = {
       tickets: { t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }) },
-      feeds: { general: feedOf("g", []), d70: feedOf("d70", []) },
+      feeds: { d70: feedOf("d70", []) },
     };
-    const script = scripted(world);
-    await scriptServer(
-      page,
-      plus(script, {
-        reads: {
-          ...script.reads,
-          "channel.search": () => ({
-            type: "channels",
-            value: { channels: [ticketChannel("d70", 70, "doing")] },
-          }),
-        },
-      }),
-    );
+    await scriptServer(page, scripted(world));
     await page.goto(`${site.origin}/board`);
     await page.getByRole("button", { name: /#70 A ticket opens/ }).click();
     await expect(page).toHaveURL(/\/ticket\/70$/);
     // Board stays the place it came from in the sidebar.
     await expect(page.getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
-
-    await page.goto(`${site.origin}/chat`);
-    await page.getByLabel("Search channels").fill("70");
-    await page.getByRole("button", { name: "Ticket 70, A ticket opens as its own session" }).click();
-    await expect(page).toHaveURL(/\/ticket\/70$/);
   });
 
   test("an unknown number says so", async ({ page }) => {
@@ -449,7 +403,6 @@ test("shots", async ({ page }) => {
       }),
     },
     feeds: {
-      general: feedOf("g", [message("g1", "user", "Morning all", sam)]),
       d70: feedOf("d70", [
         message("a1", "user", "@Pixel design first, then Flux builds.", { ...sam, created_at_ms: live - 600_000 }),
         message("a2", "assistant", "ui-ontwerp.md is committed on feat/ticket-70-ticket-session.", {
@@ -521,10 +474,6 @@ test("shots", async ({ page }) => {
     await page.goto(`${site.origin}/ticket/9999`);
     await expect(page.getByRole("heading", { name: "Ticket #9999 not found." })).toBeVisible();
     await shot("not-found.png");
-
-    await page.goto(`${site.origin}/chat`);
-    await expect(page.getByRole("region", { name: "Channels" })).toBeVisible();
-    await shot("team-chat.png");
 
     await page.setViewportSize({ width: 820, height: 900 });
     await page.goto(`${site.origin}/ticket/70`);

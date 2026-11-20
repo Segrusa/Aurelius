@@ -54,7 +54,6 @@ const CATALOGUE: [Profile; 5] = [
             "mcp__aurelius__update_ticket",
             "mcp__aurelius__move_ticket",
             "mcp__aurelius__post_to_ticket",
-            "mcp__aurelius__post_to_group_chat",
             "mcp__aurelius__schedule_message",
             "mcp__aurelius__propose_colleague",
         ]),

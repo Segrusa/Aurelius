@@ -42,7 +42,7 @@ const COMPANY: &str = "Company";
 /// What is left out stays on and is never asked: `AskUserQuestion`,
 /// `ExitPlanMode`, and of the bridge the employee's own memory and scratchpad,
 /// reading its work (tasks, tickets, discussions, guidelines), `post_to_discussion`,
-/// `hand_off`, `tell_responsible`, `suggest_replies`, `set_mode` and
+/// `hand_off`, `suggest_replies`, `set_mode` and
 /// `report_test_result` and `report_ready`. They only touch the employee's own thread or read, and
 /// the platform rules count on them.
 pub const SWITCHABLE_TOOLS: &[SwitchableTool] = &[
@@ -62,7 +62,6 @@ pub const SWITCHABLE_TOOLS: &[SwitchableTool] = &[
     tool("mcp__aurelius__update_ticket", "Update tickets", COMPANY),
     tool("mcp__aurelius__move_ticket", "Move tickets", COMPANY),
     tool("mcp__aurelius__post_to_ticket", "Post on other tickets", COMPANY),
-    tool("mcp__aurelius__post_to_group_chat", "Post in channels", COMPANY),
     tool("mcp__aurelius__schedule_message", "Schedule messages", COMPANY),
     tool("mcp__aurelius__propose_colleague", "Propose a colleague", COMPANY),
     tool("mcp__aurelius__propose_instructions", "Propose instructions", COMPANY),
@@ -73,7 +72,7 @@ pub const SWITCHABLE_TOOLS: &[SwitchableTool] = &[
 
 /// Tools that are no longer offered. A list stored while they still were may name them: it stays
 /// valid, and the next save drops them.
-const RETIRED_TOOLS: &[&str] = &["mcp__aurelius__add_idea"];
+const RETIRED_TOOLS: &[&str] = &["mcp__aurelius__add_idea", "mcp__aurelius__post_to_group_chat"];
 
 pub fn is_switchable(name: &str) -> bool {
     SWITCHABLE_TOOLS.iter().any(|t| t.name == name)
@@ -234,6 +233,13 @@ mod tests {
         let saved = policy(Some(&["Read", "mcp__aurelius__add_idea"]), &["mcp__aurelius__add_idea"]).validate().unwrap();
         assert_eq!(saved, policy(Some(&["Read"]), &[]));
         assert!(!is_switchable("mcp__aurelius__add_idea"));
+    }
+
+    #[test]
+    fn a_stored_list_that_names_the_retired_group_chat_tool_stays_valid_and_loses_the_name() {
+        let saved = policy(Some(&["Read", "mcp__aurelius__post_to_group_chat"]), &["mcp__aurelius__post_to_group_chat"]).validate().unwrap();
+        assert_eq!(saved, policy(Some(&["Read"]), &[]));
+        assert!(!is_switchable("mcp__aurelius__post_to_group_chat"));
     }
 
     #[test]

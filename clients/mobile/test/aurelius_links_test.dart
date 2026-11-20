@@ -246,18 +246,18 @@ void main() {
       expect(router.state.uri.toString(), '/ticket/$_ticket?tab=discussion&message=$_message');
     });
 
-    testWidgets('a reply in a thread of a channel opens the channel with its thread', (tester) async {
+    testWidgets('a reply in a thread of a channel that is no ticket (chat is gone) opens the Inbox', (tester) async {
       final repo = repoFor();
       when(() => repo.messageLocation(_message)).thenAnswer((_) async => const MessageLocation(conversationId: 'c1', messageId: _message, threadRoot: 'root'));
       final router = await tapShown(tester, repo, 'See $_messageLink', 'Message');
-      expect(router.state.uri.toString(), '/channel/c1?message=$_message&thread=root');
+      expect(router.state.uri.toString(), '/inbox');
     });
 
-    testWidgets('a message in a channel opens that channel', (tester) async {
+    testWidgets('a message in General or a project channel (chat is gone) opens the Inbox, no channel screen', (tester) async {
       final repo = repoFor();
       when(() => repo.messageLocation(_message)).thenAnswer((_) async => const MessageLocation(conversationId: 'c1', messageId: _message));
       final router = await tapShown(tester, repo, 'See $_messageLink', 'Message');
-      expect(router.state.uri.toString(), '/channel/c1?message=$_message');
+      expect(router.state.uri.toString(), '/inbox');
     });
 
     testWidgets('a message that is gone says so and goes nowhere', (tester) async {

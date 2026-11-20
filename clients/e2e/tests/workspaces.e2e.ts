@@ -38,7 +38,7 @@ const noteIn = (i: number, projectId: string, subject: string) => ({
 const notes = [noteIn(1, ATLAS, "Atlas news"), noteIn(2, ZEPHYR, "Zephyr news")];
 
 const script = {
-  features: ["workspace_filters", "team_channels", "ticket_channels", "chat_threads"],
+  features: ["workspace_filters", "ticket_channels", "chat_threads"],
   projects,
   tickets,
   tasks: [
@@ -50,15 +50,9 @@ const script = {
     t2: { ticket: inZephyr, root_task: null, tasks: [], as_of_seq: 1 },
   },
   channels: [
-    channel("general", "general", { kind: "general" }),
-    channel("c-atlas", "Atlas", { project_id: ATLAS }),
-    channel("c-zephyr", "Zephyr", { project_id: ZEPHYR }),
     channel("c-t1", "21-atlas-ticket", { kind: "ticket", project_id: ATLAS, ticket_id: "t1", ticket_number: 21 }),
   ],
   feeds: {
-    general: messages("general", []),
-    "c-atlas": messages("c-atlas", []),
-    "c-zephyr": messages("c-zephyr", []),
     "c-t1": messages("c-t1", []),
   },
   reads: {
@@ -132,7 +126,7 @@ test("a workspace and a ticket show their Claude Design link, and an older serve
   }
 });
 
-test("switching narrows the board, the inbox and the chat, and All projects shows everything", async ({ page }) => {
+test("switching narrows the board and the inbox, and All projects shows everything", async ({ page }) => {
   const site = await open(page, "/board");
   try {
     await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
@@ -150,19 +144,6 @@ test("switching narrows the board, the inbox and the chat, and All projects show
     await expect(inbox.getByText("Atlas news").first()).toBeVisible();
     await expect(inbox.getByText("Zephyr news")).toBeHidden();
     await page.keyboard.press("Escape");
-
-    // The Team chat has no sidebar row any more; its shortcut still opens it.
-    await page.keyboard.press("Control+8");
-    const channels = page.getByRole("region", { name: "Channels" });
-    await expect(channels.getByText("Atlas", { exact: true })).toBeVisible();
-    // A ticket opens as its session, never as a channel in this list (ticket #70).
-    await expect(channels.getByText("21-atlas-ticket")).toBeHidden();
-    await expect(channels.getByText("Zephyr")).toBeHidden();
-    await expect(channels.getByText("general")).toBeHidden();
-
-    await choose(page, "All projects");
-    await expect(channels.getByText("general")).toBeVisible();
-    await expect(channels.getByText("Zephyr")).toBeVisible();
 
     // Remembered per device.
     await choose(page, "Zephyr");

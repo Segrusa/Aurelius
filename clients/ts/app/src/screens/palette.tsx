@@ -9,7 +9,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef } from "react";
 import { useLinkState } from "../connection";
-import { useChannels, useEmployees, useGuidelines, useProjects, useTickets } from "../data";
+import { useEmployees, useGuidelines, useProjects, useTickets } from "../data";
 import { hidden } from "../hidden";
 import { keysFor, SHORTCUTS, showChord } from "../keys/keymap";
 import { isMac, useKeyContext, useKeys } from "../keys/provider";
@@ -17,7 +17,6 @@ import { usePlatform } from "../platform";
 import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
 import { useWorkspace } from "../workspace";
-import { bareName } from "./chat-logic";
 import { topCentered } from "./dialog-logic";
 import { useOpenNewSession } from "./new-session";
 import { overlays, useOpenOverlay } from "./overlays-store";
@@ -133,7 +132,6 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
   const employees = useEmployees();
   const tickets = useTickets();
   const guidelines = useGuidelines();
-  const channels = useChannels();
   const workspace = useWorkspace();
   const switchTo = useSwitchWorkspace();
   const quick = quickCreatable(useLinkState().features);
@@ -219,21 +217,6 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
         })),
       },
       {
-        label: "Channels",
-        items: narrow(channels.data ?? [], here).map((c) => ({
-          id: `channel:${c.conversation_id}`,
-          label: `Go to #${bareName(c)}`,
-          detail: "Team chat",
-          mark: c.conversation_id,
-          run: () =>
-            void navigate(
-              c.kind === "ticket" && c.ticket_id
-                ? ticketPlace({ id: c.ticket_id, number: c.ticket_number })
-                : { to: "/chat", search: c.kind && c.kind !== "general" ? { channel: c.conversation_id } : {} },
-            ),
-        })),
-      },
-      {
         label: "Employees",
         items: (employees.data ?? []).map((e) => ({
           id: `employee:${e.id}`,
@@ -294,7 +277,6 @@ function PaletteBody({ onClose }: { onClose: () => void }) {
     tickets.data,
     employees.data,
     guidelines.data,
-    channels.data,
     keys,
     kind,
     navigate,

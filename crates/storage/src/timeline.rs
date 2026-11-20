@@ -320,6 +320,9 @@ pub const REASON_SENT_BACK: &str = "sent_back";
 pub const REASON_FAILED: &str = "failed";
 /// `NotificationView::reason`: an answer waits for this board member's Claude login.
 pub const REASON_LOGIN: &str = "login";
+/// `NotificationView::reason`: the server tells every board member something about itself
+/// (a vault key export, a vault name runs may no longer have).
+pub const REASON_SERVER_NOTICE: &str = "server_notice";
 /// The sentence of a row about a main task that failed.
 const FAILED_TITLE: &str = "The main task failed";
 /// How a row names who did it when that person or employee is gone.
@@ -596,6 +599,23 @@ fn notify_login(tx: &rusqlite::Transaction<'_>, seq: u64, event: &EventRow) -> R
         return Ok(false);
     }
     deliver(tx, seq, event, user, &Head { reason: REASON_LOGIN, severity, title, ticket, conversation: None, message: None })
+}
+
+/// A row for every board member that is not disabled, about the event at `seq`, with
+/// `title` as its sentence (`REASON_SERVER_NOTICE`). How many got one: the caller
+/// refuses to go on when it is none.
+pub fn notify_board_members(tx: &rusqlite::Transaction<'_>, seq: u64, severity: &str, title: &str) -> Result<usize, StorageError> {
+    let Some(event) = event_at(tx, seq)? else { return Ok(0) };
+    let mut stmt = tx.prepare("SELECT id FROM users WHERE disabled_at_ms IS NULL ORDER BY created_at_ms, id")?;
+    let users = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+    let head = Head { reason: REASON_SERVER_NOTICE, severity, title, ticket: None, conversation: None, message: None };
+    let mut told = 0;
+    for user in users.iter().filter_map(|u| UserId::parse(u).ok()) {
+        if deliver(tx, seq, &event, user, &head)? {
+            told += 1;
+        }
+    }
+    Ok(told)
 }
 
 fn active_member(conn: &Connection, user: UserId) -> Result<bool, StorageError> {

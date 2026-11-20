@@ -18,7 +18,7 @@ const base: KeyState = {
 
 describe("the table", () => {
   it("holds the desktop's shortcuts that do something here, none twice for one chord in one context", () => {
-    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(73);
+    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(70);
     const seen = new Set<string>();
     for (const s of SHORTCUTS) {
       for (const k of s.keys) {

@@ -240,8 +240,8 @@ pub mod feature {
     /// of a ticket on Done is read-only.
     pub const TICKET_DISCUSSION: &str = "ticket_discussion";
     /// Channels in the Team chat: `channel.list`, `group_chat.get { channel }`,
-    /// `group_chat.send { channel }`. Live events of project channels go only to
-    /// connections whose `HelloParams::accepts` names `team_channels`.
+    /// `group_chat.send { channel }`. The Team chat is gone (migration 45): no longer
+    /// advertised in `FEATURES`; the methods only answer for a ticket's channel.
     pub const TEAM_CHANNELS: &str = "team_channels";
     /// The Testing column (protocol 5, additive): `ColumnKind::Testing` between
     /// Plan review and Review, the company tester (`company.update { tester }`,
@@ -357,7 +357,8 @@ pub mod feature {
     /// `TokenUsage::model_calls`, `UsageSnapshot::by_user`.
     pub const RUN_CARDS: &str = "run_cards";
     /// A board member's lasting chat with an employee: `employee.open_chat`, `employee.chats`
-    /// and `chat.send` to such a chat.
+    /// and `chat.send` to such a chat. Gone (migration 45): no longer advertised in `FEATURES`;
+    /// `employee.chats` answers an empty list and `employee.open_chat` is refused.
     pub const EMPLOYEE_CHATS: &str = "employee_chats";
     /// `schedule_message` on the bridge shows to board members: `scheduled_message.list`,
     /// `scheduled_message.cancel`, and who waits for a thread (`thread.waiting`).
@@ -445,7 +446,6 @@ pub const FEATURES: &[&str] = &[
     feature::MANAGEMENT_CHOOSES_MODE,
     feature::AUTO_ALLOW,
     feature::TICKET_DISCUSSION,
-    feature::TEAM_CHANNELS,
     feature::TICKET_CHANNELS,
     feature::VAULT,
     feature::GUIDELINES,
@@ -464,7 +464,6 @@ pub const FEATURES: &[&str] = &[
     feature::TICKET_FROM_IDEA,
     feature::EMPLOYEE_ACCESS,
     feature::RUN_CARDS,
-    feature::EMPLOYEE_CHATS,
     feature::SCHEDULED_MESSAGES,
     feature::EMPLOYEE_SCRATCHPAD,
     feature::EMPLOYEE_TOOLS,
