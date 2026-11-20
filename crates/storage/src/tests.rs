@@ -20,6 +20,20 @@ fn event(aggregate_id: &str, version: u64, dedupe: &str) -> NewEvent<'static> {
 }
 
 #[test]
+fn a_dropped_store_has_closed_its_database_when_drop_returns() {
+    let dir = tempfile::tempdir().unwrap();
+    let wal = dir.path().join("data/aurelius.sqlite-wal");
+    for _ in 0..20 {
+        let store = Store::open(dir.path()).unwrap();
+        assert!(wal.exists(), "an open store writes ahead");
+        drop(store);
+        // The last connection to close checkpoints and removes the -wal and -shm files.
+        assert!(!wal.exists(), "the writer closed the database before drop returned");
+        assert!(!dir.path().join("data/aurelius.sqlite-shm").exists());
+    }
+}
+
+#[test]
 fn migration_is_idempotent_and_detects_tampering() {
     let dir = tempfile::tempdir().unwrap();
     drop(Store::open(dir.path()).unwrap());

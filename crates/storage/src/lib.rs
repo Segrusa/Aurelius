@@ -119,6 +119,27 @@ pub struct Store {
     next_reader: AtomicUsize,
     blobs: BlobStore,
     db_path: PathBuf,
+    /// The writer thread: dropping the store waits for it (see `Drop`).
+    writer_thread: Option<thread::JoinHandle<()>>,
+}
+
+/// A dropped store is closed when `drop` returns: the read connections first, then the writer
+/// finishes the jobs it has and closes the database last, so SQLite checkpoints and removes the
+/// `-wal`/`-shm` files. Code that looks at, moves or copies the database right after (a fresh
+/// start, a restore, a backup) never races a connection that is still open.
+impl Drop for Store {
+    fn drop(&mut self) {
+        self.readers.clear();
+        // Disconnect the channel: the writer's loop ends after its last job.
+        let (closed, _) = mpsc::channel();
+        drop(std::mem::replace(&mut self.writer, closed));
+        if let Some(handle) = self.writer_thread.take() {
+            // Dropped by a job on the writer thread itself: that thread ends on its own.
+            if handle.thread().id() != thread::current().id() {
+                let _ = handle.join();
+            }
+        }
+    }
 }
 
 impl Store {
@@ -152,14 +173,21 @@ impl Store {
             .collect::<Result<Vec<_>, StorageError>>()?;
 
         let (tx, rx) = mpsc::channel::<WriteJob>();
-        thread::Builder::new().name("aurelius-db-writer".into()).spawn(move || {
+        let writer_thread = thread::Builder::new().name("aurelius-db-writer".into()).spawn(move || {
             let mut conn = write_conn;
             for job in rx {
                 job(&mut conn);
             }
         })?;
 
-        Ok(Self { writer: tx, readers, next_reader: AtomicUsize::new(0), blobs, db_path })
+        Ok(Self {
+            writer: tx,
+            readers,
+            next_reader: AtomicUsize::new(0),
+            blobs,
+            db_path,
+            writer_thread: Some(writer_thread),
+        })
     }
 
     pub fn blobs(&self) -> &BlobStore {
