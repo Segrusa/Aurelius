@@ -92,14 +92,14 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await pasteImage(page.getByLabel("Description"));
     await expect(page.getByRole("button", { name: "Remove pasted.png" })).toBeVisible();
     await page.getByRole("button", { name: "Create", exact: true }).click();
-    // A new ticket opens on its chat (ticket #58): its channel in Chat, since the panel has no discussion (#56).
+    // A new ticket opens as its session (ticket #58, #70).
     const pictured = await until("created", async () => {
       const all = expectBody(await server.call("ticket.list", { project_id: project }), "tickets").value.tickets;
       return all.find((t) => t.title === "Ticket with a picture");
     });
     const detail = expectBody(await server.call("ticket.get", { ticket_id: pictured.id }), "ticket").value;
     expect(detail.ticket.conversation_id).toBeTruthy();
-    await expect(page).toHaveURL(new RegExp(`/chat\\?channel=${detail.ticket.conversation_id}`));
+    await expect(page).toHaveURL(new RegExp(`/ticket/${detail.ticket.number}`));
     // Its files are on the ticket, on the Board.
     await page.getByRole("navigation").getByRole("link", { name: "Board" }).first().click();
     await page
@@ -164,7 +164,7 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
 
     // Ctrl+N from anywhere is New session now (ticket #60), not Give work. First the ticket's chat must
     // have opened, or that navigation lands after /new.
-    await expect(page).toHaveURL(/\/chat\?channel=/);
+    await expect(page).toHaveURL(/\/ticket\/\d+/);
     await page.keyboard.press("Control+n");
     await expectNewSession(page);
 

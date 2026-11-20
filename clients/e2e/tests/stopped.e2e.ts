@@ -96,13 +96,6 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
       .click();
     await expect(p.getByText("Please try again.")).toBeVisible();
     await expect(p.getByText("Assignment", { exact: true })).toBeVisible();
-
-    // In the Team chat the server says so itself.
-    await p.keyboard.press("Control+8");
-    const box = p.getByPlaceholder(/Message the team/);
-    await box.fill("Anyone there?");
-    await box.press("Enter");
-    await expect(p.getByText(/Could not answer/)).toBeVisible({ timeout: 30_000 });
   } finally {
     await app.close();
     await daemon.dispose();

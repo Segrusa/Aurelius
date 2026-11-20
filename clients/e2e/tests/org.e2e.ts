@@ -118,21 +118,6 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await expect(page.getByPlaceholder("Name, for example Alex")).toHaveValue("");
     await page.getByRole("button", { name: "Cancel" }).click();
 
-    // A chat of one's own: the server takes the opening and the message, and the sidebar lists it.
-    await go(page, "Employees");
-    await page.getByRole("row", { name: /Orion/ }).getByRole("button", { name: "Chat", exact: true }).click();
-    await expect(page.getByRole("region", { name: "Chat with Orion" })).toBeVisible();
-    await expect(page.getByText("Talk with Orion here.", { exact: true }).first()).toBeVisible();
-    await page.getByPlaceholder("Message Orion").fill("Hallo Orion");
-    await page.keyboard.press("Enter");
-    const talk = page.getByRole("region", { name: "Chat with Orion" });
-    await expect(talk.getByText("Hallo Orion", { exact: true }).first()).toBeVisible();
-    await expect(page.getByRole("navigation").getByRole("link", { name: "Orion" }).last()).toHaveAttribute(
-      "href",
-      /\/talk\//,
-    );
-    await expect(page.locator('[role="alert"]:not([data-astryx-live-region])')).toHaveCount(0);
-
     // A guideline: made, linked, changed to a second version, then archived and restored.
     await go(page, "Knowledge");
     await expect(page.getByRole("heading", { name: "No guidelines yet" })).toBeVisible();
@@ -527,76 +512,6 @@ test.describe("scripted organisation", () => {
     await stop();
   });
 
-  test("the sidebar shows the latest four chats, one unread, and a chat answers on chat.send", async ({ page }) => {
-    const chat = (id: string, name: string, unread: number) => ({
-      conversation_id: id,
-      employee_id: "e1",
-      employee_name: name,
-      unread,
-      last_activity_ms: 1,
-    });
-    const { writes, stop } = await scripted(
-      page,
-      {
-        features: ["employee_chats"],
-        conversations: {
-          c1: messages("c1", [
-            message("m1", "user", "Can you rename it?"),
-            message("m2", "assistant", "Made a ticket for it."),
-            message("m3", "assistant", "Which name?\n\nFrom ticket #7 Rename", {
-              update: "ticket_note",
-              author: "Orion",
-            }),
-          ]),
-        },
-        reads: {
-          "employee.chats": () => ({
-            type: "employee_chats",
-            value: {
-              as_of_seq: 1,
-              chats: [
-                chat("c1", "Orion", 0),
-                chat("c2", "Mira", 2),
-                chat("c3", "Bo", 0),
-                chat("c4", "Cy", 0),
-                chat("c5", "Fifth", 0),
-              ],
-            },
-          }),
-        },
-        results: {
-          "employee.open_chat": () => ({
-            kind: "command",
-            value: { type: "employee_chat_opened", conversation_id: "c1" },
-          }),
-        },
-      },
-      "/employees",
-    );
-    const nav = page.getByRole("navigation");
-    await expect(nav.getByRole("link", { name: "Mira" })).toBeVisible();
-    await expect(nav.getByRole("link", { name: "Cy" })).toBeVisible();
-    await expect(nav.getByRole("link", { name: "Fifth" })).toHaveCount(0);
-
-    await page.getByRole("row", { name: /Pixel/ }).getByRole("button", { name: "Chat", exact: true }).click();
-    await expect.poll(() => writes.filter((w) => w.method === "employee.open_chat").length).toBe(1);
-    expect(writes.find((w) => w.method === "employee.open_chat")?.params).toMatchObject({ employee_id: "e2" });
-    const talk = page.getByRole("region", { name: "Chat with Orion" });
-    await expect(talk.getByText("Made a ticket for it.")).toBeVisible();
-    await expect(talk.getByText("FROM A TICKET")).toBeVisible();
-    await expect(talk.getByText(/From ticket #7/)).toBeVisible();
-
-    await page.getByPlaceholder("Message Orion").fill("Call it Vega");
-    await page.keyboard.press("Enter");
-    await expect.poll(() => writes.filter((w) => w.method === "chat.send").length).toBe(1);
-    expect(writes.find((w) => w.method === "chat.send")?.params).toMatchObject({
-      conversation_id: "c1",
-      text: "Call it Vega",
-    });
-    expect(writes.filter((w) => w.method === "group_chat.send")).toHaveLength(0);
-    await stop();
-  });
-
   test("the Scheduled page lists what comes back and a chat shows who waits for it", async ({ page }) => {
     const planned = {
       from_employee: "e1",
@@ -790,9 +705,26 @@ test.describe("scripted organisation", () => {
     const { stop } = await scripted(
       page,
       {
-        features: ["scheduled_messages", "employee_chats"],
+        features: ["scheduled_messages", "work_sessions"],
         conversations: { c1: messages("c1", [message("m1", "assistant", "Noted.")]) },
         reads: {
+          "work_session.list": () => ({
+            type: "work_sessions",
+            value: {
+              as_of_seq: 1,
+              sessions: [
+                {
+                  conversation_id: "c1",
+                  title: "Rename it",
+                  employee_id: "e1",
+                  employee_name: "Orion",
+                  running: false,
+                  created_at_ms: 1,
+                  last_activity_ms: 1,
+                },
+              ],
+            },
+          }),
           "thread.waiting": () => ({
             type: "thread_waiting",
             value: {
@@ -803,7 +735,7 @@ test.describe("scripted organisation", () => {
           }),
         },
       },
-      "/talk/c1",
+      "/session/c1",
     );
     await expect(page.getByLabel("Who waits for this thread")).toHaveText(
       "Orion is waiting to pick up this thread (behind 2 items)",

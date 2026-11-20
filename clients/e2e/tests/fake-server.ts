@@ -22,7 +22,7 @@ export interface Scripted {
   proposals?: unknown[];
   features?: string[];
   channels?: unknown[];
-  /** `group_chat.get` answers by channel; "general" for none. */
+  /** `group_chat.get` answers by channel (a ticket's). */
   feeds?: Record<string, unknown>;
   threads?: Record<string, unknown>;
   /** Any other answer, by method: the whole response body. */

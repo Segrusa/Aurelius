@@ -167,7 +167,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
       await expect(p.getByRole("button", { name: /^Who/ })).toContainText("Builder");
       await act(() => p.keyboard.press("Control+Enter"));
       // The new ticket's chat opens, as after New ticket and Give work (#58); its plan shows on the Board.
-      await expect(p).toHaveURL(/\/chat\?channel=/);
+      await expect(p).toHaveURL(/\/ticket\/\d+/);
       await act(() => nav("Board").click());
       // The first employee is management, which starts in Plan: this stops at a plan first.
       await expect(
@@ -187,30 +187,6 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
       if (SHOTS) await p.screenshot({ path: join(SHOTS, "plan-in-inbox.png") });
       await act(() => p.keyboard.press("Control+Enter"));
       await expect(approve).toHaveCount(0, { timeout: 15_000 });
-    });
-
-    await step("chat with the employee", async () => {
-      await act(() => p.keyboard.press("Control+8"));
-      const box = p.getByPlaceholder(/Message the team/);
-      await act(() => box.fill("What did you do today?"));
-      await act(() => box.press("Enter"));
-      await expect(p.getByText(/local test runtime/).first()).toBeVisible({ timeout: 30_000 });
-      await expect(p.getByText("Writing…")).toHaveCount(0, { timeout: 30_000 });
-    });
-
-    await step("a server restart during an answer", async () => {
-      const box = p.getByPlaceholder(/Message the team/);
-      await act(() => box.fill("Second question"));
-      await act(() => box.press("Enter"));
-      await expect(p.getByText("Writing…")).toBeVisible({ timeout: 20_000 });
-      await daemon.stop();
-      await expect(p.getByText("Reconnecting…")).toBeVisible({ timeout: 20_000 });
-      if (SHOTS) await p.screenshot({ path: join(SHOTS, "offline-during-answer.png") });
-      await daemon.start();
-      await expect(p.getByText("Reconnecting…")).toHaveCount(0, { timeout: 30_000 });
-      // Without leaving the screen: the answer ended with the server.
-      await expect(p.getByText("Writing…")).toHaveCount(0, { timeout: 15_000 });
-      if (SHOTS) await p.screenshot({ path: join(SHOTS, "after-restart.png") });
     });
 
     await step("server restart while looking at the board", async () => {

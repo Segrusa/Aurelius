@@ -8,8 +8,8 @@ import { Connection } from "@aurelius/client";
 import { _electron, expect, type Page, test } from "@playwright/test";
 import { openPipe } from "../../electron/src/main/pipe";
 import { REPO, serveStatic, TestDaemon, until, WEB_DIST } from "./daemon";
-import { channel, message, messages, scriptServer } from "./fake-server";
-import { expectNewSession } from "./new-session";
+import { boardOf, channel, message, messages, scriptServer, ticket } from "./fake-server";
+import { expectNewSession, sessionComposer } from "./new-session";
 
 const SOURCE = readFileSync(join(REPO, "crates/remote-gateway/src/web.rs"), "utf8");
 const POLICY = /"content-security-policy",\s*"([^"]+)"/.exec(SOURCE)?.[1] as string;
@@ -25,10 +25,17 @@ const watchViolations = (page: Page) =>
     );
   });
 
+const open = ticket("t1", 35, "doing", { title: "Trim the texts", conversation_id: "d1" });
+const talk = messages("d1", [message("m1", "assistant", "```ts\nconst answer: number = 42;\n```")]);
 const script = {
   employees: [{ id: "e1", name: "Flux", role: "engineer", title: "Engineer", status: "active" }],
-  channels: [channel("g", "general", { kind: "general" })],
-  feeds: { general: messages("g", [message("m1", "assistant", "```ts\nconst answer: number = 42;\n```")]) },
+  features: ["ticket_channels", "ticket_discussion"],
+  tickets: [open],
+  board: boardOf([open]),
+  channels: [channel("d1", "#35-trim", { kind: "ticket", ticket_id: "t1", ticket_number: 35, ticket_column: "doing" })],
+  details: { t1: { ticket: open, root_task: null, tasks: [], as_of_seq: 1 } },
+  feeds: { d1: talk },
+  conversations: { d1: talk },
 };
 
 /** What makes Astryx put a <style> in the page: a code block, a dialog and a tooltip. */
@@ -51,7 +58,7 @@ test("nothing the app draws is refused by the gateway's policy", async ({ page }
   try {
     await watchViolations(page);
     await scriptServer(page, script);
-    await page.goto(`${site.origin}/chat`);
+    await page.goto(`${site.origin}/ticket/35`);
     await drawEverything(page);
     expect(await violations(page)).toEqual([]);
   } finally {
@@ -84,7 +91,7 @@ test("nothing is refused on the page a real gateway serves", async ({ page }) =>
     await watchViolations(page);
     // The page and its files are the gateway's; only what the page asks it afterwards is scripted.
     await scriptServer(page, script);
-    const response = await page.goto(`${daemon.origin}/chat`);
+    const response = await page.goto(`${daemon.origin}/ticket/35`);
     expect(response?.headers()["content-security-policy"]).toBe(POLICY);
     await drawEverything(page);
     expect(await violations(page)).toEqual([]);
@@ -121,10 +128,12 @@ test("nothing is refused in the built Electron app", async () => {
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-    await page.keyboard.press("Control+8");
-    const box = page.getByRole("textbox", { name: /^Message/ });
-    await box.fill("```ts\nconst answer: number = 42;\n```");
-    await box.press("Enter");
+    // A new session's first words show as a code block in the session it opens.
+    await page.keyboard.press("Control+n");
+    await expectNewSession(page);
+    await sessionComposer(page).fill("```ts\nconst answer: number = 42;\n```");
+    await page.keyboard.press("Control+Enter");
+    await expect(page).not.toHaveURL(/\/new$/);
     await drawEverything(page, "Control+t");
     expect(await violations(page)).toEqual([]);
   } finally {

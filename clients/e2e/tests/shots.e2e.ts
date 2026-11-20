@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "@playwright/test";
 import { REPO, serveStatic, WEB_DIST } from "./daemon";
-import { approval, boardOf, channel, message, messages, notification, scriptServer, task, ticket } from "./fake-server";
+import { approval, boardOf, message, messages, notification, scriptServer, task, ticket } from "./fake-server";
 
 for (const theme of ["dark", "light"] as const) {
   test(`the Inbox, ${theme}`, async ({ page }) => {
@@ -190,7 +190,6 @@ for (const theme of ["dark", "light"] as const) {
           "employee_queue",
           "activity_log",
           "workspace_filters",
-          "team_channels",
           "ticket_channels",
           "chat_threads",
           "guidelines",
@@ -214,8 +213,6 @@ for (const theme of ["dark", "light"] as const) {
           c1: messages("c1", []),
           c3: messages("c3", []),
         },
-        channels: [channel("g", "general", { kind: "general" })],
-        feeds: { general: messages("g", [message("m1", "assistant", "All **green** on the rollout.")]) },
         limits: [{ label: "Weekly limit", percent: 58, resets: "Mon 09:00" }],
         company: {
           company: { name: "Northwind", tester_employee_id: null },
