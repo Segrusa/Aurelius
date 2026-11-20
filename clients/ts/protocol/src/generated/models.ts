@@ -729,6 +729,190 @@ export interface ClaudeLoginView {
 }
 
 /**
+ * One local branch.
+ */
+export interface CodeBranch {
+  /**
+   * Commits on this branch that main lacks (`main..branch`); 0 for main.
+   */
+  ahead: number;
+  at_ms: number;
+  author: string;
+  /**
+   * Commits on main this branch lacks (`branch..main`); 0 for main.
+   */
+  behind: number;
+  /**
+   * Its own commits (`main..branch`), newest first, at most `CODE_BRANCH_COMMITS_MAX`.
+   */
+  commits?: CodeCommitLine[];
+  deletions?: number;
+  /**
+   * The size of `main...branch` (what a merge would bring): files, lines added, removed.
+   */
+  files_changed?: number;
+  /**
+   * Its newest commit.
+   */
+  head: string;
+  insertions?: number;
+  /**
+   * The repository's main branch.
+   */
+  is_main?: boolean;
+  /**
+   * Every commit of it is in main (it can be deleted without losing work).
+   */
+  merged?: boolean;
+  name: string;
+  /**
+   * Who works on it: the ticket's owner, else the employee of the work session.
+   */
+  owner?: CodeOwner | null;
+  /**
+   * Its newest commit: subject, author name and time.
+   */
+  subject: string;
+  /**
+   * The ticket it belongs to: a quick task's branch, a work session's worktree, or a
+   * ticket number in its name (`feat/ticket-77-…`, `fix/77-…`) of this project.
+   */
+  ticket?: CodeTicket | null;
+  /**
+   * Its upstream (`origin/…`); for main: how far it is from it after a fetch.
+   */
+  upstream?: string | null;
+  upstream_ahead?: number;
+  upstream_behind?: number;
+  /**
+   * An employee works on it now: a run of its ticket or work session is live or queued.
+   */
+  working?: boolean;
+  /**
+   * The worktree it is checked out in; none: no worktree.
+   */
+  worktree_path?: string | null;
+}
+
+/**
+ * One commit of the graph.
+ */
+export interface CodeCommit {
+  at_ms: number;
+  author: string;
+  /**
+   * The listed local branches whose newest commit this is.
+   */
+  branches?: string[];
+  /**
+   * The full hash; the client shows the first seven characters.
+   */
+  hash: string;
+  /**
+   * Its parents' full hashes, the first parent first (two or more: a merge).
+   */
+  parents?: string[];
+  subject: string;
+}
+
+/**
+ * A commit of a branch's own list.
+ */
+export interface CodeCommitLine {
+  hash: string;
+  subject: string;
+}
+
+/**
+ * Who works on a branch.
+ */
+export interface CodeOwner {
+  employee_id: string;
+  name: string;
+}
+
+/**
+ * The ticket a branch belongs to.
+ */
+export interface CodeTicket {
+  number: number;
+  ticket_id: string;
+  title: string;
+}
+
+/**
+ * The git state of one project's folder.
+ */
+export interface CodeView {
+  /**
+   * The local branches, main first, then the newest last commit first.
+   */
+  branches?: CodeBranch[];
+  /**
+   * The newest commits of main and every listed branch, newest first (date order),
+   * at most `CODE_COMMITS_MAX`. A parent outside the list is cut off in the graph.
+   */
+  commits?: CodeCommit[];
+  /**
+   * When the last `git fetch` ended (the time of `FETCH_HEAD`); none: never.
+   */
+  fetched_at_ms?: number | null;
+  /**
+   * Whether the repository has a remote at all (no remote: no Fetch).
+   */
+  has_remote?: boolean;
+  /**
+   * The repository's main branch (`main`, else `master`); none: see `problem`.
+   */
+  main_branch?: string | null;
+  /**
+   * Why there is nothing to show, in words a board member can act on (no folder,
+   * not a git repository, git missing, no main branch). The lists are empty then.
+   */
+  problem?: string | null;
+  project_id: string;
+  /**
+   * The project's folder (the main checkout).
+   */
+  repo_path: string;
+  /**
+   * Every worktree git knows, the main checkout first.
+   */
+  worktrees?: CodeWorktree[];
+}
+
+/**
+ * One worktree of the repository.
+ */
+export interface CodeWorktree {
+  /**
+   * Its branch; none: a detached HEAD.
+   */
+  branch?: string | null;
+  /**
+   * How many files have uncommitted changes (may be more than `changed_files` names).
+   */
+  changed_count?: number;
+  /**
+   * Uncommitted changes (tracked and untracked files), at most `CODE_FILES_MAX` named.
+   */
+  changed_files?: string[];
+  /**
+   * The commit it is on.
+   */
+  head: string;
+  /**
+   * The project's folder itself; never removed from here.
+   */
+  is_main?: boolean;
+  /**
+   * Git no longer finds its folder (`git worktree prune` removes it).
+   */
+  missing?: boolean;
+  path: string;
+}
+
+/**
  * What a column does. The seven kinds always exist, once each.
  */
 export type ColumnKind =
@@ -2511,6 +2695,10 @@ export type HostResult =
    * `ServerMessage::ClaudeLoginPrompt` with this id.
    */
   | ({ type: "claude_login_link"; link_id: string })
+  /**
+   * `code.*`: the project's git state after the write.
+   */
+  | ({ type: "code" } & CodeView)
   | ({ type: "compaction_setting" } & CompactionSetting)
   /**
    * Notifications changed.
@@ -2580,6 +2768,36 @@ export type HostWrite =
    * removed). Answers `ClaudeLogin`.
    */
   | ({ method: "claude_login.unlink" })
+  /**
+   * Delete a local branch (not main, not one checked out in a worktree, not one an
+   * employee works on now). A branch with commits main lacks needs `force` (the
+   * client asked the board member first: that work is gone). Answers `Code`.
+   */
+  | ({ method: "code.delete_branch"; params: { branch: string; force?: boolean; project_id: string } })
+  /**
+   * `git fetch --prune` of the project's repository (feature `code_view`, ticket #77);
+   * answers `HostResult::Code`. Never a prompt for credentials: a remote that wants
+   * one fails with git's reason.
+   */
+  | ({ method: "code.fetch"; params: { project_id: string } })
+  /**
+   * Merge a local branch into the project's main (`--no-ff`), in the project's folder.
+   * Refused when the folder is not on main, main has uncommitted changes, is in another
+   * merge, or the branch has nothing ahead; a conflict is aborted, so main stays as it
+   * was (`validation` with git's reason and the conflicting files). Answers `Code`.
+   */
+  | ({ method: "code.merge"; params: { branch: string; project_id: string } })
+  /**
+   * Clean up merged: remove every clean worktree of a merged branch nobody works on,
+   * then delete every merged branch without a worktree (never main), then
+   * `git worktree prune`. Answers `Code`.
+   */
+  | ({ method: "code.prune_merged"; params: { project_id: string } })
+  /**
+   * Remove a worktree (not the project's folder). Refused when it has uncommitted
+   * changes or an employee works in it now. The branch stays. Answers `Code`.
+   */
+  | ({ method: "code.remove_worktree"; params: { path: string; project_id: string } })
   /**
    * Above how many tokens of context a session is compacted before its next turn
    * (feature `compaction_setting`), from the next run on; 0: never.
@@ -3611,6 +3829,13 @@ export type Method =
    */
   | ({ method: "claude_login.status" })
   /**
+   * The Code tab of a workspace (feature `code_view`, ticket #77): the git state of
+   * the project's folder (worktrees, local branches, recent commits). A folder that is
+   * no git repository answers a view with `problem` set, not an error. The same
+   * rights as `board.get`.
+   */
+  | ({ method: "code.get"; params: { project_id: string } })
+  /**
    * Whether the server committed the write sent with `idempotency_key` (feature
    * `command_applied`), answered with `CommandApplied`. A client asks this after
    * the connection dropped or timed out under a write it will not resend, so it
@@ -4550,6 +4775,10 @@ export type ResponseBody =
   | ({ type: "browser"; value: BrowserSetting })
   | ({ type: "channels"; value: ChannelsSnapshot })
   | ({ type: "claude_login"; value: ClaudeLoginView })
+  /**
+   * `code.get`.
+   */
+  | ({ type: "code"; value: CodeView })
   /**
    * `command.applied`.
    */

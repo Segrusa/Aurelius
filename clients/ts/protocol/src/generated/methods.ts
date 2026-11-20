@@ -40,6 +40,12 @@ export const METHODS = {
   "claude_login.link": "host",
   "claude_login.status": "read",
   "claude_login.unlink": "host",
+  "code.delete_branch": "host",
+  "code.fetch": "host",
+  "code.get": "read",
+  "code.merge": "host",
+  "code.prune_merged": "host",
+  "code.remove_worktree": "host",
   "command.applied": "read",
   "compaction.get_setting": "read",
   "compaction.set_threshold": "host",
@@ -358,6 +364,43 @@ export interface MethodParams {
    * removed). Answers `ClaudeLogin`.
    */
   "claude_login.unlink": undefined;
+  /**
+   * Delete a local branch (not main, not one checked out in a worktree, not one an
+   * employee works on now). A branch with commits main lacks needs `force` (the
+   * client asked the board member first: that work is gone). Answers `Code`.
+   */
+  "code.delete_branch": { branch: string; force?: boolean; project_id: string };
+  /**
+   * `git fetch --prune` of the project's repository (feature `code_view`, ticket #77);
+   * answers `HostResult::Code`. Never a prompt for credentials: a remote that wants
+   * one fails with git's reason.
+   */
+  "code.fetch": { project_id: string };
+  /**
+   * The Code tab of a workspace (feature `code_view`, ticket #77): the git state of
+   * the project's folder (worktrees, local branches, recent commits). A folder that is
+   * no git repository answers a view with `problem` set, not an error. The same
+   * rights as `board.get`.
+   */
+  "code.get": { project_id: string };
+  /**
+   * Merge a local branch into the project's main (`--no-ff`), in the project's folder.
+   * Refused when the folder is not on main, main has uncommitted changes, is in another
+   * merge, or the branch has nothing ahead; a conflict is aborted, so main stays as it
+   * was (`validation` with git's reason and the conflicting files). Answers `Code`.
+   */
+  "code.merge": { branch: string; project_id: string };
+  /**
+   * Clean up merged: remove every clean worktree of a merged branch nobody works on,
+   * then delete every merged branch without a worktree (never main), then
+   * `git worktree prune`. Answers `Code`.
+   */
+  "code.prune_merged": { project_id: string };
+  /**
+   * Remove a worktree (not the project's folder). Refused when it has uncommitted
+   * changes or an employee works in it now. The branch stays. Answers `Code`.
+   */
+  "code.remove_worktree": { path: string; project_id: string };
   /**
    * Whether the server committed the write sent with `idempotency_key` (feature
    * `command_applied`), answered with `CommandApplied`. A client asks this after
