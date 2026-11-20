@@ -272,7 +272,9 @@ describe("what the server would refuse", () => {
   it("someone working or an open ticket is the first reason given", () => {
     const b = branch("f", { worktree_path: "/wt/f" });
     expect(dangerAction({ ...b, working: true }, repo()).disabledWhy).toBe("An employee works on this branch now.");
-    expect(dangerAction({ ...b, open: true }, repo()).disabledWhy).toBe("Its ticket is still open.");
+    expect(dangerAction({ ...b, open: true }, repo()).disabledWhy).toBe("Its work session is still open.");
+    const ticket = { ticket_id: "t", number: 7, title: "T" };
+    expect(dangerAction({ ...b, open: true, ticket }, repo()).disabledWhy).toBe("Its ticket is still open.");
   });
 
   it("a detached worktree can be removed by its path, by the same rules", () => {
@@ -285,6 +287,8 @@ describe("what the server would refuse", () => {
     });
     const dirty = { path: "/wt/d2", branch: null, head: "h", changed_count: 3 };
     expect(worktreeAction(dirty, repo()).disabledWhy).toBe("This worktree has 3 uncommitted files.");
+    const busy = { ...(detached as CodeWorktree), working: true };
+    expect(worktreeAction(busy, repo()).disabledWhy).toBe("An employee works in this worktree now.");
   });
 
   it("merging needs the project folder clean and on main", () => {

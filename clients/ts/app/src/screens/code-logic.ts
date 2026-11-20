@@ -178,6 +178,8 @@ export type DangerAction =
 
 const WORKING_WHY = "An employee works on this branch now.";
 const OPEN_WHY = "Its ticket is still open.";
+const SESSION_OPEN_WHY = "Its work session is still open.";
+const WORKTREE_WORKING_WHY = "An employee works in this worktree now.";
 const OWN_FOLDER_WHY = "This is the project's own folder.";
 
 /** Why the server would refuse to remove the worktree at `path` (its folder or uncommitted files); null: it would not. */
@@ -197,7 +199,8 @@ function removeWhy(path: string, repo: RepoFacts, known?: CodeWorktree): string 
 export function dangerAction(b: CodeBranch, repo: RepoFacts = NO_FACTS): DangerAction {
   if (b.is_main) return { kind: "prune_merged", label: "Clean up merged", disabledWhy: null };
   // The server refuses both for a branch whose ticket or session is open, also before its first commit.
-  const why = b.working ? WORKING_WHY : b.open ? OPEN_WHY : null;
+  // A branch without a ticket is open because of its work session.
+  const why = b.working ? WORKING_WHY : b.open ? (b.ticket ? OPEN_WHY : SESSION_OPEN_WHY) : null;
   if (b.worktree_path) {
     const path = b.worktree_path;
     return { kind: "remove_worktree", label: "Remove worktree", path, disabledWhy: why ?? removeWhy(path, repo) };
@@ -207,7 +210,9 @@ export function dangerAction(b: CodeBranch, repo: RepoFacts = NO_FACTS): DangerA
 
 /** A worktree without a branch (a detached HEAD): it can only be removed, by its path, by the same rules. */
 export function worktreeAction(w: CodeWorktree, repo: RepoFacts): Extract<DangerAction, { kind: "remove_worktree" }> {
-  return { kind: "remove_worktree", label: "Remove worktree", path: w.path, disabledWhy: removeWhy(w.path, repo, w) };
+  // A work session may run in a detached folder; the server refuses to remove it then.
+  const why = w.working ? WORKTREE_WORKING_WHY : removeWhy(w.path, repo, w);
+  return { kind: "remove_worktree", label: "Remove worktree", path: w.path, disabledWhy: why };
 }
 
 /** What the confirm of a forced delete says is lost. */
