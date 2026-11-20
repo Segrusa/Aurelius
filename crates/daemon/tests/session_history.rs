@@ -104,3 +104,41 @@ async fn every_board_member_sees_a_session_in_the_history_and_its_summary_comes_
     let send = Command::SendChatMessage(aurelius_domain::conversation::SendChatMessage { conversation_id: conversation, text: "Me too".into(), images: vec![], files: vec![], interrupt: false, confirm_secret: false });
     assert!(ada.execute(aurelius_client::envelope(send, None)).await.is_err(), "only Grace writes in it");
 }
+
+/// The reader's own row of `conversation` in `work_session.list`.
+async fn listed(client: &Client, conversation: ConversationId) -> aurelius_domain::work_session::WorkSessionView {
+    let aurelius_protocol::ResponseBody::WorkSessions(snapshot) = client.call(Method::WorkSessionList { project_id: None }).await.unwrap() else { panic!("not a session list") };
+    snapshot.sessions.into_iter().find(|s| s.conversation_id == conversation).expect("the session is listed")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_finished_answer_is_unseen_until_the_session_is_opened_and_it_orders_by_its_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let _daemon = common::start(dir.path()).await;
+    let grace = common::connect_as(dir.path(), "grace").await;
+    let conversation = session(dir.path(), &grace).await;
+    assert!(!listed(&grace, conversation).await.unseen, "read after the answer ended: seen");
+
+    // A second answer that nobody opens: wait for it on the list only.
+    let send = aurelius_domain::conversation::SendChatMessage { confirm_secret: false, conversation_id: conversation, text: "And the import?".into(), images: vec![], files: vec![], interrupt: false };
+    grace.execute(aurelius_client::envelope(Command::SendChatMessage(send), None)).await.unwrap();
+    let mut row = listed(&grace, conversation).await;
+    for _ in 0..400 {
+        let ended: i64 = common::db(dir.path())
+            .query_row("SELECT COUNT(*) FROM runs WHERE conversation_id = ?1 AND ended_at_ms IS NOT NULL", [conversation.to_string()], |r| r.get(0))
+            .unwrap();
+        row = listed(&grace, conversation).await;
+        if ended >= 2 && !row.running {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(row.unseen, "the second answer ended after the session was last opened");
+    let ended: i64 = common::db(dir.path())
+        .query_row("SELECT MAX(ended_at_ms) FROM runs WHERE conversation_id = ?1", [conversation.to_string()], |r| r.get(0))
+        .unwrap();
+    assert!(row.last_activity_ms >= ended, "the last activity is the answer's end, not its start");
+
+    grace.messages(conversation).await.unwrap();
+    assert!(!listed(&grace, conversation).await.unseen, "opening it with conversation.get clears the mark");
+}

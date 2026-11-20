@@ -67,18 +67,29 @@ pub fn of_conversation(conn: &Connection, conversation: ConversationId) -> Resul
     }))
 }
 
+/// When the session `s` (a `work_sessions` row) last did something: its latest message,
+/// or later, the latest step (tool call) or end of one of its runs. An answer is one
+/// message from its start, so a long one that keeps building counts from its last step.
+const LAST_ACTIVITY: &str = "MAX(
+    COALESCE((SELECT MAX(m.created_at_ms) FROM messages m WHERE m.conversation_id = s.conversation_id), s.created_at_ms),
+    COALESCE((SELECT MAX(MAX(COALESCE(r.started_at_ms, 0), COALESCE(r.ended_at_ms, 0),
+                             COALESCE((SELECT MAX(COALESCE(a.ended_at_ms, a.started_at_ms)) FROM run_activity a WHERE a.run_id = r.id), 0)))
+              FROM runs r WHERE r.conversation_id = s.conversation_id), 0))";
+
 /// The sessions `user` started, the latest activity first; `project`: only those of it.
 pub fn list(conn: &Connection, user: UserId, project: Option<ProjectId>) -> Result<Vec<WorkSessionView>, StorageError> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         "SELECT c.id, p.id, p.name, e.id, e.name, c.title, s.worktree, s.branch, s.created_at_ms,
-                COALESCE((SELECT MAX(m.created_at_ms) FROM messages m WHERE m.conversation_id = c.id), s.created_at_ms) AS last,
+                {LAST_ACTIVITY} AS last,
                 EXISTS(SELECT 1 FROM runs r WHERE r.conversation_id = c.id AND r.status IN ('created','starting','running','waiting','cancelling')),
-                s.dispatch
+                s.dispatch,
+                EXISTS(SELECT 1 FROM discussion_reads dr JOIN runs r ON r.conversation_id = dr.conversation_id
+                       WHERE dr.user_id = ?1 AND dr.conversation_id = c.id AND r.status IN ('succeeded','failed') AND r.ended_at_ms > dr.read_at_ms)
          FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
          JOIN projects p ON p.id = c.project_id JOIN employees e ON e.id = c.employee_id
          WHERE s.started_by = ?1 AND c.kind = 'session' AND c.archived_at_ms IS NULL AND (?2 IS NULL OR c.project_id = ?2)
-         ORDER BY last DESC, c.id DESC",
-    )?;
+         ORDER BY last DESC, c.id DESC"
+    ))?;
     let rows = stmt.query_map(params![user.to_string(), project.map(|p| p.to_string())], |r| {
         Ok((
             r.get::<_, String>(0)?,
@@ -93,11 +104,14 @@ pub fn list(conn: &Connection, user: UserId, project: Option<ProjectId>) -> Resu
             r.get::<_, i64>(9)?,
             r.get::<_, bool>(10)?,
             r.get::<_, Option<String>>(11)?,
+            r.get::<_, bool>(12)?,
         ))
     })?;
     rows.map(|row| {
-        let (conversation, project, project_name, employee, employee_name, title, worktree, branch, created_at_ms, last_activity_ms, running, dispatch) = row?;
+        let (conversation, project, project_name, employee, employee_name, title, worktree, branch, created_at_ms, last_activity_ms, running, dispatch, ended_unseen) = row?;
         let dispatch = dispatch.as_deref().and_then(SessionDispatch::parse);
+        // A dispatcher that still chooses is working on it too.
+        let running = running || dispatch == Some(SessionDispatch::Choosing);
         Ok(WorkSessionView {
             conversation_id: ConversationId::parse(&conversation).map_err(bad)?,
             project_id: ProjectId::parse(&project).map_err(bad)?,
@@ -109,9 +123,9 @@ pub fn list(conn: &Connection, user: UserId, project: Option<ProjectId>) -> Resu
             branch,
             created_at_ms,
             last_activity_ms,
-            // A dispatcher that still chooses is working on it too.
-            running: running || dispatch == Some(SessionDispatch::Choosing),
+            running,
             dispatch,
+            unseen: ended_unseen && !running,
         })
     })
     .collect()
@@ -280,8 +294,7 @@ pub fn history(conn: &Connection, filter: &HistoryFilter, limit: u32, job_kind: 
         "SELECT c.id, c.title, p.id, p.name, e.id, e.name, s.started_by, u.username, s.branch, s.created_at_ms, x.last, s.summary_text, s.summary_state,
                 EXISTS(SELECT 1 FROM jobs j WHERE j.kind = ?1 AND j.state IN ('ready','leased') AND json_extract(j.payload_json, '$.conversation_id') = c.id)
          FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
-         JOIN (SELECT ws.conversation_id AS id, COALESCE((SELECT MAX(m.created_at_ms) FROM messages m WHERE m.conversation_id = ws.conversation_id), ws.created_at_ms) AS last
-               FROM work_sessions ws) x ON x.id = c.id
+         JOIN (SELECT s.conversation_id AS id, {LAST_ACTIVITY} AS last FROM work_sessions s) x ON x.id = c.id
          JOIN projects p ON p.id = c.project_id JOIN employees e ON e.id = c.employee_id
          LEFT JOIN users u ON u.id = s.started_by
          WHERE {} ORDER BY x.last DESC, c.id DESC LIMIT {}",

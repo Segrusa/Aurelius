@@ -281,9 +281,10 @@ pub const READS_SCHEMA: i64 = 20;
 /// an employee's post or answer), not Aurelius's notes and system lines.
 pub(crate) const COUNTED: &str = "m.status = 'complete' AND (m.role = 'user' OR json_extract(m.meta_json, '$.kind') = 'group')";
 
-/// `user` read the discussion `conversation` (a channel or a ticket's
-/// discussion) up to its latest message. It never goes back; nothing for
+/// `user` read the discussion `conversation` (a channel, a ticket's discussion
+/// or a work session) up to its latest message. It never goes back; nothing for
 /// another conversation, an unknown board member, or a store before migration 20.
+/// For a session only `read_at_ms` counts: a run that ended after it is unseen.
 pub fn mark_read(tx: &Transaction<'_>, user: UserId, conversation: ConversationId) -> Result<(), StorageError> {
     if !has_reads(tx)? {
         return Ok(());
@@ -291,7 +292,7 @@ pub fn mark_read(tx: &Transaction<'_>, user: UserId, conversation: ConversationI
     tx.execute(
         "INSERT INTO discussion_reads(user_id, conversation_id, read_through, read_at_ms)
          SELECT ?1, c.id, COALESCE((SELECT MAX(ordinal) FROM messages WHERE conversation_id = c.id), 0), ?3
-         FROM conversations c WHERE c.id = ?2 AND (c.kind IN ('group', 'ticket') OR c.board_member_id = ?1) AND EXISTS (SELECT 1 FROM users WHERE id = ?1)
+         FROM conversations c WHERE c.id = ?2 AND (c.kind IN ('group', 'ticket', 'session') OR c.board_member_id = ?1) AND EXISTS (SELECT 1 FROM users WHERE id = ?1)
          ON CONFLICT(user_id, conversation_id) DO UPDATE SET read_through = MAX(read_through, excluded.read_through), read_at_ms = excluded.read_at_ms",
         params![user.to_string(), conversation.to_string(), now_ms()],
     )?;

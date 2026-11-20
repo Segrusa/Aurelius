@@ -139,6 +139,11 @@ pub struct WorkSessionView {
     /// `employee_id` is the dispatcher.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispatch: Option<SessionDispatch>,
+    /// A run of it ended after the reader last opened it (with `conversation.get`), so
+    /// there is a finished answer they have not seen. Never while it runs; older
+    /// servers leave it out, and a client then shows no mark.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unseen: bool,
 }
 
 /// `work_session.list`: the reader's sessions, the latest activity first.

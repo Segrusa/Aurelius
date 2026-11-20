@@ -268,6 +268,8 @@ mod schema47_tests;
 #[cfg(test)]
 mod session_history_tests;
 #[cfg(test)]
+mod session_list_tests;
+#[cfg(test)]
 mod schema38_tests;
 #[cfg(test)]
 mod schema39_tests;
