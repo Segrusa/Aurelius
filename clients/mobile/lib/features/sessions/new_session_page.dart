@@ -30,6 +30,20 @@ import 'session_rules.dart';
 /// The label of a run choice left to the employee (desktop: "Employee's default").
 const employeeDefault = "Employee's default";
 
+/// The visible gap between the composer and the tab bar's glass.
+const _barGap = 10.0;
+
+/// The label of the run pill: the model, effort and mode that differ from the
+/// employee's own, or "Default" when none do.
+String runSummary({required String model, required String effort, required String mode}) {
+  final parts = [
+    if (model != 'default') ModelCatalog.friendly(model),
+    if (effort != 'default') ModelCatalog.effortLabel(effort),
+    if (mode != 'default') AgentMode.fromJson(mode).label,
+  ];
+  return parts.isEmpty ? 'Default' : parts.join(' · ');
+}
+
 /// What the Chat tab starts: a work session, or a ticket (through New ticket).
 enum StartKind { session, ticket }
 
@@ -312,6 +326,55 @@ class _NewSessionPageState extends State<NewSessionPage> {
     if (picked != null && mounted) setState(() => chosen(picked.$1));
   }
 
+  /// The run sheet: model, effort and mode in one slide-up sheet. A choice
+  /// applies at once and the sheet stays open, so all three can be set in one go.
+  Future<void> _pickRun(List<String> models) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, setSheet) {
+          void choose(VoidCallback change) {
+            setState(change);
+            setSheet(() {});
+          }
+
+          Widget section(String title, List<(String, String)> options, String current, ValueChanged<String> chosen) => Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 4), child: Eyebrow(title)),
+                  for (final (value, label) in options)
+                    ListTile(
+                      key: ValueKey('pick-$title-$value'),
+                      dense: true,
+                      title: Text(label),
+                      trailing: value == current ? Icon(Icons.check, color: Tokens.accentText) : null,
+                      onTap: () => choose(() => chosen(value)),
+                    ),
+                ],
+              );
+
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.8),
+              child: ListView(shrinkWrap: true, children: [
+                section('Model', [('default', employeeDefault), for (final m in models) (m, ModelCatalog.friendly(m))], _modelOf(models), (v) => _model = v),
+                section('Effort', [('default', employeeDefault), for (final (v, label, _) in ModelCatalog.efforts) (v, label)], _effort, (v) => _effort = v),
+                section('Mode', [('default', employeeDefault), for (final m in agentModes) (m.wire, m.label)], _mode, (v) => _mode = v),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: FilledButton(key: const ValueKey('run-sheet-done'), onPressed: () => Navigator.pop(sheet), child: const Text('Done')),
+                ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   /// The project picker: every open project, the recently used first.
   Future<void> _pickProject(BuildContext anchor, List<ProjectSummary> projects) async {
     final ordered = projectRows(projects, _recent, _project, id: (p) => p.id, max: projects.length).rows;
@@ -430,8 +493,8 @@ class _NewSessionPageState extends State<NewSessionPage> {
     required bool can,
     required bool keyboard,
   }) {
-    // Above the tab bar; with the keyboard up the bar is under it, so only a margin.
-    final bottom = keyboard ? 8.0 : MediaQuery.paddingOf(context).bottom + 8;
+    // Just above the tab bar's glass; with the keyboard up the bar is under it, so only a margin.
+    final bottom = keyboard ? 8.0 : MediaQuery.paddingOf(context).bottom - AppTabBar.clearTop + _barGap;
     final showProblem = _tried && problem != null;
     // Who takes it and how only matters once there is something to start.
     final showNote = showProblem || _text.text.trim().isNotEmpty;
@@ -440,36 +503,31 @@ class _NewSessionPageState extends State<NewSessionPage> {
       padding: EdgeInsets.fromLTRB(20, 0, 20, bottom),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (kind == StartKind.session)
-          SizedBox(
-            height: 40,
-            // Every choice built, as the Board's filters: a lazy list would leave some out for screen readers.
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
-              child: Row(children: [
-                _TrayChip(
-                  key: const ValueKey('new-session-who'),
-                  label: whoName ?? 'Who?',
-                  warn: _tried && whoName == null,
-                  onTap: () => _pick<String?>('Who', [if (dispatchOn) (dispatcherWho, 'Dispatcher'), for (final e in employees) (e.id, e.name)], _who, (v) => _who = v),
+          // Who on the left; model, effort and mode in one pill on the right, whose sheet sets all three.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
+            child: Row(children: [
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _TrayChip(
+                    key: const ValueKey('new-session-who'),
+                    label: whoName ?? 'Who?',
+                    warn: _tried && whoName == null,
+                    onTap: () => _pick<String?>('Who', [if (dispatchOn) (dispatcherWho, 'Dispatcher'), for (final e in employees) (e.id, e.name)], _who, (v) => _who = v),
+                  ),
                 ),
-                _TrayChip(
-                  key: const ValueKey('new-session-model'),
-                  label: model == 'default' ? 'Model' : ModelCatalog.friendly(model),
-                  onTap: () => _pick('Model', [('default', employeeDefault), for (final m in models) (m, ModelCatalog.friendly(m))], model, (v) => _model = v),
+              ),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 220),
+                child: _TrayChip(
+                  key: const ValueKey('new-session-run'),
+                  icon: CupertinoIcons.slider_horizontal_3,
+                  label: runSummary(model: model, effort: _effort, mode: _mode),
+                  onTap: () => _pickRun(models),
                 ),
-                _TrayChip(
-                  key: const ValueKey('new-session-effort'),
-                  label: _effort == 'default' ? 'Effort' : ModelCatalog.effortLabel(_effort),
-                  onTap: () => _pick('Effort', [('default', employeeDefault), for (final (v, label, _) in ModelCatalog.efforts) (v, label)], _effort, (v) => _effort = v),
-                ),
-                _TrayChip(
-                  key: const ValueKey('new-session-mode'),
-                  label: _mode == 'default' ? 'Mode' : AgentMode.fromJson(_mode).label,
-                  onTap: () => _pick('Mode', [('default', employeeDefault), for (final m in agentModes) (m.wire, m.label)], _mode, (v) => _mode = v),
-                ),
-              ]),
-            ),
+              ),
+            ]),
           ),
         if (_images.isNotEmpty || _files.isNotEmpty || _uploading)
           Padding(
@@ -682,11 +740,12 @@ class _RoundButton extends StatelessWidget {
 
 /// One choice in the composer's tray (Who, Model, Effort, Mode).
 class _TrayChip extends StatelessWidget {
-  const _TrayChip({super.key, required this.label, required this.onTap, this.warn = false});
+  const _TrayChip({super.key, required this.label, required this.onTap, this.warn = false, this.icon});
 
   final String label;
   final VoidCallback onTap;
   final bool warn;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -702,7 +761,8 @@ class _TrayChip extends StatelessWidget {
               tint: Tokens.dark ? Tokens.glass : Colors.white.withValues(alpha: 0.6),
               padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Text(label, style: TextStyle(fontSize: 13, color: warn ? Tokens.negative : Tokens.ink2)),
+                if (icon != null) Padding(padding: const EdgeInsets.only(right: 5), child: Icon(icon, size: 13, color: Tokens.ink2)),
+                Flexible(child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: warn ? Tokens.negative : Tokens.ink2))),
                 const SizedBox(width: 4),
                 Icon(CupertinoIcons.chevron_down, size: 11, color: warn ? Tokens.negative : Tokens.ink2),
               ]),

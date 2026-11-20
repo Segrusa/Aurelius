@@ -247,6 +247,22 @@ void main() {
       await settleBoard(tester);
     }
 
+    /// Opens the run pill's sheet, taps each option in it and closes it with Done.
+    Future<void> setRun(WidgetTester tester, List<String> options) async {
+      await tester.tap(find.byKey(const ValueKey('new-session-run')));
+      await settleBoard(tester);
+      for (final option in options) {
+        await tester.ensureVisible(find.byKey(ValueKey(option)));
+        await tester.tap(find.byKey(ValueKey(option)));
+        await settleBoard(tester);
+      }
+      await tester.ensureVisible(find.byKey(const ValueKey('run-sheet-done')));
+      await tester.tap(find.byKey(const ValueKey('run-sheet-done')));
+      await settleBoard(tester);
+    }
+
+    String runLabel(WidgetTester tester) => tester.widget<Text>(find.descendant(of: find.byKey(const ValueKey('new-session-run')), matching: find.byType(Text))).data!;
+
     testWidgets('the project is a picker: its menu lists every open project with a check on the chosen one', (tester) async {
       final repo = repoWith();
       ProjectSummary project(String id, String name) => ProjectSummary(createdAtMs: 0, id: id, name: name, status: ProjectStatus.active, version: 1, employeesActive: 0);
@@ -276,9 +292,8 @@ void main() {
       expect(find.descendant(of: find.byKey(const ValueKey('chat-project')), matching: find.text('Atlas')), findsOneWidget);
       expect(find.text('Dispatcher'), findsOneWidget, reason: 'with session_dispatch the dispatcher chooses unless told');
       await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'Fix the login page');
-      await choose(tester, 'model', 'pick-Model-default');
-      await choose(tester, 'effort', 'pick-Effort-high');
-      await choose(tester, 'mode', 'pick-Mode-plan');
+      await setRun(tester, ['pick-Model-default', 'pick-Effort-high', 'pick-Mode-plan']);
+      expect(runLabel(tester), 'High · Plan', reason: 'the pill sums up what differs from the employee');
       expect(find.textContaining('The dispatcher chooses who takes it'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('new-session-start')));
       await settleBoard(tester);
@@ -317,8 +332,7 @@ void main() {
           .thenAnswer((_) async => receiptOf(const CommandResultWorkSessionDispatching(conversationId: 'c9', messageId: 'm', projectId: 'p1')));
       await pumpSessions(tester, repo, const NewSessionPage());
       await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'First');
-      await choose(tester, 'effort', 'pick-Effort-high');
-      await choose(tester, 'mode', 'pick-Mode-plan');
+      await setRun(tester, ['pick-Effort-high', 'pick-Mode-plan']);
       await tester.tap(find.byKey(const ValueKey('new-session-start')));
       await settleBoard(tester);
       final prefs = await SharedPreferences.getInstance();
@@ -333,8 +347,7 @@ void main() {
       when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
           .thenAnswer((_) async => receiptOf(const CommandResultWorkSessionDispatching(conversationId: 'c10', messageId: 'm', projectId: 'p1')));
       await pumpSessions(tester, repo, const NewSessionPage());
-      expect(find.descendant(of: find.byKey(const ValueKey('new-session-effort')), matching: find.text('High')), findsOneWidget);
-      expect(find.descendant(of: find.byKey(const ValueKey('new-session-mode')), matching: find.text('Plan')), findsOneWidget);
+      expect(runLabel(tester), endsWith('High · Plan'));
       await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'Second');
       await tester.pump();
       await tester.tap(find.byKey(const ValueKey('new-session-start')));
@@ -346,8 +359,7 @@ void main() {
     testWidgets('a remembered effort or mode the app no longer offers falls back to the default', (tester) async {
       SharedPreferences.setMockInitialValues({'new_session.effort:h': 'extreme', 'new_session.mode:h': 'yolo'});
       await pumpSessions(tester, repoWith(), const NewSessionPage());
-      expect(find.descendant(of: find.byKey(const ValueKey('new-session-effort')), matching: find.text('Effort')), findsOneWidget);
-      expect(find.descendant(of: find.byKey(const ValueKey('new-session-mode')), matching: find.text('Mode')), findsOneWidget);
+      expect(runLabel(tester), 'Default');
     });
 
     testWidgets('without session_dispatch there is no Dispatcher: Who must be chosen', (tester) async {

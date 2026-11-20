@@ -577,6 +577,14 @@ class AppTabBar extends StatelessWidget {
   /// (24pt) draws them far larger than the system's own tab bars do.
   static const nativeTabIconSize = 16.0;
 
+  /// The transparent room on top of the native bar, kept for its selection
+  /// pill. It counts in the bar's height (and so in the page's bottom
+  /// padding) but shows nothing, so a control resting on the bar subtracts it.
+  static const nativeClearTop = 14.0;
+
+  /// How much of the page's bottom padding is the bar's see-through top.
+  static double get clearTop => native ? nativeClearTop : 0;
+
   /// Whether the native bar is used on this platform.
   static bool get native => defaultTargetPlatform == TargetPlatform.iOS;
 
