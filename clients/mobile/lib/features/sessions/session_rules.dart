@@ -3,6 +3,7 @@
 // session-logic.ts and new-session-logic.ts, with the same words.
 
 import '../../data/protocol/protocol.dart';
+import 'recent_use.dart';
 
 /// The server feature of work sessions.
 const workSessionsFeature = 'work_sessions';
@@ -49,10 +50,11 @@ enum SessionPeriod {
   final String label;
 }
 
-/// The section of [s] at [now] (local time): Active while it has a signal, else by its last activity.
-SessionPeriod sessionPeriod(WorkSessionView s, DateTime now) {
-  if (sessionSignal(s) != null) return SessionPeriod.active;
-  final at = DateTime.fromMillisecondsSinceEpoch(s.lastActivityMs);
+/// The section of something used last at [usedMs], at [now] (local time):
+/// Active while it has a signal, else by the day it was last used.
+SessionPeriod periodOf({required bool active, required int usedMs, required DateTime now}) {
+  if (active) return SessionPeriod.active;
+  final at = DateTime.fromMillisecondsSinceEpoch(usedMs);
   final today = DateTime(now.year, now.month, now.day);
   if (!at.isBefore(today)) return SessionPeriod.today;
   if (!at.isBefore(DateTime(now.year, now.month, now.day - 1))) return SessionPeriod.yesterday;
@@ -61,14 +63,35 @@ SessionPeriod sessionPeriod(WorkSessionView s, DateTime now) {
   return SessionPeriod.older;
 }
 
-/// The non-empty sections in their order, each with its sessions newest activity first.
-List<(SessionPeriod, List<WorkSessionView>)> sessionSections(Iterable<WorkSessionView> sessions, DateTime now) {
-  final by = <SessionPeriod, List<WorkSessionView>>{};
-  for (final s in sessionsByActivity(sessions)) {
-    by.putIfAbsent(sessionPeriod(s, now), () => []).add(s);
+/// The section of [s] at [now] (local time): Active while it has a signal, else by its last activity.
+SessionPeriod sessionPeriod(WorkSessionView s, DateTime now, {int? usedMs}) =>
+    periodOf(active: sessionSignal(s) != null, usedMs: usedMs ?? s.lastActivityMs, now: now);
+
+/// [items] in their sections, in the sections' order, each most recently used
+/// first (desktop's byLastUse: ties keep their order). [usedAt] is when an
+/// item was last used, [active] whether it signals now.
+List<(SessionPeriod, List<T>)> sectionsByUse<T>(Iterable<T> items, DateTime now, {required int Function(T) usedAt, required bool Function(T) active}) {
+  final ordered = [for (final (i, item) in items.indexed) (i, item, usedAt(item))]..sort((a, b) {
+      final by = b.$3.compareTo(a.$3);
+      return by != 0 ? by : a.$1.compareTo(b.$1);
+    });
+  final by = <SessionPeriod, List<T>>{};
+  for (final (_, item, used) in ordered) {
+    by.putIfAbsent(periodOf(active: active(item), usedMs: used, now: now), () => []).add(item);
   }
   return [for (final p in SessionPeriod.values) if (by[p] case final list?) (p, list)];
 }
+
+/// The non-empty sections in their order, each with its sessions most
+/// recently used first: the later of their activity and when you last opened
+/// them on this phone ([uses], see recent_use.dart).
+List<(SessionPeriod, List<WorkSessionView>)> sessionSections(Iterable<WorkSessionView> sessions, DateTime now, {Map<String, int> uses = const {}}) =>
+    sectionsByUse(
+      sessions,
+      now,
+      usedAt: (s) => lastUsed(uses, sessionUseKey(s.conversationId), s.lastActivityMs),
+      active: (s) => sessionSignal(s) != null,
+    );
 
 /// Who works in a session: its employee, the dispatcher at it while it chooses, or nobody yet.
 String sessionWho(WorkSessionView s) => switch (s.dispatch) {
@@ -122,6 +145,52 @@ const newSessionHint = 'What do you want to work on? Starts right away, without 
 
 /// What is remembered per server: `project` and `who`.
 String sessionKey(String what, String hostId) => 'new_session.$what:$hostId';
+
+/// How many projects the Chat tab offers as chips before "All projects…".
+const projectRowsMax = 6;
+
+/// Projects remembered by last use; more than the row shows, so a project picked once keeps its place.
+const recentProjectsMax = 20;
+
+/// Tickets the Chat tab offers to continue.
+const continueMax = 3;
+
+/// The columns of a ticket that is still being worked on.
+const continueColumns = {ColumnKind.doing, ColumnKind.testing, ColumnKind.review};
+
+/// The projects the Chat tab shows as chips (desktop projectRows): the most
+/// recently used first, then in list order; the chosen one is always among them.
+/// [more] when there are more than fit.
+({List<T> rows, bool more}) projectRows<T>(List<T> shown, List<String> recent, String? chosen, {required String Function(T) id}) {
+  int rank(T p) {
+    final at = recent.indexOf(id(p));
+    return at < 0 ? recent.length : at;
+  }
+
+  final ordered = [for (final (i, p) in shown.indexed) (i, p)]..sort((a, b) {
+      final by = rank(a.$2).compareTo(rank(b.$2));
+      return by != 0 ? by : a.$1.compareTo(b.$1);
+    });
+  final rows = [for (final (_, p) in ordered.take(projectRowsMax)) p];
+  final picked = shown.where((p) => id(p) == chosen).firstOrNull;
+  if (picked != null && !rows.contains(picked)) rows[rows.length - 1] = picked;
+  return (rows: rows, more: shown.length > projectRowsMax);
+}
+
+/// [recent] with [projectId] used now, newest first.
+List<String> noteRecent(List<String> recent, String projectId) => [projectId, ...recent.where((r) => r != projectId)].take(recentProjectsMax).toList();
+
+/// Your tickets to continue (desktop continueTickets): in Doing, Testing or Review, last updated first.
+List<TicketView> continueTickets(Iterable<TicketView> tickets) =>
+    ([for (final t in tickets) if (t.archivedAtMs == null && continueColumns.contains(t.column)) t]..sort((a, b) => b.updatedAtMs.compareTo(a.updatedAtMs))).take(continueMax).toList();
+
+/// The pill on a ticket to continue.
+String continueColumnLabel(ColumnKind column) => switch (column) {
+      ColumnKind.doing => 'Doing',
+      ColumnKind.testing => 'Testing',
+      ColumnKind.review => 'Review',
+      _ => column.wire,
+    };
 
 /// The last used project while it is still open, else the only open one, else none (the board member picks).
 String? defaultSessionProject(List<String> open, String? last) {

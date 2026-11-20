@@ -99,6 +99,7 @@ TicketView ticketOf({
   bool? responsibleDisabled,
   String? kind,
   String? mergeCommit,
+  int updatedAtMs = 0,
 }) =>
     TicketView(
       archivedAtMs: archivedAtMs,
@@ -133,7 +134,7 @@ TicketView ticketOf({
       rootTaskStatus: rootTaskStatus,
       run: run,
       title: title,
-      updatedAtMs: 0,
+      updatedAtMs: updatedAtMs,
       version: version,
     );
 
