@@ -301,7 +301,7 @@ pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>
     let base = Base::of_employee(me.employee, run);
     let mut e = Events::new(&base, "ticket", String::new(), Some(project), 0);
     let by = Actor::Employee { employee_id: me.employee };
-    let (id, number) = insert_ticket(
+    let (id, number, _) = insert_ticket(
         tx,
         &mut e,
         &NewCard {

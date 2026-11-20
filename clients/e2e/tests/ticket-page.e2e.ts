@@ -24,7 +24,17 @@ const NEW_LINES = Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n
 const todos = (states: string[], words: string[]) =>
   words.map((content, i) => ({ content, activeForm: content.replace(/^Fix/, "Fixing"), status: states[i] }));
 
-function script() {
+const SHORT = "Clicking a workspace in the sidebar sometimes does nothing. Is it the radius animation?";
+const LONG = [
+  "Clicking a workspace in the sidebar sometimes does nothing.",
+  "It happens on Windows and on macOS.",
+  "Mostly right after the app starts.",
+  "Is it the radius animation?",
+  "Check the corners of every tile.",
+  "The last line of the description.",
+].join("\n\n");
+
+function script(description = SHORT) {
   const t = ticket("t73", 73, "doing", {
     owner_employee_id: "e1",
     owner_name: "Flux",
@@ -35,7 +45,7 @@ function script() {
     project_name: "Aurelius",
     root_task_status: "running",
     title: "Clicking a workspace in the sidebar sometimes does nothing",
-    description: "Clicking a workspace in the sidebar sometimes does nothing. Is it the radius animation?",
+    description,
   });
   const root = task("k73", {
     title: t.title,
@@ -207,6 +217,39 @@ test.describe("the ticket page", () => {
     await expect(sub).toContainText("Delegated task");
     await expect(sub.getByRole("button", { name: "1 question for you" })).toBeVisible();
     await expect(now.locator("[data-now-task=d1]")).toHaveCount(0);
+  });
+
+  test("folds a long description to three lines until Show more", async ({ page }) => {
+    await scriptServer(page, script(LONG));
+    await page.goto(`${site.origin}/ticket/73`);
+    const region = page.getByRole("region", { name: "Description" });
+    const more = region.getByRole("button", { name: "Show more" });
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+    const text = region.getByRole("button", { name: "Edit Description" });
+    const folded = (await text.boundingBox())?.height ?? 0;
+    const line = await region
+      .getByText("Clicking a workspace")
+      .evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+    // Three lines (with the paragraphs' spacing inside them), never all six paragraphs.
+    expect(folded).toBeGreaterThan(line * 2.5);
+    expect(folded).toBeLessThan(line * 5);
+    mkdirSync(SHOTS, { recursive: true });
+    await region.screenshot({ path: join(SHOTS, "description-folded.png") });
+    await more.click();
+    const less = region.getByRole("button", { name: "Show less" });
+    await expect(less).toHaveAttribute("aria-expanded", "true");
+    expect((await text.boundingBox())?.height ?? 0).toBeGreaterThan(folded * 1.5);
+    await region.screenshot({ path: join(SHOTS, "description-unfolded.png") });
+    await less.click();
+    await expect(region.getByRole("button", { name: "Show more" })).toBeVisible();
+  });
+
+  test("a short description has no Show more", async ({ page }) => {
+    await scriptServer(page, script());
+    await page.goto(`${site.origin}/ticket/73`);
+    const region = page.getByRole("region", { name: "Description" });
+    await expect(region).toContainText("Is it the radius animation?");
+    await expect(region.getByRole("button", { name: /Show (more|less)/ })).toHaveCount(0);
   });
 
   test("the live bar names the call each task runs, and Live output opens the task", async ({ page }) => {

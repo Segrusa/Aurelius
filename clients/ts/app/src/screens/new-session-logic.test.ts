@@ -234,6 +234,20 @@ describe("what Start sends (§4.6)", () => {
     expect(params.run?.mode).toBeUndefined();
     expect(done).toBe("Quick task started with Flux.");
   });
+
+  it("leaves the title empty on a server that makes it from the description", () => {
+    const made = { ...base, madeTitle: true };
+    const forDispatcher = sessionRequest(made, false).params;
+    expect(forDispatcher.title).toBe("");
+    expect(forDispatcher.description).toBe("Fix the login\nIt fails on Safari");
+    const forEmployee = sessionRequest({ ...made, who: { id: "e-1", name: "Flux" } }, false).params;
+    expect(forEmployee).toEqual({
+      ...sessionRequest({ ...base, who: { id: "e-1", name: "Flux" } }, false).params,
+      title: "",
+    });
+    // An older server refuses an empty title: it gets the first line.
+    expect(sessionRequest({ ...base, madeTitle: false }, false).params.title).toBe("Fix the login");
+  });
 });
 
 describe("whether Start can go", () => {

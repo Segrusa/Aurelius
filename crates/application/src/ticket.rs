@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 
 pub(crate) mod agent;
 pub mod quick;
+pub mod title;
 
 /// Why a paused or archived employee cannot be the tester: nobody would run the tests.
 pub(crate) const TESTER_NOT_ACTIVE: &str = "The tester must be an active employee.";
@@ -522,8 +523,14 @@ impl CommandService {
 
     fn create_ticket(&self, base: Base, envelope: &CommandEnvelope, hash: String, mut cmd: ticket::CreateTicket, user: UserId) -> Result<Committed, AppError> {
         let kind = cmd.kind.unwrap_or_default();
+        // Feature `ticket_made_title`: no title but a description, so the title is
+        // made from it; until then the description's first line is the title.
+        let made_title = cmd.title.trim().is_empty() && cmd.description.as_deref().is_some_and(|d| !d.trim().is_empty());
         if kind == TicketKind::Quick {
             crate::ticket::quick::prepare(self.store(), &mut cmd, user)?;
+        }
+        if made_title && cmd.title.trim().is_empty() {
+            cmd.title = quick::title_from(cmd.description.as_deref().unwrap_or_default());
         }
         let title = ticket::valid_title(&cmd.title).map_err(domain_error)?;
         let description = ticket::valid_description(cmd.description.as_deref()).map_err(domain_error)?;
@@ -578,7 +585,7 @@ impl CommandService {
                 blobs::register(tx, blob)?;
             }
             let mut e = Events::new(&base, "ticket", String::new(), Some(cmd.project_id), 0);
-            let (id, number) = insert_ticket(
+            let (id, number, created) = insert_ticket(
                 tx,
                 &mut e,
                 &NewCard {
@@ -597,6 +604,9 @@ impl CommandService {
                     kind,
                 },
             )?;
+            if made_title {
+                title::schedule_ticket_title(tx, id, created, &title)?;
+            }
             // The discussion starts with a link to the message, and its chat gets "→ #N" (MU2-10 AC3).
             if let Some((message, (conversation, label))) = &source {
                 e.line(crate::conversation::discussion::created_from(tx, id, number, user, *conversation, *message, label)?);
@@ -891,7 +901,8 @@ struct NewCard<'a> {
 /// Insert a ticket at the bottom of Backlog and write its `ticket.created` event, the creator's
 /// follow, a Responsible other than the creator and the board members its description names.
 /// `e` takes the ticket's identity here; the caller goes on with the rest of its write.
-fn insert_ticket(tx: &Transaction<'_>, e: &mut Events, card: &NewCard<'_>) -> Result<(TicketId, u32), StorageError> {
+/// Gives the id, the number and the `ticket.created` event (the source of a job it queues).
+fn insert_ticket(tx: &Transaction<'_>, e: &mut Events, card: &NewCard<'_>) -> Result<(TicketId, u32, aurelius_domain::EventId), StorageError> {
     let id = TicketId::new();
     let backlog = company_store::column_of_kind(tx, ColumnKind::Backlog)?;
     let number = store::insert(
@@ -926,7 +937,7 @@ fn insert_ticket(tx: &Transaction<'_>, e: &mut Events, card: &NewCard<'_>) -> Re
     if card.kind == TicketKind::Quick {
         created["kind"] = json!(card.kind);
     }
-    e.push(tx, EventKind::TicketCreated, created)?;
+    let created = e.push_id(tx, EventKind::TicketCreated, created)?;
     e.follow(tx, id, card.project, card.user, FollowReason::Created)?;
     // Choosing someone else is news for them; "You" (the default, B9) says nothing new.
     if let Some(responsible) = card.responsible.filter(|r| *r != card.user) {
@@ -935,7 +946,7 @@ fn insert_ticket(tx: &Transaction<'_>, e: &mut Events, card: &NewCard<'_>) -> Re
     for named in named {
         e.follow(tx, id, card.project, named, FollowReason::Mentioned)?;
     }
-    Ok((id, number))
+    Ok((id, number, created))
 }
 
 /// The fields of a ticket update (`ticket.update` and an employee's `update_ticket`): what is
