@@ -14,14 +14,6 @@ pub const UPLOADS_MAX: usize = 8;
 /// Largest uploaded file (the same as the remote upload limit).
 pub const UPLOAD_MAX_BYTES: u64 = 25 * 1024 * 1024;
 
-/// The `MessageView::update` kind of what wakes an employee in a board member's chat
-/// because a ticket made there reached Review. Aurelius writes it for the employee:
-/// the board member reads the employee's update, never this.
-pub const TICKET_UPDATE_KIND: &str = "ticket_update";
-/// The `MessageView::update` kind of what an employee sent the responsible board member
-/// from a ticket (`tell_responsible`), with a link to that ticket.
-pub const TICKET_NOTE_KIND: &str = "ticket_note";
-
 /// What a conversation is for. Stored as `conversations.kind`; never on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConversationKind {

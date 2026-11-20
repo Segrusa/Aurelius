@@ -19,7 +19,6 @@ pub mod threads;
 pub mod message_edits;
 pub mod conversation_sessions;
 pub mod employees;
-pub mod employee_chats;
 pub mod work_sessions;
 pub mod employee_profiles;
 pub mod activity_log;

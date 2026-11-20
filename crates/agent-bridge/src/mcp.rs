@@ -163,7 +163,7 @@ fn tool_definitions(project: bool, set_mode: bool, discussion: bool, testing: bo
     tools.extend(memory_tool_definitions());
     tools.push(suggest_replies_definition());
     tools.extend(project_tool_definitions());
-    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || !matches!(t["name"].as_str(), Some("hand_over_task" | "hand_off" | "tell_responsible" | "schedule_message" | "scratchpad"))));
+    tools.extend(task_tool_definitions().into_iter().filter(|t| !project || !matches!(t["name"].as_str(), Some("hand_over_task" | "hand_off" | "schedule_message" | "scratchpad"))));
     tools.extend(group_chat_tool_definitions());
     tools.extend(vault_tool_definitions());
     tools.extend(board_tool_definitions());
@@ -308,7 +308,6 @@ async fn call_tool(client: &mut Option<BridgeClient>, root: &Path, run_id: RunId
         "vault_read" => EmployeeTaskOp::VaultRead { item: text("item"), project: optional("project") },
         "hand_over_task" if !project => EmployeeTaskOp::HandOver { employee: text("employee"), reason: text("reason") },
         "hand_off" if !project => EmployeeTaskOp::HandOff { to: text("to"), message: text("message") },
-        "tell_responsible" if !project => EmployeeTaskOp::TellResponsible { message: text("message") },
         "schedule_message" if !project => EmployeeTaskOp::ScheduleMessage { delay: text("delay"), content: text("content"), to: optional("to") },
         "scratchpad" if !project => EmployeeTaskOp::Scratchpad { content: text("content") },
         "propose_colleague" => EmployeeTaskOp::ProposeColleague {
@@ -399,7 +398,7 @@ fn board_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "create_ticket",
-            "description": "Make a ticket in Backlog: for management, and for anyone in a board member's lasting chat with them. It starts nothing: no run, no owner; a manager starts it with move_ticket (todo) or a board member decides. Elsewhere, colleagues who are not management ask a manager to make it.",
+            "description": "Make a ticket in Backlog: for management. It starts nothing: no run, no owner; a manager starts it with move_ticket (todo) or a board member decides. Colleagues who are not management ask a manager to make it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -713,15 +712,6 @@ fn task_tool_definitions() -> Vec<Value> {
                 "required": ["content"]
             }
         }),
-        json!({
-            "name": "tell_responsible",
-            "description": "On a ticket: send its responsible board member a short message in their private chat with you, when something is for them personally and not for the ticket's discussion. It shows there with a link to this ticket and marked unread. It starts no run, wakes nobody and completes nothing; a question that needs an answer on the ticket belongs in post_to_discussion.",
-            "inputSchema": {
-                "type": "object",
-                "properties": { "message": { "type": "string", "description": "What they should read, on its own." } },
-                "required": ["message"]
-            }
-        }),
     ]
 }
 
@@ -880,12 +870,11 @@ mod tests {
         assert!(!names.contains(&"create_ticket") && names.contains(&"move_ticket") && names.contains(&"approve"));
     }
 
-    /// SEC0 E10/E12: the employee's tool, not the project assistant's or the dispatcher's, and no links to choose.
+    /// SEC0 E10/E12: the employee's tools, not the project assistant's or the dispatcher's.
     #[test]
-    fn tell_responsible_is_an_employees_tool_not_the_project_assistants() {
+    fn schedule_message_and_scratchpad_are_an_employees_tools_and_tell_responsible_is_gone() {
         let names = |project| tool_definitions(project, false, false, false, false).iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
-        assert!(names(false).contains(&"tell_responsible".to_owned()));
-        assert!(!names(true).contains(&"tell_responsible".to_owned()));
+        assert!(!names(false).contains(&"tell_responsible".to_owned()), "chatting with an employee is gone");
         for tool in ["schedule_message", "scratchpad"] {
             assert!(names(false).contains(&tool.to_owned()), "{tool}");
             assert!(!names(true).contains(&tool.to_owned()), "{tool}: the project assistant is nobody");

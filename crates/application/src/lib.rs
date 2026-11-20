@@ -62,6 +62,9 @@ impl CommandContext {
     }
 }
 
+/// Why `employee.open_chat` is refused: chatting with an employee is gone.
+pub const EMPLOYEE_CHAT_GONE: &str = "Chatting with an employee is no longer available.";
+
 pub const CHAT_RUN_KIND: &str = "run.chat";
 
 pub mod conversation;
@@ -209,7 +212,7 @@ impl CommandService {
             Command::RetryReply(cmd) => self.retry_reply(ctx, &envelope, hash, cmd),
             Command::StopRun(cmd) => self.stop_run(ctx, &envelope, hash, cmd),
             Command::CreateEmployee(cmd) => self.create_employee(ctx, &envelope, hash, cmd),
-            Command::OpenEmployeeChat(cmd) => self.open_employee_chat(ctx, &envelope, hash, cmd),
+            Command::OpenEmployeeChat(_) => Err(domain_error(DomainError::Memory(EMPLOYEE_CHAT_GONE.into()))),
             Command::CancelScheduledMessage(cmd) => self.cancel_scheduled_message(ctx, &envelope, hash, cmd),
             Command::UpdateEmployee(cmd) => self.update_employee(ctx, &envelope, hash, cmd),
             Command::SetEmployeeStatus(cmd) => self.set_employee_status(ctx, &envelope, hash, cmd),
@@ -699,7 +702,6 @@ mod discussion_tests;
 #[cfg(test)]
 mod login_tests;
 #[cfg(test)]
-mod employee_chat_tests;
 
 #[cfg(test)]
 mod guideline_tests;

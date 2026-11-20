@@ -460,7 +460,6 @@ pub const FEATURES: &[&str] = &[
     feature::TICKET_FROM_IDEA,
     feature::EMPLOYEE_ACCESS,
     feature::RUN_CARDS,
-    feature::EMPLOYEE_CHATS,
     feature::SCHEDULED_MESSAGES,
     feature::EMPLOYEE_SCRATCHPAD,
     feature::EMPLOYEE_TOOLS,

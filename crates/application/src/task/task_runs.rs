@@ -24,6 +24,9 @@ use rusqlite::OptionalExtension;
 pub const TASK_GUIDANCE: &str = "This conversation is a task you took on. Start with one or two sentences on how you will approach it. Do the work yourself with your own tools; use subagents (the Task tool) only for a broad search across many files, not by default. You can give a part to a colleague with delegate_task (you get their result here) or hand the whole task over with hand_over_task. Message a part you gave away with message_task (it interrupts them by default). Everything you do is visible in this conversation, so keep your closing answer short: say whether it worked, in one or two sentences, and what the user must still do or decide, if anything. No report, no headings, and do not repeat what is already above it (steps, tool calls, files, screenshots, ids). That closing answer is the task's result.";
 
 /// What an employee is told when the colleagues' results are in.
+/// What an old `tell_responsible` call is told: the tool is retired.
+const TELL_RESPONSIBLE_GONE: &str = "tell_responsible no longer exists: post in the ticket's discussion with post_to_discussion instead.";
+
 const COLLEAGUES_DONE: &str = "Your colleagues finished their parts (their results are above). Bring everything together and finish with your report.";
 
 /// What the owner is told when the colleagues it handed work to are done.
@@ -751,7 +754,7 @@ pub enum EmployeeAction {
     PostToDiscussion { message: String },
     /// Hand the work in the run's thread to a colleague (`discussion::hand_off`).
     HandOff { to: String, message: String },
-    /// Send the responsible board member of the run's ticket a message in their chat (`employee_chat`).
+    /// The retired `tell_responsible` (chatting with an employee is gone): an old call is refused.
     TellResponsible { message: String },
     /// A message to itself or a colleague later in this thread (`conversation::scheduled`).
     ScheduleMessage { delay: String, content: String, to: Option<String> },
@@ -932,8 +935,8 @@ impl CommandService {
             return self.store.write(move |tx| crate::conversation::discussion::hand_off(tx, &st, run, &to, &message)).map_err(storage_error);
         }
         if let EmployeeAction::TellResponsible { message } = &action {
-            let message = message.clone();
-            return self.store.write(move |tx| crate::conversation::employee_chat::tell_responsible(tx, &st, run, &message)).map_err(storage_error);
+            let _ = message;
+            return Ok((false, TELL_RESPONSIBLE_GONE.to_string(), vec![]));
         }
         if let EmployeeAction::ScheduleMessage { delay, content, to } = &action {
             let (delay, content, to) = (delay.clone(), content.clone(), to.clone());

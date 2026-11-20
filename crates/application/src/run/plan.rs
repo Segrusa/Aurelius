@@ -196,7 +196,7 @@ pub const CHAT_GUIDANCE: &str = "This is your own workspace, outside any project
 pub const GROUP_CHAT_GUIDANCE: &str = "The company has a group chat with the user and every employee (Team chat). read_group_chat shows it; post_to_group_chat posts a short message there under your name, only when the group needs to know (e.g. the task is done and needs a reviewer); it wakes nobody: hand_off does that. Keep posts to a few sentences.";
 
 /// The board tools in one line: what an employee may do with tickets, and what stays with the board members.
-pub const BOARD_GUIDANCE: &str = "The board has tools: list_tickets and read_ticket to look, post_to_ticket to write in a ticket's discussion, update_ticket on a ticket you work on, and for management create_ticket (anyone may in a board member's lasting chat with them) and move_ticket (Backlog to Todo). Done, accepting, plans, sending back and cancelling are decisions of a board member.";
+pub const BOARD_GUIDANCE: &str = "The board has tools: list_tickets and read_ticket to look, post_to_ticket to write in a ticket's discussion, update_ticket on a ticket you work on, and for management create_ticket and move_ticket (Backlog to Todo). Done, accepting, plans, sending back and cancelling are decisions of a board member.";
 
 /// What a run under a ticket is told about where board members read: the discussion, not the task chat.
 pub const DISCUSSION_FIRST_GUIDANCE: &str = "The board member responsible for this ticket does not read this task chat; they read the ticket's discussion. Everything that needs them goes there with post_to_discussion: a question, a plan or proposal, a choice between options, an explanation of what you did or found, a blocker, and the report that the work is ready. Open such a post with @username of the responsible board member so they are told. Write it so it can be read on its own: say what you need from them and, for a choice, give the options with your recommendation. Their answer arrives here as an update; do not wait for it inside a long run, finish what you can and say what is open. Keep working notes and tool output in this chat.";
@@ -337,7 +337,7 @@ impl CommandService {
                         (m.ordinal, ended.unwrap_or(m.created_at_ms))
                     });
                 let mark = |m: &aurelius_domain::views::MessageView| -> &'static str {
-                    let from_outside = (m.update.is_some() && m.update.as_deref() != Some(aurelius_domain::conversation::TICKET_NOTE_KIND)) || m.role == MessageRole::User;
+                    let from_outside = m.update.is_some() || m.role == MessageRole::User;
                     if from_outside && m.ordinal <= cutoff && run_of(m).is_none() { trigger_mark(m.ordinal, m.created_at_ms, last_answer) } else { "" }
                 };
                 // Each message that goes in, with its turn: all of them for a new session,
@@ -368,9 +368,6 @@ impl CommandService {
                                 None => Turn { role: TurnRole::User, text: format!("{label}\n{text}"), images: Vec::new() },
                             }
                         }
-                        // A ticket from this chat reached Review; what the employee itself sent from a ticket.
-                        (Some(kind), _) if kind == aurelius_domain::conversation::TICKET_UPDATE_KIND => Turn { role: TurnRole::User, text: format!("[Ticket update from Aurelius]{}\n{text}", mark(m)), images: Vec::new() },
-                        (Some(kind), _) if kind == aurelius_domain::conversation::TICKET_NOTE_KIND => Turn { role: TurnRole::User, text: format!("[What you sent this board member from a ticket]\n{text}"), images: Vec::new() },
                         // Task updates (findings of subagents, colleagues) reach the employee as input.
                         (Some(kind), from) => Turn { role: TurnRole::User, text: format!("[Task {kind} · from {}]{}\n{text}", from.as_deref().unwrap_or("Aurelius"), mark(m)), images: Vec::new() },
                         (None, _) if m.role == MessageRole::User => {
@@ -594,11 +591,8 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                         let mut text = system.unwrap_or_default();
                         match project.and_then(|p| crate::queries_project_name(conn, p)) {
                             Some(name) => text.push_str(&format!("\n\nYou work in the project {name}.")),
-                            None => match aurelius_storage::employee_chats::of_conversation(conn, conversation_id)? {
-                                Some(chat) => text.push_str(&format!("\n\n{}", crate::conversation::employee_chat::guidance(&chat.username))),
-                                None if quick => {}
-                                None => text.push_str(&format!("\n\n{CHAT_GUIDANCE}")),
-                            },
+                            None if quick => {}
+                            None => text.push_str(&format!("\n\n{CHAT_GUIDANCE}")),
                         }
                         if let (None, Some((_, name))) = (project, &channel_project) {
                             text.push_str(&format!("\n\nThe message you answer now comes from the project {name}: answer in its context, with its memory"));

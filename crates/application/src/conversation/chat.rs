@@ -86,7 +86,7 @@ impl CommandService {
         self.commit(command_id, hash, move |tx| {
             let mut notices = Vec::new();
             let correlation = command_id.to_string();
-            if let Some(refused) = crate::conversation::employee_chat::write_refusal(tx, conversation_id, user)? {
+            if let Some(refused) = crate::conversation::work_session::write_refusal(tx, conversation_id, user)? {
                 return Ok(Err(refused));
             }
             blobs::register(tx, &text_blob)?;
@@ -102,9 +102,7 @@ impl CommandService {
                 dedupe: format!("cmd:{command_id}:message"),
             })?;
             notices.push(n);
-            // A board chat's words carry who wrote them; the login follows from the chat itself.
-            let author = aurelius_storage::employee_chats::of_conversation(tx, conversation_id)?.map(|c| c.user);
-            conv::insert_message_by(tx, NewMessage {
+            conv::insert_message(tx, NewMessage {
                 id: message_id,
                 conversation_id,
                 role: MessageRole::User,
@@ -113,7 +111,7 @@ impl CommandService {
                 status: MessageStatus::Complete,
                 run_id: None,
                 reply_to: None,
-            }, author)?;
+            })?;
             crate::conversation::message_images::keep(tx, message_id, &images)?;
             conv::set_message_uploads(tx, message_id, &uploads)?;
             if interrupt {
@@ -139,7 +137,7 @@ impl CommandService {
         let meta = ctx.metadata();
         let user = ctx.user_id;
         self.commit(command_id, hash, move |tx| {
-            if let Some(refused) = crate::conversation::employee_chat::write_refusal(tx, cmd.conversation_id, user)? {
+            if let Some(refused) = crate::conversation::work_session::write_refusal(tx, cmd.conversation_id, user)? {
                 return Ok(Err(refused));
             }
             if !conv::user_message_in(tx, cmd.conversation_id, cmd.user_message_id)? {
@@ -369,9 +367,6 @@ impl CommandService {
                 Some("ticket") => return Ok(Err(domain_error(DomainError::Memory("A ticket's channel cannot be deleted; archive the ticket instead.".into())))),
                 Some("employee") if conv::is_main_employee_conversation(tx, id)? => {
                     return Ok(Err(domain_error(DomainError::Memory("This is the employee's main conversation; archive the employee instead.".into()))));
-                }
-                Some("employee") if aurelius_storage::employee_chats::of_conversation(tx, id)?.is_some() => {
-                    return Ok(Err(domain_error(DomainError::Memory("A chat with an employee lasts; it cannot be deleted.".into()))));
                 }
                 Some("group") => return Ok(Err(domain_error(DomainError::Memory("The company's group chat cannot be deleted.".into())))),
                 _ => {}

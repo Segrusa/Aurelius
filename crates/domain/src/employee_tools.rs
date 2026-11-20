@@ -42,7 +42,7 @@ const COMPANY: &str = "Company";
 /// What is left out stays on and is never asked: `AskUserQuestion`,
 /// `ExitPlanMode`, and of the bridge the employee's own memory and scratchpad,
 /// reading its work (tasks, tickets, discussions, guidelines), `post_to_discussion`,
-/// `hand_off`, `tell_responsible`, `suggest_replies`, `set_mode` and
+/// `hand_off`, `suggest_replies`, `set_mode` and
 /// `report_test_result` and `report_ready`. They only touch the employee's own thread or read, and
 /// the platform rules count on them.
 pub const SWITCHABLE_TOOLS: &[SwitchableTool] = &[

@@ -8,7 +8,7 @@ use crate::run::events::{Ev, emit};
 use crate::run::queue::queue_run;
 use crate::{CommandContext, CommandService, Committed, domain_error, storage_error};
 use aurelius_domain::{
-    ActorKind, AppError, CommandEnvelope, CommandResult, ConversationId, DomainError, MessageId,
+    ActorKind, AppError, CommandEnvelope, CommandResult, ConversationId, DomainError, MessageId, UserId,
     conversation::{MessageRole, MessageStatus},
     employee::LifecycleStatus,
     work_session::{DispatchWorkSession, SessionDispatch, StartWorkSession, branch_of},
@@ -18,6 +18,7 @@ use aurelius_storage::{
     conversations::{self as conv, NewMessage},
     employees,
 };
+use aurelius_storage::{StorageError, Tx};
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
 
@@ -27,6 +28,38 @@ pub const WORKTREE_NEEDS_GIT: &str = "A worktree of its own needs a project fold
 /// Refused: files with the first message of a session in a worktree of its own (that
 /// folder is made only before the first run).
 pub const FILES_NEED_FOLDER: &str = "Files can go with a later message of a session in its own worktree; start it without files, or in the project folder.";
+
+/// Why `user` cannot write in `conversation` now, if so: a work session of another
+/// board member (or one whose employee is not at work, or still being chosen), an
+/// older employee conversation, or a conversation that does not exist. Other
+/// conversations `chat.send` takes are left to their own checks.
+pub(crate) fn write_refusal(tx: &Tx<'_>, conversation: ConversationId, user: Option<UserId>) -> Result<Option<AppError>, StorageError> {
+    let not_found = || domain_error(DomainError::ConversationNotFound(conversation));
+    // A work session: only the board member who started it writes in it, while its employee is at work.
+    if let Some(session) = aurelius_storage::work_sessions::of_conversation(tx, conversation)? {
+        if user != Some(session.started_by) {
+            return Ok(Some(not_found()));
+        }
+        // The dispatcher still chooses, or chose nobody: the employee who answers comes first.
+        if session.dispatch.is_some() {
+            return Ok(Some(domain_error(DomainError::OutOfRange { field: "conversation_id".into(), detail: crate::conversation::session_dispatch::NOBODY_YET.into() })));
+        }
+        let Some(employee) = conv::owner_of(tx, conversation)?.0 else { return Ok(Some(not_found())) };
+        let Some(employee) = employees::load_employee(tx, employee)? else { return Ok(Some(not_found())) };
+        return Ok(match employee.status {
+            LifecycleStatus::Archived => Some(domain_error(DomainError::EmployeeArchived)),
+            LifecycleStatus::Paused => Some(domain_error(DomainError::EmployeePaused)),
+            LifecycleStatus::Active => None,
+        });
+    }
+    if conv::is_older_employee_chat(tx, conversation)? {
+        return Ok(Some(domain_error(DomainError::OutOfRange {
+            field: "conversation_id".into(),
+            detail: "This is an older conversation; write in the employee's chat".into(),
+        })));
+    }
+    Ok((!conv::conversation_exists(tx, conversation)?).then(not_found))
+}
 
 /// The folder of a session's worktree: in the data folder, as a quick task's, so the
 /// project's own folder stays clean and a backup skips it.
