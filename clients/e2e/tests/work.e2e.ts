@@ -646,6 +646,41 @@ test.describe("states a test daemon cannot produce", () => {
     await page.screenshot({ path: `${REPO}/target/session-details/session-panel.png` });
   });
 
+  test("the sidebar's count of working sessions sits at the right of its header", async ({ page }) => {
+    const working = {
+      conversation_id: "s3",
+      title: "Fix the login page",
+      employee_id: "e1",
+      employee_name: "Flux",
+      project_id: "p",
+      project_name: "Northwind API",
+      running: true,
+      created_at_ms: Date.now() - 60_000,
+      last_activity_ms: Date.now() - 1_000,
+    };
+    await scriptServer(page, {
+      ...script,
+      features: ["work_sessions"],
+      reads: {
+        "work_session.list": () => ({ type: "work_sessions", value: { sessions: [working], as_of_seq: 1 } }),
+      },
+    });
+    await page.goto(site.origin);
+    const header = page.getByRole("button", { name: /^Sessions/ });
+    await expect(header).toContainText("1 working");
+    // Right-aligned: the text "working" ends at the header's padding, not just after the title.
+    const gap = await header.evaluate((button) => {
+      const walker = document.createTreeWalker(button, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node && !node.textContent?.includes("working")) node = walker.nextNode();
+      const range = document.createRange();
+      range.selectNodeContents(node ?? button);
+      return button.getBoundingClientRect().right - range.getBoundingClientRect().right;
+    });
+    expect(gap).toBeLessThan(12);
+    await header.screenshot({ path: `${REPO}/target/sidebar-summary/sessions-header.png` });
+  });
+
   test("a new session goes to the dispatcher, which chooses who takes it", async ({ page }) => {
     const choosing = {
       conversation_id: "s2",
