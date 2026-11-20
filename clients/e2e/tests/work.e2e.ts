@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Connection, expectBody } from "@aurelius/client";
@@ -473,12 +473,14 @@ test.describe("states a test daemon cannot produce", () => {
     });
     await page.goto(site.origin);
     await nav(page, "Board");
-    // The card opens the ticket's session: what its runs used is in its head.
+    // The card opens the ticket's session: what its runs used is in its properties, not in its head.
     await page.getByRole("button", { name: /#\d+ Still at work/ }).click();
     const head = page.locator("header[data-titlebar]").filter({ hasText: "Still at work" });
-    await expect(head.getByText("Tokens in")).toBeVisible();
-    await expect(head.getByText("9k", { exact: true })).toBeVisible();
-    await expect(head.getByText("$0.12", { exact: true })).toBeVisible();
+    await expect(head).toBeVisible();
+    await expect(head.getByText("Tokens in")).toHaveCount(0);
+    const properties = page.getByRole("complementary", { name: "Ticket properties" });
+    await properties.getByRole("button", { name: "Usage" }).hover();
+    await expect(page.getByRole("tooltip")).toContainText("$0.12 API-equivalent");
 
     await page.goto(`${site.origin}/chat?channel=d3`);
     const chat = page.getByRole("main");
@@ -559,9 +561,11 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(page.getByText("2 steps")).toBeVisible();
     await expect(page.getByText("1 failed")).toBeVisible();
     const properties = page.getByRole("complementary", { name: "Run properties" });
+    await properties.getByRole("button", { name: /Files written/ }).click();
     await expect(properties.getByText("src/api.rs")).toBeVisible();
-    await expect(properties.getByText(/6\.4k out/)).toBeVisible();
-    await expect(properties.getByText(/\$0\.43/)).toBeVisible();
+    await properties.getByRole("button", { name: "Usage" }).hover();
+    await expect(page.getByRole("tooltip")).toContainText("6.4k out");
+    await expect(page.getByRole("tooltip")).toContainText("$0.43");
 
     await page.getByRole("button", { name: /Allow once/ }).click();
     await expect
@@ -638,12 +642,125 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(properties.getByText("session/ab12")).toBeVisible();
     await expect(properties.getByText("Opus")).toBeVisible();
     await expect(properties.getByText("high", { exact: true })).toBeVisible();
-    await expect(properties.getByText("src/login.tsx")).toBeVisible();
-    await expect(properties.getByText("Rust style")).toBeVisible();
-    await expect(properties.getByText("v3")).toBeVisible();
-    await expect(properties.getByText(/2\.1k out/)).toBeVisible();
+    // The files and guidelines start folded; their headings say how many.
+    const files = properties.getByRole("button", { name: /Files written/ });
+    await expect(files).toHaveAttribute("aria-expanded", "false");
+    await expect(properties.getByText("src/login.tsx")).toHaveCount(0);
+    // What the runs used is behind the info icon of the Properties heading.
+    await expect(properties.getByText(/2\.1k out/)).toBeHidden();
+    await properties.getByRole("button", { name: "Usage" }).hover();
+    await expect(page.getByRole("tooltip")).toContainText("2.1k out");
     await expect(page.getByText("The login page works again.")).toBeVisible();
     await page.screenshot({ path: `${REPO}/target/session-details/session-panel.png` });
+    await files.click();
+    await expect(properties.getByText("src/login.tsx")).toBeVisible();
+    await properties.getByRole("button", { name: /Guidelines in this run/ }).click();
+    await expect(properties.getByText("Rust style")).toBeVisible();
+    await expect(properties.getByText("v3")).toBeVisible();
+    // The head's button hides the panel beside the talk, and shows it again.
+    await page.getByRole("button", { name: "Hide session properties" }).click();
+    await expect(properties).toHaveCount(0);
+    await page.getByRole("button", { name: "Show session properties" }).click();
+    await expect(properties).toBeVisible();
+  });
+
+  test("a subagent opens as a chat log that cannot be answered, and ends with its report", async ({ page }) => {
+    mkdirSync(`${REPO}/target/subagent-log`, { recursive: true });
+    const session = {
+      conversation_id: "s1",
+      title: "Remove the Team chat",
+      employee_id: "e1",
+      employee_name: "Flux",
+      project_id: "p",
+      project_name: "Northwind API",
+      branch: "session/ab12",
+      worktree: "/data/worktrees/session-ab12",
+      running: true,
+      created_at_ms: Date.now() - 600_000,
+      last_activity_ms: Date.now() - 60_000,
+    };
+    const agent = {
+      kind: "subagent",
+      name: "Server: remove employee and Team chat",
+      detail: "general-purpose",
+      prompt: "You implement the SERVER part of removing chat.\n\nWork only in the worktree.",
+      since_ms: Date.now() - 3_600_000,
+      steps: 23,
+      doing: "Bash · cargo test -p storage",
+      run_id: "r9",
+      call_id: "t1",
+      conversation_id: "s1",
+    };
+    let finished = false;
+    const steps = Array.from({ length: 23 }, (_, i) => ({
+      call_id: `c${i}`,
+      parent_call_id: "t1",
+      offset: 0,
+      tool: i % 2 === 0 ? "Bash" : "Read",
+      input: i % 2 === 0 ? { command: `cargo check step ${i}` } : { file_path: `crates/file_${i}.rs` },
+      ok: finished || i < 22 ? true : null,
+    }));
+    await scriptServer(page, {
+      ...script,
+      features: ["work_sessions", "subagent_steps"],
+      conversations: {
+        s1: messages("s1", [message("m1", "user", "Remove the Team chat.")]),
+      },
+      reads: {
+        "work_session.list": () => ({ type: "work_sessions", value: { sessions: [session], as_of_seq: 1 } }),
+        "subagent.list": () => ({ type: "subagents", value: finished ? [] : [agent] }),
+        "run.get_activity": () => ({
+          type: "run_activity",
+          value: {
+            run_id: "r9",
+            message_id: "m2",
+            calls: [
+              {
+                call_id: "t1",
+                offset: 0,
+                tool: "Task",
+                input: {},
+                ok: finished ? true : null,
+                output: finished ? "The Team chat is gone from the server; 12 tests pass." : null,
+              },
+              ...steps.map((s, i) => ({ ...s, ok: finished || i < 22 ? true : null })),
+            ],
+          },
+        }),
+      },
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(site.origin);
+    await page.goto(`${site.origin}/session/s1`);
+    await page.getByRole("button", { name: /Server: remove employee and Team chat/ }).click();
+    const dialog = page.getByRole("dialog", { name: "Server: remove employee and Team chat" });
+    const log = dialog.getByRole("log");
+
+    // The employee's question first, as a message; then the subagent's steps, folded in lines of ten.
+    await expect(log.getByText("Flux", { exact: true })).toBeVisible();
+    await expect(log.getByText("You implement the SERVER part of removing chat.")).toBeVisible();
+    await expect(log.getByText("23 steps")).toBeVisible();
+    const done = log.getByRole("button", { name: "Ran 5 commands, read 5 files" });
+    await expect(done).toHaveCount(2);
+    await expect(done.first()).toHaveAttribute("aria-expanded", "false");
+    // The batch it is in stays open, so its newest step shows.
+    const now = log.getByRole("button", { name: /^Running 2 commands, read file_21\.rs/ });
+    await expect(now).toHaveAttribute("aria-expanded", "true");
+    await expect(log.getByRole("status")).toHaveText("Working · Bash · cargo test -p storage");
+
+    // Nothing to write in: it only reports to the employee.
+    await expect(dialog.getByRole("textbox")).toHaveCount(0);
+    await expect(dialog.getByText("Read only: a subagent reports to Flux; you cannot write to it.")).toBeVisible();
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${REPO}/target/subagent-log/running.png` });
+
+    // Once it is done, the log ends with its report and nothing works any more.
+    finished = true;
+    await expect(log.getByText("The Team chat is gone from the server; 12 tests pass.")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(log.getByRole("status")).toHaveCount(0);
+    await page.screenshot({ path: `${REPO}/target/subagent-log/done.png` });
   });
 
   test("the sidebar's count of working sessions sits at the right of its header", async ({ page }) => {

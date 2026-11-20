@@ -6,7 +6,6 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Drawer } from "@astryxdesign/core/Drawer";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
@@ -17,7 +16,7 @@ import { expectBody } from "@aurelius/client";
 import type { AgentMode, TicketDetail, TicketPriority, TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import {
   useBoard,
@@ -54,20 +53,21 @@ import { useLiveAll, useLiveStore } from "./chat-live";
 import { readOnlyBar, runAuthor } from "./chat-logic";
 import { artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { parseDeadline, parseLabels, useModels } from "./dialogs";
+import { InboxBell } from "./inbox-bell";
 import { isQuick } from "./quick-logic";
-import { TicketOdometer } from "./run-card";
 import {
   FilesWritten,
-  RunAside,
+  type PropertiesDock,
+  PropertiesPanel,
+  PropertiesToggle,
   RunGuidelines,
   SideProperties,
   SideRow,
   SideSection,
-  UsageTotalsLine,
+  usePropertiesDock,
 } from "./run-side";
 import { FileChips } from "./run-tools";
 import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
-import { OVERVIEW_KEY } from "./ticket-overview";
 import { branchOf } from "./ticket-overview-logic";
 import {
   Activity,
@@ -98,12 +98,6 @@ import {
   ticketUsage,
 } from "./ticket-session-logic";
 import { ColumnGlyph, ticketNumber, useTicketWrite } from "./tickets-kit";
-
-const ASIDE_ID = "ticket-properties";
-/** Below this the panel is an overlay sheet; between it and `DOCKED_OPEN_W` it starts closed. */
-const SHEET_BELOW_W = 900;
-const DOCKED_OPEN_W = 1100;
-const SHEET_W = 360;
 
 const styles = stylex.create({
   screen: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column" },
@@ -204,21 +198,7 @@ const styles = stylex.create({
   taskWho: { flexShrink: 0, fontSize: 12, color: "var(--color-text-secondary)" },
   taskState: { flexShrink: 0, fontSize: 12 },
   mono: { fontFamily: "var(--font-family-code)", fontSize: 12 },
-  sheetBody: { display: "flex", flexDirection: "column", gap: 20, padding: 18 },
 });
-
-/** Whether the window is narrower than `px`, following resizes. */
-function useNarrower(px: number): boolean {
-  const query = `(max-width: ${px - 1}px)`;
-  return useSyncExternalStore(
-    (changed) => {
-      const list = matchMedia(query);
-      list.addEventListener("change", changed);
-      return () => list.removeEventListener("change", changed);
-    },
-    () => matchMedia(query).matches,
-  );
-}
 
 /** The ticket of `/ticket/N`: its channel in the cached list, else `ticket.list "#N"`. */
 function useResolved(n: number) {
@@ -327,6 +307,7 @@ export function TicketSessionScreen({
           <Heading level={1} xstyle={styles.title}>
             <span {...stylex.props(styles.hash)}>#{number}</span>
           </Heading>
+          <InboxBell />
         </header>
         {failed ? (
           <div {...stylex.props(styles.problem)}>
@@ -374,35 +355,22 @@ function Session({
 }) {
   const navigate = useNavigate();
   const { features, user } = useLinkState();
-  const { storage } = usePlatform();
-  const narrow = useNarrower(SHEET_BELOW_W);
-  // The remembered choice wins; a first open shows the panel only on a wide window.
-  const [docked, setDocked] = useState(() => {
-    const kept = storage.get(OVERVIEW_KEY);
-    return kept === null ? window.innerWidth >= DOCKED_OPEN_W : kept !== "0";
-  });
-  const [sheet, setSheet] = useState(false);
-  const shown = narrow ? sheet : docked;
-  const toggle = () => {
-    if (narrow) return setSheet(!sheet);
-    storage.set(OVERVIEW_KEY, docked ? "0" : "1");
-    setDocked(!docked);
-  };
   const conversation = features.includes("ticket_channels") ? (t.conversation_id ?? null) : null;
   const closed = readOnly(t, null);
-  const head = <Head t={t} conversation={conversation} me={user?.id ?? null} shown={shown} onToggle={toggle} />;
+  const dock = usePropertiesDock();
+  // The head spans the screen; the properties dock beside the conversation, below it.
+  const head = <Head t={t} conversation={conversation} me={user?.id ?? null} dock={dock} />;
   const gate = <TicketGate detail={detail} t={t} />;
-  const properties = <Properties detail={detail} t={t} />;
+  const aside = (
+    <PropertiesPanel dock={dock} label="Ticket properties" wide>
+      <Properties detail={detail} t={t} />
+    </PropertiesPanel>
+  );
   const slots: SessionSlots = {
-    head,
+    head: null,
     gate,
     chips: <RunChips t={t} />,
-    aside:
-      !narrow && docked ? (
-        <RunAside id={ASIDE_ID} label="Ticket properties" wide>
-          {properties}
-        </RunAside>
-      ) : null,
+    aside,
     readOnly: closed,
     readOnlyText: readOnlyBar({ ticket_number: t.number }, t.column === "done"),
     placeholder: composerPlaceholder(t),
@@ -416,6 +384,7 @@ function Session({
     });
   return (
     <section aria-label={`#${t.number} ${t.title}`} {...stylex.props(styles.screen)}>
+      {head}
       {conversation ? (
         <TicketSessionBody
           conversationId={conversation}
@@ -429,22 +398,14 @@ function Session({
         // An older server has no ticket conversation: the ticket's data and decision still work.
         <div {...stylex.props(styles.body)}>
           <div {...stylex.props(styles.main)}>
-            {head}
             <div {...stylex.props(styles.centre)}>
               <EmptyState isCompact title="This server has no ticket conversation." />
             </div>
             {gate}
           </div>
-          {slots.aside}
+          {aside}
         </div>
       )}
-      {narrow ? (
-        <Drawer isOpen={sheet} onOpenChange={setSheet} label="Ticket properties" width={SHEET_W} padding={0}>
-          <RunAside id={ASIDE_ID} label="Ticket properties" sheet>
-            <div {...stylex.props(styles.sheetBody)}>{properties}</div>
-          </RunAside>
-        </Drawer>
-      ) : null}
     </section>
   );
 }
@@ -453,14 +414,13 @@ function Head({
   t,
   conversation,
   me,
-  shown,
-  onToggle,
+  dock,
 }: {
   t: TicketView;
   conversation: string | null;
   me: string | null;
-  shown: boolean;
-  onToggle: () => void;
+  /** The properties panel the head's button shows or hides. */
+  dock: PropertiesDock;
 }) {
   const { status } = useLinkState();
   const board = useBoard(null);
@@ -502,25 +462,17 @@ function Head({
             {project ? line.slice(0, -project.length - 3) : line}
             {project ? <span {...stylex.props(styles.project)}> · {project}</span> : null}
           </span>
-          <TicketOdometer ticketId={t.id} />
         </div>
       </div>
       <div {...stylex.props(styles.tools)}>
-        <IconButton
-          variant="ghost"
-          size="sm"
-          label={shown ? "Hide ticket properties" : "Show ticket properties"}
-          aria-expanded={shown}
-          aria-controls={ASIDE_ID}
-          icon={<Icon icon="viewColumns" />}
-          onClick={onToggle}
-        />
         <Menu
           label="More"
           options={menu.options}
           onPick={menu.pick}
           trigger={<IconButton variant="ghost" size="sm" label="More" icon={<Icon icon="moreHorizontal" />} />}
         />
+        <PropertiesToggle dock={dock} label="Ticket properties" />
+        <InboxBell />
       </div>
     </header>
   );
@@ -621,7 +573,7 @@ function RunChips({ t }: { t: TicketView }) {
 
 type Section = "properties" | "activity";
 
-/** The side panel's two tabs: the ticket's data, and what happened to it. */
+/** The properties panel's two tabs: the ticket's data, and what happened to it. */
 function Properties({ detail, t }: { detail: TicketDetail; t: TicketView }) {
   const platform = usePlatform();
   const [tab, setTab] = useState<Section>("properties");
@@ -636,7 +588,7 @@ function Properties({ detail, t }: { detail: TicketDetail; t: TicketView }) {
     );
   };
   const addFailed = (e: unknown) => toast(e instanceof Error ? e.message : "This did not work.");
-  // A file copied or dropped on the panel goes on the ticket, as on the board's panel; never on a closed one.
+  // A file copied or dropped on the properties goes on the ticket, as on the board's panel; never on a closed one.
   const takeFiles = (given: File[]) => {
     const { fit, problems } = acceptable(given);
     for (const problem of problems) toast(problem);
@@ -707,9 +659,10 @@ function PropertiesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: Tic
   const branch = branchOf(t);
   const modeLabel = MODES.find((m) => m.key === (t.run.mode ?? "default"))?.label ?? "Owner's default";
   const modelLabel = models.find((m) => m.key === (t.run.model ?? "default"))?.label ?? "Default";
+  const usage = useTicketUsage(t);
   return (
     <>
-      <SideProperties>
+      <SideProperties usage={usage}>
         <SideRow name="Priority">
           {open ? (
             <Menu
@@ -906,31 +859,34 @@ function PropertiesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: Tic
 /**
  * What all of the ticket's runs wrote, which guidelines the latest one had and what they used
  * (Titan's decision for ticket #70): files and guidelines over the discussion and every task's
- * conversation, read only while this tab shows; usage from `usage.get_totals { ticket_id }`, only on a
- * server with `run_cards`. Each block hides when there is nothing to show: never a zero or a spinner.
+ * conversation, read only while this tab shows (usage sits behind the info icon of the Properties
+ * heading). Each block hides when there is nothing to show: never a zero or a spinner.
  */
 function RunsOfTicket({ detail, t }: { detail: TicketDetail; t: TicketView }) {
-  const connection = useConnection();
-  const { features } = useLinkState();
   const ids = useMemo(() => ticketConversations(t.conversation_id, detail.tasks), [t.conversation_id, detail.tasks]);
   const reads = useMessagesOf(ids);
   const lists = reads.map((r) => r.data?.messages);
   const files = filesWrittenAcross(lists);
   const run = latestRunAcross(lists);
+  return (
+    <>
+      <FilesWritten files={files} />
+      <RunGuidelines runId={run} title="Guidelines in the runs" />
+    </>
+  );
+}
+
+/** What all of the ticket's runs used (`usage.get_totals { ticket_id }`), only on a server with `run_cards`. */
+function useTicketUsage(t: TicketView) {
+  const connection = useConnection();
+  const { features } = useLinkState();
   const totals = useKeyed(
-    // The same read as the head's odometer, so both share it.
+    // The same read as the run card's odometer, so both share it.
     ["usage", "odometer", t.id, null],
     async () =>
       expectBody(await connection.call("usage.get_totals", { ticket_id: t.id, conversation_id: null }), "usage_totals")
         .value,
     features.includes("run_cards"),
   );
-  const usage = features.includes("run_cards") ? ticketUsage(totals.data?.total) : null;
-  return (
-    <>
-      <FilesWritten files={files} />
-      <RunGuidelines runId={run} title="Guidelines in the runs" />
-      {usage ? <UsageTotalsLine usage={usage} /> : null}
-    </>
-  );
+  return features.includes("run_cards") ? ticketUsage(totals.data?.total) : null;
 }

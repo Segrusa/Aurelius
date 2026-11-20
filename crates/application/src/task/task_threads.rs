@@ -238,10 +238,18 @@ pub(crate) fn post_question(tx: &Tx<'_>, blobs_store: &Store, run: aurelius_doma
     post_with(tx, blobs_store, conversation, task, Speaker::Update { kind: "approval", from: &who }, text, text, serde_json::json!({ "approval_id": approval, "of_run": run })).map(|(_, n)| Some(n))
 }
 
-/// The user's decision on a plan or answer to a question, noted under it in the run's conversation.
-pub(crate) fn post_run_decision(tx: &Tx<'_>, blobs_store: &Store, run: aurelius_domain::RunId, text: &str) -> Result<Option<EventNotice>, StorageError> {
+/// The user's decision on a plan or answer to a question, noted under it in the run's conversation:
+/// `text` in words, `decision` for clients that show it as a card (`MessageView::decision`).
+pub(crate) fn post_run_decision(
+    tx: &Tx<'_>,
+    blobs_store: &Store,
+    run: aurelius_domain::RunId,
+    text: &str,
+    decision: &aurelius_domain::views::RunDecision,
+) -> Result<Option<EventNotice>, StorageError> {
     let Some((conversation, task, _)) = run_conversation(tx, run)? else { return Ok(None) };
-    post_with(tx, blobs_store, conversation, task, Speaker::Update { kind: "status", from: "You" }, text, text, serde_json::json!({ "of_run": run })).map(|(_, n)| Some(n))
+    let extra = serde_json::json!({ "of_run": run, "decision": decision });
+    post_with(tx, blobs_store, conversation, task, Speaker::Update { kind: "status", from: "You" }, text, text, extra).map(|(_, n)| Some(n))
 }
 
 /// Claude's questions (AskUserQuestion) in full, as markdown: each question with

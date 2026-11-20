@@ -68,7 +68,18 @@ const index = createRoute({
     throw redirect({ to: "/inbox" });
   },
 });
-const inbox = createRoute({ getParentRoute: () => root, path: "/inbox", component: InboxScreen });
+const inbox = createRoute({
+  getParentRoute: () => root,
+  path: "/inbox",
+  // `row`: the row the bell's dropdown opened.
+  validateSearch: (search: Record<string, unknown>): { row?: string } => ({
+    ...(typeof search.row === "string" ? { row: search.row } : {}),
+  }),
+  component: function InboxRoute() {
+    const { row } = inbox.useSearch();
+    return <InboxScreen row={row ?? null} />;
+  },
+});
 const newSession = createRoute({ getParentRoute: () => root, path: "/new", component: NewSessionScreen });
 const ticketSearch = (search: Record<string, unknown>): { ticket?: string } => ({
   ...(typeof search.ticket === "string" ? { ticket: search.ticket } : {}),

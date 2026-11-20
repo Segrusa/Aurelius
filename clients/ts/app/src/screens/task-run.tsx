@@ -23,16 +23,18 @@ import { ApprovalCard } from "./approval-card";
 import { ActivityOutput, ContextDialog } from "./chat-message";
 import { Held, useModels, useSend } from "./dialogs";
 import { nextMode } from "./employee-logic";
+import { InboxBell } from "./inbox-bell";
 import { Confirm, Page, Problem } from "./org-kit";
 import { boardOnlyReason, lastRunOf, usageTotals } from "./run-logic";
 import {
   FilesWritten,
-  RunAside,
+  PropertiesPanel,
+  PropertiesToggle,
   RunGuidelines,
   SideProperties,
   SideRow,
   SideSection,
-  UsageTotalsLine,
+  usePropertiesDock,
 } from "./run-side";
 import {
   FileChips,
@@ -484,6 +486,7 @@ function Composer({
 export function TaskRunScreen({ taskId }: { taskId: string }) {
   useKeyContext("TaskRun");
   const navigate = useNavigate();
+  const dock = usePropertiesDock();
   const connection = useConnection();
   const { status } = useLinkState();
   const tasks = useAllTasks();
@@ -540,6 +543,7 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
             <Heading level={1} xstyle={styles.title}>
               Task
             </Heading>
+            <InboxBell />
           </div>
         </LayoutHeader>
         <p {...stylex.props(styles.loading)}>
@@ -613,9 +617,12 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
             ) : isActive(task) && boardOnlyReason(task) === null ? (
               <Button variant="destructive" label="Cancel task" onClick={() => void cancel(task)} />
             ) : null}
+            <PropertiesToggle dock={dock} label="Run properties" />
+            <InboxBell />
           </div>
         </div>
       </LayoutHeader>
+
       {contextOf ? <ContextDialog run={contextOf} onClose={() => setContextOf(null)} /> : null}
       {deleting && task.conversation_id ? (
         <Confirm
@@ -681,8 +688,8 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
             />
           ) : null}
         </section>
-        <RunAside label="Run properties">
-          <SideProperties>
+        <PropertiesPanel dock={dock} label="Run properties">
+          <SideProperties usage={usage}>
             <SideRow name="Employee">{name}</SideRow>
             <SideRow name="Status">{state.text}</SideRow>
             {project ? <SideRow name="Project">{project.name}</SideRow> : null}
@@ -722,11 +729,12 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
               })}
             </SideSection>
           ) : null}
-          {task.conversation_id ? <SubagentsAtWork conversationId={task.conversation_id} live={live} /> : null}
+          {task.conversation_id ? (
+            <SubagentsAtWork conversationId={task.conversation_id} live={live} askedBy={name} />
+          ) : null}
           <FilesWritten files={files} />
           <RunGuidelines runId={lastRun} />
-          <UsageTotalsLine usage={usage} />
-        </RunAside>
+        </PropertiesPanel>
       </div>
     </Page>
   );

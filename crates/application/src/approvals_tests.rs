@@ -169,6 +169,11 @@ fn questions_are_answered_once_and_kept_for_the_bridge() {
     let question_at = after.iter().position(|m| m.approval_id == Some(approval_id)).unwrap();
     let answered_at = after.iter().position(|m| m.text.starts_with("Answered:") && m.author.as_deref() == Some("You")).expect("the answer is in the chat");
     assert!(question_at < answered_at);
+    // It carries the answer apart too, so a client shows it as a card without reading the text.
+    let decision = after[answered_at].decision.clone().expect("the answer carries its decision");
+    assert_eq!(decision.kind, aurelius_domain::views::run_decision::ANSWERED);
+    assert_eq!(decision.answers, vec![aurelius_domain::views::QuestionAnswer { question: "Which format?".into(), answer: "Summary".into() }]);
+    assert!(after[question_at].decision.is_none(), "the question itself is no decision");
     assert!(answer("Detailed").is_err(), "answered once");
     // An ordinary approval cannot be "answered".
     let approval = ask(&service, run, "c1", "ls");
@@ -290,3 +295,40 @@ fn plans_are_decided_once_and_the_decision_is_kept_for_the_bridge() {
     assert_eq!(service.approval_status(other).unwrap(), Some(ApprovalStatus::Pending));
 }
 
+
+/// A plan decision is noted in the chat with its kind and feedback apart, so a client
+/// shows it as a card; approving notes no feedback.
+#[test]
+fn a_plan_decision_is_noted_with_its_kind_and_feedback() {
+    use aurelius_domain::approval::{DecidePlan, PlanDecision};
+    use aurelius_domain::views::run_decision;
+    let (_d, service, run) = setup();
+    let input = serde_json::json!({ "plan": "# Plan\n\n1. Create hello.txt" });
+    let ask_plan = |call: &str| match service.request_runtime_permission(run, Some(call.into()), "ExitPlanMode", &input).unwrap() {
+        RuntimePermission::Pending { approval_id, .. } => approval_id,
+        RuntimePermission::Denied(why) => panic!("a plan waits for the user: {why}"),
+    };
+    let decide = |approval_id, decision, feedback: Option<&str>| {
+        let command = Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id, decision, feedback: feedback.map(str::to_owned) });
+        service.execute(&ctx(), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command }).unwrap();
+    };
+    let conversation: String = service.store().read(move |c| Ok(c.query_row("SELECT conversation_id FROM runs WHERE id = ?1", [run.to_string()], |r| r.get(0))?)).unwrap();
+    let conversation = aurelius_domain::ConversationId::parse(&conversation).unwrap();
+    let decisions = || {
+        let read = |key: &str| service.store().blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
+        let messages = service.store().read(|c| aurelius_storage::conversations::list_messages(c, conversation, &read)).unwrap();
+        messages.into_iter().filter_map(|m| m.decision).map(|d| (d.kind, d.feedback)).collect::<Vec<_>>()
+    };
+
+    decide(ask_plan("p1"), PlanDecision::Revise, Some("Smaller steps"));
+    decide(ask_plan("p2"), PlanDecision::Approve, Some("ignored on approval"));
+    decide(ask_plan("p3"), PlanDecision::Reject, None);
+    assert_eq!(
+        decisions(),
+        vec![
+            (run_decision::PLAN_CHANGES.to_string(), Some("Smaller steps".to_string())),
+            (run_decision::PLAN_APPROVED.to_string(), None),
+            (run_decision::PLAN_REJECTED.to_string(), None),
+        ]
+    );
+}

@@ -10300,6 +10300,7 @@ final class MessageView {
     this.authorUser,
     this.awaitingUser,
     required this.createdAtMs,
+    this.decision,
     this.deletedAtMs,
     this.editable,
     this.editedAtMs,
@@ -10344,6 +10345,11 @@ final class MessageView {
   /// message in the list. Left out when false and by older servers.
   final bool? awaitingUser;
   final int createdAtMs;
+  /// A board member's answer to a run's questions or decision on its plan (feature
+  /// `run_decisions`), on the `status` update that notes it, so a client can show it
+  /// as a card without reading `text` apart. Left out for other messages, for
+  /// decisions noted before this field existed and by older servers.
+  final RunDecision? decision;
   /// When the message was deleted (feature `message_edits`): `text` is the
   /// line that says so. Left out when it was not and by older servers.
   final int? deletedAtMs;
@@ -10425,6 +10431,7 @@ final class MessageView {
     authorUser: (json['author_user'] == null ? null : UserView.fromJson(json['author_user'] as Map<String, dynamic>)),
     awaitingUser: (json['awaiting_user'] == null ? null : (json['awaiting_user'] as bool)),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
+    decision: (json['decision'] == null ? null : RunDecision.fromJson(json['decision'] as Map<String, dynamic>)),
     deletedAtMs: (json['deleted_at_ms'] == null ? null : (json['deleted_at_ms'] as num).toInt()),
     editable: (json['editable'] == null ? null : (json['editable'] as bool)),
     editedAtMs: (json['edited_at_ms'] == null ? null : (json['edited_at_ms'] as num).toInt()),
@@ -10460,6 +10467,7 @@ final class MessageView {
     if (authorUser != null) 'author_user': authorUser?.toJson(),
     if (awaitingUser != null) 'awaiting_user': awaitingUser,
     'created_at_ms': createdAtMs,
+    if (decision != null) 'decision': decision?.toJson(),
     if (deletedAtMs != null) 'deleted_at_ms': deletedAtMs,
     if (editable != null) 'editable': editable,
     if (editedAtMs != null) 'edited_at_ms': editedAtMs,
@@ -13514,6 +13522,27 @@ final class PushStatus {
   };
 }
 
+/// One answered question of a run (`RunDecision::answers`).
+final class QuestionAnswer {
+  const QuestionAnswer({
+    required this.answer,
+    required this.question,
+  });
+
+  final String answer;
+  final String question;
+
+  factory QuestionAnswer.fromJson(Map<String, dynamic> json) => QuestionAnswer(
+    answer: (json['answer'] as String),
+    question: (json['question'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'answer': answer,
+    'question': question,
+  };
+}
+
 /// A board member adds (`on`) or takes back their reaction with `emoji` on a
 /// message of a channel or a ticket's discussion that is not closed
 /// (`message.react`, feature `chat_reactions`). Idempotent: on twice is on once.
@@ -15537,6 +15566,36 @@ final class RunBrief {
     'failed_calls': failedCalls,
     'status': status,
     'tool_calls': toolCalls,
+  };
+}
+
+/// What a board member decided on a run's questions or plan (`MessageView::decision`).
+/// `MessageView::text` stays the readable sentence for clients that do not know it.
+final class RunDecision {
+  const RunDecision({
+    this.answers = const [],
+    this.feedback,
+    required this.kind,
+  });
+
+  /// For `answered`: each question with its answer, in the order they were noted.
+  final List<QuestionAnswer> answers;
+  /// For a plan decision: what the board member wrote with it, if anything.
+  final String? feedback;
+  /// One of `run_decision`. A string, not an enum, so a new kind never breaks an
+  /// older client: it shows `text` instead.
+  final String kind;
+
+  factory RunDecision.fromJson(Map<String, dynamic> json) => RunDecision(
+    answers: (json['answers'] == null ? const [] : (json['answers'] as List<dynamic>).map((x0) => QuestionAnswer.fromJson(x0 as Map<String, dynamic>)).toList()),
+    feedback: (json['feedback'] == null ? null : (json['feedback'] as String)),
+    kind: (json['kind'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'answers': answers.map((x0) => x0.toJson()).toList(),
+    if (feedback != null) 'feedback': feedback,
+    'kind': kind,
   };
 }
 

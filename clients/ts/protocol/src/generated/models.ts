@@ -3385,6 +3385,13 @@ export interface MessageView {
   awaiting_user?: boolean;
   created_at_ms: number;
   /**
+   * A board member's answer to a run's questions or decision on its plan (feature
+   * `run_decisions`), on the `status` update that notes it, so a client can show it
+   * as a card without reading `text` apart. Left out for other messages, for
+   * decisions noted before this field existed and by older servers.
+   */
+  decision?: RunDecision | null;
+  /**
    * When the message was deleted (feature `message_edits`): `text` is the
    * line that says so. Left out when it was not and by older servers.
    */
@@ -4367,6 +4374,14 @@ export interface PushStatus {
 }
 
 /**
+ * One answered question of a run (`RunDecision::answers`).
+ */
+export interface QuestionAnswer {
+  answer: string;
+  question: string;
+}
+
+/**
  * A board member adds (`on`) or takes back their reaction with `emoji` on a
  * message of a channel or a ticket's discussion that is not closed
  * (`message.react`, feature `chat_reactions`). Idempotent: on twice is on once.
@@ -4737,6 +4752,26 @@ export interface RunBrief {
    */
   status: string;
   tool_calls: number;
+}
+
+/**
+ * What a board member decided on a run's questions or plan (`MessageView::decision`).
+ * `MessageView::text` stays the readable sentence for clients that do not know it.
+ */
+export interface RunDecision {
+  /**
+   * For `answered`: each question with its answer, in the order they were noted.
+   */
+  answers?: QuestionAnswer[];
+  /**
+   * For a plan decision: what the board member wrote with it, if anything.
+   */
+  feedback?: string | null;
+  /**
+   * One of `run_decision`. A string, not an enum, so a new kind never breaks an
+   * older client: it shows `text` instead.
+   */
+  kind: string;
 }
 
 /**

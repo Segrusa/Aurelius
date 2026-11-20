@@ -11,16 +11,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import {
-  useApprovals,
-  useGuidelineProposals,
-  useMessages,
-  useNotifications,
-  useOpenTasks,
-  useProposals,
-  useTicket,
-  useTickets,
-} from "../data";
+import { useMessages, useNotifications, useTicket } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { StatusGlyph } from "../ui/icons";
 import { KeyHint } from "../ui/key-hint";
@@ -28,17 +19,15 @@ import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { ApprovalCard, PLAN_TOOL, QUESTION_TOOL, ReplyCard } from "./approval-card";
-import { taskCounts } from "./board-logic";
+import { INBOX_TONES, useInbox } from "./inbox-data";
 import {
   age,
   approvalAction,
   approvalSentence,
-  buildInbox,
   filterInbox,
   type InboxFilter,
   type InboxGroup,
   type InboxRow,
-  type InboxTone,
   openQuestion,
 } from "./inbox-logic";
 import { useFollowLink } from "./links";
@@ -48,8 +37,7 @@ import { lastFailure } from "./run-logic";
 import { useRetryAnswer } from "./run-tools";
 import { TicketDecision } from "./ticket-panel";
 import { ticketPlace } from "./ticket-session-logic";
-import { NoConnectionNote, useNoConnection, useTicketNeeds } from "./tickets-kit";
-import { guidelineProposalsIn, narrow } from "./workspace-logic";
+import { NoConnectionNote, useNoConnection } from "./tickets-kit";
 
 const enter = stylex.keyframes({
   from: { opacity: 0, transform: "translateY(4px)" },
@@ -183,67 +171,12 @@ const styles = stylex.create({
   frameHead: { display: "flex", flexDirection: "column", gap: 8 },
 });
 
-const TONES: Record<InboxTone, string> = {
-  amber: "var(--color-text-warning)",
-  violet: "var(--precision-violet)",
-  blue: "var(--color-text-info)",
-  green: "var(--color-text-accent)",
-  muted: "var(--precision-text3)",
-  red: "var(--color-text-error)",
-};
-
 const FILTERS: { key: InboxFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "decisions", label: "Decisions" },
   { key: "reviews", label: "Reviews" },
   { key: "mentions", label: "Mentions" },
 ];
-
-export function useInbox() {
-  const workspace = useWorkspace().id;
-  const approvals = useApprovals(workspace);
-  const proposals = useProposals();
-  const guidelineProposals = useGuidelineProposals();
-  const tasks = useOpenTasks();
-  const notifications = useNotifications(workspace);
-  const { features } = useLinkState();
-  const responsible = features.includes("ticket_responsible");
-  const tickets = useTickets(responsible);
-  const need = useTicketNeeds(tickets.data ?? []);
-  const groups = useMemo(
-    () =>
-      buildInbox({
-        approvals: approvals.data ?? [],
-        // Who to hire is the company's, not a project's.
-        proposals: workspace === null ? (proposals.data ?? []) : [],
-        guidelineProposals: guidelineProposalsIn(guidelineProposals.data ?? [], workspace),
-        // Freeze §5: a ticket's main task only when its ticket needs this board member.
-        tasks: narrow(tasks.data ?? [], workspace).filter((t) =>
-          taskCounts(
-            t,
-            responsible,
-            tickets.data?.find((x) => x.id === t.ticket_id),
-            need.mine,
-          ),
-        ),
-        notifications: notifications.data ?? [],
-      }),
-    [
-      workspace,
-      approvals.data,
-      proposals.data,
-      guidelineProposals.data,
-      tasks.data,
-      notifications.data,
-      responsible,
-      tickets.data,
-      need,
-    ],
-  );
-  const loading = approvals.isPending || notifications.isPending || tasks.isPending;
-  const error = approvals.error ?? notifications.error ?? tasks.error ?? null;
-  return { groups, loading, error };
-}
 
 type Entry = { kind: "header"; group: InboxGroup } | { kind: "row"; row: InboxRow };
 
@@ -291,7 +224,7 @@ function InboxList({
           if (item.kind === "header") {
             return (
               <li key={item.group.key} style={place} {...stylex.props(styles.groupHead)}>
-                <span {...stylex.props(styles.groupDot)} style={{ background: TONES[item.group.tone] }} />
+                <span {...stylex.props(styles.groupDot)} style={{ background: INBOX_TONES[item.group.tone] }} />
                 {item.group.label}
                 <span {...stylex.props(styles.groupCount)}>{item.group.rows.length}</span>
               </li>
@@ -305,7 +238,7 @@ function InboxList({
               style={{ transform: `translateY(${v.start}px)` }}
               label={row.title}
               description={row.meta}
-              startContent={<StatusGlyph glyph={row.glyph} color={TONES[row.tone]} />}
+              startContent={<StatusGlyph glyph={row.glyph} color={INBOX_TONES[row.tone]} />}
               endContent={<span {...stylex.props(styles.age)}>{age(row.atMs, now)}</span>}
               isSelected={row.id === selected}
               onClick={() => onSelect(row.id)}
@@ -578,11 +511,20 @@ function GuidelineDetail({ row, proposal }: { row: InboxRow; proposal: Guideline
   );
 }
 
-export function InboxScreen() {
+export function InboxScreen({ row = null }: { row?: string | null }) {
   const { groups, loading, error } = useInbox();
   const workspace = useWorkspace();
   const [filter, setFilter] = useState<InboxFilter>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(row);
+  // A row picked in the bell's dropdown while the Inbox is already open: select it, in every filter.
+  const [asked, setAsked] = useState(row);
+  if (row !== asked) {
+    setAsked(row);
+    if (row) {
+      setSelectedId(row);
+      setFilter("all");
+    }
+  }
   const shown = useMemo(() => filterInbox(groups, filter), [groups, filter]);
   const rows = useMemo(() => shown.flatMap((g) => g.rows), [shown]);
   // A row that went away (decided) hands over to the first one.

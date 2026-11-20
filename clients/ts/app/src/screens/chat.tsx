@@ -67,6 +67,7 @@ import {
   NewLine,
 } from "./chat-message";
 import { Held } from "./dialogs";
+import { InboxBell } from "./inbox-bell";
 import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
@@ -995,7 +996,7 @@ interface ChannelProps {
 
 /** What a ticket's session puts around the channel's feed and composer. */
 export interface SessionSlots {
-  /** In place of the channel's head. */
+  /** In place of the channel's head; a ticket's session puts its own head above the whole body. */
   head?: ReactNode;
   /** Between the progress and the composer: the decision of the moment. */
   gate: ReactNode;
@@ -1309,8 +1310,8 @@ function ChannelBody({
   return (
     <section aria-label={`#${name}`} {...stylex.props(styles.channel)}>
       <div {...stylex.props(styles.channelMain, embedded && thread !== null && styles.hiddenMain)}>
-        {session?.head ? (
-          session.head
+        {session ? (
+          (session.head ?? null)
         ) : embedded ? null : (
           <header data-titlebar {...stylex.props(styles.top)}>
             <Heading level={1} xstyle={styles.title}>
@@ -1357,6 +1358,7 @@ function ChannelBody({
                 Overview
               </button>
             ) : null}
+            <InboxBell />
           </header>
         )}
         <ThreadWaiting conversationId={openId} />

@@ -142,7 +142,11 @@ test("switching narrows the board, the inbox and the chat, and All projects show
     await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
     await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeHidden();
 
-    await page.getByRole("link", { name: "Inbox" }).click();
+    await page
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    await page.getByRole("button", { name: "Open Inbox" }).click();
     await expect(page.getByText("Atlas news").first()).toBeVisible();
     await expect(page.getByText("Zephyr news")).toBeHidden();
 
@@ -284,7 +288,11 @@ test("a real daemon takes the filters of a workspace", async () => {
     await choose(page, "Atlas");
     // What refuses an unknown param answers with an error, and each screen would say so.
     const noFailure = () => expect(page.getByText(/did not load|not valid|is not valid/)).toHaveCount(0);
-    await page.getByRole("link", { name: "Inbox" }).click();
+    await page
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    await page.getByRole("button", { name: "Open Inbox" }).click();
     await expect(page.getByText("Nothing waits for you in Atlas.").first()).toBeVisible();
     await noFailure();
     await page.evaluate(() => {

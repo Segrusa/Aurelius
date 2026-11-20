@@ -30,6 +30,14 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
   try {
     const p = await app.firstWindow();
     const nav = (name: string) => p.getByRole("link", { name: new RegExp(`^${name}`) }).first();
+    // The Inbox is behind the bell in every screen's head: its dropdown opens the page.
+    const openInbox = async () => {
+      await p
+        .getByRole("button", { name: /^Inbox/ })
+        .first()
+        .click();
+      await p.getByRole("button", { name: "Open Inbox" }).click();
+    };
     await p.getByLabel("Name").fill("sam");
     await p.getByLabel("Password").fill("correct horse battery");
     await p.getByRole("button", { name: "Create" }).click();
@@ -77,7 +85,7 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
     await expect(p.getByText(/No connection is configured/).first()).toBeVisible();
     await expect(p.getByRole("button", { name: "Try again" })).toBeVisible();
 
-    await nav("Inbox").click();
+    await openInbox();
     await p
       .getByRole("button", { name: /Login page/ })
       .first()
