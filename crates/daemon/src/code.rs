@@ -433,7 +433,12 @@ fn merge_failure(branch: &str, reason: &str, files: &[String]) -> String {
     message
 }
 
-/// `code.remove_worktree`: never the project's folder, one with changes or one an employee works in.
+/// Why a branch of an open ticket or work session keeps its worktree and stays: work on it
+/// may still come, also when it has no commit of its own yet (as Clean up merged leaves it).
+const STILL_OPEN: &str = "Its ticket is still open; it is cleaned up after the ticket is done.";
+
+/// `code.remove_worktree`: never the project's folder, one with changes, one an employee
+/// works in or one of a branch whose ticket or session is still open.
 fn remove_worktree(repo: &Path, state: &RepoState, path: &str, busy: &Busy) -> Result<(), ProtocolError> {
     let worktree = state.worktrees.iter().find(|w| same_path(&w.path, path)).ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, format!("Git does not know a worktree at {path}.")))?;
     if same_path(&worktree.path, &repo.to_string_lossy()) || state.worktrees.first().is_some_and(|w| std::ptr::eq(w, worktree)) {
@@ -441,6 +446,9 @@ fn remove_worktree(repo: &Path, state: &RepoState, path: &str, busy: &Busy) -> R
     }
     if busy.worktree(worktree) {
         return Err(invalid("An employee works in this worktree now; wait until they are done."));
+    }
+    if worktree.branch.as_deref().is_some_and(|b| busy.open(b)) {
+        return Err(invalid(STILL_OPEN));
     }
     let missing = worktree.prunable || !Path::new(&worktree.path).is_dir();
     if !missing {
@@ -453,8 +461,8 @@ fn remove_worktree(repo: &Path, state: &RepoState, path: &str, busy: &Busy) -> R
     ok(repo, &["worktree", "prune"]).map(drop).map_err(invalid)
 }
 
-/// `code.delete_branch`: never main, a checked-out branch or one an employee works on; work
-/// main lacks only with `force`.
+/// `code.delete_branch`: never main, a checked-out branch, one an employee works on or one
+/// whose ticket or session is still open; work main lacks only with `force`.
 fn delete_branch(repo: &Path, state: &RepoState, branch: &str, force: bool, busy: &Busy) -> Result<(), ProtocolError> {
     known_branch(state, branch)?;
     if branch == state.main {
@@ -465,6 +473,9 @@ fn delete_branch(repo: &Path, state: &RepoState, branch: &str, force: bool, busy
     }
     if busy.branch(branch) {
         return Err(invalid(format!("An employee works on {branch} now; wait until they are done.")));
+    }
+    if busy.open(branch) {
+        return Err(invalid(STILL_OPEN));
     }
     let ahead = ahead_of_main(repo, &state.main, branch)?;
     if ahead > 0 && !force {

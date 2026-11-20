@@ -147,10 +147,17 @@ async fn the_code_tab_reads_a_repository_and_changes_it_only_as_asked() {
     refused(host(&client, remove(&repo)).await, ErrorCode::Validation, "project's own folder");
     refused(host(&client, remove(&dir.path().join("nowhere"))).await, ErrorCode::NotFound, "does not know");
     std::fs::write(worktree.join("scratch.txt"), "x").unwrap();
-    refused(host(&client, remove(&worktree)).await, ErrorCode::Validation, "uncommitted changes");
+    refused(host(&client, remove(&worktree)).await, ErrorCode::Validation, "Its ticket is still open");
     let view = get(&client, atlas).await;
     assert_eq!(view.worktrees[1].changed_files, vec!["scratch.txt".to_owned()]);
     std::fs::remove_file(worktree.join("scratch.txt")).unwrap();
+    let loose = dir.path().join("wt-loose");
+    git(&repo, &["worktree", "add", "--quiet", "--detach", &loose.to_string_lossy(), "main"]);
+    std::fs::write(loose.join("scratch.txt"), "x").unwrap();
+    refused(host(&client, remove(&loose)).await, ErrorCode::Validation, "uncommitted changes");
+    std::fs::remove_file(loose.join("scratch.txt")).unwrap();
+    host(&client, remove(&loose)).await.unwrap();
+    assert!(!loose.exists(), "a clean worktree without a ticket goes");
 
     // Merging into a main with uncommitted changes is refused and changes nothing.
     let main_before = git(&repo, &["rev-parse", "main"]);
@@ -250,7 +257,7 @@ async fn until_working(client: &Client, project_id: ProjectId, branch: &str, wor
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_branch_an_employee_works_on_now_is_never_merged_deleted_or_removed() {
+async fn a_branch_an_employee_works_on_is_never_merged_deleted_or_removed_nor_one_of_an_open_ticket_removed() {
     let dir = tempfile::tempdir().unwrap();
     let held = Arc::new(Held { gate: tokio::sync::watch::channel(false).0 });
     let daemon = start_with(dir.path(), held.clone()).await;
@@ -309,7 +316,13 @@ async fn a_branch_an_employee_works_on_now_is_never_merged_deleted_or_removed() 
     assert_eq!(git(&repo, &["rev-parse", "main"]), main_before, "main unchanged");
     assert!(worktree.exists() && !git(&repo, &["branch", "--list", &extra]).is_empty(), "worktree and branch stay");
 
+    // The run ended; the ticket is still open: its worktree and branches stay.
     held.gate.send_replace(true);
     until_working(&client, hermes, &feature, false).await;
+    let still_open = "Its ticket is still open; it is cleaned up after the ticket is done.";
+    refused(host(&client, HostWrite::CodeRemoveWorktree { project_id: hermes, path: worktree.display().to_string() }).await, ErrorCode::Validation, still_open);
+    refused(host(&client, HostWrite::CodeDeleteBranch { project_id: hermes, branch: extra.clone(), force: true }).await, ErrorCode::Validation, still_open);
+    assert!(worktree.exists() && !git(&repo, &["branch", "--list", &extra]).is_empty(), "worktree and branch stay");
+    assert_eq!(git(&repo, &["rev-parse", "main"]), main_before, "main unchanged");
     stop(dir.path(), daemon).await;
 }
