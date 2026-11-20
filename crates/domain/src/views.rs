@@ -524,6 +524,48 @@ pub struct MessageView {
     /// `usage` for the tokens. Left out for other messages and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<RunBrief>,
+    /// A board member's answer to a run's questions or decision on its plan (feature
+    /// `run_decisions`), on the `status` update that notes it, so a client can show it
+    /// as a card without reading `text` apart. Left out for other messages, for
+    /// decisions noted before this field existed and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision: Option<RunDecision>,
+}
+
+/// What a board member decided on a run's questions or plan (`MessageView::decision`).
+/// `MessageView::text` stays the readable sentence for clients that do not know it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RunDecision {
+    /// One of `run_decision`. A string, not an enum, so a new kind never breaks an
+    /// older client: it shows `text` instead.
+    pub kind: String,
+    /// For `answered`: each question with its answer, in the order they were noted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub answers: Vec<QuestionAnswer>,
+    /// For a plan decision: what the board member wrote with it, if anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feedback: Option<String>,
+}
+
+/// One answered question of a run (`RunDecision::answers`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct QuestionAnswer {
+    pub question: String,
+    pub answer: String,
+}
+
+/// The values of `RunDecision::kind` (feature `run_decisions`).
+pub mod run_decision {
+    /// The board member answered the run's questions (`answers`).
+    pub const ANSWERED: &str = "answered";
+    /// The plan goes ahead in Auto.
+    pub const PLAN_APPROVED: &str = "plan_approved";
+    /// The plan goes ahead with edits allowed and everything else asked.
+    pub const PLAN_APPROVED_EDITS: &str = "plan_approved_edits";
+    /// The plan is to be revised (`feedback` says how).
+    pub const PLAN_CHANGES: &str = "plan_changes";
+    /// The plan is rejected and the work stops (`feedback` may say why).
+    pub const PLAN_REJECTED: &str = "plan_rejected";
 }
 
 /// What the run card of a post shows while folded (`MessageView::run`).

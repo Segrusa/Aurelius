@@ -10,6 +10,7 @@ use aurelius_domain::{
     ActorKind, AppError, ApprovalId, CommandEnvelope, CommandResult, DomainError, EventNotice, RunId,
     approval::{ApprovalStatus, DecideApproval, Effect, always_allow_eligible},
     autonomy::AgentMode,
+    views::{QuestionAnswer, RunDecision, run_decision},
 };
 use aurelius_storage::{StorageError, Tx, approvals, blobs, conversations as conv, now_ms, settings};
 use rusqlite::OptionalExtension as _;
@@ -252,7 +253,12 @@ impl CommandService {
             }
             approvals::set_approval_answer(tx, approval_id, &serde_json::json!(answers))?;
             let answered: Vec<String> = answers.iter().map(|(q, a)| format!("- {q}\n  **{a}**")).collect();
-            notices.extend(crate::task::task_threads::post_run_decision(tx, &st, row.run_id, &format!("Answered:\n\n{}", answered.join("\n")))?);
+            let decision = RunDecision {
+                kind: run_decision::ANSWERED.into(),
+                answers: answers.iter().map(|(q, a)| QuestionAnswer { question: q.clone(), answer: a.clone() }).collect(),
+                feedback: None,
+            };
+            notices.extend(crate::task::task_threads::post_run_decision(tx, &st, row.run_id, &format!("Answered:\n\n{}", answered.join("\n")), &decision)?);
             // Claude's answer goes on under the question and the answer, not above them.
             conv::move_run_message_to_end(tx, row.run_id)?;
             let (event_id, n) = emit(tx, ev("approval", aid.clone(), "approval.answered", ActorKind::User, correlation, None, meta, format!("approval:{aid}:answered")))?;
@@ -309,7 +315,19 @@ impl CommandService {
                 (PlanDecision::Reject, Some(f)) => format!("Rejected the plan: {f}"),
                 (_, None) => "Rejected the plan.".to_string(),
             };
-            let mut notices: Vec<EventNotice> = crate::task::task_threads::post_run_decision(tx, &st, row.run_id, &said)?.into_iter().collect();
+            let kind = match decision {
+                PlanDecision::Approve => run_decision::PLAN_APPROVED,
+                PlanDecision::ApproveEdits => run_decision::PLAN_APPROVED_EDITS,
+                PlanDecision::Revise => run_decision::PLAN_CHANGES,
+                PlanDecision::Reject => run_decision::PLAN_REJECTED,
+            };
+            // Feedback goes with a revision or rejection only, as in `said`.
+            let noted = match decision {
+                PlanDecision::Revise | PlanDecision::Reject => feedback.clone(),
+                PlanDecision::Approve | PlanDecision::ApproveEdits => None,
+            };
+            let card = RunDecision { kind: kind.into(), answers: Vec::new(), feedback: noted };
+            let mut notices: Vec<EventNotice> = crate::task::task_threads::post_run_decision(tx, &st, row.run_id, &said, &card)?.into_iter().collect();
             // The answer goes on under the plan and the decision, not above them.
             conv::move_run_message_to_end(tx, row.run_id)?;
             // The conversation leaves plan mode too, so its mode shows it and the next answer runs in it.
