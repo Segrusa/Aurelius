@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
+import { openCompanyPage } from "./company";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
 import { boardOf, channel, messages, notification, scriptServer, task, ticket } from "./fake-server";
 import { expectNewSession } from "./new-session";
@@ -272,7 +273,7 @@ test("a real daemon takes the filters of a workspace", async () => {
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { name: "Inbox" })).toBeVisible();
-    await page.getByRole("link", { name: "Knowledge" }).click();
+    await openCompanyPage(page, "Knowledge");
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     await page.getByRole("button", { name: "New project" }).first().click();
     await page.getByPlaceholder("Name, for example Atlas").fill("Atlas");

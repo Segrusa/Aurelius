@@ -8,6 +8,7 @@ import { Connection, expectBody } from "@aurelius/client";
 import { _electron, expect, type Locator, test } from "@playwright/test";
 import { daemonEndpoint, openPipe } from "../../electron/src/main/pipe";
 import { hidden } from "../../ts/app/src/hidden";
+import { openCompanyPage } from "./company";
 import { REPO, TestDaemon, until } from "./daemon";
 import { expectNewSession, openGiveWork } from "./new-session";
 
@@ -187,15 +188,17 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     });
 
     // A pinned employee stands in the sidebar.
-    await page.getByRole("navigation").getByRole("link", { name: "Employees" }).first().click();
+    await openCompanyPage(page, "Employees");
     await page.getByRole("link", { name: /Ava/ }).first().click();
     await page.getByRole("button", { name: "More for Ava" }).click();
     await page.getByRole("menuitem", { name: "Pin to the list" }).click();
+    // Employees sit under Settings; the pin shows in the app's own sidebar.
+    await page.getByRole("link", { name: "Back to the app" }).click();
     await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Ava" })).toBeVisible();
 
     // An idea takes files too.
     if (!hidden("Ideas")) {
-      await page.getByRole("navigation").getByRole("link", { name: "Knowledge" }).first().click();
+      await openCompanyPage(page, "Knowledge");
       await page.getByRole("link", { name: "Ideas" }).first().click();
       await page.getByRole("button", { name: "New idea" }).click();
       const ideaTitle = page.getByPlaceholder(/The idea, for example/);

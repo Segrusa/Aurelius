@@ -6,6 +6,7 @@ import {
   defaultEffortLabel,
   effortOptions,
   employeeRunHint,
+  inSettingsArea,
   parseClock,
   recurrenceForm,
   recurrenceOf,
@@ -103,5 +104,29 @@ describe("compaction threshold", () => {
     expect(compactThresholdOf("", limits)).toBe("Type a whole number of thousands of tokens.");
     expect(compactThresholdOf("1.5", limits)).toBe("Type a whole number of thousands of tokens.");
     expect(compactThresholdOf("-5", limits)).toBe("Type a whole number of thousands of tokens.");
+  });
+});
+
+describe("settings area", () => {
+  it("holds Settings and the Company pages that moved into it", () => {
+    for (const path of [
+      "/settings",
+      "/settings/company",
+      "/employees",
+      "/employees/org",
+      "/employees/e-1",
+      "/knowledge",
+      "/knowledge/guidelines",
+      "/knowledge/guidelines/g-1",
+      "/projects",
+    ]) {
+      expect(inSettingsArea(path), path).toBe(true);
+    }
+  });
+
+  it("leaves a project and the rest of the app in the app", () => {
+    for (const path of ["/inbox", "/board", "/projects/p-1", "/talk/c-1", "/employeesx", "/settingsx"]) {
+      expect(inSettingsArea(path), path).toBe(false);
+    }
   });
 });

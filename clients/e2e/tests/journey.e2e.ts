@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
+import { openCompanyPage } from "./company";
 import { REPO, TestDaemon } from "./daemon";
 import { expectNewSession } from "./new-session";
 
@@ -71,7 +72,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     });
 
     await step("add an employee", async () => {
-      await act(() => nav("Employees").click());
+      await act(() => openCompanyPage(p, "Employees"));
       await act(() => p.getByRole("button", { name: "Add employee" }).click());
       const dialog = p.getByRole("dialog");
       await act(() => dialog.getByLabel("Name").fill("Builder"));
@@ -82,7 +83,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     });
 
     await step("add a project", async () => {
-      await act(() => nav("Knowledge").click());
+      await act(() => openCompanyPage(p, "Knowledge"));
       await act(() => p.getByRole("link", { name: "Projects", exact: true }).click());
       await act(() => p.getByRole("button", { name: "New project" }).first().click());
       const dialog = p.getByRole("dialog");
@@ -238,9 +239,15 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
       await expect(nav("Inbox")).toBeVisible();
     });
 
-    for (const screen of ["Inbox", "Board", "Employees", "Knowledge"]) {
+    for (const screen of ["Inbox", "Board"]) {
       await step(`dark ${screen}`, async () => {
         await act(() => nav(screen).click());
+        await p.waitForTimeout(300);
+      });
+    }
+    for (const screen of ["Employees", "Knowledge"] as const) {
+      await step(`dark ${screen}`, async () => {
+        await act(() => openCompanyPage(p, screen));
         await p.waitForTimeout(300);
       });
     }

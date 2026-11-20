@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, test } from "@playwright/test";
+import { openCompanyPage } from "./company";
 import { REPO, TestDaemon } from "./daemon";
 
 test.skip(Boolean(process.env.AURELIUS_JOURNEY), "The test build always has a connection.");
@@ -34,7 +35,7 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
     await p.getByRole("button", { name: "Create" }).click();
     await expect(p.getByRole("heading", { name: "Inbox" })).toBeVisible();
 
-    await nav("Employees").click();
+    await openCompanyPage(p, "Employees");
     await p.getByRole("button", { name: "Add employee" }).click();
     // A role is no longer required.
     await p.getByRole("dialog").getByLabel("Name").fill("Builder");
@@ -44,7 +45,7 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
       .click();
     await expect(p.getByRole("dialog")).toHaveCount(0);
 
-    await nav("Knowledge").click();
+    await openCompanyPage(p, "Knowledge");
     await p.getByRole("link", { name: "Projects", exact: true }).click();
     await p.getByRole("button", { name: "New project" }).first().click();
     await p.getByRole("dialog").getByLabel("Name").fill("Atlas");
