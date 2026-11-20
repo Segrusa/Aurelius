@@ -12,6 +12,7 @@ import '../core/net/gateway_api.dart';
 import '../core/push/push_service.dart';
 import '../core/theme/theme.dart';
 import '../core/theme/tokens.dart';
+import '../core/widgets/keyboard.dart';
 import '../data/aurelius_repository.dart';
 import '../features/company/company_bloc.dart';
 import '../features/company/project_order.dart';
@@ -77,6 +78,7 @@ class _Onboarding extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         title: 'Aurelius',
         theme: aureliusTheme(),
+        builder: (context, child) => DismissKeyboardOnTap(child: child!),
         home: BlocProvider(
           create: (context) => PairingBloc(context.read<GatewayApi>(), platform: Platform.isIOS ? 'ios' : 'android'),
           child: const PairPage(firstRun: true),
@@ -172,9 +174,11 @@ class _HostAppState extends State<HostApp> with WidgetsBindingObserver {
           title: 'Aurelius',
           theme: aureliusTheme(),
           routerConfig: _router.config,
-          builder: (context, child) => widget.host.isDev
-              ? Banner(message: 'DEV', location: BannerLocation.topEnd, color: Tokens.devBadge, child: child!)
-              : child!,
+          builder: (context, child) => DismissKeyboardOnTap(
+            child: widget.host.isDev
+                ? Banner(message: 'DEV', location: BannerLocation.topEnd, color: Tokens.devBadge, child: child!)
+                : child!,
+          ),
         ),
       ),
     );

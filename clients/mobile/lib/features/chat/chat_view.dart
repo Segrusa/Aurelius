@@ -1473,7 +1473,10 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
         const SingleActivator(LogicalKeyboardKey.keyV, control: true, shift: true): _pasteImage,
         if (!group) const SingleActivator(LogicalKeyboardKey.tab, shift: true): () => context.read<ChatBloc>().add(ChatModeSelected(state.mode.next)),
       },
-      child: Container(
+      // The whole composer counts as the field: sending or attaching keeps
+      // the keyboard up; a tap on the messages above closes it.
+      child: TextFieldTapRegion(
+        child: Container(
         decoration: BoxDecoration(color: Tokens.plain, border: Border(top: BorderSide(color: Tokens.sep, width: 0.5))),
         padding: EdgeInsets.fromLTRB(12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
         child: Column(
@@ -1702,6 +1705,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
             ),
           ],
         ),
+      ),
       ),
     );
   }

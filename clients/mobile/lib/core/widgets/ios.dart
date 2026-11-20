@@ -573,6 +573,10 @@ class AppTabBar extends StatelessWidget {
   final ValueChanged<int> onTap;
   final Color? fade;
 
+  /// The point size of the SF Symbols on the native bar. The plugin's default
+  /// (24pt) draws them far larger than the system's own tab bars do.
+  static const nativeTabIconSize = 18.0;
+
   /// Whether the native bar is used on this platform.
   static bool get native => defaultTargetPlatform == TargetPlatform.iOS;
 
@@ -589,7 +593,7 @@ class AppTabBar extends StatelessWidget {
           for (final t in tabs)
             CNTabBarItem(
               label: t.label,
-              icon: switch (t.symbol) { final s? => CNSymbol(s), null => null },
+              icon: switch (t.symbol) { final s? => CNSymbol(s, size: nativeTabIconSize), null => null },
               customIcon: t.symbol == null ? t.icon : null,
               badge: t.badge > 0 && !t.calm ? '${t.badge}' : (t.dot ? CNTabBarItem.dotBadge : null),
             ),
