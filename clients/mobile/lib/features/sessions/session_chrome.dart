@@ -86,17 +86,17 @@ class SessionHead extends StatelessWidget {
     return Stack(children: [
       // The fade: the blur and the page colour give way towards the bottom.
       Positioned.fill(
-        bottom: -24,
+        bottom: -32,
         child: IgnorePointer(
           child: ShaderMask(
-            shaderCallback: (rect) => const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black, Colors.black, Colors.transparent], stops: [0, 0.5, 1]).createShader(rect),
+            shaderCallback: (rect) => const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.black, Colors.black, Colors.transparent], stops: [0, 0.65, 1]).createShader(rect),
             blendMode: BlendMode.dstIn,
             child: ClipRect(
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [bg.withValues(alpha: 0.85), bg.withValues(alpha: 0.55), bg.withValues(alpha: 0)], stops: const [0, 0.55, 1]),
+                    gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [bg.withValues(alpha: 0.92), bg.withValues(alpha: 0.72), bg.withValues(alpha: 0)], stops: const [0, 0.65, 1]),
                   ),
                 ),
               ),
