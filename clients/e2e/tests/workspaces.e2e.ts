@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
-import { openCompanyPage } from "./company";
+import { openCompanyPage, openSettings } from "./company";
 import { REPO, serveStatic, TestDaemon, WEB_DIST } from "./daemon";
 import { boardOf, channel, messages, notification, scriptServer, task, ticket } from "./fake-server";
 import { expectNewSession } from "./new-session";
@@ -285,7 +285,7 @@ test("a real daemon takes the filters of a workspace", async () => {
     });
     await expect(page.getByText("No messages are scheduled.").first()).toBeVisible();
     await noFailure();
-    await page.getByRole("link", { name: "Settings" }).click();
+    await openSettings(page);
     await page.getByRole("link", { name: "Activity log" }).click();
     await expect(page.getByText("Only Atlas.", { exact: false })).toBeVisible();
     await noFailure();

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _electron, expect, type Page, test } from "@playwright/test";
 import { hidden } from "../../ts/app/src/hidden";
+import { openSettings } from "./company";
 import { REPO, TestDaemon } from "./daemon";
 
 const PASSWORD = "a-long-enough-password";
@@ -48,7 +49,7 @@ test("every section works against a real daemon, and what is changed stays chang
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
-    await page.getByRole("link", { name: "Settings" }).click();
+    await openSettings(page);
     await expect(page.getByRole("heading", { level: 1, name: "Account" })).toBeVisible();
 
     const nav = page.getByRole("navigation", { name: "Settings" });

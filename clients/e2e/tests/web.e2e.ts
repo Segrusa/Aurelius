@@ -1,6 +1,7 @@
 import { Connection, expectBody } from "@aurelius/client";
 import { expect, type Page, test } from "@playwright/test";
 import { openPipe } from "../../electron/src/main/pipe";
+import { openSettings } from "./company";
 import { serveStatic, TestDaemon, until, WEB_DIST } from "./daemon";
 import { approval, scriptServer } from "./fake-server";
 
@@ -104,7 +105,7 @@ test.describe("against a real daemon", () => {
     await projectInSwitcher();
 
     // Settings in a browser: no section fails, and none allows other devices from here.
-    await page.getByRole("link", { name: "Settings" }).click();
+    await openSettings(page);
     for (const name of [
       "Account",
       "App",

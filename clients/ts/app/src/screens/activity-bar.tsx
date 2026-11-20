@@ -1,13 +1,13 @@
-// The status bar under every screen (ticket #50): the server, its CPU and memory, who is busy
-// and what waits for a slot.
+// The status bar under every screen (ticket #50): left the board member's Claude usage, right the
+// server, its CPU and memory, who is busy and what waits for a slot.
 
 import { Popover } from "@astryxdesign/core/Popover";
 import type { ActivityBusy, ActivityOverview, ActivityWaiting, TicketActivity } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { type ButtonHTMLAttributes, forwardRef, type ReactNode, useMemo, useState } from "react";
 import { useLinkState } from "../connection";
-import { useActivityOverview, useMachineLoad, useWorkSessions } from "../data";
+import { useActivityOverview, useMachineLoad, useSubscription, useWorkSessions } from "../data";
 import { Icon } from "../ui/icons";
 import {
   activityCounts,
@@ -20,6 +20,7 @@ import {
 } from "./activity-bar-logic";
 import { Eyebrow } from "./org-kit";
 import { when } from "./settings-kit";
+import { subscriptionFor } from "./usage-logic";
 
 const styles = stylex.create({
   bar: {
@@ -56,6 +57,12 @@ const styles = stylex.create({
     fontVariantNumeric: "tabular-nums",
     whiteSpace: "nowrap",
   },
+  // The usage sits at the left end; everything after it is pushed to the right.
+  usage: { marginInlineEnd: "auto", textDecoration: "none" },
+  usageOn: { backgroundColor: "var(--color-overlay-hover)" },
+  usageBar: { width: 48, height: 3, borderRadius: 2, backgroundColor: "var(--color-track)", overflow: "hidden" },
+  usageFill: { height: 3, borderRadius: 2, backgroundColor: "var(--color-text-accent)" },
+  quietText: { color: "var(--precision-text3)" },
   dot: { width: 6, height: 6, borderRadius: "50%", backgroundColor: "var(--precision-text3)" },
   dotBusy: { backgroundColor: "var(--color-text-accent)" },
   panel: { display: "flex", flexDirection: "column", gap: 12, maxHeight: 420, overflowY: "auto" },
@@ -190,6 +197,34 @@ function Machine() {
   );
 }
 
+/** The limit that resets furthest away (the week, when the plan has one); a click opens Usage. */
+function Usage() {
+  const { user } = useLinkState();
+  const on = useRouterState({ select: (s) => s.location.pathname === "/usage" });
+  const data = subscriptionFor(useSubscription().data, user?.id ?? null);
+  const limit = data?.limits.find((l) => /week/i.test(l.label)) ?? data?.limits[0];
+  if (!limit) return null;
+  const percent = Math.max(0, Math.min(100, Math.round(limit.percent)));
+  const hint = limit.resets
+    ? `${limit.label}: ${percent}% used, resets ${limit.resets}`
+    : `${limit.label}: ${percent}% used`;
+  return (
+    <Link
+      to="/usage"
+      title={hint}
+      aria-label={hint}
+      {...stylex.props(styles.trigger, styles.usage, on && styles.usageOn)}
+    >
+      <span>{limit.label}</span>
+      <span {...stylex.props(styles.usageBar)}>
+        <span {...stylex.props(styles.usageFill)} style={{ display: "block", width: `${percent}%` }} />
+      </span>
+      <span {...stylex.props(styles.figure)}>{percent}%</span>
+      {limit.resets ? <span {...stylex.props(styles.quietText)}>{`· resets ${limit.resets}`}</span> : null}
+    </Link>
+  );
+}
+
 /** The activity part is hidden on a server without the feature (no data ever comes). */
 export function ActivityBar() {
   const { status } = useLinkState();
@@ -204,6 +239,7 @@ export function ActivityBar() {
   const counts = overview.data ? activityCounts(overview.data) : null;
   return (
     <div {...stylex.props(styles.bar)}>
+      <Usage />
       <Machine />
       {overview.data && counts ? (
         <Popover

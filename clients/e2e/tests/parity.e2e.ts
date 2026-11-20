@@ -8,7 +8,7 @@ import { Connection, expectBody } from "@aurelius/client";
 import { _electron, expect, type Locator, test } from "@playwright/test";
 import { daemonEndpoint, openPipe } from "../../electron/src/main/pipe";
 import { hidden } from "../../ts/app/src/hidden";
-import { openCompanyPage } from "./company";
+import { openCompanyPage, openSettings } from "./company";
 import { REPO, TestDaemon, until } from "./daemon";
 import { expectNewSession, openGiveWork } from "./new-session";
 
@@ -227,7 +227,7 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await expect(page).toHaveURL(/\/tasks$/);
 
     // Settings: the keys of the page, and they show when asked.
-    await page.getByRole("link", { name: "Settings" }).click();
+    await openSettings(page);
     await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name: "App", exact: true }).click();
     await expect(page.getByRole("switch", { name: "Always show shortcut hints" })).toBeVisible();
     await page.keyboard.press("h");

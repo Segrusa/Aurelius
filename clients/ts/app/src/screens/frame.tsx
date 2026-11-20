@@ -15,7 +15,6 @@ import {
   useLiveQueries,
   useNotifications,
   useOpenTasks,
-  useSubscription,
   useTickets,
   useWorkSessions,
 } from "../data";
@@ -31,7 +30,7 @@ import {
   screenKey,
   screenUseJson,
 } from "../screen-use";
-import { Icon, Logo, NAV_ICONS, type NavIcon, NewIcon, SearchIcon } from "../ui/icons";
+import { Icon, NAV_ICONS, type NavIcon, NewIcon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/marks";
 import { ToastBridge, toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
@@ -55,7 +54,7 @@ import { SettingsSidebar } from "./settings";
 import { inSettingsArea } from "./settings-logic";
 import { sidebarTickets, ticketSignal } from "./ticket-session-logic";
 import { useTicketNeeds } from "./tickets-kit";
-import { subscriptionFor } from "./usage-logic";
+import { UserMenu } from "./user-menu";
 import { useOpenedWorkspace, WorkspaceSwitcher } from "./workspace-kit";
 import { narrow } from "./workspace-logic";
 
@@ -88,7 +87,6 @@ const styles = stylex.create({
   },
   settingsSidebar: { display: "flex", height: "100%" },
   head: { display: "flex", height: 32, alignItems: "center", gap: 8, paddingInline: 8 },
-  logo: { display: "flex" },
   brand: {
     fontSize: 14,
     fontWeight: 600,
@@ -150,29 +148,6 @@ const styles = stylex.create({
   liveEnd: { display: "flex", alignItems: "center", gap: 8 },
   foot: { display: "flex", flexDirection: "column", gap: 8, paddingInline: 8 },
   reconnect: { margin: 0, paddingInline: 8, fontSize: 12, color: "var(--color-text-warning)" },
-  usage: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-    borderRadius: 6,
-    paddingInline: 8,
-    paddingBlock: 4,
-    textDecoration: "none",
-    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
-  },
-  usageOn: { backgroundColor: "var(--color-overlay-hover)" },
-  usageTop: { display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--precision-text3)" },
-  usagePercent: { color: "var(--color-text-primary)" },
-  truncate: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  usageResets: {
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    fontSize: 12,
-    color: "var(--precision-text3)",
-  },
-  bar: { height: 3, borderRadius: 2, backgroundColor: "var(--color-track)" },
-  barFill: { height: 3, borderRadius: 2, backgroundColor: "var(--color-text-accent)" },
 });
 
 const NAV_MAIN: { to: string; label: string; icon: IconType }[] = [{ to: "/new", label: "New session", icon: NewIcon }];
@@ -423,28 +398,6 @@ function OpenTickets() {
   );
 }
 
-/** The limit that resets furthest away: the week, when the plan has one. */
-function Usage() {
-  const { user } = useLinkState();
-  const on = useRouterState({ select: (s) => s.location.pathname === "/usage" });
-  const data = subscriptionFor(useSubscription().data, user?.id ?? null);
-  const limit = data?.limits.find((l) => /week/i.test(l.label)) ?? data?.limits[0];
-  if (!limit) return null;
-  const percent = Math.max(0, Math.min(100, Math.round(limit.percent)));
-  return (
-    <Link to="/usage" {...stylex.props(styles.usage, on && styles.usageOn)}>
-      <div {...stylex.props(styles.usageTop)}>
-        <span {...stylex.props(styles.truncate)}>{limit.label}</span>
-        <span {...stylex.props(styles.usagePercent)}>{percent}%</span>
-      </div>
-      <div {...stylex.props(styles.bar)}>
-        <div {...stylex.props(styles.barFill)} style={{ width: `${percent}%` }} />
-      </div>
-      {limit.resets ? <div {...stylex.props(styles.usageResets)}>{limit.resets}</div> : null}
-    </Link>
-  );
-}
-
 const SIDEBAR_KEY = "sidebar";
 
 const GO_TO: Record<string, string> = {
@@ -618,8 +571,7 @@ function useScreenCounter(): void {
 }
 
 function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (collapsed: boolean) => void }) {
-  const { open } = overlays;
-  const { hostName, status, features } = useLinkState();
+  const { hostName, status, features, user } = useLinkState();
   const employees = useEmployees();
   const [employeePins] = usePins(pinKey(hostName, "pinned_employees"));
   const pinnedEmployees = employeePins.flatMap(
@@ -630,25 +582,27 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
     <SideNav
       aria-label="Main"
       data-sidebar
-      collapsible
+      // The fold button sits in the head, in place of the logo.
+      collapsible={{ hasButton: false }}
       resizable={{ defaultWidth: 224, autoSaveId: "sidebar", isCollapsed: collapsed, onCollapseChange: onCollapse }}
       header={
         <div data-sidebar-drag {...stylex.props(styles.head)}>
-          <span title={hostName ?? "Aurelius"} {...stylex.props(styles.logo)}>
-            <Logo />
-          </span>
-          {collapsed ? null : <span {...stylex.props(styles.brand)}>Aurelius</span>}
+          <Tooltip content={collapsed ? "Show sidebar" : "Hide sidebar"} delay={400} hasHoverIndication={false}>
+            <IconButton
+              label={collapsed ? "Show sidebar" : "Hide sidebar"}
+              icon={<Icon name="sidebar" size={16} />}
+              variant="ghost"
+              size="sm"
+              onClick={() => onCollapse(!collapsed)}
+            />
+          </Tooltip>
+          {collapsed ? null : (
+            <span title={hostName ?? "Aurelius"} {...stylex.props(styles.brand)}>
+              Aurelius
+            </span>
+          )}
           {collapsed ? null : (
             <div {...stylex.props(styles.headActions)}>
-              <Tooltip content="Search and commands" delay={400} hasHoverIndication={false}>
-                <IconButton
-                  label="Search"
-                  icon={<SearchIcon />}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => open("palette")}
-                />
-              </Tooltip>
               <Tooltip content="New session" delay={400} hasHoverIndication={false}>
                 <IconButton label="New session" icon={<NewIcon />} size="sm" onClick={openNewSession} />
               </Tooltip>
@@ -664,8 +618,8 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
               Reconnecting…
             </p>
           ) : null}
-          {collapsed ? null : <Usage />}
-          <NavRow to="/settings" label="Settings" icon={NAV_ICONS.settings} />
+          {/* Without a signed-in board member (an older server) Settings stays a row of its own. */}
+          {user ? <UserMenu collapsed={collapsed} /> : <NavRow to="/settings" label="Settings" icon={NAV_ICONS.settings} />}
         </div>
       }
     >
