@@ -390,7 +390,7 @@ fn delete_branch(repo: &Path, state: &RepoState, branch: &str, force: bool, busy
         return Err(invalid(format!("{branch} has {ahead} commit(s) that are not in {}; deleting it loses that work.", state.main)));
     }
     let flag = if force { "-D" } else { "-d" };
-    ok(repo, &["branch", flag, branch]).map(drop).map_err(|why| invalid(format!("Git could not delete {branch}: {why}")))
+    ok(repo, &["branch", flag, "--end-of-options", branch]).map(drop).map_err(|why| invalid(format!("Git could not delete {branch}: {why}")))
 }
 
 /// How many commits `branch` has that main lacks.
@@ -429,7 +429,7 @@ fn prune_merged(repo: &Path, state: &RepoState, busy: &Busy) -> Result<(), Proto
                 kept = true;
             }
         }
-        if !kept && let Err(why) = ok(repo, &["branch", "-d", branch]) {
+        if !kept && let Err(why) = ok(repo, &["branch", "-d", "--end-of-options", branch]) {
             tracing::warn!(%branch, error = %why, "code.prune_merged could not delete a branch");
         }
     }

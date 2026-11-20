@@ -112,3 +112,95 @@ fn a_subject_is_cut_at_its_limit_by_characters_not_bytes() {
     assert_eq!(cut.chars().count(), CODE_SUBJECT_MAX_CHARS);
     assert!(cut.ends_with('…'));
 }
+
+// ---- The writes against real repositories in a temp folder ----
+
+fn run(dir: &Path, args: &[&str]) -> String {
+    let out = git(dir, args).unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    quick::text(&out)
+}
+
+/// A repository on main with one commit ("base").
+fn repo() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().join("project");
+    std::fs::create_dir_all(&repo).unwrap();
+    run(&repo, &["init", "--quiet", "--initial-branch=main"]);
+    run(&repo, &["config", "user.name", "Test"]);
+    run(&repo, &["config", "user.email", "test@example.com"]);
+    run(&repo, &["config", "core.autocrlf", "false"]);
+    commit(&repo, "readme.md", "base");
+    (dir, repo)
+}
+
+fn commit(dir: &Path, file: &str, message: &str) -> String {
+    std::fs::write(dir.join(file), format!("{message}\n")).unwrap();
+    run(dir, &["add", "."]);
+    run(dir, &["commit", "--quiet", "-m", message]);
+    run(dir, &["rev-parse", "HEAD"])
+}
+
+/// A commit on a branch that is gone afterwards: reachable only from what the test points at it.
+fn loose_commit(repo: &Path, file: &str, message: &str) -> String {
+    run(repo, &["switch", "--quiet", "-c", "scratch"]);
+    let sha = commit(repo, file, message);
+    run(repo, &["switch", "--quiet", "main"]);
+    run(repo, &["branch", "--quiet", "-D", "scratch"]);
+    sha
+}
+
+fn nobody() -> Busy {
+    Busy { links: HashMap::new(), loose_working: vec![] }
+}
+
+fn merge_of(branch: &str) -> HostWrite {
+    HostWrite::CodeMerge { project_id: ProjectId::new(), branch: branch.into() }
+}
+
+fn is_ancestor(repo: &Path, commit: &str, of: &str) -> bool {
+    git(repo, &["merge-base", "--is-ancestor", commit, of]).unwrap().status.success()
+}
+
+#[test]
+fn a_branch_named_like_an_option_merges_exactly_its_commit_and_never_mains_upstream() {
+    let (_dir, repo) = repo();
+    // main tracks origin/main, which has a commit main lacks: a bare `git merge -Xours` would merge it.
+    let upstream = loose_commit(&repo, "upstream.txt", "upstream-only");
+    run(&repo, &["update-ref", "refs/remotes/origin/main", &upstream]);
+    run(&repo, &["config", "remote.origin.url", "/nowhere"]);
+    run(&repo, &["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+    run(&repo, &["config", "branch.main.remote", "origin"]);
+    run(&repo, &["config", "branch.main.merge", "refs/heads/main"]);
+    let work = loose_commit(&repo, "dash.txt", "the branch's work");
+    run(&repo, &["update-ref", "refs/heads/-Xours", &work]);
+
+    perform(&repo, merge_of("-Xours"), &nobody()).unwrap();
+    assert_eq!(run(&repo, &["rev-parse", "main^2"]), work, "the branch's commit is merged");
+    assert!(!is_ancestor(&repo, &upstream, "main"), "origin/main never reaches main");
+    assert_eq!(run(&repo, &["log", "-1", "--format=%s", "main"]), "Merge -Xours", "the message keeps the short name");
+}
+
+#[test]
+fn a_tag_named_like_the_branch_does_not_shadow_it_in_a_merge() {
+    let (_dir, repo) = repo();
+    let other = loose_commit(&repo, "other.txt", "NOT the branch");
+    run(&repo, &["tag", "feat/x", &other]);
+    run(&repo, &["switch", "--quiet", "-c", "feat/x"]);
+    let work = commit(&repo, "x.txt", "the branch");
+    run(&repo, &["switch", "--quiet", "main"]);
+
+    perform(&repo, merge_of("feat/x"), &nobody()).unwrap();
+    assert_eq!(run(&repo, &["rev-parse", "main^2"]), work);
+    assert!(!is_ancestor(&repo, &other, "main"), "the tag's commit stays out");
+}
+
+#[test]
+fn a_branch_named_like_an_option_can_be_deleted_with_force() {
+    let (_dir, repo) = repo();
+    let work = loose_commit(&repo, "x.txt", "unmerged");
+    run(&repo, &["update-ref", "refs/heads/-x", &work]);
+    let delete = HostWrite::CodeDeleteBranch { project_id: ProjectId::new(), branch: "-x".into(), force: true };
+    perform(&repo, delete, &nobody()).unwrap();
+    assert!(!git(&repo, &["rev-parse", "--verify", "--quiet", "refs/heads/-x"]).unwrap().status.success(), "the branch is gone");
+}

@@ -141,10 +141,13 @@ pub(crate) fn merge_locked(repo: &Path, branch: &str, message: &str) -> MergeOut
         }
         Err(e) => return failed(e, vec![]),
     }
-    if !branch_exists(repo, branch) {
+    // The branch's commit, resolved once by its full ref: a branch named like an option
+    // (`-Xours`) or shadowed by a tag of the same name still means this branch, and git
+    // merges exactly the commit the checks saw.
+    let Ok(commit) = ok(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}^{{commit}}")]) else {
         return failed(format!("the branch {branch} does not exist"), vec![]);
-    }
-    match ok(repo, &["rev-list", "--count", &format!("{main}..{branch}")]) {
+    };
+    match ok(repo, &["rev-list", "--count", &format!("refs/heads/{main}..{commit}"), "--"]) {
         Ok(n) if n == "0" => return MergeOutcome::NoCommits,
         Ok(_) => {}
         Err(e) => return failed(e, vec![]),
@@ -155,7 +158,7 @@ pub(crate) fn merge_locked(repo: &Path, branch: &str, message: &str) -> MergeOut
     if ok(repo, &["config", "user.email"]).unwrap_or_default().is_empty() {
         args.extend(["-c".into(), "user.name=Aurelius".into(), "-c".into(), "user.email=aurelius@localhost".into()]);
     }
-    args.extend(["merge".into(), "--no-ff".into(), "--no-edit".into(), "-m".into(), message.into(), branch.into()]);
+    args.extend(["merge".into(), "--no-ff".into(), "--no-edit".into(), "-m".into(), message.into(), "--end-of-options".into(), commit]);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     match git(repo, &args) {
         Ok(out) if out.status.success() => match ok(repo, &["rev-parse", "HEAD"]) {
