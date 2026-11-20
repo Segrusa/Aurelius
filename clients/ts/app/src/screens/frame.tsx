@@ -4,7 +4,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { expectBody } from "@aurelius/client";
-import type { NotificationView, TaskView, TicketView } from "@aurelius/protocol";
+import type { NotificationView, TaskView, TicketView, WorkSessionView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -43,6 +43,16 @@ import { newNotes, notificationHeading, ticketPlace } from "./inbox-logic";
 import { useOpenNewSession } from "./new-session";
 import { overlays } from "./overlays-store";
 import { Palette } from "./palette";
+import {
+  lastUsed,
+  parseUses,
+  RECENT_USE_KEY,
+  type RecentUses,
+  sessionUseKey,
+  ticketUseKey,
+  touchUse,
+  useKeyOf,
+} from "./recent-use-logic";
 import {
   activeSessions,
   type SessionSignal,
@@ -325,16 +335,37 @@ function FoldingSection({
   );
 }
 
+/**
+ * When you opened which session or ticket on this device, recorded as you open one, so the sidebar lists
+ * them most recently used first.
+ */
+function useRecentUses(): RecentUses {
+  const { storage } = usePlatform();
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const [uses, setUses] = useState(() => parseUses(storage.get(RECENT_USE_KEY)));
+  const key = useKeyOf(path);
+  useEffect(() => {
+    if (!key) return;
+    setUses((was) => {
+      const next = touchUse(was, key, Date.now());
+      storage.set(RECENT_USE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, [key, storage]);
+  return uses;
+}
+
 /** The board member's work sessions (server feature `work_sessions`), the workspace's when one is chosen. */
-function RecentSessions() {
+function RecentSessions({ uses }: { uses: RecentUses }) {
   const workspace = useWorkspace().id;
   const [earlier, setEarlier] = useState(false);
   const all = useWorkSessions().data ?? [];
-  const today = sidebarSessions(all, workspace, startOfDay(Date.now()));
+  const usedAt = (s: WorkSessionView) => lastUsed(uses, sessionUseKey(s.conversation_id), s.last_activity_ms);
+  const today = sidebarSessions(all, workspace, startOfDay(Date.now()), usedAt);
   const { list: sessions, hasEarlier } = withEarlier(
-    sidebarSessions(all, workspace, 0),
+    sidebarSessions(all, workspace, 0, usedAt),
     today,
-    sidebarSessions(all, workspace),
+    sidebarSessions(all, workspace, null, usedAt),
     (s) => s.conversation_id,
     earlier,
   );
@@ -369,17 +400,18 @@ function RecentSessions() {
 }
 
 /** The open tickets (ticket #70: each opens as its own session), the workspace's when one is chosen. */
-function OpenTickets() {
+function OpenTickets({ uses }: { uses: RecentUses }) {
   const workspace = useWorkspace().id;
   const [earlier, setEarlier] = useState(false);
   const all = useTickets().data ?? [];
   const need = useTicketNeeds(all);
   const signal = (t: TicketView) => ticketSignal(t, need.mine(t));
-  const today = sidebarTickets(all, workspace, signal, startOfDay(Date.now()));
+  const usedAt = (t: TicketView) => lastUsed(uses, ticketUseKey(t.number), t.updated_at_ms);
+  const today = sidebarTickets(all, workspace, signal, startOfDay(Date.now()), usedAt);
   const { list: tickets, hasEarlier } = withEarlier(
-    sidebarTickets(all, workspace, signal, 0),
+    sidebarTickets(all, workspace, signal, 0, usedAt),
     today,
-    sidebarTickets(all, workspace, signal),
+    sidebarTickets(all, workspace, signal, null, usedAt),
     (t) => t.id,
     earlier,
   );
@@ -616,6 +648,7 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
     (id) => employees.data?.filter((e) => e.id === id && e.status !== "archived") ?? [],
   );
   const openNewSession = useOpenNewSession();
+  const uses = useRecentUses();
   return (
     <SideNav
       aria-label="Main"
@@ -685,8 +718,8 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
               ))}
             </div>
           ) : null}
-          <RecentSessions />
-          <OpenTickets />
+          <RecentSessions uses={uses} />
+          <OpenTickets uses={uses} />
           <Live />
         </>
       )}

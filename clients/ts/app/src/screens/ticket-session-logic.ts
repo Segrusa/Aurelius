@@ -5,7 +5,7 @@
 import type { ChannelView, ColumnKind, TicketView, TokenUsage } from "@aurelius/protocol";
 import { ownerAnswers as ownerAnswersText } from "./chat-logic";
 import type { UsageTotals } from "./run-logic";
-import type { SessionSignal } from "./session-logic";
+import { byLastUse, type SessionSignal } from "./session-logic";
 import { filesWritten } from "./tasks-logic";
 
 /** The ticket of a number, the search still to do, or none. */
@@ -194,20 +194,28 @@ export function ticketSignal(t: Pick<TicketView, "root_task_status">, needsYou: 
 }
 
 /**
- * The sidebar's tickets: the open ones of the workspace's project (all when none is chosen), the last
- * changed first, at most `SIDEBAR_TICKETS` plus any older one with a signal, so none that needs you hides.
- * With `since`, only the ones with a signal and those changed from then on: the default view, today's work.
+ * The sidebar's tickets: the open ones of the workspace's project (all when none is chosen), most recently
+ * used first (`usedAt`, by default the last change), at most `SIDEBAR_TICKETS` plus any older one with a
+ * signal, so none that needs you hides. With `since`, only the ones with a signal and those used from then
+ * on: the default view, today's work.
  */
 export function sidebarTickets<
   T extends Pick<TicketView, "project_id" | "column" | "archived_at_ms" | "updated_at_ms">,
->(tickets: T[], workspaceId: string | null, signal: (t: T) => SessionSignal | null, since: number | null = null): T[] {
-  const open = tickets
-    .filter(
+>(
+  tickets: T[],
+  workspaceId: string | null,
+  signal: (t: T) => SessionSignal | null,
+  since: number | null = null,
+  usedAt: (t: T) => number = (t) => t.updated_at_ms,
+): T[] {
+  const open = byLastUse(
+    tickets.filter(
       (t) =>
         (workspaceId === null || t.project_id === workspaceId) && !t.archived_at_ms && OPEN_COLUMNS.includes(t.column),
-    )
-    .sort((a, b) => b.updated_at_ms - a.updated_at_ms);
-  if (since !== null) return open.filter((t) => signal(t) !== null || t.updated_at_ms >= since);
+    ),
+    usedAt,
+  );
+  if (since !== null) return open.filter((t) => signal(t) !== null || usedAt(t) >= since);
   return open.filter((t, i) => i < SIDEBAR_TICKETS || signal(t) !== null);
 }
 
