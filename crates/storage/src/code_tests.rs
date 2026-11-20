@@ -180,3 +180,24 @@ fn a_project_folder_tells_a_missing_project_from_one_without_a_folder() {
     assert_eq!(f.store.read(move |c| project_folder(c, hermes)).unwrap(), Some(None));
     assert_eq!(f.store.read(|c| project_folder(c, ProjectId::new())).unwrap(), None);
 }
+
+#[test]
+fn a_branch_stays_open_until_its_ticket_is_done_or_its_session_is_deleted() {
+    let f = fixture();
+    let (id, number) = ticket(&f, f.atlas, "Fresh", Some(f.ann), TicketKind::Normal);
+    let branch = format!("feat/ticket-{number}-fresh");
+    assert!(link(&f, &branch).open, "a Backlog ticket may still get work");
+    let ticket_id = id.to_string();
+    f.store
+        .write(move |tx| {
+            let done = company::column_of_kind(tx, ColumnKind::Done)?;
+            Ok(tx.execute("UPDATE tickets SET column_id = ?1 WHERE id = ?2", params![done.id.to_string(), ticket_id])?)
+        })
+        .unwrap();
+    assert!(!link(&f, &branch).open, "a Done ticket's branch may be cleaned up");
+
+    let conversation = session(&f, f.bob, "/data/worktrees/s3", "session/0a0b0c0d");
+    assert!(link(&f, "session/0a0b0c0d").open, "a session that is not deleted");
+    f.store.write(move |tx| Ok(tx.execute("UPDATE conversations SET archived_at_ms = 5 WHERE id = ?1", [conversation.to_string()])?)).unwrap();
+    assert!(!link(&f, "session/0a0b0c0d").open, "a deleted session");
+}

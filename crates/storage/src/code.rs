@@ -20,6 +20,10 @@ pub struct BranchLink {
     pub owner: Option<CodeOwner>,
     /// A run of its ticket's task tree or of its work session is live or queued.
     pub working: bool,
+    /// Its ticket is not on Done (nor archived), or its work session is not deleted: work
+    /// on it may still come, even when it has no commit of its own yet. Clean up merged
+    /// leaves such a branch alone (a fresh branch at main counts as merged in git).
+    pub open: bool,
 }
 
 /// The project's folder: `None` when the project does not exist, `Some(None)` when it has none.
@@ -48,11 +52,13 @@ pub fn branch_link(conn: &Connection, project: ProjectId, branch: &str) -> Resul
     let mut link = BranchLink::default();
     if let Some((ticket, owner)) = ticket {
         link.working = ticket_working(conn, ticket.ticket_id)?;
+        link.open = ticket_open(conn, ticket.ticket_id)?;
         link.owner = owner;
         link.ticket = Some(ticket);
     }
     if let Some((conversation, owner)) = session {
         link.working = link.working || session_working(conn, conversation)?;
+        link.open = link.open || session_open(conn, conversation)?;
         if link.owner.is_none() {
             link.owner = Some(owner);
         }
@@ -118,6 +124,26 @@ fn session_on(conn: &Connection, project: ProjectId, branch: &str) -> Result<Opt
         return Ok(None);
     };
     Ok(Some((ConversationId::parse(&conversation).map_err(bad)?, CodeOwner { employee_id: EmployeeId::parse(&employee).map_err(bad)?, name })))
+}
+
+/// The ticket is neither on Done nor archived.
+fn ticket_open(conn: &Connection, ticket: TicketId) -> Result<bool, StorageError> {
+    Ok(conn
+        .query_row(
+            "SELECT k.archived_at_ms IS NULL AND b.kind <> 'done' FROM tickets k JOIN board_columns b ON b.id = k.column_id WHERE k.id = ?1",
+            [ticket.to_string()],
+            |r| r.get::<_, bool>(0),
+        )
+        .optional()?
+        .unwrap_or(false))
+}
+
+/// The work session's conversation is not deleted (archived).
+fn session_open(conn: &Connection, conversation: ConversationId) -> Result<bool, StorageError> {
+    Ok(conn
+        .query_row("SELECT archived_at_ms IS NULL FROM conversations WHERE id = ?1", [conversation.to_string()], |r| r.get::<_, bool>(0))
+        .optional()?
+        .unwrap_or(false))
 }
 
 /// A task of the ticket's tree is queued or running (the sidebar's "working" of a ticket),

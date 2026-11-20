@@ -161,7 +161,15 @@ async fn the_code_tab_reads_a_repository_and_changes_it_only_as_asked() {
     assert_eq!(git(&repo, &["log", "-1", "--format=%s", "main"]), format!("Merge {feature} (ticket #{number})"));
     assert!(view.branches.iter().find(|b| b.name == feature).unwrap().merged, "the answer is the view after the merge");
 
-    // Clean up merged: the feature's clean worktree and branch and the merged branch go; the spike and main stay.
+    // Clean up merged while the feature's ticket is still open: only the merged branch
+    // without a ticket goes. An open ticket's branch may simply have no commit yet.
+    let view = host(&client, HostWrite::CodePruneMerged { project_id: atlas }).await.unwrap();
+    let names: Vec<&str> = view.branches.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, vec!["main".to_owned(), feature.clone(), "spike/unmerged".to_owned()]);
+    assert!(worktree.exists(), "an open ticket's worktree stays");
+
+    // Once the ticket is off the board, the feature's clean worktree and branch go too; the spike and main stay.
+    client.ticket_command(Command::ArchiveTicket(aurelius_domain::ticket::ArchiveTicket { ticket_id: ticket }), None).await.unwrap();
     let view = host(&client, HostWrite::CodePruneMerged { project_id: atlas }).await.unwrap();
     let names: Vec<&str> = view.branches.iter().map(|b| b.name.as_str()).collect();
     assert_eq!(names, vec!["main", "spike/unmerged"]);

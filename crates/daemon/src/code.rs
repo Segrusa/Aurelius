@@ -112,6 +112,11 @@ impl Busy {
         self.links.get(branch).is_some_and(|l| l.working)
     }
 
+    /// Its ticket or work session is still open: Clean up merged leaves it alone.
+    fn open(&self, branch: &str) -> bool {
+        self.links.get(branch).is_some_and(|l| l.open)
+    }
+
     fn worktree(&self, worktree: &WorktreeEntry) -> bool {
         match &worktree.branch {
             Some(branch) => self.branch(branch),
@@ -400,7 +405,8 @@ fn prune_merged(repo: &Path, state: &RepoState, busy: &Busy) -> Result<(), Proto
     let merged = ok(repo, &["for-each-ref", "--format=%(refname)", &format!("--merged={HEADS}{}", state.main), HEADS]).map_err(invalid)?;
     let project = repo.to_string_lossy();
     for branch in merged.lines().filter_map(|l| l.strip_prefix(HEADS)) {
-        if branch == state.main || busy.branch(branch) {
+        // A branch whose ticket or session is still open may just not have a commit yet.
+        if branch == state.main || busy.branch(branch) || busy.open(branch) {
             continue;
         }
         let mut kept = false;
