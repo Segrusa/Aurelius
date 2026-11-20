@@ -66,22 +66,32 @@ pub fn branch_link(conn: &Connection, project: ProjectId, branch: &str) -> Resul
     Ok(link)
 }
 
-/// Whether a live or queued run of a work session of `project` works in the worktree at `path`
-/// (a worktree without a branch, which `branch_link` cannot find).
-pub fn worktree_working(conn: &Connection, project: ProjectId, path: &str) -> Result<bool, StorageError> {
-    let session: Option<String> = conn
-        .query_row(
-            "SELECT s.conversation_id FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
-             WHERE c.kind = 'session' AND c.project_id = ?1 AND s.worktree = ?2 AND c.archived_at_ms IS NULL
-             ORDER BY s.created_at_ms DESC LIMIT 1",
-            params![project.to_string(), path],
-            |r| r.get(0),
-        )
-        .optional()?;
-    match session {
-        Some(id) => session_working(conn, ConversationId::parse(&id).map_err(bad)?),
-        None => Ok(false),
+/// A worktree of a work session that is not deleted, as stored, and whether a run of the
+/// session is live or queued now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionWorktree {
+    /// The folder as the session stored it; the caller compares it with git's path as a path
+    /// (a trailing slash or a symlink), not byte for byte.
+    pub path: String,
+    /// A run of the session is live or queued, or its dispatcher still chooses who takes it.
+    pub working: bool,
+}
+
+/// The worktrees of `project`'s work sessions that are not deleted, newest first: how the
+/// daemon finds who works in a worktree without a branch, which `branch_link` cannot find.
+pub fn session_worktrees(conn: &Connection, project: ProjectId) -> Result<Vec<SessionWorktree>, StorageError> {
+    let mut stmt = conn.prepare(
+        "SELECT s.conversation_id, s.worktree FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
+         WHERE c.kind = 'session' AND c.project_id = ?1 AND s.worktree IS NOT NULL AND c.archived_at_ms IS NULL
+         ORDER BY s.created_at_ms DESC",
+    )?;
+    let rows: Vec<(String, String)> = stmt.query_map([project.to_string()], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+    let mut list = Vec::with_capacity(rows.len());
+    for (conversation, path) in rows {
+        let working = session_working(conn, ConversationId::parse(&conversation).map_err(bad)?)?;
+        list.push(SessionWorktree { path, working });
     }
+    Ok(list)
 }
 
 /// id, number, title, owner id, owner name.

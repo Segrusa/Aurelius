@@ -13,7 +13,7 @@ use aurelius_application::ticket::quick::MergeOutcome;
 use aurelius_domain::ProjectId;
 use aurelius_domain::code::{CODE_BRANCH_COMMITS_MAX, CODE_BRANCHES_MAX, CODE_COMMITS_MAX, CODE_FILES_MAX, CODE_SUBJECT_MAX_CHARS, CodeBranch, CodeCommit, CodeCommitLine, CodeView, CodeWorktree};
 use aurelius_protocol::{ErrorCode, HostWrite, ProtocolError};
-use aurelius_storage::code::BranchLink;
+use aurelius_storage::code::{BranchLink, SessionWorktree};
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -93,20 +93,9 @@ pub async fn write(shared: &Arc<Shared>, write: HostWrite) -> Result<CodeView, P
     // a run that starts in between is no different from one that starts right after.
     let branches: Vec<String> = state.refs.iter().map(|r| r.name.clone()).collect();
     let links = links_of(shared, project, branches).await?;
-    let loose: Vec<String> = state.worktrees.iter().filter(|w| w.branch.is_none()).map(|w| w.path.clone()).collect();
     let store = shared.store().clone();
-    let loose_working: Vec<String> = storage_task(move || {
-        store.read(|c| {
-            let mut working = Vec::new();
-            for path in loose {
-                if aurelius_storage::code::worktree_working(c, project, &path)? {
-                    working.push(path);
-                }
-            }
-            Ok(working)
-        })
-    })
-    .await?;
+    let sessions = storage_task(move || store.read(|c| aurelius_storage::code::session_worktrees(c, project))).await?;
+    let loose_working: Vec<String> = state.worktrees.iter().filter(|w| w.branch.is_none() && working_at(&sessions, &w.path)).map(|w| w.path.clone()).collect();
     let busy = Busy { links, loose_working };
     app_task(move || apply(&repo, write, &busy, Duration::from_millis(CODE_FETCH_TIMEOUT_MS))).await?;
     view(shared, project).await
@@ -146,6 +135,12 @@ impl Busy {
             None => self.loose_working.iter().any(|p| same_path(p, &worktree.path)),
         }
     }
+}
+
+/// Whether the newest session whose worktree is the folder at `path` works now. The paths are
+/// compared as folders (`same_path`): git and the session may write the same one differently.
+fn working_at(sessions: &[SessionWorktree], path: &str) -> bool {
+    sessions.iter().find(|s| same_path(&s.path, path)).is_some_and(|s| s.working)
 }
 
 fn invalid(message: impl Into<String>) -> ProtocolError {

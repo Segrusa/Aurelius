@@ -252,3 +252,23 @@ fn reading_the_view_never_writes_the_index_of_a_worktree_that_needs_a_refresh() 
     assert!(std::fs::read(&index).unwrap() == before, "the index is never written, so index.lock is never taken");
     assert!(!index.with_extension("lock").exists());
 }
+
+#[test]
+fn a_sessions_worktree_is_found_also_when_its_path_is_written_differently() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("wt");
+    std::fs::create_dir_all(&real).unwrap();
+    let real = real.to_string_lossy().into_owned();
+    let sessions = vec![SessionWorktree { path: format!("{real}/"), working: true }];
+    assert!(working_at(&sessions, &real), "a trailing slash");
+    assert!(!working_at(&sessions, &dir.path().join("other").to_string_lossy()));
+    #[cfg(unix)]
+    {
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let sessions = vec![SessionWorktree { path: link.to_string_lossy().into_owned(), working: true }];
+        assert!(working_at(&sessions, &real), "a symlinked data root");
+    }
+    let idle = vec![SessionWorktree { path: real.clone(), working: false }, SessionWorktree { path: real.clone(), working: true }];
+    assert!(!working_at(&idle, &real), "the newest session of the folder decides");
+}
