@@ -326,3 +326,25 @@ async fn a_branch_an_employee_works_on_is_never_merged_deleted_or_removed_nor_on
     assert_eq!(git(&repo, &["rev-parse", "main"]), main_before, "main unchanged");
     stop(dir.path(), daemon).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_conflicting_merge_is_aborted_names_the_files_and_leaves_main_as_it_was() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let repo = repository(dir.path());
+    git(&repo, &["switch", "--quiet", "-c", "spike/conflict"]);
+    commit(&repo, "readme.md", "from the branch\n", "the branch's readme");
+    git(&repo, &["switch", "--quiet", "main"]);
+    commit(&repo, "readme.md", "from main\n", "main's readme");
+    let hermes = project(&client, "Hermes", &repo).await;
+    let main_before = git(&repo, &["rev-parse", "main"]);
+
+    let merge = HostWrite::CodeMerge { project_id: hermes, branch: "spike/conflict".into() };
+    refused(host(&client, merge).await, ErrorCode::Validation, "spike/conflict was not merged: a merge conflict. Files: readme.md.");
+    assert_eq!(git(&repo, &["rev-parse", "main"]), main_before, "main unchanged");
+    assert!(!repo.join(".git/MERGE_HEAD").exists(), "the merge was aborted");
+    assert_eq!(git(&repo, &["status", "--porcelain"]), "", "the project's folder is clean");
+    assert_eq!(std::fs::read_to_string(repo.join("readme.md")).unwrap(), "from main\n");
+    stop(dir.path(), daemon).await;
+}
