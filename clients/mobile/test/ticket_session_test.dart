@@ -19,7 +19,7 @@ import 'support/tickets.dart';
 const _session = LinkState(
   status: LinkStatus.online,
   capabilities: ['read', 'chat', 'task_control', 'approve'],
-  features: [ticketDiscussionFeature, teamChannelsFeature, ticketChannelsFeature, 'ticket_responsible'],
+  features: [ticketDiscussionFeature, ticketChannelsFeature, 'ticket_responsible'],
   boardMembersExist: true,
   user: testUser,
   claudeLogin: testLogin,

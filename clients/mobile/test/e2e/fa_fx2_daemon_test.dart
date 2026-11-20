@@ -21,7 +21,6 @@ import 'package:aurelius_mobile/core/net/gateway_api.dart';
 import 'package:aurelius_mobile/core/push/push_service.dart';
 import 'package:aurelius_mobile/core/widgets/ios.dart';
 import 'package:aurelius_mobile/features/pairing/pairing_bloc.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -34,7 +33,6 @@ const project = String.fromEnvironment('AUR_PROJECT');
 const employee = String.fromEnvironment('AUR_EMPLOYEE');
 const alex = String.fromEnvironment('AUR_ALEX');
 const robin = String.fromEnvironment('AUR_ROBIN');
-const general = String.fromEnvironment('AUR_CHANNEL');
 
 /// One call as a board member, over the daemon's socket (aur.py). The value of a write's result.
 Future<Map<String, dynamic>> as(
@@ -105,24 +103,6 @@ void main() {
   void go(WidgetTester tester, String location) =>
       GoRouter.of(pageContext(tester)).go(location);
   void step(String text) => debugPrint('e2e: $text');
-
-  Future<void> longPress(WidgetTester tester, String text) async {
-    final gesture = await tester.startGesture(
-      tester.getCenter(find.text(text).first),
-    );
-    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
-    await gesture.up();
-    await tester.pump(const Duration(milliseconds: 500));
-  }
-
-  /// The menu row [label] as the app's own InkWell takes it (a tap in the live binding does not reach a popup route).
-  Future<void> choose(WidgetTester tester, String label) async {
-    final row = find
-        .ancestor(of: find.text(label), matching: find.byType(InkWell))
-        .first;
-    tester.widget<InkWell>(row).onTap!();
-    await tester.pump(const Duration(milliseconds: 800));
-  }
 
   /// The rows `notification.list` answers for [who], as (id, read, subject).
   Future<List<Map<String, dynamic>>> rowsOf(String who) async {
@@ -235,61 +215,6 @@ void main() {
         isTrue,
         reason: 'opening a row sends notification.mark_read',
       );
-
-      // A long press after an edit, in General. The first press and its Edit are the
-      // user's way to the sheet; the check is on a message whose gesture has not run
-      // before: this harness (a LiveTestWidgetsFlutterBinding) never delivers the
-      // pointer-up of a long press that opened a menu, so a second press on the very
-      // same message is not seen by its recognizer, edit or no edit (fx2-rapport.md).
-      go(tester, '/channel/$general');
-      await as('alex', 'group_chat.send', {'text': 'fx2 first draft'});
-      await waitFor(
-        tester,
-        find.text('fx2 first draft'),
-        what: 'alex message in General',
-      );
-      await longPress(tester, 'fx2 first draft');
-      await choose(tester, 'Edit');
-      await waitFor(
-        tester,
-        find.byKey(const ValueKey('message-edit-field')),
-        what: 'the edit sheet',
-      );
-      await tester.enterText(
-        find.byKey(const ValueKey('message-edit-field')),
-        'fx2 second draft',
-      );
-      await tap(tester, find.byKey(const ValueKey('message-edit-save')));
-      await waitFor(
-        tester,
-        find.text('fx2 second draft'),
-        what: 'the edited text',
-      );
-      await waitFor(tester, find.text('edited'), what: 'the edited mark');
-      step('FX2-2: edited through the sheet, "edited" shown');
-      await tester.pump(const Duration(seconds: 2));
-      expect(find.byKey(const ValueKey('message-edit-field')), findsNothing);
-
-      final third = await as('alex', 'group_chat.send', {'text': 'fx2 third'});
-      await waitFor(tester, find.text('fx2 third'), what: 'third');
-      await as('alex', 'message.edit', {
-        'message_id': third['message_id'],
-        'text': 'fx2 third edited',
-      });
-      await waitFor(
-        tester,
-        find.text('fx2 third edited'),
-        what: 'the edit arrived live',
-      );
-      await waitFor(tester, find.text('edited'), what: 'the edited mark');
-      await tester.pump(const Duration(seconds: 1));
-      await longPress(tester, 'fx2 third edited');
-      final menu = [
-        for (final l in ['Copy', 'Copy link', 'Edit', 'Delete'])
-          if (find.text(l).evaluate().isNotEmpty) l,
-      ];
-      step('FX2-2: menu on an edited message = ${menu.join(', ')}');
-      expect(menu, containsAll(['Edit', 'Delete']));
     },
     skip: url.isEmpty,
   );

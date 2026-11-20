@@ -118,9 +118,9 @@ void main() {
       expect(inboxPlace(reason: 'mention', ticketId: 't', messageId: 'm'), '/ticket/t?tab=discussion&message=m');
     });
 
-    test('outside a ticket it opens the channel, on the message', () {
-      expect(inboxPlace(reason: 'mention', conversationId: 'c', messageId: 'm'), '/channel/c?message=m');
-      expect(inboxPlace(reason: 'mention', conversationId: 'c'), '/channel/c');
+    test('outside a ticket (chat is gone) it opens the Inbox, never a channel', () {
+      expect(inboxPlace(reason: 'mention', conversationId: 'c', messageId: 'm'), '/inbox');
+      expect(inboxPlace(reason: 'mention', conversationId: 'c'), '/inbox');
     });
 
     test('naming neither opens nothing', () => expect(inboxPlace(reason: 'mention'), isNull));
@@ -332,7 +332,7 @@ void main() {
         GoRoute(path: '/', builder: (_, _) => const InboxPage()),
         GoRoute(path: '/ticket/:id', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['id']} tab ${s.uri.queryParameters['tab']}'))),
         GoRoute(path: '/ticket/:id/plan', builder: (_, s) => Scaffold(body: Text('plan ${s.pathParameters['id']}'))),
-        GoRoute(path: '/channel/:id', builder: (_, s) => Scaffold(body: Text('channel ${s.pathParameters['id']}'))),
+        GoRoute(path: '/inbox', builder: (_, _) => const Scaffold(body: Text('inbox'))),
       ]);
       addTearDown(router.dispose);
       await tester.pumpWidget(RepositoryProvider<AureliusRepository>.value(
@@ -395,12 +395,12 @@ void main() {
       expect(find.text('ticket k42 tab activity'), findsOneWidget);
     });
 
-    testWidgets('a channel row opens the channel; its +n has no Activity to open', (tester) async {
+    testWidgets('a channel row (chat is gone) opens the Inbox; its +n has no Activity to open', (tester) async {
       await show(tester, InboxState(loading: false, personalOn: true, notifications: [row('c', ticket: null, number: null, conversation: 'c7', subject: 'general', merged: 1)]));
       expect(find.text('# general'), findsOneWidget);
       await tester.tap(find.text('+1'));
       await tester.pumpAndSettle();
-      expect(find.text('channel c7'), findsOneWidget);
+      expect(find.text('inbox'), findsOneWidget);
     });
 
     testWidgets('an unknown reason shows as a plain row that opens its ticket', (tester) async {
@@ -486,10 +486,10 @@ void main() {
   });
 
   group('a push (iOS)', () {
-    test('of a ticket opens it at its place; of a channel the channel', () {
+    test('of a ticket opens it at its place; of a channel the Inbox', () {
       expect(pushPlace({'target_type': 'ticket.plan_review', 'reason': 'plan_review', 'ticket_id': 'k42', 'task_id': 't1', 'project_id': 'p', 'notification_id': 'n'}), '/ticket/k42/plan');
       expect(pushPlace({'reason': 'mention', 'ticket_id': 'k42', 'message_id': 'm'}), '/ticket/k42?tab=discussion&message=m');
-      expect(pushPlace({'reason': 'mention', 'conversation_id': 'c7', 'message_id': 'm'}), '/channel/c7?message=m');
+      expect(pushPlace({'reason': 'mention', 'conversation_id': 'c7', 'message_id': 'm'}), '/inbox');
     });
 
     test('an unknown reason still opens its ticket', () {

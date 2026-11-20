@@ -45,16 +45,15 @@ void main() {
     when(() => repo.appends).thenAnswer((_) => const Stream.empty());
     when(() => repo.loadChanges).thenAnswer((_) => const Stream.empty());
     when(() => repo.boardMembers()).thenAnswer((_) async => const []);
-    when(() => repo.groupChat(channel: any(named: 'channel'))).thenAnswer((_) async => snapshotOf('team'));
     when(() => repo.messages(any())).thenAnswer((_) async => snapshotOf('c1'));
     return repo;
   }
 
   group('ChatBloc', () {
-    test('Team chat: refused with only the names, nothing sent twice silently; Send anyway goes with confirm_secret and a new key', () async {
+    test('Ticket discussion: refused with only the names, nothing sent twice silently; Send anyway goes with confirm_secret and a new key', () async {
       final repo = chatRepository();
       refuseFirst(repo, const CommandResultGroupMessageSent(conversationId: 'team', messageId: 'm1', runIds: [], to: []));
-      final bloc = ChatBloc.group(repo);
+      final bloc = ChatBloc.discussion(repo, ticketId: 'k1', conversationId: 'c1');
       await stateWhere(bloc, (s) => !s.loading);
       bloc.add(const ChatMessageSent('The token is $fakeSecret'));
       final asked = await stateWhere(bloc, (s) => s.secretCheck != null);
@@ -67,7 +66,7 @@ void main() {
       await stateWhere(bloc, (s) => s.unsent.isEmpty || s.unsent.single.delivered);
       final writes = writesWithKeys(repo);
       expect(writes, hasLength(2));
-      expect(writes[0].$1['method'], 'group_chat.send');
+      expect(writes[0].$1['method'], 'ticket.post');
       expect(paramsOf(writes[0].$1).containsKey('confirm_secret'), isFalse);
       expect(paramsOf(writes[1].$1)['confirm_secret'], isTrue);
       expect(writes[1].$2, isNot(writes[0].$2), reason: 'the confirmed send is another request');
@@ -77,7 +76,7 @@ void main() {
     test('M-m5: refused again after Send anyway (a value in an attached file) ends unsent with a notice, no second question', () async {
       final repo = chatRepository();
       when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry'))).thenThrow(refused);
-      final bloc = ChatBloc.group(repo);
+      final bloc = ChatBloc.discussion(repo, ticketId: 'k1', conversationId: 'c1');
       await stateWhere(bloc, (s) => !s.loading);
       bloc.add(const ChatMessageSent('See the attached notes'));
       final asked = await stateWhere(bloc, (s) => s.secretCheck != null);
@@ -114,7 +113,7 @@ void main() {
     test('Try again on an ordinary failure keeps confirm_secret off; the commands leave it out unless confirmed', () {
       expect(paramsOf(Commands.postTicketMessage('k1', 'x')).containsKey('confirm_secret'), isFalse);
       expect(paramsOf(Commands.postTicketMessage('k1', 'x', confirmSecret: true))['confirm_secret'], isTrue);
-      expect(paramsOf(Commands.sendGroupMessage('x', confirmSecret: true))['confirm_secret'], isTrue);
+      expect(paramsOf(Commands.postTicketMessage('k1', 'x', confirmSecret: true))['confirm_secret'], isTrue);
       expect(paramsOf(Commands.sendEmployeeMessage('e', 'x', conversationId: 'c', confirmSecret: true))['confirm_secret'], isTrue);
     });
   });
@@ -127,9 +126,9 @@ void main() {
     await store.setSessionToken(testHost.hostId, daemon.sessionFor('u-1'));
     connection.start();
     await until(() => connection.state.isOnline && connection.state.user != null);
-    daemon.errors['group_chat.send'] = {'code': 'looks_like_secret', 'message': 'This looks like a vault secret.', 'matched_items': ['GitHub token', 'Sentry DSN']};
+    daemon.errors['ticket.post'] = {'code': 'looks_like_secret', 'message': 'This looks like a vault secret.', 'matched_items': ['GitHub token', 'Sentry DSN']};
     await expectLater(
-      connection.write(Commands.sendGroupMessage('Hi Robin, $fakeSecret'), retry: false),
+      connection.write(Commands.postTicketMessage('k1', 'Hi Robin, $fakeSecret'), retry: false),
       throwsA(isA<ProtocolException>().having((e) => e.looksLikeSecret, 'looksLikeSecret', isTrue).having((e) => e.matchedItems, 'matchedItems', ['GitHub token', 'Sentry DSN'])),
     );
   });
@@ -147,7 +146,7 @@ void main() {
     const link = LinkState(
       status: LinkStatus.online,
       capabilities: ['read', 'chat', 'task_control', 'approve'],
-      features: ['ticket_discussion', 'team_channels', 'vault'],
+      features: ['ticket_discussion', 'vault'],
       boardMembersExist: true,
       user: testUser,
     );

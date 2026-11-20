@@ -20,7 +20,7 @@ import 'support/tickets.dart';
 const _phase2 = LinkState(
   status: LinkStatus.online,
   capabilities: ['read', 'chat', 'task_control', 'approve'],
-  features: [ticketDiscussionFeature, teamChannelsFeature],
+  features: [ticketDiscussionFeature],
   boardMembersExist: true,
   user: testUser,
 );

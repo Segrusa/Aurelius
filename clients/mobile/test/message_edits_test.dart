@@ -21,7 +21,7 @@ import 'support/tickets.dart';
 const _withEdits = LinkState(
   status: LinkStatus.online,
   capabilities: ['read', 'chat', 'task_control', 'approve'],
-  features: [ticketDiscussionFeature, teamChannelsFeature, 'message_edits'],
+  features: [ticketDiscussionFeature, 'message_edits'],
   boardMembersExist: true,
   user: testUser,
 );
@@ -29,7 +29,7 @@ const _withEdits = LinkState(
 const _withoutEdits = LinkState(
   status: LinkStatus.online,
   capabilities: ['read', 'chat', 'task_control', 'approve'],
-  features: [ticketDiscussionFeature, teamChannelsFeature],
+  features: [ticketDiscussionFeature],
   boardMembersExist: true,
   user: testUser,
 );

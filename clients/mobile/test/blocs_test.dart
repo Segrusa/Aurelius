@@ -52,69 +52,37 @@ void main() {
 
   tearDown(() => appends.close());
 
-  group('ChatBloc in the group chat (Team)', () {
+  group('ChatBloc in a ticket discussion', () {
     MessagesSnapshot team(List<MessageView> messages) => snapshotOf('team', messages: messages);
-
-    test('a server from before the Team chat (unknown_method) stops the loading and says to restart it; Try again loads it', () async {
-      var calls = 0;
-      when(() => repo.groupChat()).thenAnswer((_) async {
-        if (calls++ == 0) throw const ProtocolException(ErrorCode.unknownMethod, 'This server does not know the method group_chat.get.');
-        return team([message('u1', MessageRole.user, 'Hi all')]);
-      });
-      final bloc = ChatBloc.group(repo);
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-      expect(bloc.state.loading, isFalse);
-      expect(bloc.state.loadError, contains('older than this app'));
-      expect(bloc.state.loadError, contains('Restart the server'));
-      bloc.add(const ChatRefreshed());
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-      expect((bloc.state.loading, bloc.state.loadError, bloc.state.conversationId), (false, null, 'team'));
-      await bloc.close();
-    });
-
-    test('a server that never answers, or an answer the app cannot read, stops the loading with the reason', () async {
-      var calls = 0;
-      when(() => repo.groupChat()).thenAnswer((_) async {
-        if (calls++ == 0) throw const DisconnectedException('The PC did not answer in time.');
-        throw StateError('bad answer');
-      });
-      final bloc = ChatBloc.group(repo);
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-      expect((bloc.state.loading, bloc.state.loadError), (false, 'The PC did not answer in time.'));
-      bloc.add(const ChatRefreshed());
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-      expect(bloc.state.loading, isFalse);
-      expect(bloc.state.loadError, contains('could not be loaded'));
-      await bloc.close();
-    });
+    ChatBloc discussion({String? Function(String)? runAuthor, Duration? liveTimeout}) =>
+        liveTimeout == null ? ChatBloc.discussion(repo, ticketId: 'k1', conversationId: 'team', runAuthor: runAuthor) : ChatBloc.discussion(repo, ticketId: 'k1', conversationId: 'team', runAuthor: runAuthor, liveTimeout: liveTimeout);
 
     blocTest<ChatBloc, ChatState>(
-      'loads through group_chat.get and learns its id; each message keeps its author',
+      'loads the conversation; each message keeps its author',
       build: () {
-        when(() => repo.groupChat()).thenAnswer((_) async => team([
+        when(() => repo.messages('team')).thenAnswer((_) async => team([
               message('u1', MessageRole.user, 'Who reviews this?'),
               message('a1', MessageRole.assistant, 'I will.', author: 'Trace', update: 'group'),
               message('a2', MessageRole.assistant, 'And I test it.', author: 'Pulse', update: 'group'),
             ]));
-        return ChatBloc.group(repo);
+        return discussion();
       },
       wait: const Duration(milliseconds: 150),
       verify: (bloc) {
         expect(bloc.state.loading, isFalse);
         expect(bloc.state.conversationId, 'team');
         expect(bloc.state.messages.map((m) => m.author), [null, 'Trace', 'Pulse']);
-        verify(() => repo.groupChat()).called(1);
-        verifyNever(() => repo.messages(any()));
+        verify(() => repo.messages('team')).called(1);
       },
     );
 
     blocTest<ChatBloc, ChatState>(
-      'a message goes out with group_chat.send (text, images, files), never interrupting',
+      'a message goes out with ticket.post (text, images, files), never interrupting',
       build: () {
-        when(() => repo.groupChat()).thenAnswer((_) async => team([message('a1', MessageRole.assistant, 'Working', status: MessageStatus.partial, author: 'Atlas')]));
+        when(() => repo.messages('team')).thenAnswer((_) async => team([message('a1', MessageRole.assistant, 'Working', status: MessageStatus.partial, author: 'Atlas')]));
         when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
             .thenAnswer((_) async => receipt(const CommandResultGroupMessageSent(conversationId: 'team', messageId: 'u2', runIds: ['r2'], to: ['Orion'])));
-        return ChatBloc.group(repo);
+        return discussion();
       },
       act: (bloc) async {
         await Future<void>.delayed(const Duration(milliseconds: 150));
@@ -123,8 +91,8 @@ void main() {
       wait: const Duration(milliseconds: 200),
       verify: (bloc) {
         final sent = writesOf(repo);
-        expect(sent.map((c) => c['method']), ['group_chat.send'], reason: 'no run.stop first');
-        expect(params(sent.single), {'text': '@Orion plan it', 'images': <String>[], 'files': <String>[]});
+        expect(sent.map((c) => c['method']), ['ticket.post'], reason: 'no run.stop first');
+        expect(params(sent.single), {'ticket_id': 'k1', 'text': '@Orion plan it', 'images': <String>[], 'files': <String>[]});
         expect(bloc.state.unsent, isEmpty);
       },
     );
@@ -133,11 +101,11 @@ void main() {
       'an answer streams in under its employee before it is a message, then the snapshot takes over',
       build: () {
         var calls = 0;
-        when(() => repo.groupChat()).thenAnswer((_) async => team([
+        when(() => repo.messages('team')).thenAnswer((_) async => team([
               message('u1', MessageRole.user, '@Orion status?'),
               if (calls++ > 0) message('live', MessageRole.assistant, 'All on track.', author: 'Orion', update: 'group'),
             ]));
-        return ChatBloc.group(repo, runAuthor: (run) => run == 'r-orion' ? 'Orion' : null);
+        return discussion(runAuthor: (run) => run == 'r-orion' ? 'Orion' : null);
       },
       act: (bloc) async {
         await Future<void>.delayed(const Duration(milliseconds: 150));
@@ -148,7 +116,7 @@ void main() {
         final live = bloc.state.messages.last;
         expect((live.id, live.text, live.author, live.isStreaming), ('live', 'All on track', 'Orion', true));
         expect(bloc.state.streaming?.id, 'live');
-        verify(() => repo.groupChat()).called(1);
+        verify(() => repo.messages('team')).called(1);
         bloc.add(const ChatRefreshed());
       },
       wait: const Duration(milliseconds: 200),
@@ -161,8 +129,8 @@ void main() {
     blocTest<ChatBloc, ChatState>(
       'a live answer stays through a refresh while its run works',
       build: () {
-        when(() => repo.groupChat()).thenAnswer((_) async => team([message('u1', MessageRole.user, 'Hi all')]));
-        return ChatBloc.group(repo, runAuthor: (run) => 'Atlas');
+        when(() => repo.messages('team')).thenAnswer((_) async => team([message('u1', MessageRole.user, 'Hi all')]));
+        return discussion(runAuthor: (run) => 'Atlas');
       },
       act: (bloc) async {
         await Future<void>.delayed(const Duration(milliseconds: 150));
@@ -177,9 +145,9 @@ void main() {
     blocTest<ChatBloc, ChatState>(
       'a live answer whose run ended without a message goes by itself, with no refresh',
       build: () {
-        when(() => repo.groupChat()).thenAnswer((_) async => team([message('u1', MessageRole.user, 'Hi all')]));
+        when(() => repo.messages('team')).thenAnswer((_) async => team([message('u1', MessageRole.user, 'Hi all')]));
         var running = true;
-        final bloc = ChatBloc.group(repo, runAuthor: (run) => running ? 'Atlas' : null, liveTimeout: const Duration(milliseconds: 100));
+        final bloc = discussion(runAuthor: (run) => running ? 'Atlas' : null, liveTimeout: const Duration(milliseconds: 100));
         // The run ends without its answer being copied (it only posted with post_to_group_chat).
         Timer(const Duration(milliseconds: 250), () => running = false);
         return bloc;
@@ -194,17 +162,17 @@ void main() {
       verify: (bloc) {
         expect(bloc.state.messages.map((m) => m.id), ['u1']);
         expect(bloc.state.streaming, isNull);
-        verify(() => repo.groupChat()).called(1);
+        verify(() => repo.messages('team')).called(1);
       },
     );
 
     blocTest<ChatBloc, ChatState>(
       'a live answer gets its author once the company knows the run, without a next delta',
       build: () {
-        when(() => repo.groupChat()).thenAnswer((_) async => team([message('u1', MessageRole.user, 'Hi all')]));
+        when(() => repo.messages('team')).thenAnswer((_) async => team([message('u1', MessageRole.user, 'Hi all')]));
         String? author;
         Timer(const Duration(milliseconds: 220), () => author = 'Orion');
-        return ChatBloc.group(repo, runAuthor: (run) => author, liveTimeout: const Duration(seconds: 5));
+        return discussion(runAuthor: (run) => author, liveTimeout: const Duration(seconds: 5));
       },
       act: (bloc) async {
         await Future<void>.delayed(const Duration(milliseconds: 150));

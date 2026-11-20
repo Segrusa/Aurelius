@@ -199,7 +199,8 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
 
     // Warm start: the app is up and online.
-    final sent = await as('alex', 'group_chat.send', {
+    final sent = await as('alex', 'ticket.post', {
+      'ticket_id': ticket,
       'text': 'A message to open',
     });
     final message = sent['message_id'] as String;

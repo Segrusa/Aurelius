@@ -92,12 +92,12 @@ void main() {
     const phase2 = LinkState(
       status: LinkStatus.online,
       capabilities: ['read', 'chat', 'task_control', 'approve'],
-      features: [ticketDiscussionFeature, teamChannelsFeature],
+      features: [ticketDiscussionFeature],
       boardMembersExist: true,
       user: testUser,
       claudeLogin: testLogin,
     );
-    const signedOut = LinkState(status: LinkStatus.online, features: [ticketDiscussionFeature, teamChannelsFeature], boardMembersExist: true, signedOut: SignOutReason.expired);
+    const signedOut = LinkState(status: LinkStatus.online, features: [ticketDiscussionFeature], boardMembersExist: true, signedOut: SignOutReason.expired);
 
     void setLink(LinkState state) {
       current = state;
