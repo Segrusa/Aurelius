@@ -2,7 +2,7 @@
 // The server reads git; the client decides a branch's status, the filters, the actions and the lanes of the
 // commit graph, so they are tested here without a repository.
 
-import type { CodeBranch, CodeCommit, CodeView, CodeWorktree } from "@aurelius/protocol";
+import type { CodeBranch, CodeCommit, CodeView, CodeWorktree, WriteResult } from "@aurelius/protocol";
 
 /** The server feature of the Code tab. */
 export const CODE_VIEW = "code_view";
@@ -56,6 +56,13 @@ export function filterBranches(branches: readonly CodeBranch[], filter: BranchFi
 /** The worktrees an employee or a person made: every one but the project's folder (the sidebar's count). */
 export function extraWorktrees(view: Pick<CodeView, "worktrees"> | undefined): CodeWorktree[] {
   return (view?.worktrees ?? []).filter((w) => !w.is_main);
+}
+
+/** The view a `code.*` write answers with; null for any other answer (a newer or a wrong server). */
+export function codeOf(result: WriteResult): CodeView | null {
+  if (result.kind !== "host" || result.value.type !== "code") return null;
+  const { type: _, ...view } = result.value;
+  return view;
 }
 
 /** "aurelius" for "/home/me/projects/aurelius". */
@@ -126,7 +133,8 @@ const WORKING_WHY = "An employee works on this branch now.";
 export function dangerAction(b: CodeBranch): DangerAction {
   if (b.is_main) return { kind: "prune_merged", label: "Clean up merged", disabledWhy: null };
   const why = b.working ? WORKING_WHY : null;
-  if (b.worktree_path) return { kind: "remove_worktree", label: "Remove worktree", path: b.worktree_path, disabledWhy: why };
+  if (b.worktree_path)
+    return { kind: "remove_worktree", label: "Remove worktree", path: b.worktree_path, disabledWhy: why };
   return { kind: "delete_branch", label: "Delete branch", force: !b.merged && b.ahead > 0, disabledWhy: why };
 }
 

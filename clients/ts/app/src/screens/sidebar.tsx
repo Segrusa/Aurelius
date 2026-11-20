@@ -20,6 +20,8 @@ import { Icon, NAV_ICONS, type NavIcon, NewIcon, PlusIcon, SearchIcon } from "..
 import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
 import { useWorkspace } from "../workspace";
+import { useCodeWorktreeCount } from "./code";
+import { CODE_VIEW } from "./code-logic";
 import { pinnedFirst } from "./employee-logic";
 import { InboxBell } from "./inbox-bell";
 import { overlays } from "./overlays-store";
@@ -270,11 +272,23 @@ const NO_PROJECT = "No project";
 // `server`: the row shows only when the server has that feature.
 const NAV: { to: string; label: string; icon: NavIcon; feature?: Feature; server?: string }[] = [
   { to: "/board", label: "Board", icon: "board" },
+  { to: "/code", label: "Code", icon: "code", server: CODE_VIEW },
   { to: "/history", label: "History", icon: "history", server: "ticket_history" },
   { to: "/tasks", label: "Tasks", icon: "tasks", feature: "TasksInSidebar" },
   { to: "/scheduled", label: "Scheduled", icon: "clock", feature: "ScheduledInSidebar" },
   { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
 ];
+
+/** Beside Code: how many worktrees the workspace's repository has besides its folder (none: nothing). */
+function CodeCount() {
+  const n = useCodeWorktreeCount();
+  if (!n) return null;
+  return (
+    <span title={`${n} ${n === 1 ? "worktree" : "worktrees"}`} {...stylex.props(styles.count)}>
+      {n}
+    </span>
+  );
+}
 
 const NEW_SESSION_KEYS = SHORTCUTS.find((s) => s.action === "NewItem")?.keys ?? [];
 
@@ -765,7 +779,13 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
             end={newKey ? <KeyHint>{showChord(newKey, isMac)}</KeyHint> : undefined}
           />
           {offered(shown(NAV), features).map((n) => (
-            <NavRow key={n.to} to={n.to} label={n.label} icon={NAV_ICONS[n.icon]} />
+            <NavRow
+              key={n.to}
+              to={n.to}
+              label={n.label}
+              icon={NAV_ICONS[n.icon]}
+              end={n.to === "/code" ? <CodeCount /> : undefined}
+            />
           ))}
         </>
       }

@@ -5,6 +5,7 @@ import {
   branchColor,
   branchStatus,
   changesText,
+  codeOf,
   dangerAction,
   dirtyText,
   edgePath,
@@ -110,6 +111,14 @@ describe("the worktrees", () => {
     expect(dirtyText({ changed_count: 1 })).toBe("1 uncommitted");
     expect(dirtyText({ changed_files: ["a", "b"] })).toBe("2 uncommitted");
     expect(dirtyText({ changed_count: 3, missing: true })).toBe("Missing");
+  });
+});
+
+describe("a write's answer", () => {
+  it("is the new view when it is Code, else nothing", () => {
+    const view = { project_id: "p", repo_path: "/repo" };
+    expect(codeOf({ kind: "host", value: { type: "code", ...view } })).toEqual(view);
+    expect(codeOf({ kind: "command", value: { type: "none" } } as never)).toBeNull();
   });
 });
 
