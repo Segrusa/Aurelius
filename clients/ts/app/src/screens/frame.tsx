@@ -53,6 +53,7 @@ import {
   withEarlier,
 } from "./session-logic";
 import { SettingsSidebar } from "./settings";
+import { inSettingsArea } from "./settings-logic";
 import { sidebarTickets, ticketSignal } from "./ticket-session-logic";
 import { useTicketNeeds } from "./tickets-kit";
 import { subscriptionFor } from "./usage-logic";
@@ -186,8 +187,6 @@ const NAV_WORKSPACE: { to: string; label: string; icon: NavIcon; feature?: Featu
   { to: "/tasks", label: "Tasks", icon: "tasks", feature: "TasksInSidebar" },
   { to: "/scheduled", label: "Scheduled", icon: "clock", feature: "ScheduledInSidebar" },
   { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
-  { to: "/employees", label: "Employees", icon: "team" },
-  { to: "/knowledge", label: "Knowledge", icon: "know" },
 ];
 
 // SideNavItem takes a component: one per mark, kept, or every render would remount the rows' icons.
@@ -205,13 +204,8 @@ function markIcon(letter: string, color: string, size: number, radius: number): 
 
 function NavRow({ to, label, icon, end }: { to: string; label: string; icon: IconType; end?: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
-  // The list of projects is a tab of Knowledge; a ticket's session counts as the Board, where it came
-  // from (ticket #70).
-  const on =
-    path === to ||
-    path.startsWith(`${to}/`) ||
-    (to === "/knowledge" && path.startsWith("/projects")) ||
-    (to === "/board" && path.startsWith("/ticket/"));
+  // A ticket's session counts as the Board, where it came from (ticket #70).
+  const on = path === to || path.startsWith(`${to}/`) || (to === "/board" && path.startsWith("/ticket/"));
   return <SideNavItem label={label} href={to} icon={icon} size="sm" isSelected={on} endContent={end} />;
 }
 
@@ -721,7 +715,8 @@ function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (c
 
 export function Frame({ children }: { children: ReactNode }) {
   useLiveQueries();
-  const inSettings = useRouterState({ select: (s) => s.location.pathname.startsWith("/settings") });
+  // Employees and Knowledge sit under Settings › Company, so they show its sidebar.
+  const inSettings = useRouterState({ select: (s) => inSettingsArea(s.location.pathname) });
   useGlobalActions();
   useOpenedWorkspace();
   useScreenCounter();

@@ -146,3 +146,12 @@ export function compactThresholdOf(field: string, limits: CompactionSetting): nu
     return `Choose 0 (never) or ${compactFieldOf(limits.min_tokens)} to ${compactFieldOf(limits.max_tokens)}.`;
   return tokens;
 }
+
+/** Pages under Settings › Company that keep their own route; a project itself stays in the app. */
+const COMPANY_PAGES = ["/employees", "/knowledge"];
+
+/** Whether `path` shows the Settings sidebar instead of the app's: Settings itself and the Company pages. */
+export function inSettingsArea(path: string): boolean {
+  const under = (root: string) => path === root || path.startsWith(`${root}/`);
+  return under("/settings") || COMPANY_PAGES.some(under) || path === "/projects";
+}
