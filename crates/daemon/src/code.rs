@@ -8,7 +8,7 @@
 
 use crate::Shared;
 use crate::api::{app_task, internal, storage_task};
-use crate::quick::{self, git, ok};
+use crate::quick::{self, ok};
 use aurelius_application::ticket::quick::MergeOutcome;
 use aurelius_domain::ProjectId;
 use aurelius_domain::code::{CODE_BRANCH_COMMITS_MAX, CODE_BRANCHES_MAX, CODE_COMMITS_MAX, CODE_FILES_MAX, CODE_SUBJECT_MAX_CHARS, CodeBranch, CodeCommit, CodeCommitLine, CodeView, CodeWorktree};
@@ -188,8 +188,8 @@ struct RepoState {
 /// Read what every write checks against. `Err`: why there is no repository to change.
 fn repo_state(repo: &Path) -> Result<RepoState, String> {
     let main = quick::main_branch(repo).ok_or_else(|| quick::no_main_reason(repo))?.to_owned();
-    let worktrees = parse_worktrees(&ok(repo, &["worktree", "list", "--porcelain"])?);
-    let refs = parse_refs(&ok(repo, &["for-each-ref", "--sort=-committerdate", REFS_FORMAT, HEADS])?);
+    let worktrees = parse_worktrees(&read(repo, &["worktree", "list", "--porcelain"])?);
+    let refs = parse_refs(&read(repo, &["for-each-ref", "--sort=-committerdate", REFS_FORMAT, HEADS])?);
     Ok(RepoState { main, worktrees, refs })
 }
 
@@ -225,7 +225,7 @@ fn read_view(project: ProjectId, repo: &Path) -> Result<CodeView, String> {
     args.extend(branches.iter().map(|b| format!("{HEADS}{}", b.name)));
     args.push("--".into());
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    let commits = parse_log(&ok(repo, &args)?)
+    let commits = parse_log(&read(repo, &args)?)
         .into_iter()
         .map(|c| {
             let branches = tips.get(c.hash.as_str()).cloned().unwrap_or_default();
@@ -233,8 +233,8 @@ fn read_view(project: ProjectId, repo: &Path) -> Result<CodeView, String> {
         })
         .collect();
 
-    let has_remote = !ok(repo, &["remote"]).unwrap_or_default().is_empty();
-    let fetched_at_ms = ok(repo, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    let has_remote = !read(repo, &["remote"]).unwrap_or_default().is_empty();
+    let fetched_at_ms = read(repo, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .ok()
         .and_then(|dir| std::fs::metadata(Path::new(&dir).join("FETCH_HEAD")).ok()?.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -249,14 +249,14 @@ fn branch_of(repo: &Path, main: &str, r: &RefEntry, worktree_path: Option<&str>)
     let (behind, ahead) = if is_main {
         (0, 0)
     } else {
-        ok(repo, &["rev-list", "--left-right", "--count", &format!("{HEADS}{main}...{HEADS}{}", r.name), "--"]).ok().and_then(|t| parse_left_right(&t)).unwrap_or((0, 0))
+        read(repo, &["rev-list", "--left-right", "--count", &format!("{HEADS}{main}...{HEADS}{}", r.name), "--"]).ok().and_then(|t| parse_left_right(&t)).unwrap_or((0, 0))
     };
     let (mut files_changed, mut insertions, mut deletions, mut commits) = (0, 0, 0, vec![]);
     if ahead > 0 {
-        (files_changed, insertions, deletions) = parse_shortstat(&ok(repo, &["diff", "--shortstat", &format!("{HEADS}{main}...{HEADS}{}", r.name), "--"]).unwrap_or_default());
+        (files_changed, insertions, deletions) = parse_shortstat(&read(repo, &["diff", "--shortstat", &format!("{HEADS}{main}...{HEADS}{}", r.name), "--"]).unwrap_or_default());
         let max = format!("--max-count={CODE_BRANCH_COMMITS_MAX}");
         let range = format!("{HEADS}{main}..{HEADS}{}", r.name);
-        commits = parse_lines(&ok(repo, &["log", &max, LINES_FORMAT, &range, "--"]).unwrap_or_default());
+        commits = parse_lines(&read(repo, &["log", &max, LINES_FORMAT, &range, "--"]).unwrap_or_default());
     }
     CodeBranch {
         name: r.name.clone(),
@@ -283,9 +283,27 @@ fn branch_of(repo: &Path, main: &str, r: &RefEntry, worktree_path: Option<&str>)
     }
 }
 
+/// git for a read of the Code tab: it never takes an optional lock (`git status` would
+/// otherwise refresh the index under `index.lock`), so a poll never makes an employee's
+/// `git add` or `git commit` in the same worktree fail.
+fn reader(dir: &Path, args: &[&str]) -> std::process::Command {
+    let mut command = quick::command(dir, args);
+    command.env("GIT_OPTIONAL_LOCKS", "0");
+    command
+}
+
+/// `quick::ok` for a read: git's output, or why it failed.
+fn read(dir: &Path, args: &[&str]) -> Result<String, String> {
+    match reader(dir, args).output() {
+        Ok(out) if out.status.success() => Ok(quick::text(&out)),
+        Ok(out) => Err(quick::why(&out)),
+        Err(e) => Err(format!("git could not run: {e}")),
+    }
+}
+
 /// A worktree's uncommitted changes: at most `CODE_FILES_MAX` named, and how many there are.
 fn changes(worktree: &Path) -> (Vec<String>, u32) {
-    let Ok(out) = git(worktree, &["status", "--porcelain=v1", "-z"]) else { return (vec![], 0) };
+    let Ok(out) = reader(worktree, &["status", "--porcelain=v1", "-z"]).output() else { return (vec![], 0) };
     if !out.status.success() {
         return (vec![], 0);
     }
@@ -339,7 +357,7 @@ fn perform(repo: &Path, write: HostWrite, busy: &Busy) -> Result<(), ProtocolErr
 /// `code.fetch`: `git fetch --all --prune`, stopped at `deadline`. A repository without a
 /// remote has nothing to fetch.
 fn fetch(repo: &Path, deadline: Duration) -> Result<(), ProtocolError> {
-    if ok(repo, &["remote"]).map_err(invalid)?.is_empty() {
+    if read(repo, &["remote"]).map_err(invalid)?.is_empty() {
         return Err(invalid("This repository has no remote to fetch from."));
     }
     let mut args = FETCH_HTTP_LIMITS.to_vec();
@@ -454,7 +472,7 @@ fn delete_branch(repo: &Path, state: &RepoState, branch: &str, force: bool, busy
 
 /// How many commits `branch` has that main lacks.
 fn ahead_of_main(repo: &Path, main: &str, branch: &str) -> Result<u32, ProtocolError> {
-    let count = ok(repo, &["rev-list", "--count", &format!("{HEADS}{main}..{HEADS}{branch}"), "--"]).map_err(invalid)?;
+    let count = read(repo, &["rev-list", "--count", &format!("{HEADS}{main}..{HEADS}{branch}"), "--"]).map_err(invalid)?;
     count.trim().parse().map_err(|_| internal(format!("git counted {count:?} commits")))
 }
 
@@ -463,7 +481,7 @@ fn ahead_of_main(repo: &Path, main: &str, branch: &str) -> Result<u32, ProtocolE
 /// cannot go entirely is left as it is. Nothing is forced.
 fn prune_merged(repo: &Path, state: &RepoState, busy: &Busy) -> Result<(), ProtocolError> {
     let _ = ok(repo, &["worktree", "prune"]);
-    let merged = ok(repo, &["for-each-ref", "--format=%(refname)", &format!("--merged={HEADS}{}", state.main), HEADS]).map_err(invalid)?;
+    let merged = read(repo, &["for-each-ref", "--format=%(refname)", &format!("--merged={HEADS}{}", state.main), HEADS]).map_err(invalid)?;
     let project = repo.to_string_lossy();
     for branch in merged.lines().filter_map(|l| l.strip_prefix(HEADS)) {
         // A branch whose ticket or session is still open may just not have a commit yet.

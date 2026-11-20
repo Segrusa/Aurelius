@@ -116,7 +116,7 @@ fn a_subject_is_cut_at_its_limit_by_characters_not_bytes() {
 // ---- The writes against real repositories in a temp folder ----
 
 fn run(dir: &Path, args: &[&str]) -> String {
-    let out = git(dir, args).unwrap();
+    let out = quick::git(dir, args).unwrap();
     assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
     quick::text(&out)
 }
@@ -159,7 +159,7 @@ fn merge_of(branch: &str) -> HostWrite {
 }
 
 fn is_ancestor(repo: &Path, commit: &str, of: &str) -> bool {
-    git(repo, &["merge-base", "--is-ancestor", commit, of]).unwrap().status.success()
+    quick::git(repo, &["merge-base", "--is-ancestor", commit, of]).unwrap().status.success()
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn a_branch_named_like_an_option_can_be_deleted_with_force() {
     run(&repo, &["update-ref", "refs/heads/-x", &work]);
     let delete = HostWrite::CodeDeleteBranch { project_id: ProjectId::new(), branch: "-x".into(), force: true };
     perform(&repo, delete, &nobody()).unwrap();
-    assert!(!git(&repo, &["rev-parse", "--verify", "--quiet", "refs/heads/-x"]).unwrap().status.success(), "the branch is gone");
+    assert!(!quick::git(&repo, &["rev-parse", "--verify", "--quiet", "refs/heads/-x"]).unwrap().status.success(), "the branch is gone");
 }
 
 #[test]
@@ -233,4 +233,22 @@ fn a_fetch_from_a_remote_that_never_answers_ends_at_its_deadline_and_leaves_the_
     assert_eq!(e.message, "The fetch did not finish within 2 s.");
     assert!(took < deadline + Duration::from_secs(2), "stopped at its deadline, took {took:?}");
     drop(silent);
+}
+
+#[test]
+fn reading_the_view_never_writes_the_index_of_a_worktree_that_needs_a_refresh() {
+    let (dir, repo) = repo();
+    let worktree = dir.path().join("wt");
+    run(&repo, &["worktree", "add", "--quiet", "-b", "feat/x", &worktree.to_string_lossy(), "main"]);
+    let index = PathBuf::from(run(&worktree, &["rev-parse", "--path-format=absolute", "--git-path", "index"]));
+    // Same content, another time: git sees a file that may have changed and wants to refresh its index.
+    let file = std::fs::File::options().write(true).open(worktree.join("readme.md")).unwrap();
+    file.set_modified(std::time::SystemTime::now() - Duration::from_secs(3600)).unwrap();
+    let before = std::fs::read(&index).unwrap();
+
+    let view = read_view(ProjectId::new(), &repo).unwrap();
+    let listed = view.worktrees.iter().find(|w| w.branch.as_deref() == Some("feat/x")).unwrap();
+    assert_eq!(listed.changed_count, 0, "an unchanged file is no change");
+    assert!(std::fs::read(&index).unwrap() == before, "the index is never written, so index.lock is never taken");
+    assert!(!index.with_extension("lock").exists());
 }
