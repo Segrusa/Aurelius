@@ -546,6 +546,15 @@ impl CommandService {
         outcome
     }
 
+    /// Whether a write with `key` committed: what `command.applied` answers, so a
+    /// client whose link dropped under a write can tell whether it arrived. Every
+    /// committed write leaves its receipt in the same transaction.
+    pub fn command_applied(&self, key: CommandId) -> Result<bool, AppError> {
+        let key = key.to_string();
+        let found = self.store.read(|conn| events::find_receipt(conn, &key)).map_err(storage_error)?;
+        Ok(found.is_some())
+    }
+
     /// The earlier answer of a host write (see `record_host_write`): the sequence it
     /// committed at and its stored result, when `key` was used with the same
     /// parameters. The same key with other parameters is a conflict.

@@ -110,6 +110,27 @@ async fn retry_after_reconnect_returns_same_receipt() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn command_applied_tells_a_new_connection_whether_a_key_committed() {
+    let (_dir, root) = tempdir();
+    let daemon = start(&root).await;
+    let key = CommandId::new();
+    {
+        let mut first = raw(&root).await;
+        let outcome = ask(&mut first, &Request::write(1, key, WriteMethod::Domain(create("Atlas")))).await;
+        assert!(matches!(outcome, Outcome::Ok(ResponseBody::Receipt(_))), "the write commits: {outcome:?}");
+    } // the link drops here, as if its answer was lost
+
+    let mut second = raw(&root).await;
+    let applied = |id, idempotency_key| Request::read(id, Method::CommandApplied { idempotency_key });
+    let committed = ask(&mut second, &applied(1, key)).await;
+    assert!(matches!(&committed, Outcome::Ok(ResponseBody::CommandApplied(a)) if a.applied), "{committed:?}");
+    let unknown = ask(&mut second, &applied(2, CommandId::new())).await;
+    assert!(matches!(&unknown, Outcome::Ok(ResponseBody::CommandApplied(a)) if !a.applied), "{unknown:?}");
+    assert!(aurelius_protocol::FEATURES.contains(&aurelius_protocol::feature::COMMAND_APPLIED));
+    stop(&root, daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_answer_survives_a_client_disconnect() {
     let (_dir, root) = tempdir();
     let daemon = start_with_delay(&root, 30).await;
