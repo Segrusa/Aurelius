@@ -68,13 +68,14 @@ void main() {
     await tester.pump();
     // What it did, in words, on top; the command and output fold open on tap.
     expect(find.text('Run the tests'), findsOneWidget);
-    expect(find.text('> cargo test'), findsNothing);
+    expect(find.text('cargo test'), findsNothing);
     await tester.tap(find.text('Run the tests'));
     await tester.pump();
-    expect(find.text('> cargo test'), findsOneWidget);
+    expect(find.text('cargo test'), findsOneWidget);
     expect(find.text('line 1\nline 2'), findsOneWidget);
     expect(find.text('Edited main.rs'), findsOneWidget);
-    expect(find.text('✗ failed'), findsOneWidget);
+    expect(find.text('failed'), findsOneWidget);
+    expect(find.byKey(const Key('step-failed')), findsOneWidget);
     expect(find.text('Done.'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

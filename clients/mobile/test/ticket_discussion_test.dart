@@ -434,7 +434,7 @@ void main() {
       expect(find.byKey(const Key('composer-send')), findsNothing);
       expect(find.byKey(const ValueKey('chip-mode')), findsNothing, reason: 'no input, no run chips');
       expect(find.byKey(const ValueKey('gate-review')), findsOneWidget);
-      expect(find.byKey(const ValueKey('ticket-properties')), findsOneWidget);
+      expect(find.byTooltip('Ticket actions'), findsOneWidget, reason: 'Properties are in its menu');
       await tester.tap(find.byKey(const ValueKey('bar-send-back')));
       await settleBoard(tester);
       expect(find.text('Send #1 back to Doing'), findsOneWidget, reason: 'the feedback sheet of Phase 1');
