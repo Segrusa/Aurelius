@@ -13,6 +13,7 @@ mod tasks;
 mod session_dispatch;
 mod triage;
 mod quick;
+mod code;
 mod memory;
 mod updates;
 mod recurring_tasks;

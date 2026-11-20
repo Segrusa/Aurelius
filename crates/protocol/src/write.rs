@@ -244,6 +244,36 @@ pub enum HostWrite {
     /// history stays. Answers `VaultItem`. Not for apps.
     #[serde(rename = "vault.archive")]
     VaultArchive { item_id: aurelius_domain::VaultItemId },
+    /// `git fetch --prune` of the project's repository (feature `code_view`, ticket #77);
+    /// answers `HostResult::Code`. Never a prompt for credentials: a remote that wants
+    /// one fails with git's reason.
+    #[serde(rename = "code.fetch")]
+    CodeFetch { project_id: ProjectId },
+    /// Merge a local branch into the project's main (`--no-ff`), in the project's folder.
+    /// Refused when the folder is not on main, main has uncommitted changes, is in another
+    /// merge, or the branch has nothing ahead; a conflict is aborted, so main stays as it
+    /// was (`validation` with git's reason and the conflicting files). Answers `Code`.
+    #[serde(rename = "code.merge")]
+    CodeMerge { project_id: ProjectId, branch: String },
+    /// Remove a worktree (not the project's folder). Refused when it has uncommitted
+    /// changes or an employee works in it now. The branch stays. Answers `Code`.
+    #[serde(rename = "code.remove_worktree")]
+    CodeRemoveWorktree { project_id: ProjectId, path: String },
+    /// Delete a local branch (not main, not one checked out in a worktree, not one an
+    /// employee works on now). A branch with commits main lacks needs `force` (the
+    /// client asked the board member first: that work is gone). Answers `Code`.
+    #[serde(rename = "code.delete_branch")]
+    CodeDeleteBranch {
+        project_id: ProjectId,
+        branch: String,
+        #[serde(default)]
+        force: bool,
+    },
+    /// Clean up merged: remove every clean worktree of a merged branch nobody works on,
+    /// then delete every merged branch without a worktree (never main), then
+    /// `git worktree prune`. Answers `Code`.
+    #[serde(rename = "code.prune_merged")]
+    CodePruneMerged { project_id: ProjectId },
 }
 
 /// `vault.create`. The value is never printed.
@@ -385,6 +415,11 @@ impl HostWrite {
         "vault.create",
         "vault.update",
         "vault.archive",
+        "code.fetch",
+        "code.merge",
+        "code.remove_worktree",
+        "code.delete_branch",
+        "code.prune_merged",
     ];
 
     pub fn name(&self) -> String {
@@ -437,6 +472,8 @@ pub enum HostResult {
     /// `vault.create` / `vault.update` / `vault.archive`: the item as it is now.
     /// A replayed receipt has no value: read it with `vault.list` or `vault.reveal`.
     VaultItem(aurelius_domain::vault::VaultItemView),
+    /// `code.*`: the project's git state after the write.
+    Code(aurelius_domain::code::CodeView),
 }
 
 impl HostResult {

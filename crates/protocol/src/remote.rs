@@ -120,6 +120,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::TicketMyTickets { .. }
         // The History: what the board shows, so the board's right (B3).
         | Method::TicketHistory { .. }
+        // The Code tab shows what the board's tickets did in the project's folder (B3).
+        | Method::CodeGet { .. }
         // Sessions in the History: the same right as the tickets next to them.
         | Method::WorkSessionHistory { .. }
         // The vault: every own device of a board member lists it and its audit log
@@ -208,7 +210,14 @@ fn host_needs(host: &HostWrite) -> Needs {
         | HostWrite::RemoteRevoke { .. }
         | HostWrite::PushConfigure(_)
         | HostWrite::PushTest { .. }
-        | HostWrite::FsCreateDir { .. } => Needs::Owner,
+        | HostWrite::FsCreateDir { .. }
+        // Git on the server's own folder: merging into main or deleting work stays with
+        // the owner's devices, like the folder browser.
+        | HostWrite::CodeFetch { .. }
+        | HostWrite::CodeMerge { .. }
+        | HostWrite::CodeRemoveWorktree { .. }
+        | HostWrite::CodeDeleteBranch { .. }
+        | HostWrite::CodePruneMerged { .. } => Needs::Owner,
     }
 }
 
