@@ -101,6 +101,8 @@ auth)
 esac
 
 # `claude -p …`: the usage overview or one run.
+# JSON with a backslash goes out through printf '%s\n': dash (/bin/sh on Ubuntu) has an `echo`
+# that turns `\n` into a real newline, which breaks the JSON string.
 case " $* " in
 *" /usage "*)
     if ! signed_in; then
@@ -110,7 +112,7 @@ case " $* " in
     if [ -f "$dir/.fake-api-only" ]; then
         echo '{"type":"result","subtype":"success","is_error":false,"result":"You are using an API key; there are no plan limits to show."}'
     else
-        echo '{"type":"result","subtype":"success","is_error":false,"result":"Current session: 12% used · resets 4pm (UTC)\nCurrent week (all models): 34% used · resets Mon 8am (UTC)"}'
+        printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Current session: 12% used · resets 4pm (UTC)\nCurrent week (all models): 34% used · resets Mon 8am (UTC)"}'
     fi
     exit 0
     ;;
@@ -127,7 +129,7 @@ if ! signed_in; then
     exit 1
 fi
 if listed expired-users; then
-    echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"OAuth token has expired.\"}}"}'
+    printf '%s\n' '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"OAuth token has expired.\"}}"}'
     exit 1
 fi
 if listed quota-users; then
