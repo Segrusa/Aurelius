@@ -3,6 +3,7 @@ import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
 import 'package:aurelius_mobile/core/widgets/widgets.dart' show StatusDot;
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
+import 'package:aurelius_mobile/data/discussion.dart' show TicketDraft;
 import 'package:aurelius_mobile/data/protocol/protocol.dart';
 import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/company_org/employee_page.dart' show ConversationPage;
@@ -42,8 +43,8 @@ WorkSessionView sessionOf(String id, {String title = 'Fix the login', int at = 0
       dispatch: dispatch,
     );
 
-MockRepository repoWith({List<WorkSessionView> sessions = const [], LinkState? link, MessagesSnapshot? messages}) {
-  final repo = boardRepository(link: link ?? sessionsLink, messages: messages);
+MockRepository repoWith({List<WorkSessionView> sessions = const [], LinkState? link, MessagesSnapshot? messages, BoardView? board}) {
+  final repo = boardRepository(link: link ?? sessionsLink, messages: messages, board: board);
   when(() => repo.chatChanges).thenAnswer((_) => const Stream.empty());
   when(() => repo.appends).thenAnswer((_) => const Stream.empty());
   when(() => repo.link).thenAnswer((_) => const Stream.empty());
@@ -71,9 +72,13 @@ Future<GoRouter> pumpSessions(WidgetTester tester, MockRepository repo, Widget p
   whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: const RuntimeState());
   final router = GoRouter(initialLocation: '/', routes: [
     GoRoute(path: '/', builder: (_, _) => page),
-    GoRoute(path: '/sessions/new', builder: (_, _) => const Scaffold(body: Text('page new session'))),
+    GoRoute(path: '/chat', builder: (_, _) => const Scaffold(body: Text('page chat'))),
     GoRoute(path: '/session/:cid', builder: (_, s) => Scaffold(body: Text('session ${s.pathParameters['cid']}'))),
-    GoRoute(path: '/board/new', builder: (_, _) => const Scaffold(body: Text('page new ticket'))),
+    GoRoute(path: '/ticket/:tid', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['tid']}'))),
+    GoRoute(
+      path: '/board/new',
+      builder: (_, s) => Scaffold(body: Text('page new ticket ${s.uri.queryParameters['project'] ?? ''} ${s.extra is TicketDraft ? '${(s.extra as TicketDraft).title}|${(s.extra as TicketDraft).description}' : ''}')),
+    ),
   ]);
   addTearDown(router.dispose);
   await tester.pumpWidget(RepositoryProvider<AureliusRepository>.value(
@@ -104,7 +109,7 @@ void main() {
         sessionOf('c3', title: 'Nobody chosen', at: 2, dispatch: SessionDispatch.nobody, employee: 'Orion', employeeId: 'orion'),
       ]);
       await pumpSessions(tester, repo, const WorkSessionsPage());
-      expect(find.text('Sessions'), findsOneWidget);
+      expect(find.text('Sessions'), findsWidgets);
       expect(find.text('1 working'), findsOneWidget);
       final busy = tester.getTopLeft(find.text('Busy one')).dy;
       final nobody = tester.getTopLeft(find.text('Nobody chosen')).dy;
@@ -148,9 +153,9 @@ void main() {
       expect(find.byKey(const ValueKey('sessions-unsupported')), findsOneWidget);
       expect(find.text('Could not load your sessions.'), findsNothing);
       verifyNever(() => repo.workSessions());
-      await tester.tap(find.byKey(const ValueKey('sessions-new')));
+      await tester.tap(find.text('New ticket'));
       await settleBoard(tester);
-      expect(find.text('page new ticket'), findsOneWidget);
+      expect(find.textContaining('page new ticket'), findsOneWidget);
     });
 
     testWidgets('a failed read shows what failed and Try again, never an endless loading', (tester) async {
@@ -165,17 +170,65 @@ void main() {
       expect(find.text('Fix the login'), findsOneWidget);
     });
 
-    testWidgets('+ opens New session', (tester) async {
+    testWidgets('✎ opens the Chat tab', (tester) async {
       final repo = repoWith();
       await pumpSessions(tester, repo, const WorkSessionsPage());
       await tester.tap(find.byKey(const ValueKey('sessions-new')));
       await settleBoard(tester);
-      expect(find.text('page new session'), findsOneWidget);
+      expect(find.text('page chat'), findsOneWidget);
+    });
+
+    testWidgets('Tickets lists the open tickets: what needs you or works first, no Backlog, Done or archived', (tester) async {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day, 0, 1).millisecondsSinceEpoch;
+      final repo = repoWith(board: boardOf([
+        ticketOf(id: 'k1', number: 1, title: 'Quiet in Todo', column: ColumnKind.todo, ownerEmployeeId: 'forge', ownerName: 'Forge', updatedAtMs: today),
+        ticketOf(id: 'k2', number: 2, title: 'Report waits', column: ColumnKind.review, updatedAtMs: 1),
+        ticketOf(id: 'k3', number: 3, title: 'Still in Backlog', column: ColumnKind.backlog, updatedAtMs: today),
+        ticketOf(id: 'k4', number: 4, title: 'All done', column: ColumnKind.done, updatedAtMs: today),
+        ticketOf(id: 'k5', number: 5, title: 'Archived one', column: ColumnKind.doing, archivedAtMs: 1, updatedAtMs: today),
+      ]));
+      await pumpSessions(tester, repo, const WorkSessionsPage(tickets: true));
+      expect(find.text('#2 Report waits'), findsOneWidget);
+      expect(find.text('#1 Quiet in Todo'), findsOneWidget);
+      expect(find.textContaining('Backlog'), findsNothing);
+      expect(find.textContaining('All done'), findsNothing);
+      expect(find.textContaining('Archived one'), findsNothing);
+      expect(find.text('1 needs you'), findsOneWidget);
+      final active = tester.getTopLeft(find.byKey(const ValueKey('tickets-section-active'))).dy;
+      final todaySection = tester.getTopLeft(find.byKey(const ValueKey('tickets-section-today'))).dy;
+      expect(active < tester.getTopLeft(find.text('#2 Report waits')).dy && tester.getTopLeft(find.text('#2 Report waits')).dy < todaySection, isTrue);
+      expect(find.descendant(of: find.byKey(const ValueKey('ticket-row-k2')), matching: find.byKey(const ValueKey('session-needs-you'))), findsOneWidget);
+      await tester.tap(find.text('#1 Quiet in Todo'));
+      await settleBoard(tester);
+      expect(find.text('ticket k1'), findsOneWidget);
+    });
+
+    testWidgets('the switch moves between Sessions and Tickets', (tester) async {
+      final repo = repoWith(sessions: [sessionOf('c1')], board: boardOf([ticketOf(id: 'k1', number: 7, title: 'Open one', column: ColumnKind.doing)]));
+      await pumpSessions(tester, repo, const WorkSessionsPage());
+      expect(find.text('Fix the login'), findsOneWidget);
+      expect(find.text('#7 Open one'), findsNothing);
+      await tester.tap(find.descendant(of: find.byKey(const ValueKey('sessions-switch')), matching: find.text('Tickets')));
+      await settleBoard(tester);
+      expect(find.text('#7 Open one'), findsOneWidget);
+      expect(find.text('Fix the login'), findsNothing);
+    });
+
+    testWidgets('a session opened on this phone earlier today stands under Today, above newer activity', (tester) async {
+      final now = DateTime.now();
+      final early = DateTime(now.year, now.month, now.day, 0, 1).millisecondsSinceEpoch;
+      SharedPreferences.setMockInitialValues({'sessions.used:h': '{"session:old": ${early + 1000}}'});
+      final repo = repoWith(sessions: [sessionOf('new', title: 'Newer activity', at: early + 500), sessionOf('old', title: 'Opened here', at: 1)]);
+      await pumpSessions(tester, repo, const WorkSessionsPage());
+      expect(find.byKey(const ValueKey('sessions-section-older')), findsNothing);
+      expect(tester.getTopLeft(find.text('Opened here')).dy < tester.getTopLeft(find.text('Newer activity')).dy, isTrue);
     });
   });
 
   group('New session', () {
     Future<void> choose(WidgetTester tester, String row, String option) async {
+      await tester.ensureVisible(find.byKey(ValueKey('new-session-$row')));
       await tester.tap(find.byKey(ValueKey('new-session-$row')));
       await settleBoard(tester);
       await tester.tap(find.byKey(ValueKey(option)));
@@ -187,8 +240,9 @@ void main() {
       when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
           .thenAnswer((_) async => receiptOf(const CommandResultWorkSessionDispatching(conversationId: 'c9', messageId: 'm', projectId: 'p1')));
       await pumpSessions(tester, repo, const NewSessionPage());
-      expect(find.text('New session'), findsOneWidget);
+      expect(find.text('What should happen next?'), findsOneWidget);
       expect(find.text('Atlas'), findsOneWidget, reason: 'the only open project is chosen');
+      expect(tester.widget<ChoiceChip>(find.byKey(const ValueKey('chat-project-p1'))).selected, isTrue);
       expect(find.text('Dispatcher'), findsOneWidget, reason: 'with session_dispatch the dispatcher chooses unless told');
       await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'Fix the login page');
       await choose(tester, 'model', 'pick-Model-default');
@@ -241,11 +295,62 @@ void main() {
       expect(find.byKey(const ValueKey('pick-Who-dispatcher')), findsNothing);
     });
 
-    testWidgets('a server without work sessions gets New ticket instead', (tester) async {
+    testWidgets('a server without work sessions only makes tickets: the text goes to New ticket as a draft', (tester) async {
       final repo = repoWith(link: onlineLink);
       await pumpSessions(tester, repo, const NewSessionPage());
-      expect(find.text('New ticket'), findsOneWidget);
-      expect(find.byKey(const ValueKey('new-session-text')), findsNothing);
+      expect(find.byKey(const ValueKey('chat-kind')), findsNothing);
+      expect(find.byKey(const ValueKey('new-session-who')), findsNothing);
+      await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'Fix the footer\nIt overlaps on phones');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('new-session-start')));
+      await settleBoard(tester);
+      expect(find.text('page new ticket p1 Fix the footer|It overlaps on phones'), findsOneWidget);
+      verifyNever(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')));
+    });
+
+    testWidgets('Ticket hands the text to New ticket; the choice is remembered for this server', (tester) async {
+      final repo = repoWith();
+      await pumpSessions(tester, repo, const NewSessionPage());
+      await tester.tap(find.descendant(of: find.byKey(const ValueKey('chat-kind')), matching: find.text('Ticket')));
+      await settleBoard(tester);
+      expect(find.byKey(const ValueKey('new-session-who')), findsNothing);
+      await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'Write the release notes');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('new-session-start')));
+      await settleBoard(tester);
+      expect(find.text('page new ticket p1 Write the release notes|'), findsOneWidget);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('new_session.kind:h'), 'ticket');
+    });
+
+    testWidgets('Continue offers your tickets in Doing, Testing and Review, newest first', (tester) async {
+      final repo = repoWith(link: linkOf(const ['work_sessions', 'my_tickets']));
+      when(() => repo.myTickets(projectId: any(named: 'projectId'), includeDone: any(named: 'includeDone'))).thenAnswer((_) async => MyTicketsView(following: const [], tickets: [
+            ticketOf(id: 'k1', number: 1, title: 'In Todo', column: ColumnKind.todo, updatedAtMs: 9),
+            ticketOf(id: 'k2', number: 2, title: 'Doing it', column: ColumnKind.doing, updatedAtMs: 2),
+            ticketOf(id: 'k3', number: 3, title: 'To review', column: ColumnKind.review, updatedAtMs: 5),
+          ]));
+      await pumpSessions(tester, repo, const NewSessionPage());
+      expect(find.text('#1 In Todo'), findsNothing);
+      expect(tester.getTopLeft(find.text('#3 To review')).dy < tester.getTopLeft(find.text('#2 Doing it')).dy, isTrue);
+      await tester.tap(find.text('#2 Doing it'));
+      await settleBoard(tester);
+      expect(find.text('ticket k2'), findsOneWidget);
+    });
+
+    testWidgets('after a start the composer is empty again for the next one', (tester) async {
+      final repo = repoWith();
+      when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
+          .thenAnswer((_) async => receiptOf(const CommandResultWorkSessionDispatching(conversationId: 'c9', messageId: 'm', projectId: 'p1')));
+      final router = await pumpSessions(tester, repo, const NewSessionPage());
+      await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'Fix the login page');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('new-session-start')));
+      await settleBoard(tester);
+      expect(find.text('session c9'), findsOneWidget);
+      router.pop();
+      await settleBoard(tester);
+      expect(tester.widget<TextField>(find.byKey(const ValueKey('new-session-text'))).controller!.text, isEmpty);
     });
   });
 

@@ -66,7 +66,7 @@ class _ChannelLinkPageState extends State<ChannelLinkPage> {
     return Scaffold(
       appBar: const GlassAppBar(title: Text('Channel')),
       body: _askedAgain && read
-          ? EmptyState('This channel is not available.', key: const ValueKey('channel-link-unknown'), detail: channels.error, action: FilledButton(onPressed: () => context.go('/board'), child: const Text('Go to Board')))
+          ? EmptyState('This channel is not available.', key: const ValueKey('channel-link-unknown'), detail: channels.error, action: FilledButton(onPressed: () => context.go('/sessions?tab=tickets'), child: const Text('Open tickets')))
           : const Center(child: CircularProgressIndicator()),
     );
   }

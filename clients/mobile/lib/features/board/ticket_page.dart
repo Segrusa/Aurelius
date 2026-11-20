@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -24,6 +26,7 @@ import '../links/link_actions.dart';
 import '../markdown/links.dart';
 import '../chat/run_author.dart';
 import 'ticket_actions.dart';
+import '../sessions/recent_use.dart';
 import 'ticket_bloc.dart';
 import 'ticket_gate.dart';
 import 'ticket_properties.dart';
@@ -54,7 +57,12 @@ class TicketPage extends StatelessWidget {
   Widget build(BuildContext context) => BlocProvider(
         // Another ticket on the same route (a `go`) gets its own bloc, not the last one's.
         key: ValueKey('ticket-$ticketId'),
-        create: (context) => TicketBloc(context.read<AureliusRepository>(), ticketId),
+        create: (context) {
+          final repository = context.read<AureliusRepository>();
+          // Opened here: the Tickets list puts it up front (recent_use.dart).
+          unawaited(noteUseOn(repository, ticketUseKey(ticketId)));
+          return TicketBloc(repository, ticketId);
+        },
         child: _TicketView(key: ValueKey('ticket-view-$ticketId'), activity: activity, message: message),
       );
 }
@@ -204,7 +212,7 @@ class _TicketViewState extends State<_TicketView> {
               page.notFound ? (number == null ? 'Ticket not found' : 'Ticket #$number not found.') : 'No access',
               key: const ValueKey('ticket-unreachable'),
               detail: page.notFound ? "This ticket doesn't exist on ${context.read<AureliusRepository>().host.name}. It may have been deleted from the Backlog." : "You don't have access to this ticket.",
-              action: FilledButton(key: const ValueKey('ticket-go-to-board'), onPressed: () => context.go('/board'), child: const Text('Go to Board')),
+              action: FilledButton(key: const ValueKey('ticket-go-to-board'), onPressed: () => context.go('/sessions?tab=tickets'), child: const Text('Open tickets')),
             )
           : page.error != null
               ? ErrorRetry(page.error!, onRetry: () => context.read<TicketBloc>().add(const TicketRefreshed()))

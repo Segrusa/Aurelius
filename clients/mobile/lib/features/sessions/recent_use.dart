@@ -7,6 +7,8 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/aurelius_repository.dart';
+
 /// How many open times are kept; the oldest go first.
 const recentUseMax = 100;
 
@@ -62,4 +64,25 @@ Future<void> noteUse(String hostId, String key) async {
   } catch (_) {
     // Not saved: the list falls back to the activity alone.
   }
+}
+
+/// The server [repository] talks to, for the store's key; null when it is not known.
+String? _hostOf(AureliusRepository repository) {
+  try {
+    return repository.host.hostId;
+  } on Object {
+    return null;
+  }
+}
+
+/// [noteUse] on [repository]'s server.
+Future<void> noteUseOn(AureliusRepository repository, String key) async {
+  final host = _hostOf(repository);
+  if (host != null) await noteUse(host, key);
+}
+
+/// [loadUses] of [repository]'s server.
+Future<Map<String, int>> loadUsesOn(AureliusRepository repository) async {
+  final host = _hostOf(repository);
+  return host == null ? {} : loadUses(host);
 }

@@ -111,7 +111,7 @@ void main() {
     whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: const RuntimeState());
     final router = GoRouter(initialLocation: '/', routes: [
       GoRoute(path: '/', builder: (_, _) => page),
-      GoRoute(path: '/board', builder: (_, _) => const Scaffold(body: Text('the board'))),
+      GoRoute(path: '/sessions', builder: (_, _) => const Scaffold(body: Text('the board'))),
       GoRoute(path: '/ticket/:tid', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['tid']} ${s.uri.query}'))),
     ]);
     addTearDown(router.dispose);
@@ -186,11 +186,11 @@ void main() {
       expect(find.byKey(const ValueKey('flash-r2')), findsOneWidget);
     });
 
-    testWidgets('a channel that does not exist says so and leads to the Board', (tester) async {
+    testWidgets('a channel that does not exist says so and leads to the open tickets', (tester) async {
       await pump(tester, const ChannelLinkPage(conversationId: 'c-unknown', message: 'm1'), channels: const [_channel]);
       await settle(tester, frames: 8);
       expect(find.text('This channel is not available.'), findsOneWidget);
-      await tester.tap(find.text('Go to Board'));
+      await tester.tap(find.text('Open tickets'));
       await settle(tester, frames: 8);
       expect(find.text('the board'), findsOneWidget);
     });

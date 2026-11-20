@@ -6,7 +6,6 @@ import 'package:aurelius_mobile/data/quick_task.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/board/board_bloc.dart';
 import 'package:aurelius_mobile/features/board/board_page.dart';
-import 'package:aurelius_mobile/features/board/my_tickets_bloc.dart';
 import 'package:aurelius_mobile/features/board/ticket_page.dart';
 import 'package:aurelius_mobile/features/board/new_ticket_page.dart';
 import 'package:aurelius_mobile/features/dashboard/dashboard_page.dart' show GiveWorkBox;
@@ -243,13 +242,6 @@ void main() {
       },
     );
 
-    test('My tickets keeps only quick tasks in every list with the filter', () {
-      final state = MyTicketsState(loading: false, mine: MyTicketsView(tickets: [quickOne, normalOne], following: const []), quickOnly: true);
-      expect([for (final t in state.inTab(MyTab.created, me: testUser.id, needsMe: (_) => false)) t.id], ['q1']);
-      final all = MyTicketsState(loading: false, mine: MyTicketsView(tickets: [quickOne, normalOne], following: const []));
-      expect(all.inTab(MyTab.created, me: testUser.id, needsMe: (_) => false), hasLength(2));
-    });
-
     testWidgets('a quick task has the Quick tag on its card; a ticket does not', (tester) async {
       final repo = repoWith([quickOne, normalOne]);
       await pumpBoardPage(tester, repo, board(repo), link: quickLink);
@@ -284,28 +276,6 @@ void main() {
       await tester.tap(find.text('Clear filter'));
       await settleBoard(tester);
       expect(find.text('Plan the release'), findsOneWidget);
-    });
-
-    testWidgets('My tickets has the filter Quick tasks with the feature only', (tester) async {
-      final repo = repoWith([quickOne, normalOne], link: myQuickLink);
-      await pumpBoardPage(tester, repo, board(repo), link: myQuickLink);
-      await tester.tap(find.text('My tickets'));
-      await settleBoard(tester);
-      await tester.tap(find.byKey(const ValueKey('my-tab-created')));
-      await settleBoard(tester);
-      expect(find.text('Plan the release'), findsOneWidget);
-      await tapKey(tester, 'my-filter-quick');
-      expect(find.text('Fix the footer'), findsOneWidget);
-      expect(find.text('Plan the release'), findsNothing);
-      expect(find.byKey(const ValueKey('quick-tag-q1')), findsOneWidget);
-    });
-
-    testWidgets('My tickets without the feature has no filter Quick tasks', (tester) async {
-      final repo = repoWith([quickOne, normalOne], link: myLink);
-      await pumpBoardPage(tester, repo, board(repo), link: myLink);
-      await tester.tap(find.text('My tickets'));
-      await settleBoard(tester);
-      expect(find.byKey(const ValueKey('my-filter-quick')), findsNothing);
     });
   });
 

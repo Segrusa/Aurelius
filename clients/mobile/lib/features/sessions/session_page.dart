@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -12,6 +14,7 @@ import '../chat/chat_bloc.dart';
 import '../chat/chat_view.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_banner.dart';
+import 'recent_use.dart';
 import 'session_rules.dart';
 import 'sessions_bloc.dart';
 import 'sessions_page.dart';
@@ -27,7 +30,12 @@ class SessionPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => BlocProvider(
-        create: (context) => SessionsBloc(context.read<AureliusRepository>()),
+        create: (context) {
+          final repository = context.read<AureliusRepository>();
+          // Opened here: the Sessions list puts it up front (recent_use.dart).
+          unawaited(noteUseOn(repository, sessionUseKey(conversationId)));
+          return SessionsBloc(repository);
+        },
         child: SessionsShownWatcher(child: _SessionBody(conversationId: conversationId)),
       );
 }
@@ -90,7 +98,7 @@ class _Missing extends StatelessWidget {
       body = EmptyState(
         'Sessions are not on this server',
         key: const ValueKey('session-unsupported'),
-        action: FilledButton(onPressed: () => context.go('/board'), child: const Text('Go to Board')),
+        action: FilledButton(onPressed: () => context.go('/sessions?tab=tickets'), child: const Text('Open tickets')),
       );
     } else if (state.error != null) {
       body = EmptyState(

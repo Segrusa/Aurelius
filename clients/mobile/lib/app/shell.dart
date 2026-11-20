@@ -2,36 +2,37 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import '../data/activity.dart';
-import '../features/activity/activity_chip.dart';
-
 import '../core/theme/tokens.dart';
 import '../core/widgets/ios.dart';
 import '../features/connection/connection_banner.dart';
 import '../features/connection/connection_bloc.dart';
 import '../features/inbox/inbox_bloc.dart';
-import '../features/sessions/sessions_page.dart' show openNewSession;
 
 /// The route pattern of each tab, in the order of [shellTabs]; what the screen counter counts a tab by.
-const shellTabPatterns = ['/sessions', '/inbox', '/board', '/profile'];
+const shellTabPatterns = ['/chat', '/sessions', '/inbox', '/profile'];
 
 /// The bottom tabs, in this order (branch indices of the router's shell).
-/// Sessions comes first and is where the app opens (ticket #71: the Team chat
-/// is gone); the way to the chat with an employee is Profile › Employees.
-/// Profile replaced More (ticket #72): account and settings on one page.
+/// Chat comes first and is where the app opens: what to start next, as the
+/// desktop's New session. Sessions lists your sessions and open tickets, Inbox
+/// what needs you, Profile your account and settings. The Board is not on
+/// the phone; a project still shows its own.
 const shellTabs = [
-  GlassTab(CupertinoIcons.chat_bubble_2, 'Sessions'),
-  GlassTab(CupertinoIcons.tray, 'Inbox'),
-  GlassTab(CupertinoIcons.square_split_2x1, 'Board'),
-  GlassTab(CupertinoIcons.person_crop_circle, 'Profile'),
+  GlassTab(CupertinoIcons.chat_bubble_text, 'Chat', symbol: 'bubble.left.and.text.bubble.right'),
+  GlassTab(CupertinoIcons.list_bullet, 'Sessions', symbol: 'list.bullet.rectangle'),
+  GlassTab(CupertinoIcons.tray, 'Inbox', symbol: 'tray'),
+  GlassTab(CupertinoIcons.person_crop_circle, 'Profile', symbol: 'person.crop.circle'),
 ];
 
-/// The inbox tab, with the badge of what waits for you (its index in [shellTabs]).
-const inboxTab = 1;
+/// The Chat tab: where ⌘/Ctrl+N goes.
+const chatTab = 0;
 
-/// Tabs: Sessions · Inbox · Board · Profile in a floating glass tab bar,
-/// with the connection banner on top. Hardware keyboards (iPad, Android with a
-/// keyboard): ⌘/Ctrl+1…4 switch tabs, ⌘/Ctrl+N opens New session.
+/// The inbox tab, with the badge of what waits for you (its index in [shellTabs]).
+const inboxTab = 2;
+
+/// Tabs: Chat · Sessions · Inbox · Profile in the system tab bar on iOS (a
+/// floating glass bar elsewhere), with the connection banner on top. Hardware
+/// keyboards (iPad, Android with a keyboard): ⌘/Ctrl+1…4 switch tabs,
+/// ⌘/Ctrl+N opens Chat.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.shell});
 
@@ -50,15 +51,14 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final badge = context.select<InboxBloc, int>((b) => b.state.badge);
     final bannerVisible = context.select<ConnectionBloc, bool>((b) => ConnectionBanner.visible(b.state));
-    final activityOn = context.select<ConnectionBloc, bool>((b) => b.state.has(activityOverviewFeature));
     final digits = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3, LogicalKeyboardKey.digit4];
     final shortcuts = <ShortcutActivator, VoidCallback>{
       for (final (i, key) in digits.indexed) ...{
         SingleActivator(key, meta: true): () => _go(i),
         SingleActivator(key, control: true): () => _go(i),
       },
-      const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () => openNewSession(context),
-      const SingleActivator(LogicalKeyboardKey.keyN, control: true): () => openNewSession(context),
+      const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () => _go(chatTab),
+      const SingleActivator(LogicalKeyboardKey.keyN, control: true): () => _go(chatTab),
     };
     return CallbackShortcuts(
       bindings: shortcuts,
@@ -66,14 +66,14 @@ class _HomeShellState extends State<HomeShell> {
         autofocus: true,
         child: TabScaffold(
           background: Tokens.bg,
-          banners: [const ConnectionBanner(), if (activityOn) ActivityChip(underBanner: bannerVisible)],
-          bannerVisible: bannerVisible || activityOn,
-          tabBar: GlassTabBar(
+          banners: const [ConnectionBanner()],
+          bannerVisible: bannerVisible,
+          tabBar: AppTabBar(
             current: shell.currentIndex,
             onTap: _go,
             fade: Tokens.bg,
             tabs: [
-              for (final (i, t) in shellTabs.indexed) i == inboxTab ? GlassTab(t.icon, t.label, badge: badge) : t,
+              for (final (i, t) in shellTabs.indexed) i == inboxTab ? GlassTab(t.icon, t.label, badge: badge, symbol: t.symbol) : t,
             ],
           ),
           child: shell,

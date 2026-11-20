@@ -143,9 +143,9 @@ void main() {
     });
   });
 
-  test('the bottom tabs: Sessions, Inbox, Board, Profile (tickets #71, #72)', () {
-    expect(shellTabs.map((t) => t.label), ['Sessions', 'Inbox', 'Board', 'Profile']);
-    expect(inboxTab, 1, reason: 'the inbox badge follows the Inbox tab');
+  test('the bottom tabs: Chat, Sessions, Inbox, Profile', () {
+    expect(shellTabs.map((t) => t.label), ['Chat', 'Sessions', 'Inbox', 'Profile']);
+    expect(inboxTab, 2, reason: 'the inbox badge follows the Inbox tab');
   });
 
   group('company-wide pages', () {

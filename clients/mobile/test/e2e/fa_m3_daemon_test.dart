@@ -106,35 +106,6 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
     step('paired and signed in as alex');
 
-    // A4: one ticket for each tab.
-    await as('robin', 'ticket.create', {'project_id': project, 'title': 'E2E responsible', 'responsible_user_id': alex});
-    await as('alex', 'ticket.create', {'project_id': project, 'title': 'E2E created by alex'});
-    final followed = await as('robin', 'ticket.create', {'project_id': project, 'title': 'E2E followed'});
-    await as('alex', 'ticket.follow', {'ticket_id': followed['ticket_id'], 'on': true});
-    go(tester, '/board');
-    await waitFor(tester, find.byKey(const ValueKey('board-switch')), what: 'the Board | My tickets switch');
-    await tap(tester, find.text('My tickets'));
-    await waitFor(tester, find.byKey(const ValueKey('my-tab-responsible')), what: 'the tabs');
-    await waitFor(tester, find.byKey(const ValueKey('my-tab-waiting')), what: 'the tabs');
-    step('A4: first tab is Waiting on me while something waits (the ticket on alex\'s login)');
-    await tap(tester, find.byKey(const ValueKey('my-tab-responsible')));
-    await waitFor(tester, find.text('E2E responsible'), what: 'the Responsible ticket');
-    step('A4: switch shown, Responsible tab lists "E2E responsible"');
-    await tap(tester, find.byKey(const ValueKey('my-tab-created')));
-    await waitFor(tester, find.text('E2E created by alex'), what: 'Created by me');
-    expect(find.text('E2E responsible'), findsNothing);
-    step('A4: Created by me lists only alex\'s own');
-    await tap(tester, find.byKey(const ValueKey('my-tab-following')));
-    await waitFor(tester, find.text('E2E followed'), what: 'Following');
-    step('A4: Following lists the followed ticket');
-    await tap(tester, find.byKey(const ValueKey('my-tab-waiting')));
-    await tester.pump(const Duration(seconds: 1));
-    step('A4: Waiting on me, on screen: ${find.byType(Text).evaluate().map((e) => (e.widget as Text).data).whereType<String>().where((s) => s.startsWith('Nothing') || s.startsWith('E2E')).join(' | ')}');
-    await as('robin', 'ticket.set_responsible', {'ticket_id': followed['ticket_id'], 'responsible_user_id': alex});
-    await tap(tester, find.byKey(const ValueKey('my-tab-responsible')));
-    await waitFor(tester, find.text('E2E followed'), what: 'live: the ticket robin handed to alex');
-    step('A4: a handover by robin shows up live in Responsible');
-
     // A6: robin's message cannot be edited by alex; alex's can, until deleted.
     await as('robin', 'group_chat.send', {'text': 'robin says hello'});
     await as('alex', 'group_chat.send', {'text': 'alex first draft'});

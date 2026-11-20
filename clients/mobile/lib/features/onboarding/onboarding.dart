@@ -29,7 +29,7 @@ String? boardMemberRedirect(BoardMemberStep step, String location) {
     BoardMemberStep.unknown => null,
     BoardMemberStep.createFirst || BoardMemberStep.signIn => onboarding || serverChoice ? null : '/onboarding',
     BoardMemberStep.changePassword => location == '/onboarding' ? null : '/onboarding',
-    BoardMemberStep.ready => onboarding ? '/team' : null,
+    BoardMemberStep.ready => onboarding ? '/chat' : null,
   };
 }
 
