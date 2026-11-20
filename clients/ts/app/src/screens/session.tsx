@@ -35,6 +35,9 @@ import { modelName } from "./settings-kit";
 import { SubagentsAtWork } from "./subagents";
 import { filesWritten } from "./tasks-logic";
 
+/** Where the composer is in a session another board member started. */
+export const OTHERS_SESSION = "Another board member started this session. Only they write in it; you can read it.";
+
 const styles = stylex.create({
   body: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0 },
   chooser: {
@@ -53,7 +56,11 @@ const styles = stylex.create({
 
 export function SessionScreen({ conversationId }: { conversationId: string }) {
   useKeyContext("TeamChat");
-  const session = useWorkSessions().data?.find((s) => s.conversation_id === conversationId) ?? null;
+  const mine = useWorkSessions();
+  const session = mine.data?.find((s) => s.conversation_id === conversationId) ?? null;
+  // Opened from the History, a session another board member started: read, not written (the server
+  // refuses it too). Only once the list is current, so a session just started never looks like that.
+  const othersSession = mine.isSuccess && !mine.isFetching && session === null;
   const dock = usePropertiesDock();
   return (
     <div {...stylex.props(styles.body)}>
@@ -68,6 +75,7 @@ export function SessionScreen({ conversationId }: { conversationId: string }) {
           },
           footer: (snapshot) => <RunChips snapshot={snapshot} />,
           ...(session?.dispatch ? { instead: <Chooser session={session} /> } : {}),
+          ...(othersSession ? { instead: <p {...stylex.props(styles.chooser)}>{OTHERS_SESSION}</p> } : {}),
           actions: <PropertiesToggle dock={dock} label="Session properties" />,
           aside: <SessionDetails dock={dock} conversationId={conversationId} session={session} />,
         }}

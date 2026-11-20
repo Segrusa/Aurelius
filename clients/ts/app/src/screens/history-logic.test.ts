@@ -1,16 +1,22 @@
+import type { HistoryEntry, SessionHistoryEntry } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import { areasOf } from "../data";
 import {
   ALL_PROJECTS,
   dayLabel,
+  emptyText,
+  groupAt,
   groupByDay,
   historyFilters,
   historyProject,
+  mergeHistory,
   narrowed,
   nextPage,
+  nextSessionPage,
   ownerName,
   periodRange,
   projectInUrl,
+  starterName,
   summaryShown,
 } from "./history-logic";
 
@@ -142,5 +148,110 @@ describe("a row", () => {
   it("refreshes on a ticket event, so a new Done or summary shows without a reload", () => {
     expect(areasOf("ticket.updated")).toContain("tickets");
     expect(areasOf("ticket.accepted")).toContain("tickets");
+  });
+});
+
+const ticket = (number: number, done_at_ms: number): HistoryEntry => ({
+  ticket_id: `t${number}`,
+  number,
+  title: `Ticket ${number}`,
+  project_id: "p1",
+  project_name: "Alpha",
+  done_at_ms,
+  summary_state: "ready",
+});
+
+const session = (id: string, last_activity_ms: number): SessionHistoryEntry => ({
+  conversation_id: id,
+  title: `Session ${id}`,
+  project_id: "p1",
+  project_name: "Alpha",
+  employee_id: "e1",
+  employee_name: "Orion",
+  started_by: "u1",
+  created_at_ms: 1,
+  last_activity_ms,
+  summary_state: "before_history",
+});
+
+describe("tickets and sessions together", () => {
+  it("takes the type from the URL and counts it as narrowing", () => {
+    expect(historyFilters({ type: "sessions" })).toEqual({ type: "sessions" });
+    expect(historyFilters({ type: "everything" })).toEqual({});
+    expect(narrowed({ type: "tickets" })).toBe(true);
+  });
+
+  it("puts both in one list, newest first", () => {
+    const { rows, more } = mergeHistory(
+      { pages: [{ entries: [ticket(2, 300), ticket(1, 100)] }] },
+      { pages: [{ entries: [session("b", 400), session("a", 200)] }] },
+    );
+    expect(rows.map((r) => r.key)).toEqual(["s:b", "t:t2", "s:a", "t:t1"]);
+    expect(more).toEqual([]);
+  });
+
+  it("never shows a row that a later page could put something above", () => {
+    // Tickets have more below 300: a session at 200 waits until the tickets are loaded down to it.
+    const tickets = { pages: [{ entries: [ticket(3, 500), ticket(2, 300)], has_more: true }] };
+    const sessions = { pages: [{ entries: [session("b", 400), session("a", 200)] }] };
+    const first = mergeHistory(tickets, sessions);
+    expect(first.rows.map((r) => r.key)).toEqual(["t:t3", "s:b", "t:t2"]);
+    expect(first.more).toEqual(["tickets"]);
+    // The next ticket page reaches below it: the session shows.
+    const next = { pages: [...tickets.pages, { entries: [ticket(1, 100)], has_more: false }] };
+    const second = mergeHistory(next, sessions);
+    expect(second.rows.map((r) => r.key)).toEqual(["t:t3", "s:b", "t:t2", "s:a", "t:t1"]);
+    expect(second.more).toEqual([]);
+  });
+
+  it("loads more of the list that holds the line, or of both when they stop at the same moment", () => {
+    const tickets = { pages: [{ entries: [ticket(1, 300)], has_more: true }] };
+    const sessions = { pages: [{ entries: [session("a", 200)], has_more: true }] };
+    expect(mergeHistory(tickets, sessions).more).toEqual(["tickets"]);
+    const even = { pages: [{ entries: [session("a", 300)], has_more: true }] };
+    expect(mergeHistory(tickets, even).more).toEqual(["tickets", "sessions"]);
+  });
+
+  it("shows one list alone when the other is not asked for", () => {
+    const { rows, more } = mergeHistory(undefined, { pages: [{ entries: [session("a", 200)], has_more: true }] });
+    expect(rows.map((r) => r.key)).toEqual(["s:a"]);
+    expect(more).toEqual(["sessions"]);
+  });
+
+  it("groups any row per day by its own moment", () => {
+    const groups = groupAt([{ at: at(10, 14, 9) }, { at: at(10, 13) }], (r) => r.at, NOW, "en-GB");
+    expect(groups.map((g) => g.label)).toEqual(["Today", "Yesterday"]);
+  });
+
+  it("offers a session's first summary instead of saying it finished before the History", () => {
+    expect(summaryShown({ summary_state: "before_history" }, "session")).toEqual({
+      text: "No summary yet",
+      kind: "missing",
+    });
+    expect(summaryShown({ summary_state: "not_available" }, "session").kind).toBe("failed");
+    expect(starterName({ started_by_name: "grace" })).toBe("grace");
+    expect(starterName({})).toBe("—");
+  });
+
+  it("pages sessions on the last row's activity and id", () => {
+    const entries = [
+      { last_activity_ms: 20, conversation_id: "b" },
+      { last_activity_ms: 10, conversation_id: "a" },
+    ];
+    expect(nextSessionPage({ has_more: true, entries })).toEqual({
+      before_last_activity_ms: 10,
+      before_conversation_id: "a",
+    });
+    expect(nextSessionPage({ has_more: false, entries })).toBeUndefined();
+  });
+
+  it("says what shows up, for what it lists", () => {
+    expect(emptyText("tickets")).toContain("on Done");
+    expect(emptyText("sessions")).toContain("last active");
+    expect(emptyText(undefined)).toContain("a session");
+  });
+
+  it("refreshes sessions on a conversation event, so a new summary shows without a reload", () => {
+    expect(areasOf("conversation.settings_changed")).toContain("messages");
   });
 });
