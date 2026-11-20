@@ -15,7 +15,12 @@ import {
   runCounts,
 } from "./ticket-page-logic";
 
-const call = (tool: string, input: unknown, ok: boolean | null = true, over: Partial<ActivityView> = {}): ActivityView => ({
+const call = (
+  tool: string,
+  input: unknown,
+  ok: boolean | null = true,
+  over: Partial<ActivityView> = {},
+): ActivityView => ({
   call_id: `${tool}-${JSON.stringify(input)}`,
   tool,
   input,
@@ -45,7 +50,7 @@ const todos = (...states: Todo["state"][]): Todo[] => states.map((state, i) => (
 
 describe("inFilter", () => {
   const talk = { role: "user" as const, activity: [] };
-  const line = { role: "system" as const, activity: [], system: { action: "moved" } as never };
+  const line = { role: "assistant" as const, activity: [], system: { action: "moved" } as never };
   const update = { role: "assistant" as const, activity: [], update: "status" };
   const edit = { role: "assistant" as const, activity: [call("Edit", { file_path: "a.ts" })] };
 
@@ -87,7 +92,9 @@ describe("runCounts", () => {
   });
 
   it("gives no line counts when an edit's input was cut short", () => {
-    const c = runCounts([call("Edit", { file_path: "a", old_string: "x", new_string: "y" }, true, { truncated: true })]);
+    const c = runCounts([
+      call("Edit", { file_path: "a", old_string: "x", new_string: "y" }, true, { truncated: true }),
+    ]);
     expect(c.added).toBeNull();
     expect(c.removed).toBeNull();
     expect(c.changed).toBe(1);

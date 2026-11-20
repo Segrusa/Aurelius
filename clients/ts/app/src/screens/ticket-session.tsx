@@ -3,6 +3,11 @@
 // channel and the Board's panel. The server decides everything as before: who answers a message
 // (`owner_answers`), and who may accept, send back or approve. This screen only places the existing
 // reads and writes of the channel and the board panel around one timeline.
+//
+// Ticket #74 lays it out as the ticket page: the description and what every task of the ticket does
+// now above the talk (a ticket can have a main task and several delegations at once), the talk as
+// its Activity with a filter, what runs this second above the composer, and on the right the plan of
+// the main task with its delegations, then the ticket's properties and files.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -13,7 +18,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { expectBody } from "@aurelius/client";
-import type { AgentMode, TicketDetail, TicketPriority, TicketView } from "@aurelius/protocol";
+import type { AgentMode, TaskView, TicketDetail, TicketPriority, TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
@@ -65,8 +70,10 @@ import {
   usePropertiesDock,
 } from "./run-side";
 import { FileChips } from "./run-tools";
-import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
-import { branchOf } from "./ticket-overview-logic";
+import { taskStateLine } from "./tasks-logic";
+import { branchOf, latestTodos } from "./ticket-overview-logic";
+import { LiveBar, NowCard, PageSection, PlanPanel } from "./ticket-page";
+import { planStep } from "./ticket-page-logic";
 import {
   Activity,
   Box,
@@ -181,7 +188,50 @@ const styles = stylex.create({
   taskWho: { flexShrink: 0, fontSize: 12, color: "var(--color-text-secondary)" },
   taskState: { flexShrink: 0, fontSize: 12 },
   mono: { fontFamily: "var(--font-family-code)", fontSize: 12 },
+  olderTop: { marginInline: "auto", width: "100%", maxWidth: 820, boxSizing: "border-box", paddingInline: 24 },
+  plan: { paddingBottom: 12 },
+  count: { marginInlineStart: 4, color: "var(--precision-text3)" },
 });
+
+/**
+ * What the ticket page shows above its talk: the description (editable while the ticket is open),
+ * the feedback the owner works on, and what every task of the ticket does now.
+ */
+function PageTop({ detail, t }: { detail: TicketDetail; t: TicketView }) {
+  const { status } = useLinkState();
+  const write = useTicketWrite();
+  const open = !readOnly(t, null) && status === "online";
+  const activity = useTicketActivity(t.review_feedback ? t.id : null);
+  return (
+    <>
+      <PageSection title="Description">
+        {t.review_feedback && t.column === "doing" ? (
+          <Box>
+            <span {...stylex.props(styles.third)}>{feedbackLabel(activity.data)}</span>
+            <span>{t.review_feedback}</span>
+          </Box>
+        ) : null}
+        <Editable
+          label="Description"
+          value={t.description ?? ""}
+          enabled={open}
+          multiline
+          display={
+            t.description?.trim() ? (
+              <Markdown text={t.description} />
+            ) : (
+              <span {...stylex.props(styles.third)}>No description.</span>
+            )
+          }
+          onSave={(description) =>
+            write("ticket.update", { ticket_id: t.id, description }, { expectedVersion: t.version })
+          }
+        />
+      </PageSection>
+      <NowCard tasks={detail.tasks} rootId={detail.root_task?.id ?? t.root_task_id ?? null} />
+    </>
+  );
+}
 
 /** The ticket of `/ticket/N`: its channel in the cached list, else `ticket.list "#N"`. */
 function useResolved(n: number) {
@@ -321,6 +371,8 @@ function Session({
   // The head spans the screen; the properties dock beside the conversation, below it.
   const head = <Head t={t} dock={dock} />;
   const gate = <TicketGate detail={detail} t={t} />;
+  const rootId = detail.root_task?.id ?? t.root_task_id ?? null;
+  const top = <PageTop detail={detail} t={t} />;
   const aside = (
     <PropertiesPanel dock={dock} label="Ticket properties" wide>
       <Properties detail={detail} t={t} />
@@ -328,6 +380,8 @@ function Session({
   );
   const slots: SessionSlots = {
     head: null,
+    top,
+    live: <LiveBar tasks={detail.tasks} rootId={rootId} />,
     gate,
     chips: <RunChips t={t} />,
     aside,
@@ -358,6 +412,7 @@ function Session({
         // An older server has no ticket conversation: the ticket's data and decision still work.
         <div {...stylex.props(styles.body)}>
           <div {...stylex.props(styles.main)}>
+            <div {...stylex.props(styles.olderTop)}>{top}</div>
             <div {...stylex.props(styles.centre)}>
               <EmptyState isCompact title="This server has no ticket conversation." />
             </div>
@@ -497,9 +552,9 @@ function RunChips({ t }: { t: TicketView }) {
   );
 }
 
-type Section = "properties" | "activity";
+type Section = "properties" | "files" | "activity";
 
-/** The properties panel's two tabs: the ticket's data, and what happened to it. */
+/** The details panel: the plan of the ticket's tasks, then tabs for its data, its files and what happened to it. */
 function Properties({ detail, t }: { detail: TicketDetail; t: TicketView }) {
   const platform = usePlatform();
   const [tab, setTab] = useState<Section>("properties");
@@ -540,6 +595,9 @@ function Properties({ detail, t }: { detail: TicketDetail; t: TicketView }) {
         takeFiles(given);
       }}
     >
+      <div {...stylex.props(styles.plan)}>
+        <PlanPanel tasks={detail.tasks} root={detail.root_task ?? null} />
+      </div>
       <TabList
         role="tablist"
         aria-label="Ticket properties"
@@ -549,31 +607,42 @@ function Properties({ detail, t }: { detail: TicketDetail; t: TicketView }) {
         xstyle={styles.tabs}
       >
         <Tab value="properties" label="Properties" panelId="ticket-properties-tab" />
+        <Tab
+          value="files"
+          label="Files"
+          endContent={
+            t.attachments.length > 0 ? <span {...stylex.props(styles.count)}>{t.attachments.length}</span> : null
+          }
+          panelId="ticket-properties-tab"
+        />
         <Tab value="activity" label="Activity" panelId="ticket-properties-tab" />
       </TabList>
-      <div id="ticket-properties-tab" role="tabpanel" aria-label={tab === "activity" ? "Activity" : "Properties"}>
+      <div
+        id="ticket-properties-tab"
+        role="tabpanel"
+        aria-label={tab === "activity" ? "Activity" : tab === "files" ? "Files" : "Properties"}
+      >
         {tab === "activity" ? (
           <Activity id={t.id} />
+        ) : tab === "files" ? (
+          <FilesTab detail={detail} t={t} onAddFiles={() => platform.pickFiles().then(addFiles, addFailed)} />
         ) : (
-          <PropertiesTab detail={detail} t={t} onAddFiles={() => platform.pickFiles().then(addFiles, addFailed)} />
+          <PropertiesTab detail={detail} t={t} />
         )}
       </div>
     </div>
   );
 }
 
-function PropertiesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: TicketView; onAddFiles: () => void }) {
-  const navigate = useNavigate();
+function PropertiesTab({ detail, t }: { detail: TicketDetail; t: TicketView }) {
   const { features, status, user } = useLinkState();
   const employees = useEmployees();
   const members = useMembers();
   const models = useModels();
   const write = useTicketWrite();
   const open = !readOnly(t, null) && status === "online";
-  const activity = useTicketActivity(t.review_feedback ? t.id : null);
   const update = (params: Record<string, unknown>) =>
     write("ticket.update", { ticket_id: t.id, ...params } as never, { expectedVersion: t.version });
-  const tasks = useMemo(() => foldTree(treeOrder(detail.tasks), {}), [detail.tasks]);
   const me = user?.id ?? null;
   const responsibleItems = [
     { key: "me", label: "Me" },
@@ -586,21 +655,12 @@ function PropertiesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: Tic
   const modeLabel = MODES.find((m) => m.key === (t.run.mode ?? "default"))?.label ?? "Owner's default";
   const modelLabel = models.find((m) => m.key === (t.run.model ?? "default"))?.label ?? "Default";
   const usage = useTicketUsage(t);
+  const root = detail.root_task ?? null;
   return (
     <>
-      <SideProperties usage={usage}>
-        <SideRow name="Priority">
-          {open ? (
-            <Menu
-              label="Priority"
-              value={t.priority}
-              options={PRIORITIES.map((p) => ({ key: p, label: priorityLabel(p) }))}
-              onPick={(priority: TicketPriority) => void update({ priority })}
-              trigger={<Chip quiet>{priorityLabel(t.priority)}</Chip>}
-            />
-          ) : (
-            priorityLabel(t.priority)
-          )}
+      <SideSection title="Run">
+        <SideRow name="Status">
+          {root ? <RootState task={root} /> : <span {...stylex.props(styles.third)}>Not started</span>}
         </SideRow>
         <SideRow name="Owner">
           {open && ownerChoosable(t) ? (
@@ -625,6 +685,28 @@ function PropertiesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: Tic
               ) : null}
               {t.owner_name ?? "No owner"}
             </span>
+          )}
+        </SideRow>
+        <SideRow name="Mode · Model" title={`${modeLabel} · ${modelLabel}`}>
+          {`${modeLabel} · ${modelLabel}`}
+        </SideRow>
+        {root ? <SideRow name="Started">{time(root.created_at_ms)}</SideRow> : null}
+        <SideRow name="Runs on">
+          {t.login_user === me ? "Your Claude login" : `${t.login_username}'s Claude login`}
+        </SideRow>
+      </SideSection>
+      <SideProperties usage={usage}>
+        <SideRow name="Priority">
+          {open ? (
+            <Menu
+              label="Priority"
+              value={t.priority}
+              options={PRIORITIES.map((p) => ({ key: p, label: priorityLabel(p) }))}
+              onPick={(priority: TicketPriority) => void update({ priority })}
+              trigger={<Chip quiet>{priorityLabel(t.priority)}</Chip>}
+            />
+          ) : (
+            priorityLabel(t.priority)
           )}
         </SideRow>
         {features.includes("ticket_responsible") ? (
@@ -654,9 +736,7 @@ function PropertiesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: Tic
             )}
           </SideRow>
         ) : null}
-        <SideRow name="Mode · Model" title={`${modeLabel} · ${modelLabel}`}>
-          {`${modeLabel} · ${modelLabel}`}
-        </SideRow>
+        <SideRow name="Project">{t.project_name}</SideRow>
         <SideRow name="Labels">
           <Editable
             label="Labels"
@@ -685,7 +765,6 @@ function PropertiesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: Tic
             }}
           />
         </SideRow>
-        <SideRow name="Project">{t.project_name}</SideRow>
         {features.includes(DESIGN_FEATURE) ? (
           <DesignRow
             url={t.design_url ?? null}
@@ -700,69 +779,9 @@ function PropertiesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: Tic
             }}
           />
         ) : null}
-        <SideRow name="Runs on">
-          {t.login_user === me ? "Your Claude login" : `${t.login_username}'s Claude login`}
-        </SideRow>
         <SideRow name="Created by">{`${t.created_by_username} · ${time(t.created_at_ms)}`}</SideRow>
         {features.includes("ticket_follow") ? <Followers id={t.id} /> : null}
       </SideProperties>
-      <SideSection title="Description">
-        <div {...stylex.props(styles.stack)}>
-          {t.review_feedback && t.column === "doing" ? (
-            <Box>
-              <span {...stylex.props(styles.third)}>{feedbackLabel(activity.data)}</span>
-              <span>{t.review_feedback}</span>
-            </Box>
-          ) : null}
-          <Editable
-            label="Description"
-            value={t.description ?? ""}
-            enabled={open}
-            multiline
-            display={
-              t.description?.trim() ? (
-                <Markdown text={t.description} />
-              ) : (
-                <span {...stylex.props(styles.third)}>No description.</span>
-              )
-            }
-            onSave={(description) => update({ description })}
-          />
-        </div>
-      </SideSection>
-      <SideSection title="Files">
-        <span {...stylex.props(styles.files)}>
-          <FileChips files={t.attachments} />
-          {t.attachments.length === 0 && readOnly(t, null) ? <span {...stylex.props(styles.third)}>None</span> : null}
-          {readOnly(t, null) ? null : (
-            <Button label="Add files…" isDisabled={status !== "online"} onClick={onAddFiles} />
-          )}
-        </span>
-      </SideSection>
-      {tasks.length > 0 ? (
-        <SideSection title={`Tasks (${detail.tasks.length})`}>
-          {tasks.map(({ task, depth }) => {
-            const state = taskStateLine(task);
-            return (
-              <button
-                key={task.id}
-                type="button"
-                onClick={() => void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } })}
-                {...stylex.props(styles.task)}
-                style={{ paddingLeft: 4 + 16 * depth }}
-              >
-                <span {...stylex.props(styles.taskTitle)}>
-                  {task.id === t.root_task_id ? `Main task · ${task.title}` : task.title}
-                </span>
-                {task.employee_name ? <span {...stylex.props(styles.taskWho)}>{task.employee_name}</span> : null}
-                <span {...stylex.props(styles.taskState)} style={{ color: state.color }}>
-                  {state.text}
-                </span>
-              </button>
-            );
-          })}
-        </SideSection>
-      ) : null}
       {branch || t.merge_commit ? (
         <SideSection title="Work">
           {branch ? (
@@ -777,18 +796,49 @@ function PropertiesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: Tic
           ) : null}
         </SideSection>
       ) : null}
-      <RunsOfTicket detail={detail} t={t} />
+      <RunsOfTicket detail={detail} t={t} part="guidelines" />
     </>
+  );
+}
+
+/** The ticket's files and what its runs wrote; files dropped or pasted on the panel land here too. */
+function FilesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: TicketView; onAddFiles: () => void }) {
+  const { status } = useLinkState();
+  return (
+    <>
+      <SideSection title="Files">
+        <span {...stylex.props(styles.files)}>
+          <FileChips files={t.attachments} />
+          {t.attachments.length === 0 && readOnly(t, null) ? <span {...stylex.props(styles.third)}>None</span> : null}
+          {readOnly(t, null) ? null : (
+            <Button label="Add files…" isDisabled={status !== "online"} onClick={onAddFiles} />
+          )}
+        </span>
+      </SideSection>
+      <RunsOfTicket detail={detail} t={t} part="files" />
+    </>
+  );
+}
+
+/** The main task's state with the step of its plan: "Running · step 3 of 4". */
+function RootState({ task }: { task: TaskView }) {
+  const messages = useMessages(task.conversation_id ?? null);
+  const step = planStep(latestTodos([], messages.data?.messages ?? []));
+  const state = taskStateLine(task);
+  return (
+    <span style={{ color: state.color }}>
+      {step && state.text === "Running" ? `${state.text} · step ${step.at} of ${step.total}` : state.text}
+    </span>
   );
 }
 
 /**
  * What all of the ticket's runs wrote, which guidelines the latest one had and what they used
- * (Titan's decision for ticket #70): files and guidelines over the discussion and every task's
+ * (Titan's decision for ticket #70; since ticket #74 the files sit on the Files tab): files and guidelines over the discussion and every task's
  * conversation, read only while this tab shows (usage sits behind the info icon of the Properties
  * heading). Each block hides when there is nothing to show: never a zero or a spinner.
  */
-function RunsOfTicket({ detail, t }: { detail: TicketDetail; t: TicketView }) {
+function RunsOfTicket({ detail, t, part }: { detail: TicketDetail; t: TicketView; part: "files" | "guidelines" }) {
   const ids = useMemo(() => ticketConversations(t.conversation_id, detail.tasks), [t.conversation_id, detail.tasks]);
   const reads = useMessagesOf(ids);
   const lists = reads.map((r) => r.data?.messages);
@@ -796,8 +846,7 @@ function RunsOfTicket({ detail, t }: { detail: TicketDetail; t: TicketView }) {
   const run = latestRunAcross(lists);
   return (
     <>
-      <FilesWritten files={files} />
-      <RunGuidelines runId={run} title="Guidelines in the runs" />
+      {part === "files" ? <FilesWritten files={files} /> : <RunGuidelines runId={run} title="Guidelines in the runs" />}
     </>
   );
 }

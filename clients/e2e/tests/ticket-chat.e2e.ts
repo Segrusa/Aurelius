@@ -48,8 +48,9 @@ test("a ticket reads as a chat: the bar above a message is icons and takes a rea
     // An old link to the Board's panel opens the ticket's session (ticket #70): the talk and the properties.
     await page.goto(`${site.origin}/board?ticket=t1`);
     await expect(page).toHaveURL(/\/ticket\/35$/);
-    const panel = page.getByRole("complementary", { name: "Ticket properties" });
-    await expect(panel.getByText("No description.")).toBeVisible();
+    // The description heads the page, above the talk (ticket #74); the properties are beside it.
+    await expect(page.getByRole("region", { name: "Description" }).getByText("No description.")).toBeVisible();
+    await expect(page.getByRole("complementary", { name: "Ticket properties" })).toBeVisible();
 
     const chat = page.getByRole("main");
     await chat.getByText("Which group may I remove first?").hover();
