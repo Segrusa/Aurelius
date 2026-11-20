@@ -451,6 +451,7 @@ function reasonText(reason: string): string {
     sent_back: "This was sent back.",
     failed: "The main task failed.",
     login: "It waits for your Claude login.",
+    server_notice: "Aurelius tells every board member about this.",
   };
   return known[reason] ?? reason;
 }

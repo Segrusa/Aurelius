@@ -66,6 +66,21 @@ const index = createRoute({
     throw redirect({ to: "/inbox" });
   },
 });
+// The Team chat and the chat with an employee are gone: their old links open the Inbox.
+const formerChat = createRoute({
+  getParentRoute: () => root,
+  path: "/chat",
+  beforeLoad: () => {
+    throw redirect({ to: "/inbox" });
+  },
+});
+const formerTalk = createRoute({
+  getParentRoute: () => root,
+  path: "/talk/$conversationId",
+  beforeLoad: () => {
+    throw redirect({ to: "/inbox" });
+  },
+});
 const inbox = createRoute({ getParentRoute: () => root, path: "/inbox", component: InboxScreen });
 const newSession = createRoute({ getParentRoute: () => root, path: "/new", component: NewSessionScreen });
 const ticketSearch = (search: Record<string, unknown>): { ticket?: string } => ({
@@ -250,6 +265,8 @@ function ScreenFailed({ reset }: { reset: () => void }) {
 const router = createRouter({
   routeTree: root.addChildren([
     index,
+    formerChat,
+    formerTalk,
     newSession,
     inbox,
     board,

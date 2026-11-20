@@ -72,7 +72,7 @@ pub const SWITCHABLE_TOOLS: &[SwitchableTool] = &[
 
 /// Tools that are no longer offered. A list stored while they still were may name them: it stays
 /// valid, and the next save drops them.
-const RETIRED_TOOLS: &[&str] = &["mcp__aurelius__add_idea"];
+const RETIRED_TOOLS: &[&str] = &["mcp__aurelius__add_idea", "mcp__aurelius__post_to_group_chat"];
 
 pub fn is_switchable(name: &str) -> bool {
     SWITCHABLE_TOOLS.iter().any(|t| t.name == name)
@@ -233,6 +233,13 @@ mod tests {
         let saved = policy(Some(&["Read", "mcp__aurelius__add_idea"]), &["mcp__aurelius__add_idea"]).validate().unwrap();
         assert_eq!(saved, policy(Some(&["Read"]), &[]));
         assert!(!is_switchable("mcp__aurelius__add_idea"));
+    }
+
+    #[test]
+    fn a_stored_list_that_names_the_retired_group_chat_tool_stays_valid_and_loses_the_name() {
+        let saved = policy(Some(&["Read", "mcp__aurelius__post_to_group_chat"]), &["mcp__aurelius__post_to_group_chat"]).validate().unwrap();
+        assert_eq!(saved, policy(Some(&["Read"]), &[]));
+        assert!(!is_switchable("mcp__aurelius__post_to_group_chat"));
     }
 
     #[test]
