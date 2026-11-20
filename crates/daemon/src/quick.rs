@@ -24,11 +24,11 @@ pub const MAIN_BRANCHES: [&str; 2] = ["main", "master"];
 /// How many conflicting files a failed merge names at most.
 pub const FILES_MAX: usize = 20;
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
     tokio::task::spawn_blocking(f).await.ok()
 }
 
-fn git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
+pub(crate) fn git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
     Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -40,18 +40,18 @@ fn git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
         .output()
 }
 
-fn text(out: &Output) -> String {
+pub(crate) fn text(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
 /// The first line git wrote to stderr (or stdout), as the reason of a failure.
-fn why(out: &Output) -> String {
+pub(crate) fn why(out: &Output) -> String {
     let err = String::from_utf8_lossy(&out.stderr);
     let all = if err.trim().is_empty() { String::from_utf8_lossy(&out.stdout).into_owned() } else { err.into_owned() };
     all.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("git failed").trim_start_matches("fatal: ").trim_start_matches("error: ").to_owned()
 }
 
-fn ok(dir: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn ok(dir: &Path, args: &[&str]) -> Result<String, String> {
     match git(dir, args) {
         Ok(out) if out.status.success() => Ok(text(&out)),
         Ok(out) => Err(why(&out)),
@@ -59,8 +59,13 @@ fn ok(dir: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn branch_exists(repo: &Path, branch: &str) -> bool {
+pub(crate) fn branch_exists(repo: &Path, branch: &str) -> bool {
     git(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]).is_ok_and(|o| o.status.success())
+}
+
+/// Hold the git lock of quick tasks and the Code tab's writes: one git write at a time.
+pub(crate) fn lock() -> std::sync::MutexGuard<'static, ()> {
+    GIT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The project's main branch: the first of `MAIN_BRANCHES` that exists.
@@ -112,7 +117,12 @@ pub fn ensure_worktree(repo: &Path, branch: &str, worktree: &Path) -> Result<(),
 /// Merge a quick task's branch into the project's main (`--no-ff`, the ticket's number in
 /// the message). Every failure leaves main as it was.
 pub fn merge(repo: &Path, branch: &str, message: &str) -> MergeOutcome {
-    let _one = GIT.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = lock();
+    merge_locked(repo, branch, message)
+}
+
+/// `merge` for a caller that holds `lock()` already (the Code tab's `code.merge`).
+pub(crate) fn merge_locked(repo: &Path, branch: &str, message: &str) -> MergeOutcome {
     let failed = |reason: String, files: Vec<String>| MergeOutcome::Failed { reason, files };
     let Some(main) = main_branch(repo) else { return failed(no_main_reason(repo), vec![]) };
     match ok(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]) {
