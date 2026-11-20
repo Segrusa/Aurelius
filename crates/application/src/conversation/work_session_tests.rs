@@ -54,6 +54,10 @@ fn setup() -> Setup {
     };
     let repo_folder = dir.path().join("repo");
     std::fs::create_dir_all(repo_folder.join(".git")).unwrap();
+    // The folder as a project stores it: resolved, so on Windows a short temp path
+    // (C:\Users\RUNNER~1\...) becomes the long one.
+    let resolved = std::fs::canonicalize(&repo_folder).unwrap().to_string_lossy().into_owned();
+    let repo_folder = std::path::PathBuf::from(resolved.strip_prefix(r"\\?\").unwrap_or(&resolved));
     let repo = make("Planora", &repo_folder);
     let plain = make("Plain", &dir.path().join("plain"));
     let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Orion".into(), role: "Project Manager".into(), title: None, reports_to: None, instructions: None, folder: None };

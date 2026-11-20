@@ -7,6 +7,9 @@ use sha2::{Digest, Sha256};
 use std::path::Path;
 
 const FIXTURE: &str = include_str!("fresh_start_fixture.sql");
+/// Win32 `FILE_FLAG_BACKUP_SEMANTICS`: without it `CreateFile` cannot open a folder.
+#[cfg(windows)]
+const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
 const OLD_GLOBAL: &str = "0a000000-0000-4000-8000-000000000001";
 const PROJECT: &str = "0c000000-0000-4000-8000-000000000001";
 const ORION: &str = "0c000000-0000-4000-8000-000000000002";
@@ -595,7 +598,14 @@ fn a_scratch_folder_still_being_made_is_not_taken_for_a_crashed_one() {
     // A crash right after making the folder, long ago.
     let old = parent.join("crashed-before-its-lock");
     std::fs::create_dir_all(&old).unwrap();
-    std::fs::File::open(&old).unwrap().set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120)).unwrap();
+    // Windows sets a folder's time only through a handle opened for writing, with the flag that
+    // lets a folder be opened at all; Unix opens a folder for reading only.
+    #[cfg(windows)]
+    let handle = std::os::windows::fs::OpenOptionsExt::custom_flags(std::fs::OpenOptions::new().write(true), FILE_FLAG_BACKUP_SEMANTICS).open(&old).unwrap();
+    #[cfg(not(windows))]
+    let handle = std::fs::File::open(&old).unwrap();
+    handle.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(120)).unwrap();
+    drop(handle);
 
     let scratch = fresh_start::Scratch::new(root).unwrap();
 
