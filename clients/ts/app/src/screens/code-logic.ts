@@ -324,8 +324,9 @@ export function edgePath(e: GraphEdge): string {
 export const graphHeight = (rows: number) => GRAPH.top * 2 + rows * GRAPH.row;
 
 /**
- * Lane colours from the theme's icon palette. Main is grey; another branch keeps its colour across the
- * worktrees, the table and the graph because it comes from its name.
+ * Lane colours from the theme's icon palette. Main is grey; every other branch keeps one colour across the
+ * worktrees, the table and the graph. Colours go by the names in alphabetical order, so up to eight branches
+ * never share one, and a new commit (which reorders the server's list) changes none.
  */
 const BRANCH_COLORS = [
   "var(--color-icon-green)",
@@ -340,10 +341,13 @@ const BRANCH_COLORS = [
 export const MAIN_COLOR = "var(--color-icon-gray)";
 export const LOOSE_COLOR = "var(--color-icon-disabled)";
 
-export function branchColor(name: string | null, main: string | null): string {
-  if (name === null) return LOOSE_COLOR;
-  if (name === main) return MAIN_COLOR;
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) | 0;
-  return BRANCH_COLORS[Math.abs(hash) % BRANCH_COLORS.length] as string;
+/** The colour of each branch of the view; null (a line no listed branch points at) is faint. */
+export function branchPalette(names: readonly string[], main: string | null): (name: string | null) => string {
+  const others = [...new Set(names)].filter((n) => n !== main).sort();
+  const colors = new Map(others.map((n, i) => [n, BRANCH_COLORS[i % BRANCH_COLORS.length] as string]));
+  return (name) => {
+    if (name === null) return LOOSE_COLOR;
+    if (name === main) return MAIN_COLOR;
+    return colors.get(name) ?? LOOSE_COLOR;
+  };
 }

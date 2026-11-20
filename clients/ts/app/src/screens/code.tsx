@@ -25,7 +25,7 @@ import {
   BRANCH_FILTERS,
   type BranchFilter,
   type BranchStatus,
-  branchColor,
+  branchPalette,
   branchStatus,
   CODE_REFRESH_MS,
   CODE_VIEW,
@@ -52,6 +52,8 @@ import {
 } from "./code-logic";
 import { Confirm, failureOf, Loading, Page } from "./org-kit";
 import { ticketPlace } from "./ticket-session-logic";
+
+type Palette = (name: string | null) => string;
 
 /** Merge and fetch run git against the repository or a remote: they may take longer than a read. */
 const GIT_WRITE_TIMEOUT_MS = 120_000;
@@ -392,14 +394,14 @@ function AheadBehind({ ahead, behind }: { ahead: number; behind: number }) {
 
 function Worktrees({
   cards,
-  main,
+  color,
   selected,
   onSelect,
   onCleanUp,
   busy,
 }: {
   cards: WorktreeCard[];
-  main: string | null;
+  color: Palette;
   selected: string | null;
   onSelect: (branch: string) => void;
   onCleanUp: () => void;
@@ -435,7 +437,7 @@ function Worktrees({
                 {...stylex.props(styles.card, on && styles.cardOn)}
               >
                 <span {...stylex.props(styles.line)}>
-                  <Dot color={branchColor(w.branch ?? null, main)} />
+                  <Dot color={color(w.branch ?? null)} />
                   <span {...stylex.props(styles.mono, styles.strong)}>{name}</span>
                 </span>
                 <span title={w.path} {...stylex.props(styles.mono, styles.faint, styles.small)}>
@@ -469,13 +471,13 @@ function Worktrees({
 
 function Branches({
   branches,
-  main,
+  color,
   now,
   selected,
   onSelect,
 }: {
   branches: CodeBranch[];
-  main: string | null;
+  color: Palette;
   now: number;
   selected: string | null;
   onSelect: (branch: string) => void;
@@ -525,7 +527,7 @@ function Branches({
               )}
             >
               <span {...stylex.props(styles.cell)}>
-                <Dot color={branchColor(b.name, main)} />
+                <Dot color={color(b.name)} />
                 <span title={b.name} {...stylex.props(styles.mono, quiet ? styles.faint : styles.strong)}>
                   {b.name}
                 </span>
@@ -557,7 +559,17 @@ function Branches({
   );
 }
 
-function Commits({ view, now, onSelect }: { view: CodeView; now: number; onSelect: (branch: string) => void }) {
+function Commits({
+  view,
+  color,
+  now,
+  onSelect,
+}: {
+  view: CodeView;
+  color: Palette;
+  now: number;
+  onSelect: (branch: string) => void;
+}) {
   const main = view.main_branch ?? null;
   const commits = view.commits ?? [];
   const graph = useMemo(() => layoutGraph(commits, main), [commits, main]);
@@ -587,14 +599,14 @@ function Commits({ view, now, onSelect }: { view: CodeView; now: number; onSelec
               <path
                 key={`${e.fromRow}-${e.toRow}-${e.via}`}
                 d={edgePath(e)}
-                stroke={branchColor(e.branch, main)}
+                stroke={color(e.branch)}
                 strokeWidth={2}
                 fill="none"
                 strokeLinecap="round"
               />
             ))}
             {graph.rows.map((r, i) => {
-              const color = branchColor(r.branch, main);
+              const c = color(r.branch);
               return (
                 <circle
                   key={r.commit.hash}
@@ -602,8 +614,8 @@ function Commits({ view, now, onSelect }: { view: CodeView; now: number; onSelec
                   cy={rowY(i)}
                   r={r.merge ? 6 : 4.5}
                   // Main's commits are rings, a branch's are filled, as in the design.
-                  fill={r.lane === 0 && r.branch === main ? "var(--color-background-body)" : color}
-                  stroke={color}
+                  fill={r.lane === 0 && r.branch === main ? "var(--color-background-body)" : c}
+                  stroke={c}
                   strokeWidth={2}
                 />
               );
@@ -615,7 +627,7 @@ function Commits({ view, now, onSelect }: { view: CodeView; now: number; onSelec
               <div key={c.hash} {...stylex.props(styles.commit)} style={{ paddingInlineStart: indent }}>
                 <span {...stylex.props(styles.commitText)}>
                   {(c.branches ?? []).map((name) => {
-                    const color = branchColor(name, main);
+                    const tint = color(name);
                     return (
                       <button
                         key={name}
@@ -624,7 +636,7 @@ function Commits({ view, now, onSelect }: { view: CodeView; now: number; onSelec
                         disabled={!known.has(name)}
                         onClick={() => onSelect(name)}
                         {...stylex.props(styles.tag)}
-                        style={{ color, borderColor: color }}
+                        style={{ color: tint, borderColor: tint }}
                       >
                         {name}
                       </button>
@@ -672,6 +684,7 @@ function WithReason({ why, children }: { why: string | null; children: ReactNode
 
 function Details({
   branch,
+  color,
   view,
   now,
   busy,
@@ -680,6 +693,7 @@ function Details({
   onDanger,
 }: {
   branch: CodeBranch;
+  color: Palette;
   view: CodeView;
   now: number;
   busy: boolean;
@@ -697,7 +711,7 @@ function Details({
       <div {...stylex.props(styles.details)}>
         <div {...stylex.props(styles.detailsHead)}>
           <div {...stylex.props(styles.line)}>
-            <Dot color={branchColor(branch.name, view.main_branch ?? null)} size="big" />
+            <Dot color={color(branch.name)} size="big" />
             <h2 {...stylex.props(styles.detailsName)}>{branch.name}</h2>
           </div>
           <StatusPill status={status} />
@@ -780,6 +794,14 @@ export function CodeScreen() {
   const main = view?.main_branch ?? null;
   const busy = write.busy !== null;
   const cards = useMemo(() => (view ? worktreeCards(view) : []), [view]);
+  const color = useMemo(
+    () =>
+      branchPalette(
+        branches.map((b) => b.name),
+        main,
+      ),
+    [branches, main],
+  );
 
   const openTicket = (b: CodeBranch) => {
     if (b.ticket) void navigate(ticketPlace({ id: b.ticket.ticket_id, number: b.ticket.number }));
@@ -896,14 +918,14 @@ export function CodeScreen() {
         ) : null}
         <Worktrees
           cards={cards}
-          main={main}
+          color={color}
           selected={selected?.name ?? null}
           onSelect={setWanted}
           onCleanUp={() => setAsking({ kind: "prune" })}
           busy={busy}
         />
-        <Branches branches={branches} main={main} now={now} selected={selected?.name ?? null} onSelect={setWanted} />
-        <Commits view={view} now={now} onSelect={setWanted} />
+        <Branches branches={branches} color={color} now={now} selected={selected?.name ?? null} onSelect={setWanted} />
+        <Commits view={view} color={color} now={now} onSelect={setWanted} />
       </>
     );
   }
@@ -919,6 +941,7 @@ export function CodeScreen() {
         {showDetails ? (
           <Details
             branch={selected}
+            color={color}
             view={view}
             now={now}
             busy={busy}

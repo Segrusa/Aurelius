@@ -2,7 +2,7 @@ import type { CodeBranch, CodeCommit } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
   ago,
-  branchColor,
+  branchPalette,
   branchStatus,
   changesText,
   codeOf,
@@ -12,6 +12,7 @@ import {
   extraWorktrees,
   fetchedText,
   filterBranches,
+  LOOSE_COLOR,
   layoutGraph,
   lostCommitsText,
   MAIN_COLOR,
@@ -312,9 +313,21 @@ describe("the commit graph", () => {
 });
 
 describe("the colours", () => {
-  it("give main grey and a branch the same colour every time", () => {
-    expect(branchColor("main", "main")).toBe(MAIN_COLOR);
-    expect(branchColor("fix/73", "main")).toBe(branchColor("fix/73", "main"));
-    expect(branchColor("fix/73", "main")).toMatch(/^var\(--color-icon-/);
+  it("give main grey, a line without a branch a faint one, and up to eight branches each their own", () => {
+    const names = ["main", "fix/73", "fix/64", "feat/71", "feat/68", "spike", "a", "b", "c"];
+    const color = branchPalette(names, "main");
+    expect(color("main")).toBe(MAIN_COLOR);
+    expect(color(null)).toBe(LOOSE_COLOR);
+    expect(color("unknown")).toBe(LOOSE_COLOR);
+    const eight = names.slice(1, 9).map(color);
+    expect(new Set(eight).size).toBe(8);
+    expect(eight.every((c) => c.startsWith("var(--color-icon-"))).toBe(true);
+  });
+
+  it("keep a branch's colour when the list is reordered", () => {
+    const one = branchPalette(["main", "x", "y"], "main");
+    const other = branchPalette(["y", "main", "x"], "main");
+    expect(one("x")).toBe(other("x"));
+    expect(one("y")).toBe(other("y"));
   });
 });
