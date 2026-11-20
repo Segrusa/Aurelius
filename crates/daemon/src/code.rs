@@ -15,8 +15,11 @@ use aurelius_domain::code::{CODE_BRANCH_COMMITS_MAX, CODE_BRANCHES_MAX, CODE_COM
 use aurelius_protocol::{ErrorCode, HostWrite, ProtocolError};
 use aurelius_storage::code::BranchLink;
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::process::Stdio;
+use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
 
 /// Where local branches live; refs are named in full so a tag or file of the same name never answers.
 const HEADS: &str = "refs/heads/";
@@ -28,6 +31,18 @@ const REFS_FORMAT: &str = "--format=%(refname)%00%(objectname)%00%(upstream:shor
 const LOG_FORMAT: &str = "--format=%H%x00%P%x00%ct%x00%an%x00%s%x1e";
 /// The fields of a branch's own commit (see `parse_lines`).
 const LINES_FORMAT: &str = "--format=%H%x00%s%x1e";
+/// How long `code.fetch` may take before its git is stopped: a remote that accepts the
+/// connection and never answers would otherwise keep it waiting for good.
+pub const CODE_FETCH_TIMEOUT_MS: u64 = 60_000;
+/// How often a fetch is checked against its deadline.
+const FETCH_POLL_MS: u64 = 50;
+/// How long a finished fetch's error text is waited for.
+const FETCH_STDERR_WAIT_MS: u64 = 1_000;
+/// git's own limit on a slow http transfer: under 1000 bytes/s for 30 s ends it.
+const FETCH_HTTP_LIMITS: [&str; 4] = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"];
+/// The ssh a fetch uses when the environment names none: never a prompt, and a host that
+/// does not answer is given up after 15 s.
+const FETCH_SSH_COMMAND: &str = "ssh -o BatchMode=yes -o ConnectTimeout=15";
 
 /// `code.get`: the project's git state. A project without a usable repository answers a
 /// view with `problem` set; only an unknown project is an error.
@@ -93,12 +108,19 @@ pub async fn write(shared: &Arc<Shared>, write: HostWrite) -> Result<CodeView, P
     })
     .await?;
     let busy = Busy { links, loose_working };
-    app_task(move || {
-        let _git = quick::lock();
-        perform(&repo, write, &busy)
-    })
-    .await?;
+    app_task(move || apply(&repo, write, &busy, Duration::from_millis(CODE_FETCH_TIMEOUT_MS))).await?;
     view(shared, project).await
+}
+
+/// One write (blocking). A fetch runs without `quick::lock()`: it only writes remote refs and
+/// `FETCH_HEAD`, which no quick op touches, and it may wait on the network up to
+/// `fetch_deadline`. Every other write holds the lock.
+fn apply(repo: &Path, write: HostWrite, busy: &Busy, fetch_deadline: Duration) -> Result<(), ProtocolError> {
+    if let HostWrite::CodeFetch { .. } = write {
+        return fetch(repo, fetch_deadline);
+    }
+    let _git = quick::lock();
+    perform(repo, write, busy)
 }
 
 /// What the database says of who works where, for the refusals of a write.
@@ -305,7 +327,7 @@ fn perform(repo: &Path, write: HostWrite, busy: &Busy) -> Result<(), ProtocolErr
     // Read again under the lock: another write may have changed it since.
     let state = repo_state(repo).map_err(invalid)?;
     match write {
-        HostWrite::CodeFetch { .. } => fetch(repo),
+        HostWrite::CodeFetch { .. } => Err(internal("a fetch runs outside the git lock (see apply)")),
         HostWrite::CodeMerge { branch, .. } => merge(repo, &state, &branch, busy),
         HostWrite::CodeRemoveWorktree { path, .. } => remove_worktree(repo, &state, &path, busy),
         HostWrite::CodeDeleteBranch { branch, force, .. } => delete_branch(repo, &state, &branch, force, busy),
@@ -314,12 +336,49 @@ fn perform(repo: &Path, write: HostWrite, busy: &Busy) -> Result<(), ProtocolErr
     }
 }
 
-/// `code.fetch`: `git fetch --all --prune`. A repository without a remote has nothing to fetch.
-fn fetch(repo: &Path) -> Result<(), ProtocolError> {
+/// `code.fetch`: `git fetch --all --prune`, stopped at `deadline`. A repository without a
+/// remote has nothing to fetch.
+fn fetch(repo: &Path, deadline: Duration) -> Result<(), ProtocolError> {
     if ok(repo, &["remote"]).map_err(invalid)?.is_empty() {
         return Err(invalid("This repository has no remote to fetch from."));
     }
-    ok(repo, &["fetch", "--all", "--prune"]).map(drop).map_err(|why| invalid(format!("The fetch failed: {why}")))
+    let mut args = FETCH_HTTP_LIMITS.to_vec();
+    args.extend(["fetch", "--all", "--prune"]);
+    let mut command = quick::command(repo, &args);
+    if std::env::var_os("GIT_SSH_COMMAND").is_none() && std::env::var_os("GIT_SSH").is_none() {
+        command.env("GIT_SSH_COMMAND", FETCH_SSH_COMMAND);
+    }
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|e| invalid(format!("git could not run: {e}")))?;
+    // Read on a thread of its own, so a full pipe never stalls git. After a kill a helper of
+    // git may still hold the pipe, so the text is never waited for without a limit.
+    let stderr = child.stderr.take();
+    let (said, heard) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        if let Some(mut stderr) = stderr {
+            let _ = stderr.read_to_string(&mut text);
+        }
+        let _ = said.send(text);
+    });
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(invalid(format!("The fetch did not finish within {} s.", deadline.as_secs())));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(FETCH_POLL_MS)),
+            Err(e) => return Err(invalid(format!("git could not run: {e}"))),
+        }
+    };
+    if status.success() {
+        return Ok(());
+    }
+    let text = heard.recv_timeout(Duration::from_millis(FETCH_STDERR_WAIT_MS)).unwrap_or_default();
+    Err(invalid(format!("The fetch failed: {}", quick::reason(&text))))
 }
 
 fn known_branch<'a>(state: &'a RepoState, branch: &str) -> Result<&'a RefEntry, ProtocolError> {

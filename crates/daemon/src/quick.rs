@@ -29,15 +29,21 @@ pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + '
 }
 
 pub(crate) fn git(dir: &Path, args: &[&str]) -> std::io::Result<Output> {
-    Command::new("git")
+    command(dir, args).output()
+}
+
+/// git in `dir` as every caller here runs it, for one that adds to it before it runs.
+pub(crate) fn command(dir: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new("git");
+    command
         .args(args)
         .current_dir(dir)
         // Never a prompt for credentials, and never the repository of the daemon's environment.
         .env("GIT_TERMINAL_PROMPT", "0")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
+        .env_remove("GIT_INDEX_FILE");
+    command
 }
 
 pub(crate) fn text(out: &Output) -> String {
@@ -48,7 +54,12 @@ pub(crate) fn text(out: &Output) -> String {
 pub(crate) fn why(out: &Output) -> String {
     let err = String::from_utf8_lossy(&out.stderr);
     let all = if err.trim().is_empty() { String::from_utf8_lossy(&out.stdout).into_owned() } else { err.into_owned() };
-    all.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("git failed").trim_start_matches("fatal: ").trim_start_matches("error: ").to_owned()
+    reason(&all)
+}
+
+/// The first line of what git wrote, without its "fatal: " or "error: ".
+pub(crate) fn reason(text: &str) -> String {
+    text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("git failed").trim_start_matches("fatal: ").trim_start_matches("error: ").to_owned()
 }
 
 pub(crate) fn ok(dir: &Path, args: &[&str]) -> Result<String, String> {

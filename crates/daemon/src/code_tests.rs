@@ -204,3 +204,33 @@ fn a_branch_named_like_an_option_can_be_deleted_with_force() {
     perform(&repo, delete, &nobody()).unwrap();
     assert!(!git(&repo, &["rev-parse", "--verify", "--quiet", "refs/heads/-x"]).unwrap().status.success(), "the branch is gone");
 }
+
+#[test]
+fn a_fetch_from_a_remote_that_never_answers_ends_at_its_deadline_and_leaves_the_git_lock_free() {
+    let (_dir, repo) = repo();
+    // The kernel accepts the connection; nobody ever answers it.
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    run(&repo, &["remote", "add", "origin", &format!("git://127.0.0.1:{}/repo.git", silent.local_addr().unwrap().port())]);
+    let deadline = Duration::from_secs(2);
+    let fetching = {
+        let repo = repo.clone();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let result = apply(&repo, HostWrite::CodeFetch { project_id: ProjectId::new() }, &nobody(), deadline);
+            (result, started.elapsed())
+        })
+    };
+    std::thread::sleep(Duration::from_millis(300));
+    let (got, lock_taken) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _git = quick::lock();
+        let _ = got.send(());
+    });
+    assert!(lock_taken.recv_timeout(Duration::from_secs(1)).is_ok(), "a quick task's git work goes on while the fetch waits");
+    let (result, took) = fetching.join().unwrap();
+    let e = result.expect_err("the fetch is stopped");
+    assert_eq!(e.code, ErrorCode::Validation);
+    assert_eq!(e.message, "The fetch did not finish within 2 s.");
+    assert!(took < deadline + Duration::from_secs(2), "stopped at its deadline, took {took:?}");
+    drop(silent);
+}
