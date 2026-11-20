@@ -1,6 +1,7 @@
 // The app's sidebar: a rail of workspaces on the left (All workspaces, one tile per project, the Inbox
-// bell, the account and the fold button), and beside it the workspace's panel with New session, Board and History and its
-// sessions under Running, Today and Earlier. Under All workspaces those come per workspace.
+// bell, the account and the fold button), and beside it the workspace's panel with New session, Board and History, and
+// a Sessions and a Tickets section, each under Running, Today and Earlier. Under All workspaces those come per
+// workspace. Both sections always show and fold on their own.
 
 import type { IconType } from "@astryxdesign/core/Icon";
 import { SideNav, SideNavItem } from "@astryxdesign/core/SideNav";
@@ -33,6 +34,8 @@ import {
   needsPerProject,
   type SidebarBucket,
   type SidebarItem,
+  type SidebarSection,
+  sectionKey,
   workspaceGroups,
 } from "./sidebar-logic";
 import { sidebarTickets, ticketSignal } from "./ticket-session-logic";
@@ -157,16 +160,32 @@ const styles = stylex.create({
     textOverflow: "ellipsis",
     userSelect: "none",
   },
-  label: {
+  section: {
+    display: "flex",
+    flexDirection: "column",
     marginBlockStart: 12,
-    paddingBlockStart: 12,
-    paddingInline: 10,
+    paddingBlockStart: 8,
     borderBlockStartWidth: 1,
     borderBlockStartStyle: "solid",
     borderBlockStartColor: "var(--color-border)",
+  },
+  firstSection: { marginBlockStart: 4 },
+  // A section's head reads as a quiet label, but folds the section.
+  sectionFold: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    height: 26,
+    paddingInline: 10,
+    borderWidth: 0,
+    borderRadius: 6,
+    font: "inherit",
     fontSize: 11,
     fontWeight: 500,
-    color: "var(--precision-text3)",
+    textAlign: "start",
+    cursor: "pointer",
+    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-secondary)" },
+    backgroundColor: "transparent",
   },
   list: { display: "flex", flexDirection: "column", gap: 10, paddingBlock: 8 },
   group: { display: "flex", flexDirection: "column", gap: 1 },
@@ -293,6 +312,7 @@ function useSidebarItems(): SidebarItem[] {
     const signal = (t: TicketView) => ticketSignal(t, need.mine(t));
     const fromSessions: SidebarItem[] = (sessions ?? []).map((s) => ({
       key: `s:${s.conversation_id}`,
+      section: "sessions",
       to: `/session/${s.conversation_id}`,
       label: s.title || "Session",
       who: s.employee_name,
@@ -304,6 +324,7 @@ function useSidebarItems(): SidebarItem[] {
     // Since 0: every open ticket, not only the latest few.
     const fromTickets: SidebarItem[] = sidebarTickets(tickets ?? [], null, signal, 0).map((t) => ({
       key: `t:${t.id}`,
+      section: "tickets",
       to: `/ticket/${t.number}`,
       label: `#${t.number} ${t.title}`,
       who: t.owner_name ?? "?",
@@ -353,8 +374,8 @@ function Rows({ items, sub }: { items: SidebarItem[]; sub?: boolean }) {
 }
 
 /** One of Running, Today and Earlier in a single workspace. */
-function BucketFold({ entry }: { entry: SidebarBucket }) {
-  const [folded, toggle] = useFold(foldKey(undefined, entry.bucket), entry.bucket);
+function BucketFold({ section, entry }: { section: SidebarSection; entry: SidebarBucket }) {
+  const [folded, toggle] = useFold(foldKey(undefined, entry.bucket, section), entry.bucket);
   const running = entry.bucket === "running";
   return (
     <div {...stylex.props(styles.group)}>
@@ -370,8 +391,16 @@ function BucketFold({ entry }: { entry: SidebarBucket }) {
 }
 
 /** Running, Today or Earlier inside a workspace under All workspaces. */
-function SubFold({ workspace, entry }: { workspace: string | null; entry: SidebarBucket }) {
-  const [folded, toggle] = useFold(foldKey(workspace, entry.bucket), entry.bucket);
+function SubFold({
+  section,
+  workspace,
+  entry,
+}: {
+  section: SidebarSection;
+  workspace: string | null;
+  entry: SidebarBucket;
+}) {
+  const [folded, toggle] = useFold(foldKey(workspace, entry.bucket, section), entry.bucket);
   return (
     <div {...stylex.props(styles.group)}>
       <button type="button" aria-expanded={!folded} onClick={toggle} {...stylex.props(styles.fold, styles.subFold)}>
@@ -385,19 +414,21 @@ function SubFold({ workspace, entry }: { workspace: string | null; entry: Sideba
 }
 
 function WorkspaceFold({
+  section,
   project,
   id,
   buckets,
   count,
   running,
 }: {
+  section: SidebarSection;
   project: ProjectSummary | null;
   id: string | null;
   buckets: SidebarBucket[];
   count: number;
   running: number;
 }) {
-  const [folded, toggle] = useFold(foldKey(id));
+  const [folded, toggle] = useFold(foldKey(id, undefined, section));
   const name = project?.name ?? NO_PROJECT;
   return (
     <div {...stylex.props(styles.group)}>
@@ -413,12 +444,24 @@ function WorkspaceFold({
         ) : null}
         <span {...stylex.props(styles.count)}>{count}</span>
       </button>
-      {folded ? null : buckets.map((b) => <SubFold key={b.bucket} workspace={id} entry={b} />)}
+      {folded ? null : buckets.map((b) => <SubFold key={b.bucket} section={section} workspace={id} entry={b} />)}
     </div>
   );
 }
 
-function SessionList({ items, projects }: { items: SidebarItem[]; projects: ProjectSummary[] }) {
+const SECTION_TITLES: Record<SidebarSection, string> = { sessions: "Sessions", tickets: "Tickets" };
+const SECTION_EMPTY: Record<SidebarSection, string> = { sessions: "No sessions yet", tickets: "No open tickets" };
+
+/** One section's rows, cut into Running, Today and Earlier, per workspace under All workspaces. */
+function SectionList({
+  section,
+  items,
+  projects,
+}: {
+  section: SidebarSection;
+  items: SidebarItem[];
+  projects: ProjectSummary[];
+}) {
   const workspace = useWorkspace().id;
   const since = startOfDay(Date.now());
   if (workspace !== null) {
@@ -426,11 +469,11 @@ function SessionList({ items, projects }: { items: SidebarItem[]; projects: Proj
       items.filter((i) => i.projectId === workspace),
       since,
     );
-    if (buckets.length === 0) return <p {...stylex.props(styles.empty)}>No sessions yet</p>;
+    if (buckets.length === 0) return <p {...stylex.props(styles.empty)}>{SECTION_EMPTY[section]}</p>;
     return (
       <div {...stylex.props(styles.list)}>
         {buckets.map((b) => (
-          <BucketFold key={b.bucket} entry={b} />
+          <BucketFold key={b.bucket} section={section} entry={b} />
         ))}
       </div>
     );
@@ -440,13 +483,43 @@ function SessionList({ items, projects }: { items: SidebarItem[]; projects: Proj
     projects.map((p) => p.id),
     since,
   );
-  if (groups.length === 0) return <p {...stylex.props(styles.empty)}>No sessions yet</p>;
+  if (groups.length === 0) return <p {...stylex.props(styles.empty)}>{SECTION_EMPTY[section]}</p>;
   return (
     <div {...stylex.props(styles.list)}>
       {groups.map((g) => (
-        <WorkspaceFold key={g.id ?? ""} project={projects.find((p) => p.id === g.id) ?? null} {...g} />
+        <WorkspaceFold
+          key={g.id ?? ""}
+          section={section}
+          project={projects.find((p) => p.id === g.id) ?? null}
+          {...g}
+        />
       ))}
     </div>
+  );
+}
+
+/** Sessions or Tickets: always shown, even empty, and folded by its head (kept across starts). */
+function Section({
+  section,
+  items,
+  projects,
+  first,
+}: {
+  section: SidebarSection;
+  items: SidebarItem[];
+  projects: ProjectSummary[];
+  first?: boolean;
+}) {
+  const [folded, toggle] = useFold(sectionKey(section));
+  const mine = items.filter((i) => i.section === section);
+  return (
+    <section aria-label={SECTION_TITLES[section]} {...stylex.props(styles.section, first && styles.firstSection)}>
+      <button type="button" aria-expanded={!folded} onClick={toggle} {...stylex.props(styles.sectionFold)}>
+        <Chevron folded={folded} size={10} />
+        <span {...stylex.props(styles.foldName)}>{SECTION_TITLES[section]}</span>
+      </button>
+      {folded ? null : <SectionList section={section} items={mine} projects={projects} />}
+    </section>
   );
 }
 
@@ -631,7 +704,6 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
           {offered(shown(NAV), features).map((n) => (
             <NavRow key={n.to} to={n.to} label={n.label} icon={NAV_ICONS[n.icon]} />
           ))}
-          <div {...stylex.props(styles.label)}>Sessions</div>
         </>
       }
       footer={
@@ -642,7 +714,8 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
         ) : undefined
       }
     >
-      <SessionList items={items} projects={projects} />
+      <Section section="sessions" items={items} projects={projects} first />
+      <Section section="tickets" items={items} projects={projects} />
     </SideNav>
   );
 }

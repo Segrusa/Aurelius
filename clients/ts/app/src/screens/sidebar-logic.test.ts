@@ -7,6 +7,7 @@ import {
   isFolded,
   needsPerProject,
   type SidebarItem,
+  sectionKey,
   workspaceGroups,
 } from "./sidebar-logic";
 
@@ -15,6 +16,7 @@ const DAY = 1_000_000;
 function item(key: string, over: Partial<SidebarItem> = {}): SidebarItem {
   return {
     key,
+    section: "sessions",
     to: `/session/${key}`,
     label: key,
     who: "Flux",
@@ -80,6 +82,13 @@ describe("folds", () => {
     expect(foldKey(undefined, "today")).toBe("sidebar.fold.today");
     expect(foldKey("p1")).toBe("sidebar.fold.p1");
     expect(foldKey(null, "earlier")).toBe("sidebar.fold.none.earlier");
+  });
+
+  it("keeps the Tickets section's folds apart from the Sessions section's", () => {
+    expect(foldKey(undefined, "today", "tickets")).toBe("sidebar.tickets.fold.today");
+    expect(foldKey(null, "earlier", "tickets")).toBe("sidebar.tickets.fold.none.earlier");
+    expect(sectionKey("sessions")).toBe("sidebar.sessions");
+    expect(sectionKey("tickets")).toBe("sidebar.tickets");
   });
 
   it("opens Earlier only on request and the rest until folded", () => {

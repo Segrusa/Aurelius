@@ -1,12 +1,16 @@
-// The sidebar's lists without a screen: sessions and ticket sessions as one list, cut into Running, Today
+// The sidebar's lists without a screen: a Sessions and a Tickets section, each cut into Running, Today
 // and Earlier, per workspace when All workspaces shows, and what each workspace's rail tile counts.
 
 import type { SessionSignal } from "./session-logic";
 
-/** One row of the sidebar's session list: a work session or a ticket's session. */
+/** The sidebar's two sections; each folds on its own and always shows. */
+export type SidebarSection = "sessions" | "tickets";
+
+/** One row of the sidebar: a work session or a ticket's session. */
 export interface SidebarItem {
   /** Unique across both kinds. */
   key: string;
+  section: SidebarSection;
   to: string;
   label: string;
   /** Who works in it: the session's employee or the ticket's owner, for the mark. */
@@ -90,10 +94,23 @@ export function needsPerProject(items: Pick<SidebarItem, "projectId" | "signal">
   return counts;
 }
 
-/** The storage key of a fold in the session list; `workspace` only under All workspaces. */
-export function foldKey(workspace: string | null | undefined, bucket?: Bucket): string {
+/** The storage key of a sidebar section's own fold. */
+export function sectionKey(section: SidebarSection): string {
+  return `sidebar.${section}`;
+}
+
+/**
+ * The storage key of a fold inside a section; `workspace` only under All workspaces. The Sessions section
+ * keeps the keys it had before Tickets became a section of its own, so folds made then still hold.
+ */
+export function foldKey(
+  workspace: string | null | undefined,
+  bucket?: Bucket,
+  section: SidebarSection = "sessions",
+): string {
   const ws = workspace === undefined ? "" : (workspace ?? "none");
-  return ["sidebar.fold", ws, bucket ?? ""].filter((p) => p !== "").join(".");
+  const prefix = section === "sessions" ? "sidebar.fold" : "sidebar.tickets.fold";
+  return [prefix, ws, bucket ?? ""].filter((p) => p !== "").join(".");
 }
 
 /** Whether a fold is closed: as stored, else Earlier starts closed and the rest open. */

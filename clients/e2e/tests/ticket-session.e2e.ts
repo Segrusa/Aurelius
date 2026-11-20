@@ -295,7 +295,34 @@ test.describe("a ticket's session", () => {
     await expect(page).toHaveURL(/\/ticket\/70$/);
   });
 
-  test("the sidebar lists the open tickets among the sessions; a row opens the session", async ({ page }) => {
+  test("the sidebar always shows a Sessions and a Tickets section, each folding on its own", async ({ page }) => {
+    const world: World = {
+      tickets: { t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }) },
+      feeds: { d70: feedOf("d70", []) },
+    };
+    await scriptServer(page, scripted(world));
+    await page.goto(`${site.origin}/new`);
+    const side = page.getByRole("navigation", { name: "Main" });
+    const sessions = side.getByRole("region", { name: "Sessions" });
+    const tickets = side.getByRole("region", { name: "Tickets" });
+    // No sessions yet: the section still shows, with its empty line.
+    await expect(sessions.getByText("No sessions yet")).toBeVisible();
+    await expect(tickets.getByRole("link", { name: /#70 A ticket opens/ })).toBeVisible();
+
+    const sessionsHead = sessions.getByRole("button", { name: "Sessions" });
+    await sessionsHead.click();
+    await expect(sessionsHead).toHaveAttribute("aria-expanded", "false");
+    await expect(sessions.getByText("No sessions yet")).toHaveCount(0);
+    await page.reload();
+    await expect(sessions.getByRole("button", { name: "Sessions" })).toHaveAttribute("aria-expanded", "false");
+    await expect(tickets.getByRole("link", { name: /#70 A ticket opens/ })).toBeVisible();
+
+    await tickets.getByRole("button", { name: "Tickets" }).click();
+    await expect(tickets.getByRole("link", { name: /#70 A ticket opens/ })).toHaveCount(0);
+    await expect(tickets.getByRole("button", { name: "Tickets" })).toBeVisible();
+  });
+
+  test("the sidebar lists the open tickets under Tickets; a row opens the session", async ({ page }) => {
     const world: World = {
       tickets: {
         t70: ticket("t70", 70, "doing", { ...owned, title: "A ticket opens as its own session" }),
