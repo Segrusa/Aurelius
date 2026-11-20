@@ -13,15 +13,22 @@ export function chooserText(session: Pick<WorkSessionView, "employee_name" | "di
   return null;
 }
 
-/** What a session's sidebar row signals: it works now, or it waits for your choice of who takes it. */
-export type SessionSignal = "working" | "needs_you";
+/**
+ * What a session's sidebar row signals: it works now, it waits for your choice of who takes it, or it
+ * finished an answer you have not opened yet (`done`, until you open the session).
+ */
+export type SessionSignal = "working" | "needs_you" | "done";
 
-type SignalFields = Pick<WorkSessionView, "running"> & Partial<Pick<WorkSessionView, "dispatch">>;
+type SignalFields = Pick<WorkSessionView, "running"> & Partial<Pick<WorkSessionView, "dispatch" | "unseen">>;
 
-/** A session works while a run of it is queued or under way, or while the dispatcher chooses who takes it. */
+/**
+ * A session works while a run of it is queued or under way, or while the dispatcher chooses who takes it.
+ * Done only says something when neither of the others does.
+ */
 export function sessionSignal(session: SignalFields): SessionSignal | null {
   if (session.running || session.dispatch === "choosing") return "working";
   if (session.dispatch === "nobody") return "needs_you";
+  if (session.unseen) return "done";
   return null;
 }
 

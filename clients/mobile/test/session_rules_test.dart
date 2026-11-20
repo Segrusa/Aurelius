@@ -2,7 +2,7 @@ import 'package:aurelius_mobile/data/protocol/protocol.dart';
 import 'package:aurelius_mobile/features/sessions/session_rules.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-WorkSessionView session({String id = 'c1', bool running = false, SessionDispatch? dispatch, int at = 0, String? branch, String? worktree}) => WorkSessionView(
+WorkSessionView session({String id = 'c1', bool running = false, SessionDispatch? dispatch, int at = 0, String? branch, String? worktree, bool unseen = false}) => WorkSessionView(
       conversationId: id,
       createdAtMs: 0,
       employeeId: 'e1',
@@ -15,6 +15,7 @@ WorkSessionView session({String id = 'c1', bool running = false, SessionDispatch
       dispatch: dispatch,
       branch: branch,
       worktree: worktree,
+      unseen: unseen,
     );
 
 Receipt receipt(CommandResult value) => Receipt(committedSeq: 1, idempotencyKey: 'k', replayed: false, result: WriteResultCommand(value: value));
@@ -25,6 +26,11 @@ void main() {
     test('a session the dispatcher is choosing for works', () => expect(sessionSignal(session(dispatch: SessionDispatch.choosing)), SessionSignal.working));
     test('a session the dispatcher chose nobody for needs you', () => expect(sessionSignal(session(dispatch: SessionDispatch.nobody)), SessionSignal.needsYou));
     test('a quiet session has no signal', () => expect(sessionSignal(session()), isNull));
+    test('a finished answer not opened yet is done', () => expect(sessionSignal(session(unseen: true)), SessionSignal.done));
+    test('working and needing you go before done', () {
+      expect(sessionSignal(session(running: true, unseen: true)), SessionSignal.working);
+      expect(sessionSignal(session(dispatch: SessionDispatch.nobody, unseen: true)), SessionSignal.needsYou);
+    });
   });
 
   test('activeSessions counts only the working ones', () {
@@ -43,6 +49,7 @@ void main() {
 
     test('a working session is Active whenever it last moved', () => expect(sessionPeriod(session(running: true, at: at(2025, 1, 1)), now), SessionPeriod.active));
     test('a session waiting for your choice is Active', () => expect(sessionPeriod(session(dispatch: SessionDispatch.nobody, at: at(2025, 1, 1)), now), SessionPeriod.active));
+    test('a done session stays in the day it finished, not Active', () => expect(sessionPeriod(session(unseen: true, at: at(2026, 11, 17, 23)), now), SessionPeriod.yesterday));
     test('since midnight is Today', () => expect(sessionPeriod(session(at: at(2026, 11, 18)), now), SessionPeriod.today));
     test('the day before is Yesterday', () => expect(sessionPeriod(session(at: at(2026, 11, 17, 23)), now), SessionPeriod.yesterday));
     test('Monday of this week is This week', () => expect(sessionPeriod(session(at: at(2026, 11, 16)), now), SessionPeriod.thisWeek));

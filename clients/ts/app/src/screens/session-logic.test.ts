@@ -134,6 +134,13 @@ describe("sessionSignal", () => {
   it("gives an idle session no signal", () => {
     expect(sessionSignal({ running: false })).toBeNull();
     expect(sessionSignal({ running: false, dispatch: null })).toBeNull();
+    expect(sessionSignal({ running: false, unseen: false })).toBeNull();
+  });
+
+  it("marks a finished answer you have not opened yet as done, below working and needing you", () => {
+    expect(sessionSignal({ running: false, unseen: true })).toBe("done");
+    expect(sessionSignal({ running: true, unseen: true })).toBe("working");
+    expect(sessionSignal({ running: false, dispatch: "nobody", unseen: true })).toBe("needs_you");
   });
 });
 

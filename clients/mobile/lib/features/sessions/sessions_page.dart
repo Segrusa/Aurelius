@@ -224,12 +224,18 @@ class SessionRow extends StatelessWidget {
       subtitle: '${sessionWho(s)} · ${s.projectName} · ${Fmt.ago(s.lastActivityMs)}',
       leading: SessionMark.lead(sessionSignal(s)),
       chevron: true,
-      onTap: () => context.push('/session/${s.conversationId}'),
+      // Opening it marks it seen on the server; read the list again on the way back.
+      onTap: () async {
+        final sessions = context.read<SessionsBloc>();
+        await context.push('/session/${s.conversationId}');
+        if (!sessions.isClosed) sessions.add(const SessionsRefreshed());
+      },
     );
   }
 }
 
-/// The dot of a session's row: pulsing while it works, the warning colour while it waits for your choice.
+/// The dot of a session's row: pulsing while it works, red while it waits for your
+/// choice (as on the desktop), orange when it finished an answer you have not opened yet.
 class SessionMark extends StatelessWidget {
   const SessionMark({super.key, required this.signal});
 
@@ -243,6 +249,7 @@ class SessionMark extends StatelessWidget {
   Widget build(BuildContext context) => switch (signal) {
         null => const SizedBox.shrink(),
         SessionSignal.working => Semantics(label: 'Working', child: StatusDot(key: const ValueKey('session-working'), color: Tokens.accent, pulse: true)),
-        SessionSignal.needsYou => Semantics(label: 'Waiting for your choice', child: StatusDot(key: const ValueKey('session-needs-you'), color: Tokens.warning)),
+        SessionSignal.needsYou => Semantics(label: 'Waiting for your choice', child: StatusDot(key: const ValueKey('session-needs-you'), color: Tokens.red)),
+        SessionSignal.done => Semantics(label: 'Finished, not opened yet', child: StatusDot(key: const ValueKey('session-done'), color: Tokens.orange)),
       };
 }

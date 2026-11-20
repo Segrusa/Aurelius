@@ -32,7 +32,7 @@ LinkState linkOf(List<String> features) => LinkState(status: LinkStatus.online, 
 
 final sessionsLink = linkOf(const ['work_sessions', 'session_dispatch', 'chat_files']);
 
-WorkSessionView sessionOf(String id, {String title = 'Fix the login', int at = 0, bool running = false, SessionDispatch? dispatch, String employeeId = 'forge', String employee = 'Forge'}) => WorkSessionView(
+WorkSessionView sessionOf(String id, {String title = 'Fix the login', int at = 0, bool running = false, SessionDispatch? dispatch, String employeeId = 'forge', String employee = 'Forge', bool unseen = false}) => WorkSessionView(
       conversationId: id,
       createdAtMs: 0,
       employeeId: employeeId,
@@ -43,6 +43,7 @@ WorkSessionView sessionOf(String id, {String title = 'Fix the login', int at = 0
       running: running,
       title: title,
       dispatch: dispatch,
+      unseen: unseen,
     );
 
 MockRepository repoWith({List<WorkSessionView> sessions = const [], LinkState? link, MessagesSnapshot? messages, BoardView? board}) {
@@ -130,6 +131,13 @@ void main() {
       expect(tester.getTopLeft(find.byKey(const ValueKey('session-working'))).dx, lessThan(tester.getTopLeft(find.text('Busy one')).dx), reason: 'the dot leads the row');
       expect(find.textContaining('Forge · Atlas'), findsNWidgets(2));
       expect(find.textContaining('Nobody yet · Atlas'), findsOneWidget);
+    });
+
+    testWidgets('a finished answer not opened yet gets the orange done dot and stays out of Active', (tester) async {
+      final repo = repoWith(sessions: [sessionOf('c1', title: 'Finished one', at: 1, unseen: true)]);
+      await pumpSessions(tester, repo, const WorkSessionsPage());
+      expect(find.descendant(of: find.byKey(const ValueKey('session-c1')), matching: find.byKey(const ValueKey('session-done'))), findsOneWidget);
+      expect(find.textContaining('ACTIVE'), findsNothing);
     });
 
     testWidgets('sessions stand in sections: Active, then by the day of their last activity', (tester) async {

@@ -16,14 +16,24 @@ const chatFilesFeature = 'chat_files';
 /// The Who of a session nobody was chosen for: the dispatcher chooses.
 const dispatcherWho = 'dispatcher';
 
-/// What a session's row signals: it works now, or it waits for your choice of who takes it.
-enum SessionSignal { working, needsYou }
+/// What a session's row signals: it works now, it waits for your choice of who
+/// takes it, or it finished an answer you have not opened yet ([done], until you open it).
+enum SessionSignal {
+  working,
+  needsYou,
+  done;
+
+  /// Working or needing you: what puts a row in the Active section. Done does not.
+  bool get isActive => this != done;
+}
 
 /// A session works while a run of it is queued or under way, or while the
 /// dispatcher chooses who takes it; it needs you once the dispatcher chose nobody.
+/// Done only says something when neither of the others does.
 SessionSignal? sessionSignal(WorkSessionView s) {
   if (s.running || s.dispatch == SessionDispatch.choosing) return SessionSignal.working;
   if (s.dispatch == SessionDispatch.nobody) return SessionSignal.needsYou;
+  if (s.unseen ?? false) return SessionSignal.done;
   return null;
 }
 
@@ -64,7 +74,7 @@ SessionPeriod periodOf({required bool active, required int usedMs, required Date
 
 /// The section of [s] at [now] (local time): Active while it has a signal, else by its last activity.
 SessionPeriod sessionPeriod(WorkSessionView s, DateTime now, {int? usedMs}) =>
-    periodOf(active: sessionSignal(s) != null, usedMs: usedMs ?? s.lastActivityMs, now: now);
+    periodOf(active: sessionSignal(s)?.isActive ?? false, usedMs: usedMs ?? s.lastActivityMs, now: now);
 
 /// [items] in their sections, in the sections' order, each most recently used
 /// first (desktop's byLastUse: ties keep their order). [usedAt] is when an
@@ -88,7 +98,7 @@ List<(SessionPeriod, List<WorkSessionView>)> sessionSections(Iterable<WorkSessio
       sessions,
       now,
       usedAt: (s) => s.lastActivityMs,
-      active: (s) => sessionSignal(s) != null,
+      active: (s) => sessionSignal(s)?.isActive ?? false,
     );
 
 /// Who works in a session: its employee, the dispatcher at it while it chooses, or nobody yet.

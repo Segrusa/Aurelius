@@ -8,7 +8,7 @@ import { Button } from "@astryxdesign/core/Button";
 import type { AgentMode, MessagesSnapshot, WorkSessionView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useConnection } from "../connection";
 import { useEmployees, useMessages, useWorkSessions } from "../data";
 import { useKeyContext } from "../keys/provider";
@@ -62,6 +62,7 @@ export function SessionScreen({ conversationId }: { conversationId: string }) {
   // refuses it too). Only once the list is current, so a session just started never looks like that.
   const othersSession = mine.isSuccess && !mine.isFetching && session === null;
   const dock = usePropertiesDock();
+  useSeenOnRead(conversationId);
   return (
     <div {...stylex.props(styles.body)}>
       <EmployeeChat
@@ -81,6 +82,18 @@ export function SessionScreen({ conversationId }: { conversationId: string }) {
       />
     </div>
   );
+}
+
+/**
+ * Reading the session marks it seen on the server; the session list, read alongside, may still say it
+ * finished unseen (the orange dot). So after each read of its messages, the list is read once more.
+ */
+function useSeenOnRead(conversationId: string) {
+  const client = useQueryClient();
+  const readAt = useMessages(conversationId).dataUpdatedAt;
+  useEffect(() => {
+    if (readAt > 0) void client.invalidateQueries({ queryKey: ["messages", "work_sessions"] });
+  }, [readAt, client]);
 }
 
 /** The session's properties panel: what a task's run shows, for this session. */

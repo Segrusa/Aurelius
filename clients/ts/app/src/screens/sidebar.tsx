@@ -222,6 +222,7 @@ const styles = stylex.create({
   },
   dotRunning: { backgroundColor: "var(--color-text-success)" },
   dotNeedsYou: { backgroundColor: "var(--color-text-error)" },
+  dotDone: { backgroundColor: "var(--color-dot-orange)" },
   empty: { margin: 0, paddingInline: 10, fontSize: 12, color: "var(--precision-text3)" },
   reconnect: { margin: 0, paddingInline: 8, fontSize: 12, color: "var(--color-text-warning)" },
 });
@@ -260,18 +261,22 @@ function NavRow({ to, label, icon, end }: { to: string; label: string; icon: Ico
   return <SideNavItem label={label} href={to} icon={icon} size="sm" isSelected={on} endContent={end} />;
 }
 
-/** A row's dot: green and breathing while it works, red while it waits for you. */
+const SIGNAL_DOTS = {
+  working: { text: "Working", style: styles.dotWorking },
+  needs_you: { text: "Waiting for you", style: styles.dotNeedsYou },
+  done: { text: "Finished, not opened yet", style: styles.dotDone },
+} as const;
+
+/**
+ * A row's dot: green and breathing while it works, red while it waits for you, orange when it finished an
+ * answer you have not opened yet.
+ */
 function SignalDot({ signal }: { signal: SessionSignal | null }) {
   if (signal === null) return null;
-  const working = signal === "working";
-  const text = working ? "Working" : "Waiting for you";
+  const { text, style } = SIGNAL_DOTS[signal];
   return (
     <Tooltip content={text} delay={400} hasHoverIndication={false}>
-      <span
-        role="img"
-        aria-label={text}
-        {...stylex.props(styles.dot, working ? styles.dotWorking : styles.dotNeedsYou)}
-      />
+      <span role="img" aria-label={text} {...stylex.props(styles.dot, style)} />
     </Tooltip>
   );
 }
