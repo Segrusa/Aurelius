@@ -1,11 +1,23 @@
-// The status bar under every screen (ticket #50): who is busy and what waits for a slot.
+// The status bar under every screen (ticket #50): the server, its CPU and memory, who is busy
+// and what waits for a slot.
 
 import { Popover } from "@astryxdesign/core/Popover";
 import type { ActivityBusy, ActivityOverview, ActivityWaiting, TicketActivity } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
-import { type ButtonHTMLAttributes, forwardRef, useState } from "react";
-import { useActivityOverview } from "../data";
-import { activityCounts, ticketActivityLine, waitLabel, workLabel } from "./activity-bar-logic";
+import { useNavigate } from "@tanstack/react-router";
+import { type ButtonHTMLAttributes, forwardRef, type ReactNode, useMemo, useState } from "react";
+import { useLinkState } from "../connection";
+import { useActivityOverview, useMachineLoad, useWorkSessions } from "../data";
+import { Icon } from "../ui/icons";
+import {
+  activityCounts,
+  machineFigures,
+  serverLine,
+  ticketActivityLine,
+  waitLabel,
+  workHref,
+  workLabel,
+} from "./activity-bar-logic";
 import { Eyebrow } from "./org-kit";
 import { when } from "./settings-kit";
 
@@ -15,6 +27,8 @@ const styles = stylex.create({
     flexShrink: 0,
     height: 24,
     alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 12,
     borderTopWidth: 1,
     borderTopStyle: "solid",
     borderTopColor: "var(--color-border)",
@@ -33,11 +47,31 @@ const styles = stylex.create({
     color: "var(--color-text-secondary)",
     backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
   },
+  figure: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 12,
+    color: "var(--color-text-secondary)",
+    fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap",
+  },
   dot: { width: 6, height: 6, borderRadius: "50%", backgroundColor: "var(--precision-text3)" },
   dotBusy: { backgroundColor: "var(--color-text-accent)" },
   panel: { display: "flex", flexDirection: "column", gap: 12, maxHeight: 420, overflowY: "auto" },
   section: { display: "flex", flexDirection: "column", gap: 6 },
   row: { display: "flex", flexDirection: "column", fontSize: 12 },
+  link: {
+    textAlign: "start",
+    cursor: "pointer",
+    borderWidth: 0,
+    borderRadius: 4,
+    marginInline: -6,
+    paddingBlock: 4,
+    paddingInline: 6,
+    font: "inherit",
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+  },
   who: { color: "var(--color-text-primary)" },
   quiet: { color: "var(--color-text-secondary)" },
   empty: { margin: 0, fontSize: 12, color: "var(--color-text-secondary)" },
@@ -55,46 +89,62 @@ const styles = stylex.create({
 const rowKey = (row: ActivityBusy | ActivityWaiting): string =>
   `${row.employee_id ?? "assistant"}|${row.since_ms}|${row.work.label ?? ""}|${"waits_for" in row ? row.waits_for : "busy"}`;
 
+/** A row opens where its work is; another board member's chat has nowhere to go. */
+function Row({ href, onOpen, children }: { href: string | null; onOpen: (href: string) => void; children: ReactNode }) {
+  if (!href) return <div {...stylex.props(styles.row)}>{children}</div>;
+  return (
+    <button type="button" onClick={() => onOpen(href)} {...stylex.props(styles.row, styles.link)}>
+      {children}
+    </button>
+  );
+}
+
 function BusyRow({ row }: { row: ActivityBusy }) {
   return (
-    <div {...stylex.props(styles.row)}>
+    <>
       <span {...stylex.props(styles.who)}>
         {row.employee_name}
         {row.employee_paused ? " (paused, finishes this run)" : ""}
       </span>
       <span {...stylex.props(styles.quiet)}>{workLabel(row.work)}</span>
       <span {...stylex.props(styles.quiet)}>Since {when(row.since_ms)}</span>
-    </div>
+    </>
   );
 }
 
 function WaitingRow({ row }: { row: ActivityWaiting }) {
   return (
-    <div {...stylex.props(styles.row)}>
+    <>
       <span {...stylex.props(styles.who)}>{workLabel(row.work)}</span>
       <span
         {...stylex.props(styles.quiet)}
       >{`${row.employee_name}: ${waitLabel(row.waits_for, row.employee_name)}`}</span>
       <span {...stylex.props(styles.quiet)}>Since {when(row.since_ms)}</span>
-    </div>
+    </>
   );
 }
 
-function Details({ overview }: { overview: ActivityOverview }) {
+function Details({ overview, onOpen }: { overview: ActivityOverview; onOpen: (href: string) => void }) {
+  const sessions = useWorkSessions().data;
+  const sessionIds = useMemo(() => new Set((sessions ?? []).map((s) => s.conversation_id)), [sessions]);
   return (
     <div {...stylex.props(styles.panel)}>
       <section {...stylex.props(styles.section)}>
         <Eyebrow>BUSY</Eyebrow>
         {overview.busy.length === 0 ? <p {...stylex.props(styles.empty)}>Nobody is working right now.</p> : null}
         {overview.busy.map((row) => (
-          <BusyRow key={rowKey(row)} row={row} />
+          <Row key={rowKey(row)} href={workHref(row.work, sessionIds)} onOpen={onOpen}>
+            <BusyRow row={row} />
+          </Row>
         ))}
       </section>
       <section {...stylex.props(styles.section)}>
         <Eyebrow>IN LINE</Eyebrow>
         {overview.waiting.length === 0 ? <p {...stylex.props(styles.empty)}>Nothing is waiting.</p> : null}
         {overview.waiting.map((row) => (
-          <WaitingRow key={rowKey(row)} row={row} />
+          <Row key={rowKey(row)} href={workHref(row.work, sessionIds)} onOpen={onOpen}>
+            <WaitingRow row={row} />
+          </Row>
         ))}
       </section>
     </div>
@@ -113,25 +163,61 @@ const Trigger = forwardRef<
   );
 });
 
-/** Hidden on a server without the feature (no data ever comes). */
+/** The server's name and version, then its CPU and memory where the server measures them. */
+function Machine() {
+  const { hostName, daemonVersion } = useLinkState();
+  const load = useMachineLoad().data;
+  const figures = load ? machineFigures(load) : null;
+  return (
+    <>
+      <span {...stylex.props(styles.figure)} title="Server">
+        <Icon name="server" size={13} />
+        {serverLine(hostName, daemonVersion)}
+      </span>
+      {figures ? (
+        <>
+          <span {...stylex.props(styles.figure)} title={figures.cpuHint}>
+            <Icon name="cpu" size={13} />
+            {figures.cpu}
+          </span>
+          <span {...stylex.props(styles.figure)} title={figures.memoryHint}>
+            <Icon name="memory" size={13} />
+            {figures.memory}
+          </span>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/** The activity part is hidden on a server without the feature (no data ever comes). */
 export function ActivityBar() {
+  const { status } = useLinkState();
   const overview = useActivityOverview();
   const [open, setOpen] = useState(false);
-  if (!overview.data) return null;
-  const { busy, waitingForSlot } = activityCounts(overview.data);
+  const navigate = useNavigate();
+  const openWork = (href: string) => {
+    setOpen(false);
+    void navigate({ href });
+  };
+  if (status !== "online") return null;
+  const counts = overview.data ? activityCounts(overview.data) : null;
   return (
     <div {...stylex.props(styles.bar)}>
-      <Popover
-        label="Activity"
-        isOpen={open}
-        onOpenChange={setOpen}
-        width={340}
-        placement="above"
-        alignment="start"
-        content={<Details overview={overview.data} />}
-      >
-        <Trigger busy={busy} waiting={waitingForSlot} />
-      </Popover>
+      <Machine />
+      {overview.data && counts ? (
+        <Popover
+          label="Activity"
+          isOpen={open}
+          onOpenChange={setOpen}
+          width={340}
+          placement="above"
+          alignment="end"
+          content={<Details overview={overview.data} onOpen={openWork} />}
+        >
+          <Trigger busy={counts.busy} waiting={counts.waitingForSlot} />
+        </Popover>
+      ) : null}
     </div>
   );
 }

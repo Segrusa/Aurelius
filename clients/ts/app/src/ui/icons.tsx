@@ -38,6 +38,10 @@ const NAV_PATHS = {
   bell: "M4 11.5V7.2a4 4 0 0 1 8 0v4.3l1.2 1.5H2.8zM6.6 13.5a1.5 1.5 0 0 0 2.8 0",
   // A list with a marked first row: the properties of a session or run, behind the head's button.
   properties: "M4.25 3.25a1.75 1.75 0 1 0 0 3.5a1.75 1.75 0 1 0 0-3.5zM8.5 5h5M2.5 11h3M8.5 11h5",
+  // The status bar's machine figures: a chip with pins, a memory module, a rack of two units.
+  cpu: "M4.5 4.5h7v7h-7zM6.75 6.75h2.5v2.5h-2.5zM6.5 2v2.5M9.5 2v2.5M6.5 11.5V14M9.5 11.5V14M2 6.5h2.5M2 9.5h2.5M11.5 6.5H14M11.5 9.5H14",
+  memory: "M1.5 5h13v5.5h-13zM4 7v1.5M6.67 7v1.5M9.33 7v1.5M12 7v1.5M3.5 10.5v2M6 10.5v2M10 10.5v2M12.5 10.5v2",
+  server: "M2.5 2.5h11v4.5h-11zM2.5 9h11v4.5h-11zM5 4.75h.01M5 11.25h.01M8 4.75h3M8 11.25h3",
 } as const;
 
 export type NavIcon = keyof typeof NAV_PATHS;
