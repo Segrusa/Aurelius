@@ -163,20 +163,11 @@ const styles = stylex.create({
     textDecoration: "none",
   },
   rowText: { minWidth: 0, flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
-  rowName: {
-    minWidth: 0,
-    flex: 1,
-    overflow: "hidden",
-    fontWeight: 500,
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-  },
   note: { margin: 0, padding: 14, color: "var(--precision-text3)" },
   ticket: { marginInlineEnd: 8, fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--precision-text3)" },
   rowSide: { flexShrink: 0, fontSize: 12 },
   rowDim: { flexShrink: 0, fontSize: 12, color: "var(--precision-text3)" },
   rowMono: { fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--precision-text3)" },
-  on: { color: "var(--color-text-accent)" },
   dim: { color: "var(--precision-text3)" },
   link: { color: "var(--color-text-accent)", textDecoration: "none" },
   cardFoot: { padding: 10 },
@@ -191,11 +182,6 @@ const styles = stylex.create({
   },
   missing: { margin: 0, padding: 24, color: "var(--color-text-secondary)" },
   back: { color: "var(--color-text-secondary)", textDecoration: "none" },
-  chevron: {
-    color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
-    textDecoration: "none",
-  },
-  truncatedName: { overflow: "hidden", fontWeight: 600, whiteSpace: "nowrap", textOverflow: "ellipsis" },
   path: {
     maxWidth: 260,
     overflow: "hidden",
@@ -935,20 +921,6 @@ function Overview({
           />
         </div>
       ) : null}
-      <Panel title={`WHO WORKS HERE · ${team.length}`}>
-        {team.length === 0 ? (
-          <p {...stylex.props(styles.note)}>Nobody works here yet. Start a ticket to put someone to work.</p>
-        ) : null}
-        {team.map((e) => (
-          <Link key={e.id} to="/employees/$id" params={{ id: e.id }} {...row}>
-            <Mark letter={initial(e.name)} color={markColor(e.id)} size={22} radius={6} />
-            <span {...stylex.props(styles.rowName)}>{e.name}</span>
-            <span {...stylex.props(styles.rowSide, e.working ? styles.on : styles.dim)}>
-              {e.status === "paused" ? "Paused" : e.working ? "Working" : "Available"}
-            </span>
-          </Link>
-        ))}
-      </Panel>
       <Panel
         title={`TASKS · ${open.length} OPEN`}
         right={
@@ -1096,15 +1068,7 @@ export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab })
   return (
     <Page>
       <PageHead
-        title={
-          <>
-            <Link to="/projects" aria-label="Back to projects" {...stylex.props(styles.chevron)}>
-              ‹
-            </Link>
-            <Mark letter={initial(project.name)} color={markColor(project.id)} size={16} radius={4} />
-            <span {...stylex.props(styles.truncatedName)}>{project.name}</span>
-          </>
-        }
+        title="Workspace settings"
         {...(tabs.length > 1
           ? {
               tabs: (

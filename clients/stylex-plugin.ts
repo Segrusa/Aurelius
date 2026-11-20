@@ -18,6 +18,10 @@ type Hook = HookObject | ((...args: unknown[]) => unknown);
 
 export function ownStylex<Plugin>(): Plugin[] {
   const made = stylex({
+    // Not Astryx's `x`: the same declaration would otherwise get the same atomic class, and our unlayered
+    // copy then beats the Astryx theme on Astryx's own elements (a sidebar badge's red fill once hid the
+    // Deny label under a red fill).
+    classNamePrefix: "a",
     runtimeInjection: false,
     useCSSLayers: false,
     unstable_moduleResolution: { type: "commonJS", rootDir: ROOT },

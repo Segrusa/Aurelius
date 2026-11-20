@@ -47,7 +47,7 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByPlaceholder("Name, for example Atlas").fill("Atlas");
     await page.getByLabel("Project folder (required)").fill(folder);
     await page.getByRole("button", { name: "Create project" }).click();
-    await expect(page.getByText("WHO WORKS HERE · 0")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Workspace settings" })).toBeVisible();
 
     // A boss and a report, so the org chart has a line.
     await openCompanyPage(page, "Employees");

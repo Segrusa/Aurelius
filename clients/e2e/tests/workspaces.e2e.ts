@@ -110,7 +110,7 @@ test("a workspace and a ticket show their Claude Design link, and an older serve
 
     await scriptServer(page, script);
     await page.goto(`${site.origin}/projects/${ATLAS}`);
-    await expect(page.getByText("WORKSPACE SETTINGS")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible();
     await expect(page.getByText("Styleguide", { exact: true })).toBeHidden();
     await page.goto(`${site.origin}/board?ticket=t1`);
     await expect(page.getByRole("complementary", { name: "Ticket properties" })).toBeVisible();
@@ -265,7 +265,7 @@ test("a real daemon takes the filters of a workspace", async () => {
     await page.getByPlaceholder("Name, for example Atlas").fill("Atlas");
     await page.getByLabel("Project folder (required)").fill(folder);
     await page.getByRole("button", { name: "Create project" }).click();
-    await expect(page.getByText("WHO WORKS HERE · 0")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Workspace settings" })).toBeVisible();
 
     await choose(page, "Atlas");
     // What refuses an unknown param answers with an error, and each screen would say so.

@@ -182,7 +182,12 @@ test.describe("the Inbox bell", () => {
     await dropdown(page)
       .getByRole("button", { name: /Flux wants to run a command.*ls/ })
       .click();
-    await dropdown(page).getByRole("button", { name: /^Deny/ }).click();
+    // The theme draws Deny as an outline. An app class that shares Astryx's atomic name for the red fill
+    // once won over it and hid the label: red text on a red fill.
+    const deny = dropdown(page).getByRole("button", { name: /^Deny/ });
+    await expect(deny).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(deny).toHaveCSS("border-top-width", "1px");
+    await deny.click();
     await expect.poll(() => writes.length).toBe(2);
     expect(writes[1]).toMatchObject({ params: { approval_id: "b", approve: false } });
     await expect(dropdown(page).getByText("Nothing here. You are up to date.")).toBeVisible();

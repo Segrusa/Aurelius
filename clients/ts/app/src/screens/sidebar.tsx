@@ -143,11 +143,13 @@ const styles = stylex.create({
   newTile: { borderWidth: 1, borderStyle: "dashed", borderColor: "var(--color-border-emphasized)" },
   grow: { flexGrow: 1 },
   head: { display: "flex", alignItems: "center", gap: 4, height: 36 },
+  titleMark: { display: "flex", flexShrink: 0, paddingInlineStart: 8 },
+  titleBeside: { paddingInlineStart: 4 },
   title: {
     flex: 1,
     minWidth: 0,
     paddingInline: 8,
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: 600,
     color: "var(--color-text-primary)",
     whiteSpace: "nowrap",
@@ -579,7 +581,12 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
       resizable={{ defaultWidth: 264, minWidth: 200, maxWidth: 440, autoSaveId: "sidebar-panel" }}
       header={
         <div data-sidebar-drag {...stylex.props(styles.head)}>
-          <span title={title} {...stylex.props(styles.title)}>
+          {available ? (
+            <span {...stylex.props(styles.titleMark)}>
+              <WorkspaceMark project={project} size={20} />
+            </span>
+          ) : null}
+          <span title={title} {...stylex.props(styles.title, available && styles.titleBeside)}>
             {title}
           </span>
           <Tooltip content="Search and commands" delay={400} hasHoverIndication={false}>
@@ -600,9 +607,9 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
                 onClick={() =>
                   void (id ? navigate({ to: "/projects/$id", params: { id } }) : navigate({ to: "/projects" }))
                 }
-                {...stylex.props(styles.railButton)}
+                {...stylex.props(styles.railButton, styles.headButton)}
               >
-                <Icon name="settings" size={17} />
+                <Icon name="settings" size={15} />
               </button>
             </Tooltip>
           ) : null}
