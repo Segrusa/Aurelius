@@ -7017,6 +7017,12 @@ export interface WorkSessionView {
    */
   title: string;
   /**
+   * A run of it ended after the reader last opened it (with `conversation.get`), so
+   * there is a finished answer they have not seen. Never while it runs; older
+   * servers leave it out, and a client then shows no mark.
+   */
+  unseen?: boolean;
+  /**
    * Its own worktree and branch; none when it works in the project's folder.
    */
   worktree?: string | null;

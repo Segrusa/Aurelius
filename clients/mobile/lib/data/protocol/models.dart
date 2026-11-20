@@ -20284,6 +20284,7 @@ final class WorkSessionView {
     required this.projectName,
     required this.running,
     required this.title,
+    this.unseen,
     this.worktree,
   });
 
@@ -20304,6 +20305,10 @@ final class WorkSessionView {
   /// Named after its first message, until a title made from its content
   /// replaces it after the first answer.
   final String title;
+  /// A run of it ended after the reader last opened it (with `conversation.get`), so
+  /// there is a finished answer they have not seen. Never while it runs; older
+  /// servers leave it out, and a client then shows no mark.
+  final bool? unseen;
   /// Its own worktree and branch; none when it works in the project's folder.
   final String? worktree;
 
@@ -20319,6 +20324,7 @@ final class WorkSessionView {
     projectName: (json['project_name'] as String),
     running: (json['running'] as bool),
     title: (json['title'] as String),
+    unseen: (json['unseen'] == null ? null : (json['unseen'] as bool)),
     worktree: (json['worktree'] == null ? null : (json['worktree'] as String)),
   );
 
@@ -20334,6 +20340,7 @@ final class WorkSessionView {
     'project_name': projectName,
     'running': running,
     'title': title,
+    if (unseen != null) 'unseen': unseen,
     if (worktree != null) 'worktree': worktree,
   };
 }
