@@ -191,20 +191,8 @@ class AureliusRepository {
   /// The reader's work sessions, the latest activity first (feature `work_sessions`).
   Future<List<WorkSessionView>> workSessions() async => (await _ask<ResponseBodyWorkSessions>(workSessionList())).value.sessions;
 
-  /// The company's group chat (Team): the user and every employee. With
-  /// [channel] (feature `team_channels`) a project's channel, or (feature
-  /// `ticket_channels`) a ticket's; none: General.
-  Future<MessagesSnapshot> groupChat({String? channel}) async => (await _ask<ResponseBodyMessages>(groupChatGet(channel: channel))).value;
-
-  /// One thread of a channel (feature `chat_threads`): the message [messageId]
-  /// and its replies. Reading it marks the thread read for the board member.
-  Future<ThreadSnapshot> thread(String messageId) async => (await _ask<ResponseBodyThread>(threadRead(messageId: messageId))).value;
-
-  /// The Team chat's channels (feature `team_channels`): General first, then one per project.
-  Future<List<ChannelView>> channels() async => (await _ask<ResponseBodyChannels>(channelList())).value.channels;
-
   /// The channels whose name or ticket number matches [query] (feature
-  /// `ticket_channels`), archived ones too, in the order of [channels].
+  /// `ticket_channels`), archived ones too.
   Future<List<ChannelView>> searchChannels(String query) async => (await _ask<ResponseBodyChannels>(channelSearch(query: query))).value.channels;
 
   /// One tool call of message [messageId] whole (`activity_preview`: messages

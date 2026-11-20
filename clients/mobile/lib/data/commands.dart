@@ -57,16 +57,9 @@ abstract final class Commands {
   static Map<String, dynamic> sendChatMessage(String conversationId, String text, {List<String> images = const [], List<String> files = const [], bool interrupt = false, bool confirmSecret = false}) =>
       chatSend(SendChatMessage(confirmSecret: confirmSecret ? true : null, conversationId: conversationId, files: files, images: images, interrupt: interrupt ? true : null, text: text));
 
-  /// A message of the user in the group chat (Team): `@Name` wakes those
-  /// employees, else the CEO answers (in a project's [channel]: its dispatcher).
-  /// With [threadParent] (feature `chat_threads`) a reply in that message's thread.
-  static Map<String, dynamic> sendGroupMessage(String text, {List<String> images = const [], List<String> files = const [], String? channel, bool confirmSecret = false, String? threadParent}) =>
-      groupChatSend(SendGroupMessage(channel: channel, confirmSecret: confirmSecret ? true : null, files: files, images: images, text: text, threadParent: threadParent));
-
   /// A board member's message in a ticket's discussion (feature `ticket_discussion`).
-  /// With [threadParent] (feature `chat_threads`) a reply in that message's thread.
-  static Map<String, dynamic> postTicketMessage(String ticketId, String text, {List<String> images = const [], List<String> files = const [], bool confirmSecret = false, String? threadParent}) =>
-      ticketPost(confirmSecret: confirmSecret ? true : null, ticketId: ticketId, text: text, images: images, files: files, threadParent: threadParent);
+  static Map<String, dynamic> postTicketMessage(String ticketId, String text, {List<String> images = const [], List<String> files = const [], bool confirmSecret = false}) =>
+      ticketPost(confirmSecret: confirmSecret ? true : null, ticketId: ticketId, text: text, images: images, files: files);
 
   /// The board member's reaction [emoji] on a channel's message, added ([on]) or
   /// taken back (feature `chat_reactions`). Idempotent on the PC.

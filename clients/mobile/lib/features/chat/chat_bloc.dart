@@ -25,21 +25,6 @@ class ChatRefreshed extends ChatEvent {
   const ChatRefreshed();
 }
 
-/// Whether the Team chat is on screen. Reading a channel marks it read on the
-/// server (`group_chat.get`, schema 20): hidden, changes only mark it stale and
-/// it is read again once it shows, so its unread and mentions stay in the badge.
-class ChatShown extends ChatEvent {
-  const ChatShown(this.visible);
-
-  final bool visible;
-}
-
-/// The channel can be written in again (AUR-CHAT-001 §8 Reopen): its
-/// ticket left Done, so `channel_archived` no longer holds.
-class ChatReopened extends ChatEvent {
-  const ChatReopened();
-}
-
 /// The board member's own reaction [emoji] on [messageId], added ([on]) or
 /// taken back (feature `chat_reactions`): shown at once, undone when refused.
 class ChatReacted extends ChatEvent {
@@ -338,7 +323,7 @@ class ChatState extends Equatable {
 
   /// A write here was refused with `channel_archived` (feature
   /// `ticket_channels`): the channel can only be read, the read-only bar
-  /// shows in place of the composer until [ChatReopened].
+  /// shows in place of the composer.
   final bool closed;
 
   /// The run that is streaming now, if any.
@@ -413,73 +398,28 @@ class ChatState extends Equatable {
 
 /// One conversation: an employee's task conversation when [employeeId] is set
 /// (messages then go to the employee), a project conversation when [projectId]
-/// is set (messages go to `project_conversation.send`), or the company's group
-/// chat with [ChatBloc.group] (`group_chat.get` / `group_chat.send`).
+/// is set (messages go to `project_conversation.send`), or a ticket's
+/// discussion with [ChatBloc.discussion].
 /// [session]: a work session's conversation (feature `work_sessions`); its
 /// messages go in with `chat.send`, as on the desktop.
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   ChatBloc(this._repository, {String? conversationId, this.employeeId, this.projectId, this.session = false})
       : assert(employeeId != null || projectId != null, 'a conversation belongs to an employee or a project'),
         assert(!session || conversationId != null, 'a session has its conversation'),
-        group = false,
-        channel = null,
-        channelTicket = null,
         ticketId = null,
-        threadRoot = null,
         runAuthor = null,
-        onRead = null,
         liveTimeout = Duration.zero,
         super(ChatState(conversationId: conversationId, loading: conversationId != null)) {
     _init(conversationId != null);
   }
 
-  /// The group chat (Team). Its id comes with the first load. [runAuthor]
-  /// names the employee a run answers for while it streams (its answer is no
-  /// message in the group until it ends); `null` once that run no longer works.
-  /// A live answer that never becomes a message goes [liveTimeout] after its
-  /// last update once its run no longer works.
-  /// [onRead] runs after each read of the channel (which the server counts as
-  /// read): the channels' unread and mentions are asked for again then.
-  /// [channelTicket]: the ticket whose channel this is (feature `ticket_channels`).
-  ChatBloc.group(this._repository, {this.runAuthor, this.liveTimeout = const Duration(seconds: 3), this.channel, this.channelTicket, this.onRead})
-      : employeeId = null,
-        projectId = null,
-        ticketId = null,
-        threadRoot = null,
-        session = false,
-        group = true,
-        super(const ChatState()) {
-    _init(true);
-  }
-
   /// A ticket's discussion (feature `ticket_discussion`): read as any
-  /// conversation, written with `ticket.post`. It works as the group chat:
-  /// board members and employees write in it, answers stream under their name.
+  /// conversation, written with `ticket.post`: board members and employees write in it, answers stream under their name.
   ChatBloc.discussion(this._repository, {required String this.ticketId, required String conversationId, this.runAuthor, this.liveTimeout = const Duration(seconds: 3)})
       : employeeId = null,
         projectId = null,
-        channel = null,
-        channelTicket = null,
-        threadRoot = null,
-        onRead = null,
         session = false,
-        group = true,
         super(ChatState(conversationId: conversationId)) {
-    _init(true);
-  }
-
-  /// One thread of a Team chat channel (feature `chat_threads`, AUR-CHAT-002
-  /// §5): the message [threadRoot] and its replies (`thread.read`, which marks
-  /// the thread read), written with `group_chat.send { channel, thread_parent }`.
-  /// It works as the channel: answers stream into it under their name, and
-  /// only the ones of this thread.
-  ChatBloc.thread(this._repository, {required String this.threadRoot, this.channel, this.channelTicket, this.runAuthor, this.liveTimeout = const Duration(seconds: 3), this.onRead})
-      : employeeId = null,
-        projectId = null,
-        ticketId = null,
-        session = false,
-        group = true,
-        super(const ChatState()) {
     _init(true);
   }
 
@@ -507,25 +447,12 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<ChatFileRemoved>((e, emit) => emit(state.copyWith(files: state.files.where((f) => f != e.file).toList())));
     on<ChatAttachmentRemoved>((e, emit) => _run(emit, Commands.removeAttachment(e.attachmentId)));
     on<ChatNoticeShown>((e, emit) => emit(state.copyWith()));
-    on<ChatReopened>((e, emit) => emit(state.copyWith(closed: false)));
     on<ChatReacted>(_react, transformer: sequential());
-    on<ChatShown>((e, emit) {
-      _shown = e.visible;
-      if (_shown && _stale) {
-        _stale = false;
-        add(const ChatRefreshed());
-      }
-    });
 
     _subs = [
       _repository.online.listen((_) => _changed()),
       _repository.chatChanges.where((e) => e.aggregateId == state.conversationId || e.isRun).listen((_) => _changed()),
-      // An answer streaming into a thread goes to that thread's screen, never into the channel (AUR-CHAT-002).
-      _repository.appends.where((a) => a.conversationId == state.conversationId && a.threadParent == threadRoot).listen((a) => add(_AppendReceived(a))),
-      // A ticket's channel is its discussion: its lines and employees' posts
-      // come as `task.posted` on the conversation, a move as the ticket's own event.
-      if (channelTicket case final ticket?)
-        _repository.changes.where((e) => (e.kind == EventKind.taskPosted && e.aggregateId == state.conversationId) || e.aggregateId == ticket).listen((_) => _changed()),
+      _repository.appends.where((a) => a.conversationId == state.conversationId && a.threadParent == null).listen((a) => add(_AppendReceived(a))),
     ];
     if (load && _repository.linkState.isOnline) add(const ChatRefreshed());
   }
@@ -537,40 +464,15 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   /// A work session's conversation: sent with `chat.send`.
   final bool session;
 
-  /// The company's group chat: messages carry their author, answers stream
-  /// before they are messages there (see [_live]).
-  final bool group;
-
-  /// The group chat's channel (a project's, from `channel.list`); null: General.
-  final String? channel;
-
-  /// The ticket whose channel [channel] is; null for General and a project's.
-  final String? channelTicket;
-
   /// The ticket whose discussion this is; null for every other chat.
   final String? ticketId;
 
   bool get discussion => ticketId != null;
 
-  /// The message whose thread this is; null for every other chat.
-  final String? threadRoot;
+  /// Its answers stream before they are messages (see [_live]): a discussion's.
+  bool get group => discussion;
 
-  /// See [ChatBloc.group].
-  final void Function()? onRead;
-
-  /// The Team chat is on screen ([ChatShown]); a change while hidden leaves it [_stale].
-  bool _shown = true;
-  bool _stale = false;
-
-  /// Reading the Team chat marks its channel read for the board member; a
-  /// hidden one waits. Every other chat reads again at once.
-  void _changed() {
-    if (group && !discussion && !_shown) {
-      _stale = true;
-    } else {
-      add(const ChatRefreshed());
-    }
-  }
+  void _changed() => add(const ChatRefreshed());
 
   /// The board members were asked for once (they rarely change).
   bool _membersRead = false;
@@ -633,9 +535,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (id == null && !group) return;
     // Trying again after it failed: loading shows again.
     if (group && state.loadError != null && state.messages.isEmpty) emit(state.copyWith(loading: true));
-    if (threadRoot != null) return _refreshThread(threadRoot!, emit);
     try {
-      final snapshot = discussion ? await _repository.messages(id!) : group ? await _repository.groupChat(channel: channel) : await _repository.messages(id!);
+      final snapshot = await _repository.messages(id!);
       final messages = _deleting.isEmpty ? snapshot.messages : snapshot.messages.where((m) => !_deleting.contains(m.id)).toList();
       emit(state.copyWith(
         loading: false,
@@ -651,44 +552,16 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         clearLoadError: true,
         boardMembers: group && !_membersRead ? await _boardMembers() : null,
       ));
-      if (group && !discussion) onRead?.call();
     } on DisconnectedException catch (e) {
-      // The Team chat that never loaded says why (a reconnect loads it again), not that it is empty.
+      // A discussion that never loaded says why (a reconnect loads it again), not that it is empty.
       emit(state.copyWith(loading: false, loadError: group && state.conversationId == null ? e.message : null));
     } on ProtocolException catch (e) {
-      final shown = discussion ? 'The discussion could not be loaded: ${e.shown}' : group ? groupChatFailure(e) : e.shown;
+      final shown = discussion ? 'The discussion could not be loaded: ${e.shown}' : e.shown;
       emit(state.copyWith(loading: false, notice: shown, loadError: shown));
     } catch (e) {
       // Anything else (an answer this app cannot read) stops the loading too.
       if (!group) rethrow;
-      emit(state.copyWith(loading: false, loadError: '${discussion ? 'The discussion' : 'The Team chat'} could not be loaded: $e'));
-    }
-  }
-
-  /// A thread's read: its root on top, then its replies. The PC says whether
-  /// its channel is closed (`read_only`): then nothing in it can be written.
-  Future<void> _refreshThread(String root, Emitter<ChatState> emit) async {
-    if (state.loadError != null && state.messages.isEmpty) emit(state.copyWith(loading: true));
-    try {
-      final thread = await _repository.thread(root);
-      final messages = [thread.root, ...thread.replies];
-      emit(state.copyWith(
-        loading: false,
-        conversationId: thread.conversationId,
-        messages: [...messages, ..._stillLive(messages)],
-        unsent: state.unsent.where((u) => !u.delivered).toList(),
-        closed: thread.readOnly ?? false,
-        clearLoadError: true,
-        boardMembers: !_membersRead ? await _boardMembers() : null,
-      ));
-      onRead?.call();
-    } on DisconnectedException catch (e) {
-      emit(state.copyWith(loading: false, loadError: state.conversationId == null ? e.message : null));
-    } on ProtocolException catch (e) {
-      final shown = 'The thread could not be loaded: ${e.shown}';
-      emit(state.copyWith(loading: false, notice: shown, loadError: shown));
-    } catch (e) {
-      emit(state.copyWith(loading: false, loadError: 'The thread could not be loaded: $e'));
+      emit(state.copyWith(loading: false, loadError: 'The discussion could not be loaded: $e'));
     }
   }
 
@@ -701,13 +574,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       return const [];
     }
   }
-
-  /// Why the Team chat did not load. A server from before the group chat does not
-  /// know `group_chat.get` (`unknown_method`): after an update it still runs the
-  /// old version and must be restarted.
-  static String groupChatFailure(ProtocolException e) => e.code == ErrorCode.unknownMethod
-      ? 'The server is older than this app and has no Team chat yet. Restart the server (or update it), then try again.'
-      : 'The Team chat could not be loaded: ${e.shown}';
 
   /// The streaming group answers the snapshot does not have yet. One that
   /// never became a message (an empty answer) goes once its run no longer
@@ -821,11 +687,9 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
     final images = [for (final i in unsent.images) i.path];
     final files = [for (final f in unsent.files) f.path];
-    final fresh = !group && employeeId == null && state.conversationId == null;
+    final fresh = !discussion && employeeId == null && state.conversationId == null;
     final command = discussion
-        ? Commands.postTicketMessage(ticketId!, unsent.text, images: images, files: files, confirmSecret: unsent.confirmSecret, threadParent: threadRoot)
-        : group
-        ? Commands.sendGroupMessage(unsent.text, images: images, files: files, channel: channel, confirmSecret: unsent.confirmSecret, threadParent: threadRoot)
+        ? Commands.postTicketMessage(ticketId!, unsent.text, images: images, files: files, confirmSecret: unsent.confirmSecret)
         : session
         ? Commands.sendChatMessage(state.conversationId!, unsent.text, images: images, files: files, interrupt: unsent.interrupt, confirmSecret: unsent.confirmSecret)
         : employeeId != null
@@ -874,7 +738,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
       // says so, never the error itself (AUR-CHAT-001 §8). The text stays to copy.
       if (e.code == ErrorCode.channelArchived) {
         emit(state.copyWith(unsent: state.unsent.map((u) => u.localId == unsent.localId ? u.asFailed(true) : u).toList(), closed: true));
-        onRead?.call();
         return;
       }
       // A server without the discussion engine (`unknown_method`): kept, to try again after an update.
@@ -901,7 +764,6 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     } on ProtocolException catch (e) {
       if (e.code == ErrorCode.channelArchived) {
         put(before.reactions, closed: true);
-        onRead?.call();
         return;
       }
       put(before.reactions, notice: e.message);
