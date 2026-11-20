@@ -76,7 +76,9 @@ export function useTicketNeeds(tickets: TicketView[]) {
         t.root_task_id ? (approvals.get(t.root_task_id) ?? 0) : 0,
         t.root_task_id ? (waiting.get(t.root_task_id) ?? null) : null,
       );
-    return { me, dispatcher, choosing, needs, mine: (t: TicketView) => needsMe(needs(t), t, me) };
+    const rootWaiting = (t: TicketView): string | null =>
+      t.root_task_id ? (waiting.get(t.root_task_id) ?? null) : null;
+    return { me, dispatcher, choosing, needs, rootWaiting, mine: (t: TicketView) => needsMe(needs(t), t, me) };
   }, [unowned, timelines, tasks.data, projects.data, company.data, employees.data, me]);
 }
 

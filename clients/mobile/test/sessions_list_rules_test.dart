@@ -56,6 +56,15 @@ void main() {
       expect(ticketSignal(ticketOf(rootTaskStatus: TaskStatus.queued), needsYou: false), SessionSignal.working);
       expect(ticketSignal(ticketOf(rootTaskStatus: TaskStatus.waiting), needsYou: false), isNull);
     });
+
+    test('ticketSignal: a main task waiting for the parts it delegated keeps the ticket working', () {
+      final delegated = ticketOf(column: ColumnKind.doing, rootTaskStatus: TaskStatus.waiting);
+      expect(ticketSignal(delegated, needsYou: false, rootWaiting: 'dependency'), SessionSignal.working);
+      expect(ticketSignal(delegated, needsYou: true, rootWaiting: 'dependency'), SessionSignal.needsYou);
+      expect(ticketSignal(delegated, needsYou: false, rootWaiting: 'input'), isNull);
+      final sections = ticketSections([delegated], DateTime.now(), needsYou: (_) => false, rootWaiting: (_) => 'dependency');
+      expect(sections.first.$1, SessionPeriod.active);
+    });
   });
 
   group('Chat tab', () {

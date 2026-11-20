@@ -153,10 +153,18 @@ export const SIDEBAR_TICKETS = 8;
 /** The columns of a ticket that is under way: not waiting in the Backlog and not done yet. */
 const OPEN_COLUMNS: readonly ColumnKind[] = ["todo", "doing", "plan_review", "testing", "review"];
 
-/** A ticket's dot in the sidebar: it needs you first, else it works while its main task runs. */
-export function ticketSignal(t: Pick<TicketView, "root_task_status">, needsYou: boolean): SessionSignal | null {
+/**
+ * A ticket's dot in the sidebar: it needs you first, else it works while its main task runs, or waits for the
+ * parts it delegated (`rootWaiting`, the main task's `waiting_reason`): the ticket is still under way then.
+ */
+export function ticketSignal(
+  t: Pick<TicketView, "root_task_status">,
+  needsYou: boolean,
+  rootWaiting: string | null = null,
+): SessionSignal | null {
   if (needsYou) return "needs_you";
-  return t.root_task_status === "running" || t.root_task_status === "queued" ? "working" : null;
+  if (t.root_task_status === "running" || t.root_task_status === "queued") return "working";
+  return t.root_task_status === "waiting" && rootWaiting === "dependency" ? "working" : null;
 }
 
 /**
