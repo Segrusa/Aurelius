@@ -84,12 +84,20 @@ export class LiveStore {
 
 /** The store of one conversation, fed from the connection for as long as it is shown. */
 export function useLiveStore(conversationId: string | null | undefined): LiveStore {
+  return useLiveStoreOf(conversationId ? [conversationId] : []);
+}
+
+/** One store for several conversations at once: the tasks of a ticket, for its Activity. */
+export function useLiveStoreOf(conversationIds: readonly string[]): LiveStore {
   const connection = useConnection();
   const store = useMemo(() => new LiveStore(), []);
+  // A new array of the same ids must not subscribe again.
+  const key = conversationIds.join(" ");
   useEffect(() => {
-    if (!conversationId) return;
+    if (key === "") return;
+    const ids = new Set(key.split(" "));
     const off = connection.streams.on((u) => {
-      if (u.conversation_id === conversationId) store.put(u);
+      if (ids.has(u.conversation_id)) store.put(u);
     });
     const sweep = setInterval(() => store.sweep(Date.now(), 3000), 1000);
     const offState = connection.subscribe(() => {
@@ -101,7 +109,7 @@ export function useLiveStore(conversationId: string | null | undefined): LiveSto
       clearInterval(sweep);
       store.dispose();
     };
-  }, [connection, conversationId, store]);
+  }, [connection, key, store]);
   return store;
 }
 

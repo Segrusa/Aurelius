@@ -63,8 +63,9 @@ import { Held } from "./dialogs";
 import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
+import { mergeByTime, type WorkRow, workInFilter } from "./ticket-activity-logic";
 import { OVERVIEW_KEY, OverviewPanel, ProgressCard, useTicketProgress } from "./ticket-overview";
-import { ActivityHead } from "./ticket-page";
+import { ActivityHead, WorkItem } from "./ticket-page";
 import { type ActivityFilter, inFilter } from "./ticket-page-logic";
 import { ticketPlace } from "./ticket-session-logic";
 import { ColumnGlyph } from "./tickets-kit";
@@ -779,6 +780,7 @@ function ThreadPanel({
 type Row =
   | { kind: "message"; m: MessageView; day: boolean; isNew: boolean; grouped: boolean; earlier: number }
   | { kind: "live"; id: string; run: string }
+  | { kind: "work"; id: string; w: WorkRow }
   | { kind: "approval"; id: string };
 
 interface ChannelProps {
@@ -802,6 +804,8 @@ export interface SessionSlots {
    * now. With it the talk gets an Activity heading with a filter.
    */
   top?: ReactNode;
+  /** What the ticket's tasks read, edited and ran, merged in time into the Activity (ticket #76). */
+  work?: readonly WorkRow[];
   /** In place of the progress card above the composer: what runs this second. */
   live?: ReactNode;
   /** Between the progress and the composer: the decision of the moment. */
@@ -950,15 +954,19 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
 
   const rows = useMemo<Row[]>(() => {
     const dayOf = (ms: number) => localDay(ms, offset());
-    const out: Row[] = list2.map((m, i) => {
-      const b = before(list2, i, newAt, dayOf);
+    const work = filtering && workInFilter(filter) ? (session?.work ?? []) : [];
+    const out: Row[] = mergeByTime(list2, work).map((r, at, all) => {
+      if (r.kind === "work") return { kind: "work", id: r.w.id, w: r.w };
+      const b = before(list2, r.index, newAt, dayOf);
+      // A message right after work starts its own group again.
+      const afterWork = all[at - 1]?.kind === "work";
       return {
         kind: "message",
-        m,
+        m: r.m,
         day: b.day,
         isNew: b.new,
-        grouped: b.grouped,
-        earlier: folded.earlier.get(m.id) ?? 0,
+        grouped: b.grouped && !afterWork,
+        earlier: folded.earlier.get(r.m.id) ?? 0,
       };
     });
     // What streams and what waits on you is talk, not a change.
@@ -969,7 +977,7 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
     }
     for (const a of pending) if (!onCard.has(a.id)) out.push({ kind: "approval", id: a.id });
     return out;
-  }, [list2, folded.earlier, newAt, live, inList, pending, onCard, filter]);
+  }, [list2, folded.earlier, newAt, live, inList, pending, onCard, filter, filtering, session?.work]);
 
   const readOnly = session ? session.readOnly : (c?.archived ?? false) || feed.data?.read_only === true;
   const caps = useMemo<Caps>(
@@ -1205,6 +1213,8 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
                             <MessageRow m={row.m} grouped={row.grouped} />
                           </div>
                         </>
+                      ) : row.kind === "work" ? (
+                        <WorkItem row={row.w} />
                       ) : row.kind === "live" ? (
                         <LiveRow
                           id={row.id}
