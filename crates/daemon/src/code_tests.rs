@@ -346,3 +346,25 @@ fn an_open_branch_says_whether_its_ticket_or_its_work_session_keeps_it() {
     assert_eq!(busy.open_why("feat/closed"), None);
     assert_eq!(busy.open_why("unknown"), None);
 }
+
+#[test]
+fn a_failing_remote_does_not_stop_the_next_one_and_a_skipped_one_is_left_out() {
+    let (_good_dir, good) = repo();
+    let (_dir, repo) = repo();
+    run(&repo, &["remote", "add", "a", "/nonexistent/dead"]);
+    run(&repo, &["remote", "add", "b", &good.to_string_lossy()]);
+    run(&repo, &["remote", "add", "c", &good.to_string_lossy()]);
+    run(&repo, &["config", "remote.c.skipFetchAll", "true"]);
+    let e = apply(&repo, HostWrite::CodeFetch { project_id: ProjectId::new() }, &nobody(), Duration::from_secs(20)).expect_err("a failed");
+    assert!(e.message.starts_with("The fetch failed for a: "), "{}", e.message);
+    assert!(!e.message.contains("b:"), "b was fetched: {}", e.message);
+    assert!(!run(&repo, &["for-each-ref", "refs/remotes/b"]).is_empty(), "b fetched after a failed");
+    assert!(run(&repo, &["for-each-ref", "refs/remotes/c"]).is_empty(), "c skips fetch --all");
+}
+
+#[test]
+fn skip_fetch_all_is_read_from_gits_config_lines() {
+    let config = "remote.c.skipfetchall true\nremote.d.skipfetchall false\nremote.up-stream.skipfetchall yes\n";
+    assert_eq!(skipped_remotes(config), vec!["c", "up-stream"]);
+    assert!(skipped_remotes("").is_empty());
+}

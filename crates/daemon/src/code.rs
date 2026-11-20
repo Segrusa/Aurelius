@@ -370,8 +370,9 @@ fn perform(repo: &Path, write: HostWrite, busy: &Busy) -> Result<(), ProtocolErr
 }
 
 /// `code.fetch`: `git fetch --prune` of every remote in turn, all within `deadline`. One
-/// process per remote (not `--all`, whose per-remote children a kill would not reach). A
-/// repository without a remote has nothing to fetch.
+/// process per remote (not `--all`, whose per-remote children a kill would not reach). As
+/// `--all` does, a failing remote does not stop the next one, and a remote with
+/// `skipFetchAll` is left out. A repository without a remote has nothing to fetch.
 fn fetch(repo: &Path, deadline: Duration) -> Result<(), ProtocolError> {
     let remotes = read(repo, &["remote"]).map_err(invalid)?;
     let remotes: Vec<&str> = remotes.lines().map(str::trim).filter(|r| !r.is_empty()).collect();
@@ -383,17 +384,33 @@ fn fetch(repo: &Path, deadline: Duration) -> Result<(), ProtocolError> {
     let own_ssh = std::env::var_os("GIT_SSH_COMMAND").is_some()
         || std::env::var_os("GIT_SSH").is_some()
         || !read(repo, &["config", "--get", "core.sshCommand"]).unwrap_or_default().is_empty();
+    let skipped = read(repo, &["config", "--get-regexp", r"^remote\..*\.skipfetchall$"]).unwrap_or_default();
+    let skipped = skipped_remotes(&skipped);
     let started = Instant::now();
-    for remote in remotes {
+    let mut failed = Vec::new();
+    for remote in remotes.into_iter().filter(|r| !skipped.contains(r)) {
         let left = deadline.saturating_sub(started.elapsed());
-        fetch_remote(repo, remote, own_ssh, left, deadline)?;
+        if let Err(why) = fetch_remote(repo, remote, own_ssh, left, deadline)? {
+            failed.push(format!("{remote}: {why}"));
+        }
     }
-    Ok(())
+    if failed.is_empty() { Ok(()) } else { Err(invalid(format!("The fetch failed for {}", failed.join("; ")))) }
+}
+
+/// The remotes `git config --get-regexp 'remote\..*\.skipfetchall'` names with a true value.
+fn skipped_remotes(config: &str) -> Vec<&str> {
+    config
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .filter(|(_, value)| matches!(value.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "on" | "1"))
+        .filter_map(|(key, _)| key.strip_prefix("remote.")?.strip_suffix(".skipfetchall"))
+        .collect()
 }
 
 /// One remote's `git fetch --prune`, killed when `left` runs out (`deadline` is the whole
-/// fetch's, for the message).
-fn fetch_remote(repo: &Path, remote: &str, own_ssh: bool, left: Duration, deadline: Duration) -> Result<(), ProtocolError> {
+/// fetch's, for the message). The outer error stops the whole fetch (the deadline, git that
+/// cannot run); the inner one is this remote's failure, with git's reason.
+fn fetch_remote(repo: &Path, remote: &str, own_ssh: bool, left: Duration, deadline: Duration) -> Result<Result<(), String>, ProtocolError> {
     let mut args = FETCH_HTTP_LIMITS.to_vec();
     if !own_ssh {
         args.extend(["-c", FETCH_SSH_COMMAND]);
@@ -427,10 +444,10 @@ fn fetch_remote(repo: &Path, remote: &str, own_ssh: bool, left: Duration, deadli
         }
     };
     if status.success() {
-        return Ok(());
+        return Ok(Ok(()));
     }
     let text = heard.recv_timeout(Duration::from_millis(FETCH_STDERR_WAIT_MS)).unwrap_or_default();
-    Err(invalid(format!("The fetch failed: {}", quick::reason(&text))))
+    Ok(Err(quick::reason(&text)))
 }
 
 fn known_branch<'a>(state: &'a RepoState, branch: &str) -> Result<&'a RefEntry, ProtocolError> {
