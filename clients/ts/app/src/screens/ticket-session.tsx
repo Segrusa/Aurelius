@@ -72,7 +72,7 @@ import {
 import { FileChips } from "./run-tools";
 import { taskStateLine } from "./tasks-logic";
 import { branchOf, latestTodos } from "./ticket-overview-logic";
-import { LiveBar, NowCard, PageSection, PlanPanel } from "./ticket-page";
+import { LiveBar, NowCard, PageSection, PlanPanel, useTicketWork } from "./ticket-page";
 import { planStep } from "./ticket-page-logic";
 import {
   Activity,
@@ -373,6 +373,7 @@ function Session({
   const gate = <TicketGate detail={detail} t={t} />;
   const rootId = detail.root_task?.id ?? t.root_task_id ?? null;
   const top = <PageTop detail={detail} t={t} />;
+  const work = useTicketWork(detail.tasks);
   const aside = (
     <PropertiesPanel dock={dock} label="Ticket properties" wide>
       <Properties detail={detail} t={t} />
@@ -381,6 +382,7 @@ function Session({
   const slots: SessionSlots = {
     head: null,
     top,
+    work,
     live: <LiveBar tasks={detail.tasks} rootId={rootId} />,
     gate,
     chips: <RunChips t={t} />,

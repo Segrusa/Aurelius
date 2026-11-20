@@ -4,18 +4,29 @@
 // task's own conversation, the same reads the task's run screen uses, so they share the cache.
 
 import { Button } from "@astryxdesign/core/Button";
-import type { MessageView, TaskView } from "@aurelius/protocol";
+import type { ActivityView, MessageView, TaskView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useMessages } from "../data";
+import { useMessages, useMessagesOf } from "../data";
 import { Icon, StatusGlyph } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
-import { useLiveAll, useLiveStore } from "./chat-live";
-import type { Todo } from "./chat-logic";
-import { taskStateLine, treeOrder } from "./tasks-logic";
+import { useLiveAll, useLiveStore, useLiveStoreOf } from "./chat-live";
+import { clock, type Todo } from "./chat-logic";
+import { stepLine, taskStateLine, treeOrder } from "./tasks-logic";
+import {
+  diffCounts,
+  fileName,
+  rowDiff,
+  rowFiles,
+  runningTitle,
+  type WorkRow,
+  workKind,
+  workRows,
+  workTitle,
+} from "./ticket-activity-logic";
 import { TodoMark } from "./ticket-overview";
 import { elapsed, latestTodos } from "./ticket-overview-logic";
 import {
@@ -233,7 +244,96 @@ const styles = stylex.create({
   subWho: { fontSize: 12, color: "var(--color-text-secondary)" },
   subBody: { display: "flex", flexDirection: "column", gap: 4, paddingInlineStart: 28, paddingBlock: 4 },
   subLink: { fontSize: 12, color: "var(--color-text-accent)", textDecoration: "none" },
+  // A row of work in the Activity (ticket #76).
+  work: { display: "flex", gap: 10, paddingBlock: 6, paddingInline: 4 },
+  workMark: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    color: "var(--color-text-secondary)",
+    backgroundColor: "var(--precision-sunk)",
+  },
+  workMarkLive: { color: "var(--color-text-accent)" },
+  workBody: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column", gap: 6 },
+  workHead: { display: "flex", alignItems: "baseline", gap: 8, minHeight: 24, fontSize: 13 },
+  workTitle: { color: "var(--color-text-primary)" },
+  workWho: { fontWeight: 600, color: "var(--color-text-primary)" },
+  workTime: { flexShrink: 0, fontSize: 11, color: "var(--precision-text3)", fontVariantNumeric: "tabular-nums" },
+  chips: { display: "flex", flexWrap: "wrap", gap: 4 },
+  chip: {
+    maxWidth: 260,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    borderRadius: 5,
+    paddingInline: 6,
+    paddingBlock: 1,
+    fontFamily: "var(--font-family-code)",
+    fontSize: 11,
+    color: "var(--color-text-secondary)",
+    backgroundColor: "var(--precision-sunk)",
+  },
+  box: {
+    margin: 0,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 8,
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    lineHeight: "18px",
+  },
+  diffLine: { paddingInline: 8, whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
+  diffFile: {
+    paddingBlock: 2,
+    color: "var(--color-text-secondary)",
+    backgroundColor: "var(--precision-sunk)",
+  },
+  diffAdd: {
+    color: "var(--color-text-success)",
+    backgroundColor: "color-mix(in srgb, var(--color-text-success) 8%, transparent)",
+  },
+  diffDel: {
+    color: "var(--color-text-error)",
+    backgroundColor: "color-mix(in srgb, var(--color-text-error) 8%, transparent)",
+  },
+  diffMore: { paddingInline: 8, color: "var(--precision-text3)" },
+  command: { paddingInline: 8, paddingBlock: 4, color: "var(--color-text-primary)", overflowWrap: "anywhere" },
+  result: {
+    margin: 0,
+    paddingInline: 8,
+    paddingBlock: 4,
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: "var(--color-border)",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+    color: "var(--color-text-secondary)",
+  },
+  resultFailed: { color: "var(--color-text-error)" },
+  resultMore: { paddingInline: 8, paddingBottom: 4, fontFamily: "inherit" },
+  quote: {
+    margin: 0,
+    paddingInlineStart: 10,
+    borderLeftWidth: 3,
+    borderLeftStyle: "solid",
+    borderLeftColor: "var(--color-border)",
+    fontSize: 13,
+    color: "var(--color-text-secondary)",
+    whiteSpace: "pre-wrap",
+  },
+  workActions: { display: "flex", gap: 12 },
 });
+
+/** How many diff lines and result lines a work row shows before View diff / Show more. */
+const DIFF_LINES_SHOWN = 8;
+const RESULT_LINES_SHOWN = 6;
+const FINDING_CHARS_SHOWN = 600;
 
 /** Every second while `on`, so a timer moves. */
 function useNow(on: boolean): number {
@@ -633,5 +733,221 @@ function SubTaskBody({ task }: { task: TaskView }) {
         Open the task's conversation
       </Link>
     </div>
+  );
+}
+
+/**
+ * The work of every task of the ticket as Activity rows (ticket #76): read from each task's own
+ * conversation, under the same keys as its run screen, with what streams in them now.
+ */
+export function useTicketWork(tasks: readonly TaskView[]): WorkRow[] {
+  const ids = useMemo(() => tasks.flatMap((t) => t.conversation_id ?? []), [tasks]);
+  const reads = useMessagesOf(ids);
+  const store = useLiveStoreOf(ids);
+  const live = useLiveAll(store);
+  const lists = reads.map((r) => r.data?.messages);
+  // useQueries gives a new array every render; what each read holds is what counts.
+  const stamp = reads.map((r) => r.dataUpdatedAt).join(" ");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `stamp` says when `lists` changed.
+  useEffect(() => {
+    store.settle(
+      new Set(
+        lists
+          .flatMap((l) => l ?? [])
+          .filter((m) => m.status !== "partial")
+          .map((m) => m.id),
+      ),
+    );
+  }, [stamp, store]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `stamp` says when `lists` changed.
+  return useMemo(() => {
+    const byConversation = new Map(ids.map((id, i) => [id, lists[i] ?? []]));
+    return workRows(
+      tasks.flatMap((t) =>
+        t.conversation_id
+          ? [
+              {
+                taskId: t.id,
+                who: t.employee_name ?? null,
+                messages: byConversation.get(t.conversation_id) ?? [],
+                live: live.filter((u) => u.conversation_id === t.conversation_id),
+              },
+            ]
+          : [],
+      ),
+    );
+  }, [stamp, ids, tasks, live]);
+}
+
+const zone = () => -new Date().getTimezoneOffset();
+
+/** One row of a task's work in the ticket's Activity. */
+export function WorkItem({ row }: { row: WorkRow }) {
+  return (
+    <div data-work-row={row.kind === "steps" ? row.work : row.kind} {...stylex.props(styles.work)}>
+      <span aria-hidden="true" {...stylex.props(styles.workMark, row.kind === "running" && styles.workMarkLive)}>
+        {row.kind === "running" ? (
+          <StatusGlyph glyph="dot" color="var(--color-text-accent)" />
+        ) : (
+          <Icon name={row.kind === "finding" ? "chat" : WORK_ICON[row.work]} size={14} />
+        )}
+      </span>
+      <div {...stylex.props(styles.workBody)}>
+        <div {...stylex.props(styles.workHead)}>
+          <span {...stylex.props(styles.workTitle)}>
+            {row.who ? <span {...stylex.props(styles.workWho)}>{row.who}</span> : null}
+            {row.who ? " · " : ""}
+            {row.kind === "finding"
+              ? "noted"
+              : row.kind === "running"
+                ? runningTitle(row.step)
+                : workTitle(row.work, row.steps)}
+          </span>
+          <span {...stylex.props(styles.grow)} />
+          {Number.isFinite(row.atMs) ? (
+            <time dateTime={new Date(row.atMs).toISOString()} {...stylex.props(styles.workTime)}>
+              {clock(row.atMs, zone())}
+            </time>
+          ) : null}
+        </div>
+        {row.kind === "finding" ? (
+          <Finding text={row.text} />
+        ) : row.kind === "running" ? (
+          <RunningCall row={row} />
+        ) : row.work === "command" ? (
+          row.steps.map((s) => <CommandResult key={s.call_id} step={s} />)
+        ) : (
+          <>
+            <FileChips steps={row.steps} />
+            {row.work === "edit" ? <EditDiff steps={row.steps} /> : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const WORK_ICON = { read: "note", edit: "edit", command: "tasks" } as const;
+
+function FileChips({ steps }: { steps: ActivityView[] }) {
+  const files = rowFiles(steps);
+  if (files.length === 0) return null;
+  return (
+    <ul aria-label="Files" {...stylex.props(styles.chips)} style={{ margin: 0, padding: 0, listStyle: "none" }}>
+      {files.map((f) => (
+        <li key={f} title={f} {...stylex.props(styles.chip)}>
+          {fileName(f)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function EditDiff({ steps }: { steps: ActivityView[] }) {
+  const [all, setAll] = useState(false);
+  const lines = useMemo(() => rowDiff(steps), [steps]);
+  const counts = diffCounts(lines);
+  if (lines.every((l) => l.sign === "file")) return null;
+  const shown = all ? lines : lines.slice(0, DIFF_LINES_SHOWN);
+  return (
+    <>
+      <figure aria-label="Diff" {...stylex.props(styles.box)}>
+        {shown.map((l, i) => (
+          <div
+            // biome-ignore lint/suspicious/noArrayIndexKey: a diff's lines have no ids and never move.
+            key={i}
+            {...stylex.props(
+              styles.diffLine,
+              l.sign === "file" && styles.diffFile,
+              l.sign === "+" && styles.diffAdd,
+              l.sign === "-" && styles.diffDel,
+            )}
+          >
+            {l.sign === "file" ? l.text : `${l.sign} ${l.text}`}
+          </div>
+        ))}
+        {!all && lines.length > shown.length ? (
+          <div {...stylex.props(styles.diffMore)}>{`… ${lines.length - shown.length} more lines`}</div>
+        ) : null}
+      </figure>
+      <div {...stylex.props(styles.workActions)}>
+        <span {...stylex.props(styles.counts)}>
+          <span {...stylex.props(styles.plus)}>+{counts.added}</span>
+          <span {...stylex.props(styles.minus)}>−{counts.removed}</span>
+        </span>
+        {lines.length > DIFF_LINES_SHOWN ? (
+          <button type="button" aria-expanded={all} onClick={() => setAll(!all)} {...stylex.props(styles.linkButton)}>
+            {all ? "Hide diff" : "View diff"}
+          </button>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+function CommandResult({ step }: { step: ActivityView }) {
+  const [all, setAll] = useState(false);
+  const output = (step.output ?? "").trimEnd();
+  const lines = output === "" ? [] : output.split("\n");
+  const shown = all ? lines : lines.slice(0, RESULT_LINES_SHOWN);
+  return (
+    <div {...stylex.props(styles.box)}>
+      <div {...stylex.props(styles.command)}>$ {stepLine(step)}</div>
+      {lines.length > 0 ? (
+        <pre {...stylex.props(styles.result, step.ok === false && styles.resultFailed)}>{shown.join("\n")}</pre>
+      ) : null}
+      {lines.length > shown.length ? (
+        <button type="button" onClick={() => setAll(true)} {...stylex.props(styles.linkButton, styles.resultMore)}>
+          {`Show ${lines.length - shown.length} more lines`}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function RunningCall({ row }: { row: Extract<WorkRow, { kind: "running" }> }) {
+  const navigate = useNavigate();
+  const files = workKind(row.step.tool) === "command" ? [] : rowFiles([row.step]);
+  return (
+    <>
+      {files.length > 0 ? (
+        <FileChips steps={[row.step]} />
+      ) : (
+        <div {...stylex.props(styles.box)}>
+          <div {...stylex.props(styles.command)}>
+            {workKind(row.step.tool) === "command" ? "$ " : ""}
+            {stepLine(row.step)}
+          </div>
+        </div>
+      )}
+      <div {...stylex.props(styles.workActions)}>
+        <button
+          type="button"
+          onClick={() => void navigate({ to: "/tasks/$taskId", params: { taskId: row.taskId } })}
+          {...stylex.props(styles.linkButton)}
+        >
+          Live output
+        </button>
+      </div>
+    </>
+  );
+}
+
+function Finding({ text }: { text: string }) {
+  const [all, setAll] = useState(false);
+  const long = text.length > FINDING_CHARS_SHOWN;
+  return (
+    <>
+      <blockquote {...stylex.props(styles.quote)}>
+        {long && !all ? `${text.slice(0, FINDING_CHARS_SHOWN)}…` : text}
+      </blockquote>
+      {long ? (
+        <div {...stylex.props(styles.workActions)}>
+          <button type="button" onClick={() => setAll(!all)} {...stylex.props(styles.linkButton)}>
+            {all ? "Show less" : "Show more"}
+          </button>
+        </div>
+      ) : null}
+    </>
   );
 }
