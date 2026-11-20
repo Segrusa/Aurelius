@@ -119,3 +119,16 @@ export function isFolded(stored: string | null, bucket?: Bucket): boolean {
   if (stored === "open") return false;
   return bucket === "earlier";
 }
+
+/** Whether a row for `to` is the one open at `path`: the page itself or a page under it. */
+export function isOpenAt(to: string, path: string): boolean {
+  return path === to || path.startsWith(`${to}/`);
+}
+
+/**
+ * The rows a closed fold still shows: only the one open at `path`, so the session or ticket you are in
+ * never hides behind a fold.
+ */
+export function openRows(items: SidebarItem[], path: string): SidebarItem[] {
+  return items.filter((i) => isOpenAt(i.to, path));
+}

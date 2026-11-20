@@ -1,7 +1,7 @@
 // The app's sidebar: a rail of workspaces on the left (All workspaces, one tile per project, the Inbox
 // bell, the account and the fold button), and beside it the workspace's panel with New session, Board and History, and
 // a Sessions and a Tickets section, each under Running, Today and Earlier. Under All workspaces those come per
-// workspace. Both sections always show and fold on their own.
+// workspace. Both sections always show and fold on their own; a closed fold still shows the row you are in.
 
 import type { IconType } from "@astryxdesign/core/Icon";
 import { SideNav, SideNavItem } from "@astryxdesign/core/SideNav";
@@ -31,7 +31,9 @@ import {
   bucketed,
   foldKey,
   isFolded,
+  isOpenAt,
   needsPerProject,
+  openRows,
   type SidebarBucket,
   type SidebarItem,
   type SidebarSection,
@@ -291,7 +293,7 @@ function markIcon(letter: string, color: string): IconType {
 function NavRow({ to, label, icon, end }: { to: string; label: string; icon: IconType; end?: ReactNode }) {
   const path = useRouterState({ select: (s) => s.location.pathname });
   // A ticket's session counts as the Board, where it came from (ticket #70).
-  const on = path === to || path.startsWith(`${to}/`) || (to === "/board" && path.startsWith("/ticket/"));
+  const on = isOpenAt(to, path) || (to === "/board" && path.startsWith("/ticket/"));
   return <SideNavItem label={label} href={to} icon={icon} size="sm" isSelected={on} endContent={end} />;
 }
 
@@ -364,6 +366,11 @@ function useFold(key: string, bucket?: Bucket): [boolean, () => void] {
   return [folded, toggle];
 }
 
+/** The path of the page that is open, for the rows a closed fold still shows. */
+function usePath(): string {
+  return useRouterState({ select: (s) => s.location.pathname });
+}
+
 function Chevron({ folded, size }: { folded: boolean; size: number }) {
   return (
     <span {...stylex.props(styles.chevron, folded && styles.chevronFolded)}>
@@ -391,6 +398,7 @@ function Rows({ items, sub }: { items: SidebarItem[]; sub?: boolean }) {
 /** One of Running, Today and Earlier in a single workspace. */
 function BucketFold({ section, entry }: { section: SidebarSection; entry: SidebarBucket }) {
   const [folded, toggle] = useFold(foldKey(undefined, entry.bucket, section), entry.bucket);
+  const path = usePath();
   const running = entry.bucket === "running";
   return (
     <div {...stylex.props(styles.group)}>
@@ -400,7 +408,7 @@ function BucketFold({ section, entry }: { section: SidebarSection; entry: Sideba
         <span {...stylex.props(styles.foldName)}>{BUCKET_LABELS[entry.bucket]}</span>
         <span {...stylex.props(styles.count)}>{entry.items.length}</span>
       </button>
-      {folded ? null : <Rows items={entry.items} />}
+      <Rows items={folded ? openRows(entry.items, path) : entry.items} />
     </div>
   );
 }
@@ -416,6 +424,7 @@ function SubFold({
   entry: SidebarBucket;
 }) {
   const [folded, toggle] = useFold(foldKey(workspace, entry.bucket, section), entry.bucket);
+  const path = usePath();
   return (
     <div {...stylex.props(styles.group)}>
       <button type="button" aria-expanded={!folded} onClick={toggle} {...stylex.props(styles.fold, styles.subFold)}>
@@ -423,7 +432,7 @@ function SubFold({
         <span {...stylex.props(entry.bucket === "running" && styles.runningLabel)}>{BUCKET_LABELS[entry.bucket]}</span>
         <span {...stylex.props(styles.count)}>{entry.items.length}</span>
       </button>
-      {folded ? null : <Rows items={entry.items} sub />}
+      <Rows items={folded ? openRows(entry.items, path) : entry.items} sub />
     </div>
   );
 }
@@ -444,6 +453,7 @@ function WorkspaceFold({
   running: number;
 }) {
   const [folded, toggle] = useFold(foldKey(id, undefined, section));
+  const path = usePath();
   const name = project?.name ?? NO_PROJECT;
   return (
     <div {...stylex.props(styles.group)}>
@@ -459,7 +469,17 @@ function WorkspaceFold({
         ) : null}
         <span {...stylex.props(styles.count)}>{count}</span>
       </button>
-      {folded ? null : buckets.map((b) => <SubFold key={b.bucket} section={section} workspace={id} entry={b} />)}
+      {folded ? (
+        <Rows
+          items={openRows(
+            buckets.flatMap((b) => b.items),
+            path,
+          )}
+          sub
+        />
+      ) : (
+        buckets.map((b) => <SubFold key={b.bucket} section={section} workspace={id} entry={b} />)
+      )}
     </div>
   );
 }
@@ -526,7 +546,11 @@ function Section({
   first?: boolean;
 }) {
   const [folded, toggle] = useFold(sectionKey(section));
+  const path = usePath();
+  const workspace = useWorkspace().id;
   const mine = items.filter((i) => i.section === section);
+  // Folded, the section still shows the row you are in, if this workspace lists it.
+  const open = folded ? openRows(mine, path).filter((i) => workspace === null || i.projectId === workspace) : [];
   return (
     <section
       aria-label={SECTION_TITLES[section]}
@@ -536,7 +560,11 @@ function Section({
         <Chevron folded={folded} size={10} />
         <span {...stylex.props(styles.foldName)}>{SECTION_TITLES[section]}</span>
       </button>
-      {folded ? null : (
+      {folded ? (
+        open.length > 0 ? (
+          <Rows items={open} />
+        ) : null
+      ) : (
         <div {...stylex.props(styles.sectionScroll)}>
           <SectionList section={section} items={mine} projects={projects} />
         </div>

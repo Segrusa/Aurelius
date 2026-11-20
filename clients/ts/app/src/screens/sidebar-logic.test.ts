@@ -6,6 +6,7 @@ import {
   foldKey,
   isFolded,
   needsPerProject,
+  openRows,
   type SidebarItem,
   sectionKey,
   workspaceGroups,
@@ -97,5 +98,23 @@ describe("folds", () => {
     expect(isFolded(null)).toBe(false);
     expect(isFolded("open", "earlier")).toBe(false);
     expect(isFolded("folded", "running")).toBe(true);
+  });
+});
+
+describe("open rows under a closed fold", () => {
+  const rows = [item("a"), item("b"), item("t", { section: "tickets", to: "/ticket/7" })];
+
+  it("keeps only the row open at the path", () => {
+    expect(openRows(rows, "/session/b").map((i) => i.key)).toEqual(["b"]);
+    expect(openRows(rows, "/ticket/7").map((i) => i.key)).toEqual(["t"]);
+  });
+
+  it("counts a page under the row as open, but not a row whose id only starts the same", () => {
+    expect(openRows(rows, "/ticket/7/files").map((i) => i.key)).toEqual(["t"]);
+    expect(openRows(rows, "/ticket/71")).toEqual([]);
+  });
+
+  it("keeps nothing when no row is open", () => {
+    expect(openRows(rows, "/board")).toEqual([]);
   });
 });
