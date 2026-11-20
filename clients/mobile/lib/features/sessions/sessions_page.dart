@@ -1,4 +1,3 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -70,9 +69,6 @@ class _SessionsShownWatcherState extends State<SessionsShownWatcher> {
   Widget build(BuildContext context) => widget.child;
 }
 
-/// "2 working": the header's count; none while nobody works.
-String? workingLabel(int working) => working > 0 ? '$working working' : null;
-
 class _WorkSessionsBody extends StatefulWidget {
   const _WorkSessionsBody({required this.tickets});
 
@@ -99,43 +95,28 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
     final company = context.watch<CompanyBloc>().state;
     final me = context.select<ConnectionBloc, String?>((b) => b.state.user?.id);
     bool mine(TicketView t) => needsMeOf(t, company, board, me: me);
-    final working = workingLabel(state.working);
-    final needYou = board.tickets.where((t) => listedTicket(t) && mine(t)).length;
-    final count = _tickets ? (needYou > 0 ? '$needYou need${needYou == 1 ? 's' : ''} you' : null) : working;
-    return Scaffold(
-      appBar: GlassAppBar(
-        title: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Sessions'),
-          if (count != null) ...[
-            const SizedBox(width: 10),
-            StatusDot(color: _tickets ? Tokens.warning : Tokens.accent, pulse: !_tickets, size: 7),
-            const SizedBox(width: 4),
-            Flexible(child: Text(count, key: ValueKey(_tickets ? 'tickets-need-you' : 'sessions-working'), overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: Tokens.label2, fontWeight: FontWeight.w400))),
-          ],
-        ]),
-        actions: [
-          IconButton(key: const ValueKey('sessions-new'), tooltip: 'New session', icon: const Icon(CupertinoIcons.square_pencil), onPressed: () => openNewSession(context)),
-        ],
-      ),
-      body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    // Who works shows as the Sessions tab's badge, so the page has no count of its own.
+    return LargeTitleScaffold(
+      title: 'Sessions',
+      onRefresh: () async => _tickets ? context.read<BoardBloc>().add(const BoardRefreshed()) : context.read<SessionsBloc>().add(const SessionsRefreshed()),
+      header: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-          child: CupertinoSlidingSegmentedControl<bool>(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          child: BrandSegments<bool>(
             key: const ValueKey('sessions-switch'),
-            groupValue: _tickets,
-            children: const {
-              false: Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('Sessions')),
-              true: Padding(padding: EdgeInsets.symmetric(vertical: 6), child: Text('Tickets')),
-            },
-            onValueChanged: (v) => setState(() => _tickets = v ?? false),
+            height: 34,
+            segments: const [(false, 'Sessions'), (true, 'Tickets')],
+            selected: _tickets,
+            onChanged: (v) => setState(() => _tickets = v),
           ),
         ),
-        Expanded(child: _tickets ? _ticketList(context, board, mine) : _list(context, state)),
-      ]),
+      ],
+      fill: _tickets ? _ticketFill(context, board) : _fill(context, state),
+      children: _tickets ? _ticketList(board, mine) : _list(state),
     );
   }
 
-  Widget _ticketList(BuildContext context, BoardState board, bool Function(TicketView) mine) {
+  Widget? _ticketFill(BuildContext context, BoardState board) {
     if (board.board == null && board.error != null) {
       return EmptyState(
         'Could not load the tickets.',
@@ -145,8 +126,7 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
       );
     }
     if (board.board == null) return const Center(child: CircularProgressIndicator());
-    final sections = ticketSections(board.tickets, DateTime.now(), needsYou: mine);
-    if (sections.isEmpty) {
+    if (ticketSections(board.tickets, DateTime.now(), needsYou: (_) => false).isEmpty) {
       return EmptyState(
         'No open tickets',
         key: const ValueKey('tickets-empty'),
@@ -154,21 +134,17 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
         action: FilledButton(onPressed: () => context.push('/board/new'), child: const Text('New ticket')),
       );
     }
-    return RefreshIndicator(
-      onRefresh: () async => context.read<BoardBloc>().add(const BoardRefreshed()),
-      child: ListView(
-        padding: EdgeInsets.fromLTRB(0, 8, 0, listBottom(context)),
-        children: [
-          for (final (period, tickets) in sections) ...[
-            GroupHeader(period.label, key: ValueKey('tickets-section-${period.name}'), count: tickets.length),
-            InsetGroup(children: [for (final t in tickets) TicketRow(ticket: t, needsYou: mine(t))]),
-          ],
-        ],
-      ),
-    );
+    return null;
   }
 
-  Widget _list(BuildContext context, SessionsState state) {
+  List<Widget> _ticketList(BoardState board, bool Function(TicketView) mine) => [
+        for (final (period, tickets) in ticketSections(board.tickets, DateTime.now(), needsYou: mine)) ...[
+          GroupHeader(period.label, key: ValueKey('tickets-section-${period.name}'), count: tickets.length),
+          InsetGroup(children: [for (final t in tickets) TicketRow(ticket: t, needsYou: mine(t))]),
+        ],
+      ];
+
+  Widget? _fill(BuildContext context, SessionsState state) {
     if (!state.supported) {
       return EmptyState(
         'Sessions are not on this server',
@@ -194,20 +170,19 @@ class _WorkSessionsBodyState extends State<_WorkSessionsBody> {
         action: FilledButton(onPressed: () => openNewSession(context), child: const Text('New session')),
       );
     }
-    return RefreshIndicator(
-      onRefresh: () async => context.read<SessionsBloc>().add(const SessionsRefreshed()),
-      child: ListView(
-        padding: EdgeInsets.fromLTRB(0, 8, 0, listBottom(context)),
-        children: [
-          for (final (period, sessions) in sessionSections(state.sessions, DateTime.now())) ...[
-            GroupHeader(period.label, key: ValueKey('sessions-section-${period.name}'), count: sessions.length),
-            InsetGroup(children: [for (final s in sessions) SessionRow(session: s)]),
-          ],
-        ],
-      ),
-    );
+    return null;
   }
+
+  List<Widget> _list(SessionsState state) => [
+        for (final (period, sessions) in sessionSections(state.sessions, DateTime.now())) ...[
+          GroupHeader(period.label, key: ValueKey('sessions-section-${period.name}'), count: sessions.length),
+          InsetGroup(children: [for (final s in sessions) SessionRow(session: s)]),
+        ],
+      ];
 }
+
+/// The bold-ish title of a session or ticket row.
+TextStyle _rowTitle() => TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Tokens.label);
 
 /// One open ticket: its number and title, owner and project, and its signal.
 class TicketRow extends StatelessWidget {
@@ -224,8 +199,9 @@ class TicketRow extends StatelessWidget {
     return GroupRow(
       key: ValueKey('ticket-row-${t.id}'),
       title: '#${t.number} ${t.title}',
+      titleStyle: _rowTitle(),
       subtitle: '${t.ownerName ?? 'No owner yet'} · ${t.projectName} · ${Fmt.ago(t.updatedAtMs)}',
-      trailing: SessionMark(signal: ticketSignal(t, needsYou: needsYou)),
+      leading: SessionMark.lead(ticketSignal(t, needsYou: needsYou)),
       chevron: true,
       onTap: () => context.push('/ticket/${t.id}'),
     );
@@ -244,8 +220,9 @@ class SessionRow extends StatelessWidget {
     return GroupRow(
       key: ValueKey('session-${s.conversationId}'),
       title: s.title.isEmpty ? 'Session' : s.title,
+      titleStyle: _rowTitle(),
       subtitle: '${sessionWho(s)} · ${s.projectName} · ${Fmt.ago(s.lastActivityMs)}',
-      trailing: SessionMark(signal: sessionSignal(s)),
+      leading: SessionMark.lead(sessionSignal(s)),
       chevron: true,
       onTap: () => context.push('/session/${s.conversationId}'),
     );
@@ -257,6 +234,10 @@ class SessionMark extends StatelessWidget {
   const SessionMark({super.key, required this.signal});
 
   final SessionSignal? signal;
+
+  /// The mark in front of a row's title, or nothing when there is no signal
+  /// (the title then starts at the edge, as in the design).
+  static Widget? lead(SessionSignal? signal) => signal == null ? null : SessionMark(signal: signal);
 
   @override
   Widget build(BuildContext context) => switch (signal) {

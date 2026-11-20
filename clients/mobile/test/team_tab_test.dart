@@ -3,6 +3,7 @@ import 'package:aurelius_mobile/app/shell.dart';
 import 'package:aurelius_mobile/core/hosts/host.dart';
 import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
+import 'package:aurelius_mobile/core/theme/tokens.dart';
 import 'package:aurelius_mobile/core/widgets/ios.dart' show AppTabBar, GlassTabBar;
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/views.dart';
@@ -287,8 +288,10 @@ void main() {
   });
 
   group('HomeShell', () {
-    Future<void> pump(WidgetTester tester, InboxState inbox, {LinkState link = online}) async {
+    Future<void> pump(WidgetTester tester, InboxState inbox, {LinkState link = online, CompanyState company = const CompanyState()}) async {
       when(() => repo.linkState).thenReturn(link);
+      final companyBloc = MockCompanyBloc();
+      whenListen(companyBloc, const Stream<CompanyState>.empty(), initialState: company);
       final inboxBloc = MockInboxBloc();
       whenListen(inboxBloc, const Stream<InboxState>.empty(), initialState: inbox);
       final connection = MockConnectionBloc();
@@ -309,6 +312,7 @@ void main() {
           providers: [
             BlocProvider<InboxBloc>.value(value: inboxBloc),
             BlocProvider<ConnectionBloc>.value(value: connection),
+            BlocProvider<CompanyBloc>.value(value: companyBloc),
           ],
           child: MaterialApp.router(theme: aureliusTheme(), routerConfig: router),
         ),
@@ -323,6 +327,19 @@ void main() {
       final x = tester.getCenter(badge).dx;
       expect((x - tester.getCenter(find.text('Inbox')).dx).abs(), lessThan(1));
       expect(find.text('Team'), findsNothing);
+    });
+
+    testWidgets('the Sessions tab counts the employees at work in green; the Inbox badge stays red', (tester) async {
+      await pump(
+        tester,
+        InboxState(loading: false, approvals: [approvalOf('a1')]),
+        company: CompanyState(employees: [employeeOf(id: 'a', working: true), employeeOf(id: 'b', working: true), employeeOf(id: 'c')]),
+      );
+      final working = tester.widget<Badge>(find.ancestor(of: find.text('2'), matching: find.byType(Badge)));
+      expect(working.backgroundColor, Tokens.accent);
+      expect((tester.getCenter(find.text('2')).dx - tester.getCenter(find.text('Sessions')).dx).abs(), lessThan(20));
+      final waiting = tester.widget<Badge>(find.ancestor(of: find.text('1'), matching: find.byType(Badge)));
+      expect(waiting.backgroundColor, Tokens.red);
     });
 
     testWidgets('the shell opens on Chat; ⌘3 opens the inbox, ⌘1 Chat again; Sessions is a tab; no Board', (tester) async {

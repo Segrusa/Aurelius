@@ -139,7 +139,7 @@ String dispatchedNote(bool worktree) => worktree
     : "The dispatcher chooses who takes it, in the project's folder itself. No ticket: you talk with them in the session.";
 
 /// The composer's hint on New session (desktop: placeholderOf("session")).
-const newSessionHint = 'What do you want to work on? Starts right away, without a ticket';
+const newSessionHint = 'What do you want to work on?';
 
 /// What is remembered per server: `project` and `who`.
 String sessionKey(String what, String hostId) => 'new_session.$what:$hostId';
@@ -159,7 +159,7 @@ const continueColumns = {ColumnKind.doing, ColumnKind.testing, ColumnKind.review
 /// The projects the Chat tab shows as chips (desktop projectRows): the most
 /// recently used first, then in list order; the chosen one is always among them.
 /// [more] when there are more than fit.
-({List<T> rows, bool more}) projectRows<T>(List<T> shown, List<String> recent, String? chosen, {required String Function(T) id}) {
+({List<T> rows, bool more}) projectRows<T>(List<T> shown, List<String> recent, String? chosen, {required String Function(T) id, int max = projectRowsMax}) {
   int rank(T p) {
     final at = recent.indexOf(id(p));
     return at < 0 ? recent.length : at;
@@ -169,10 +169,10 @@ const continueColumns = {ColumnKind.doing, ColumnKind.testing, ColumnKind.review
       final by = rank(a.$2).compareTo(rank(b.$2));
       return by != 0 ? by : a.$1.compareTo(b.$1);
     });
-  final rows = [for (final (_, p) in ordered.take(projectRowsMax)) p];
+  final rows = [for (final (_, p) in ordered.take(max)) p];
   final picked = shown.where((p) => id(p) == chosen).firstOrNull;
   if (picked != null && !rows.contains(picked)) rows[rows.length - 1] = picked;
-  return (rows: rows, more: shown.length > projectRowsMax);
+  return (rows: rows, more: shown.length > max);
 }
 
 /// [recent] with [projectId] used now, newest first.

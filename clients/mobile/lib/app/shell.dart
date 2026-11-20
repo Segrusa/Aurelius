@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../core/theme/tokens.dart';
 import '../core/widgets/ios.dart';
 import '../features/connection/connection_banner.dart';
+import '../features/company/company_bloc.dart';
 import '../features/connection/connection_bloc.dart';
 import '../features/inbox/inbox_bloc.dart';
 
@@ -16,12 +17,16 @@ const shellTabPatterns = ['/chat', '/sessions', '/inbox', '/profile'];
 /// desktop's New session. Sessions lists your sessions and open tickets, Inbox
 /// what needs you, Profile your account and settings. The Board is not on
 /// the phone; a project still shows its own.
+/// Line icons, as the redesign draws them.
 const shellTabs = [
-  GlassTab(CupertinoIcons.chat_bubble_text, 'Chat', symbol: 'bubble.left.and.text.bubble.right'),
-  GlassTab(CupertinoIcons.list_bullet, 'Sessions', symbol: 'list.bullet.rectangle'),
+  GlassTab(CupertinoIcons.chat_bubble_text, 'Chat', symbol: 'text.bubble'),
+  GlassTab(CupertinoIcons.square_list, 'Sessions', symbol: 'list.bullet.rectangle'),
   GlassTab(CupertinoIcons.tray, 'Inbox', symbol: 'tray'),
-  GlassTab(CupertinoIcons.person_crop_circle, 'Profile', symbol: 'person.crop.circle'),
+  GlassTab(CupertinoIcons.person, 'Profile', symbol: 'person'),
 ];
+
+/// The Sessions tab, with the count of employees at work (its index in [shellTabs]).
+const sessionsTab = 1;
 
 /// The Chat tab: where ⌘/Ctrl+N goes.
 const chatTab = 0;
@@ -50,6 +55,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final badge = context.select<InboxBloc, int>((b) => b.state.badge);
+    final working = context.select<CompanyBloc, int>((b) => b.state.working);
     final bannerVisible = context.select<ConnectionBloc, bool>((b) => ConnectionBanner.visible(b.state));
     final digits = [LogicalKeyboardKey.digit1, LogicalKeyboardKey.digit2, LogicalKeyboardKey.digit3, LogicalKeyboardKey.digit4];
     final shortcuts = <ShortcutActivator, VoidCallback>{
@@ -73,7 +79,12 @@ class _HomeShellState extends State<HomeShell> {
             onTap: _go,
             fade: Tokens.bg,
             tabs: [
-              for (final (i, t) in shellTabs.indexed) i == inboxTab ? GlassTab(t.icon, t.label, badge: badge, symbol: t.symbol) : t,
+              for (final (i, t) in shellTabs.indexed)
+                switch (i) {
+                  inboxTab => GlassTab(t.icon, t.label, badge: badge, symbol: t.symbol),
+                  sessionsTab => GlassTab(t.icon, t.label, badge: working, symbol: t.symbol, calm: true),
+                  _ => t,
+                },
             ],
           ),
           child: shell,

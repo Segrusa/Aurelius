@@ -14,6 +14,7 @@ import 'package:aurelius_mobile/features/sessions/new_session_page.dart';
 import 'package:aurelius_mobile/features/sessions/session_page.dart';
 import 'package:aurelius_mobile/features/sessions/sessions_page.dart';
 import 'package:bloc_test/bloc_test.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -57,13 +58,13 @@ MockRepository repoWith({List<WorkSessionView> sessions = const [], LinkState? l
 }
 
 /// [page] under a router that knows where the session pages lead.
-Future<GoRouter> pumpSessions(WidgetTester tester, MockRepository repo, Widget page, {LinkState? link}) async {
+Future<GoRouter> pumpSessions(WidgetTester tester, MockRepository repo, Widget page, {LinkState? link, CompanyState? company}) async {
   tester.view.physicalSize = const Size(390, 844) * 3;
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
   final state = link ?? repo.linkState;
-  final company = MockCompanyBloc();
-  whenListen(company, const Stream<CompanyState>.empty(), initialState: companyWith());
+  final companyBloc = MockCompanyBloc();
+  whenListen(companyBloc, const Stream<CompanyState>.empty(), initialState: company ?? companyWith());
   final connection = MockConnectionBloc();
   whenListen(connection, const Stream<LinkState>.empty(), initialState: state);
   final inbox = MockInboxBloc();
@@ -85,7 +86,7 @@ Future<GoRouter> pumpSessions(WidgetTester tester, MockRepository repo, Widget p
     value: repo,
     child: MultiBlocProvider(
       providers: [
-        BlocProvider<CompanyBloc>.value(value: company),
+        BlocProvider<CompanyBloc>.value(value: companyBloc),
         BlocProvider<ConnectionBloc>.value(value: connection),
         BlocProvider<InboxBloc>.value(value: inbox),
         BlocProvider<RuntimeBloc>.value(value: runtime),
@@ -102,7 +103,7 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('the Sessions tab', () {
-    testWidgets('lists work_session.list newest first with who, project and the dots; the header counts who works', (tester) async {
+    testWidgets('lists work_session.list newest first with who, project and the dots in front; who works is the tab badge, not a header count', (tester) async {
       final repo = repoWith(sessions: [
         sessionOf('c1', title: 'Old and quiet', at: 1),
         sessionOf('c2', title: 'Busy one', at: 3, running: true),
@@ -110,7 +111,8 @@ void main() {
       ]);
       await pumpSessions(tester, repo, const WorkSessionsPage());
       expect(find.text('Sessions'), findsWidgets);
-      expect(find.text('1 working'), findsOneWidget);
+      expect(find.text('1 working'), findsNothing);
+      expect(find.text('ACTIVE · 2'), findsOneWidget, reason: 'the working one and the one waiting for your choice');
       final busy = tester.getTopLeft(find.text('Busy one')).dy;
       final nobody = tester.getTopLeft(find.text('Nobody chosen')).dy;
       final old = tester.getTopLeft(find.text('Old and quiet')).dy;
@@ -118,6 +120,7 @@ void main() {
       expect(find.descendant(of: find.byKey(const ValueKey('session-c2')), matching: find.byKey(const ValueKey('session-working'))), findsOneWidget);
       expect(find.descendant(of: find.byKey(const ValueKey('session-c3')), matching: find.byKey(const ValueKey('session-needs-you'))), findsOneWidget);
       expect(find.descendant(of: find.byKey(const ValueKey('session-c1')), matching: find.byType(StatusDot)), findsNothing);
+      expect(tester.getTopLeft(find.byKey(const ValueKey('session-working'))).dx, lessThan(tester.getTopLeft(find.text('Busy one')).dx), reason: 'the dot leads the row');
       expect(find.textContaining('Forge · Atlas'), findsNWidgets(2));
       expect(find.textContaining('Nobody yet · Atlas'), findsOneWidget);
     });
@@ -170,10 +173,18 @@ void main() {
       expect(find.text('Fix the login'), findsOneWidget);
     });
 
-    testWidgets('✎ opens the Chat tab', (tester) async {
+    testWidgets('the page has a large title and no ✎: work starts on the Chat tab', (tester) async {
+      final repo = repoWith(sessions: [sessionOf('c1')]);
+      await pumpSessions(tester, repo, const WorkSessionsPage());
+      expect(find.text('Sessions'), findsWidgets);
+      expect(find.byKey(const ValueKey('sessions-new')), findsNothing);
+    });
+
+    testWidgets('an empty list still has the switch and offers New session, which opens Chat', (tester) async {
       final repo = repoWith();
       await pumpSessions(tester, repo, const WorkSessionsPage());
-      await tester.tap(find.byKey(const ValueKey('sessions-new')));
+      expect(find.byKey(const ValueKey('sessions-switch')), findsOneWidget);
+      await tester.tap(find.text('New session'));
       await settleBoard(tester);
       expect(find.text('page chat'), findsOneWidget);
     });
@@ -194,7 +205,7 @@ void main() {
       expect(find.textContaining('Backlog'), findsNothing);
       expect(find.textContaining('All done'), findsNothing);
       expect(find.textContaining('Archived one'), findsNothing);
-      expect(find.text('1 needs you'), findsOneWidget);
+      expect(find.text('ACTIVE · 1'), findsOneWidget);
       final active = tester.getTopLeft(find.byKey(const ValueKey('tickets-section-active'))).dy;
       final todaySection = tester.getTopLeft(find.byKey(const ValueKey('tickets-section-today'))).dy;
       expect(active < tester.getTopLeft(find.text('#2 Report waits')).dy && tester.getTopLeft(find.text('#2 Report waits')).dy < todaySection, isTrue);
@@ -236,6 +247,25 @@ void main() {
       await settleBoard(tester);
     }
 
+    testWidgets('the project is a picker: its menu lists every open project with a check on the chosen one', (tester) async {
+      final repo = repoWith();
+      ProjectSummary project(String id, String name) => ProjectSummary(createdAtMs: 0, id: id, name: name, status: ProjectStatus.active, version: 1, employeesActive: 0);
+      await pumpSessions(tester, repo, const NewSessionPage(), company: companyWith(projects: [project('p1', 'Atlas'), project('p2', 'Planora'), project('p3', 'Eurocontrol MMIT')]));
+      expect(find.descendant(of: find.byKey(const ValueKey('chat-project')), matching: find.text('Choose a project')), findsOneWidget, reason: 'several projects and none used yet');
+      await tester.tap(find.byKey(const ValueKey('chat-project')));
+      await settleBoard(tester);
+      for (final id in ['p1', 'p2', 'p3']) {
+        expect(find.byKey(ValueKey('menu-$id')), findsOneWidget);
+      }
+      await tester.tap(find.byKey(const ValueKey('menu-p2')));
+      await settleBoard(tester);
+      expect(find.descendant(of: find.byKey(const ValueKey('chat-project')), matching: find.text('Planora')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('chat-project')));
+      await settleBoard(tester);
+      expect(find.descendant(of: find.byKey(const ValueKey('menu-p2')), matching: find.byIcon(CupertinoIcons.checkmark_alt)), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const ValueKey('menu-p1')), matching: find.byIcon(CupertinoIcons.checkmark_alt)), findsNothing);
+    });
+
     testWidgets('Who = Dispatcher starts with work_session.dispatch and opens the new session', (tester) async {
       final repo = repoWith();
       when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
@@ -243,7 +273,7 @@ void main() {
       await pumpSessions(tester, repo, const NewSessionPage());
       expect(find.text('What should happen next?'), findsOneWidget);
       expect(find.text('Atlas'), findsOneWidget, reason: 'the only open project is chosen');
-      expect(tester.widget<ChoiceChip>(find.byKey(const ValueKey('chat-project-p1'))).selected, isTrue);
+      expect(find.descendant(of: find.byKey(const ValueKey('chat-project')), matching: find.text('Atlas')), findsOneWidget);
       expect(find.text('Dispatcher'), findsOneWidget, reason: 'with session_dispatch the dispatcher chooses unless told');
       await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'Fix the login page');
       await choose(tester, 'model', 'pick-Model-default');

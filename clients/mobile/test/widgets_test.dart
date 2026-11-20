@@ -318,7 +318,7 @@ void main() {
         when(() => repo.effectiveGuidelines('mgr')).thenAnswer((_) async => const EffectiveGuidelines(guidelines: [coding], limitChars: 24000, totalChars: 21, employeeId: 'mgr'));
         await open(tester);
         await tester.pumpAndSettle();
-        expect(find.text('Guidelines  1', findRichText: true), findsOneWidget);
+        expect(find.text('GUIDELINES · 1'), findsOneWidget);
         expect(find.text('Rust style'), findsOneWidget);
         await tester.tap(find.byKey(const ValueKey('employee-guideline-g1')));
         await tester.pumpAndSettle();

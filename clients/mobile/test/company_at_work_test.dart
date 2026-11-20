@@ -65,10 +65,10 @@ void main() {
       // The only root leads by default; the only project is the project.
       expect(find.descendant(of: find.byKey(const ValueKey('give-work-lead')), matching: find.text('Ada')), findsOneWidget);
       expect(find.descendant(of: find.byKey(const ValueKey('give-work-project')), matching: find.text('Atlas')), findsOneWidget);
-      expect(find.text('Management Team'), findsOneWidget);
+      expect(find.text('MANAGEMENT TEAM'), findsOneWidget);
       expect(find.byKey(const ValueKey('team-ceo')), findsOneWidget);
       expect(find.byKey(const ValueKey('team-b')), findsNothing, reason: 'Bo reports to Ada');
-      expect(find.textContaining('At Work'), findsOneWidget);
+      expect(find.textContaining('AT WORK'), findsOneWidget);
       expect(find.text('Task 1 · Atlas'), findsOneWidget);
       expect(find.byKey(const ValueKey('at-work-c')), findsNothing, reason: 'Cy is not working');
       await tester.tap(find.byKey(const ValueKey('at-work-b')));
@@ -101,7 +101,7 @@ void main() {
         ),
         const DashboardPage(),
       );
-      expect(find.textContaining('Needs You'), findsOneWidget);
+      expect(find.textContaining('NEEDS YOU'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('home-waiting-w')));
       await tester.pumpAndSettle();
       expect(find.text('task w'), findsOneWidget);
@@ -189,7 +189,7 @@ void main() {
       await show(tester, state, const CompanyOrgPage());
       expect(find.byKey(const ValueKey('proposal-pr1')), findsOneWidget);
       expect(find.textContaining('reports to Ada'), findsOneWidget);
-      final headers = ['Proposals', 'Management team', 'Employees'].map((t) => tester.getTopLeft(find.textContaining(RegExp('^$t  \\d'))).dy).toList();
+      final headers = ['Proposals', 'Management team', 'Employees'].map((t) => tester.getTopLeft(find.textContaining(RegExp('^${t.toUpperCase()} · \\d'))).dy).toList();
       expect(headers, orderedEquals([...headers]..sort()), reason: 'proposals, then the management team, then the others');
       expect(find.byKey(const ValueKey('employee-e')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('employee-c')));

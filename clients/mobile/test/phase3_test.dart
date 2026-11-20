@@ -452,7 +452,7 @@ void main() {
           ]));
       when(() => repo.revokeSession('s-2')).thenAnswer((_) async {});
       await pump(tester, const SessionsPage());
-      expect(find.text('Devices signed in as alex'), findsOneWidget);
+      expect(find.text('DEVICES SIGNED IN AS ALEX'), findsOneWidget);
       expect(find.text('This device'), findsOneWidget);
       expect(find.byKey(const ValueKey('revoke-s-1')), findsNothing, reason: 'this phone signs out with Sign out');
       expect(find.textContaining('active 2 h ago'), findsOneWidget);

@@ -346,7 +346,7 @@ void main() {
       return (repo, bloc, router);
     }
 
-    testWidgets('a ◆ row sits in Needs you, the others in Updates above Running', (tester) async {
+    testWidgets('a ◆ row sits in Needs you, the others in Updates and done', (tester) async {
       await show(tester, InboxState(loading: false, personalOn: true, notifications: [row('w', reason: 'review', needsYou: true), row('u', ticket: 'k43', number: 43)]));
       expect(find.byKey(const ValueKey('inbox-row-diamond-w')), findsOneWidget);
       expect(find.byKey(const ValueKey('inbox-row-diamond-u')), findsNothing);
@@ -355,11 +355,12 @@ void main() {
       final updates = find.byKey(const ValueKey('inbox-section-updates'));
       expect(y(find.byKey(const ValueKey('inbox-section-needs-you'))) < y(find.byKey(const ValueKey('inbox-row-w'))), isTrue);
       expect(y(find.byKey(const ValueKey('inbox-row-w'))) < y(updates), isTrue);
-      expect(y(updates) < y(find.byKey(const ValueKey('inbox-row-u'))), isTrue);
-      expect(y(find.byKey(const ValueKey('inbox-row-u'))) < y(find.byKey(const ValueKey('inbox-section-running'))), isTrue);
+      expect(y(find.byKey(const ValueKey('inbox-section-done'))) < y(updates), isTrue);
+      expect(y(updates) <= y(find.byKey(const ValueKey('inbox-row-u'))), isTrue);
+      expect(find.text('UPDATES AND DONE'), findsOneWidget);
     });
 
-    testWidgets('no rows says No updates; with nothing at all the empty screen explains', (tester) async {
+    testWidgets('with nothing at all the empty line explains what lands here', (tester) async {
       await show(tester, const InboxState(loading: false, personalOn: true));
       expect(find.textContaining("You get one when you're made responsible"), findsOneWidget);
     });

@@ -81,9 +81,9 @@ void main() {
     final ys = [
       y(find.byKey(const ValueKey('profile-name'))),
       y(find.byKey(const ValueKey('profile-pc'))),
-      y(find.text('Account')),
-      y(find.text('Workspace')),
-      y(find.text('App')),
+      y(find.text('ACCOUNT')),
+      y(find.text('WORKSPACE')),
+      y(find.text('APP')),
       y(find.byKey(const ValueKey('account-sign-out'))),
     ];
     expect(ys, [...ys]..sort());

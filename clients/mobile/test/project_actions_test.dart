@@ -140,7 +140,7 @@ void main() {
       taskOf(id: 't4', projectId: 'other', employeeId: 'jean', title: 'Elsewhere', goal: '', status: TaskStatus.running),
     ];
     await pump(tester);
-    expect(find.textContaining('Who Works Here'), findsOneWidget);
+    expect(find.textContaining('WHO WORKS HERE'), findsOneWidget);
     expect(find.byKey(const ValueKey('works-here-tom')), findsOneWidget);
     expect(find.text('Tester · 2 open tasks'), findsOneWidget);
     expect(find.byKey(const ValueKey('works-here-jean')), findsNothing, reason: 'Jean has only ended work here');
