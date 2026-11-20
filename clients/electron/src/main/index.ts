@@ -35,6 +35,7 @@ import {
   type WebContents,
 } from "electron";
 import { connectOrStart, daemonProgram, installDir, startDaemon } from "./daemon";
+import { appendLinkLog, linkLine, PageWatch } from "./link-life";
 import { linkInArguments, linkOf } from "./links";
 import { daemonEndpoint, dataDir, openPipe } from "./pipe";
 import { type Box, MIN_HEIGHT, MIN_WIDTH, placement } from "./placement";
@@ -130,13 +131,23 @@ function handle<A extends unknown[], R>(
 }
 
 function serveLinks(): void {
-  const links = new Map<number, { link: Link; owner: number }>();
+  const links = new Map<number, { link: Link; owner: number; openedAt: number; detach: () => void }>();
   let nextId = 1;
+  // When and why each link ended: a dropped link can only be pieced together afterwards.
+  const logFile = join(app.getPath("logs"), "links.log");
+  const log = (id: number, event: "opened" | "closed", detail: Record<string, string | number>) =>
+    appendLinkLog(logFile, linkLine(new Date(), id, event, detail));
 
-  const close = (id: number) => {
-    links.get(id)?.link.close();
+  /** Takes the link out first, so its own close event finds nothing to report twice. */
+  const forget = (id: number, reason: string) => {
+    const entry = links.get(id);
+    if (entry === undefined) return null;
     links.delete(id);
+    entry.detach();
+    log(id, "closed", { reason, open_ms: Date.now() - entry.openedAt });
+    return entry;
   };
+  const close = (id: number, reason: string) => forget(id, reason)?.link.close();
 
   const connect = async (root: string): Promise<Link> => {
     const server = activeServer();
@@ -161,25 +172,34 @@ function serveLinks(): void {
     try {
       const link = await connect(root);
       const id = nextId++;
-      links.set(id, { link, owner: sender.id });
+      // A reload makes a new page in the same contents; the old page's link goes with it. Only a page
+      // change that goes through counts: one that will-navigate blocks must not cut the link.
+      const watch = new PageWatch();
+      const started = (details: { isSameDocument: boolean; isMainFrame: boolean }) => watch.started(details);
+      const committed = () => {
+        if (watch.committed()) close(id, "page changed");
+      };
+      const destroyed = () => close(id, "window closed");
+      sender.on("did-start-navigation", started);
+      sender.on("did-navigate", committed);
+      sender.once("destroyed", destroyed);
+      const detach = () => {
+        if (sender.isDestroyed()) return;
+        sender.off("did-start-navigation", started);
+        sender.off("did-navigate", committed);
+        sender.off("destroyed", destroyed);
+      };
+      links.set(id, { link, owner: sender.id, openedAt: Date.now(), detach });
+      log(id, "opened", { server: activeServer() === null ? "local" : "remote" });
       link.listen(
         (text) => {
           if (!sender.isDestroyed()) sender.send("link:frame", id, text);
         },
         (code) => {
-          links.delete(id);
+          if (forget(id, code === null ? "server closed" : `server closed (${code})`) === null) return;
           if (!sender.isDestroyed()) sender.send("link:closed", id, code);
         },
       );
-      sender.once("destroyed", () => close(id));
-      // A reload makes a new page in the same contents; the old page's link goes with it.
-      const navigated = (details: { isSameDocument: boolean; isMainFrame: boolean }) => {
-        if (details.isMainFrame && !details.isSameDocument) {
-          sender.off("did-start-navigation", navigated);
-          close(id);
-        }
-      };
-      sender.on("did-start-navigation", navigated);
       return { ok: true as const, id };
     } catch (error) {
       return {
@@ -197,8 +217,8 @@ function serveLinks(): void {
   handle("link:send", (sender, id: unknown, text: unknown) => {
     if (typeof text === "string") own(sender, id)?.link.send(text);
   });
-  handle("link:close", (sender, id: unknown) => {
-    if (own(sender, id)) close(id as number);
+  handle("link:close", (sender, id: unknown, reason: unknown) => {
+    if (own(sender, id)) close(id as number, typeof reason === "string" ? reason.slice(0, 80) : "page asked");
   });
 }
 
@@ -542,8 +562,11 @@ function makeWindow(extra: Electron.BrowserWindowConstructorOptions, path: strin
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
+  // Never away from the app: a plain web link opens in the browser instead, anything else stays put.
   window.webContents.on("will-navigate", (event, url) => {
-    if (!fromOurPage(url)) event.preventDefault();
+    if (fromOurPage(url)) return;
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
   });
   window.loadURL(`${DEV_URL ?? ORIGIN}${path}`).catch((error: unknown) => {
     dialog.showErrorBox("Aurelius could not start", String(error));

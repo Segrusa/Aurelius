@@ -21,6 +21,7 @@ const hello = (over: Record<string, unknown> = {}) => ({
 class FakeLink implements Link {
   sent: Record<string, unknown>[] = [];
   closed = false;
+  closeReason: string | undefined;
   private onFrame: (text: string) => void = () => {};
   private onClosed: (code: number | null) => void = () => {};
   answers: (request: Record<string, unknown>) => unknown = () => undefined;
@@ -33,8 +34,9 @@ class FakeLink implements Link {
       queueMicrotask(() => this.frame({ type: "response", request_id: request.request_id, ...(ok as object) }));
   }
 
-  close(): void {
+  close(reason?: string): void {
     this.closed = true;
+    this.closeReason = reason;
   }
 
   listen(onFrame: (text: string) => void, onClosed: (code: number | null) => void): void {
@@ -314,6 +316,7 @@ describe("Connection", () => {
     await vi.advanceTimersByTimeAsync(25_000);
     await vi.advanceTimersByTimeAsync(1000);
     expect(first.closed).toBe(true);
+    expect(first.closeReason).toMatch(/^no answer for \d+ s$/);
     expect(second.methods()).toContain("session.hello");
     conn.dispose();
   });

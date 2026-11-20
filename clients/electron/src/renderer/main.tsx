@@ -1,4 +1,11 @@
-import { App, adoptDesktopPrefs, type DesktopPrefs, type Platform, type ServerChoices } from "@aurelius/app";
+import {
+  App,
+  adoptDesktopPrefs,
+  type DesktopPrefs,
+  guardStrayDrops,
+  type Platform,
+  type ServerChoices,
+} from "@aurelius/app";
 import { LinkError } from "@aurelius/client";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -8,7 +15,7 @@ import "./style.css";
 interface Bridge {
   openLink(): Promise<{ ok: true; id: number } | { ok: false; kind: LinkError["kind"]; message: string }>;
   sendLink(id: number, text: string): Promise<void>;
-  closeLink(id: number): Promise<void>;
+  closeLink(id: number, reason?: string): Promise<void>;
   listenLink(id: number, frame: (text: string) => void, closed: (code: number | null) => void): void;
   getSession(): Promise<string | null>;
   setSession(token: string | null): Promise<void>;
@@ -82,7 +89,7 @@ const platform: Platform = {
     const { id } = opened;
     return {
       send: (text) => void bridge.sendLink(id, text),
-      close: () => void bridge.closeLink(id),
+      close: (reason) => void bridge.closeLink(id, reason),
       listen: (onFrame, onClosed) => bridge.listenLink(id, onFrame, onClosed),
     };
   },
@@ -132,6 +139,7 @@ const platform: Platform = {
 };
 
 adoptDesktopPrefs(platform.storage, desktopPrefs);
+guardStrayDrops(window);
 
 const root = document.getElementById("root");
 if (root === null) throw new Error("No root element.");

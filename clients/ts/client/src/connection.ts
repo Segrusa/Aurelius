@@ -30,7 +30,8 @@ import { StreamMerge, type StreamUpdate } from "./stream";
 /** One open connection. Frames are JSON text, whatever carries them. */
 export interface Link {
   send(text: string): void;
-  close(): void;
+  /** `reason`: a few words for the transport's log of why this side closed it. */
+  close(reason?: string): void;
   /** Set once, right after opening. `code`: the close code, when the transport has one. */
   listen(onFrame: (text: string) => void, onClosed: (code: number | null) => void): void;
 }
@@ -250,7 +251,7 @@ export class Connection {
     this.disposed = true;
     for (const timer of this.timers) clearInterval(timer);
     this.wake();
-    this.link?.close();
+    this.link?.close("app closed the connection");
     this.failWaiting();
     for (const pending of this.outbox.splice(0)) pending.reject(new NotSentError(pending.key));
   }
@@ -366,7 +367,7 @@ export class Connection {
         this.setState({ status: "offline", message: "Connection lost. Reconnecting…" });
         if (closedCode === 4401) continue; // Revoked or turned off: the next open says which, now.
       } catch (error) {
-        this.link?.close();
+        this.link?.close(error instanceof Error ? `hello failed: ${error.message}` : "hello failed");
         this.failWaiting();
         if (this.disposed) return;
         if (error instanceof Incompatible) {
@@ -671,7 +672,7 @@ export class Connection {
     if (link === null || this.state.status !== "online") return;
     const quiet = Date.now() - this.lastFrameAt;
     if (quiet >= SILENCE_LIMIT_MS) {
-      link.close();
+      link.close(`no answer for ${Math.round(quiet / 1000)} s`);
       this.linkClosed(link, null);
     } else if (quiet >= HEARTBEAT_MS) {
       this.call("user.whoami").catch(() => {});
