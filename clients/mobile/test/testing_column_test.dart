@@ -170,8 +170,7 @@ void main() {
       final test = taskOf(id: 'test-1', status: TaskStatus.running, employeeId: 'pulse', employeeName: 'Pulse', parentTaskId: 'root', updatedAtMs: 5);
       final repo = boardRepository(detail: TicketDetail(asOfSeq: 1, ticket: tested, rootTask: root, tasks: [root, test]), link: testingLink);
       final router = await pumpBoardPage(tester, repo, TicketPage(ticketId: tested.id), company: withTester(), link: testingLink);
-      expect(find.text('Testing'), findsOneWidget, reason: 'the column');
-      expect(find.text('Pulse is testing…'), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('session-head-detail'))).data, endsWith(' · Pulse is testing…'), reason: 'what it waits for, beside the pill');
       expect(find.byKey(const ValueKey('ticket-testing')), findsOneWidget);
       expect(find.byKey(const ValueKey('bar-done')), findsNothing);
       expect(find.byKey(const ValueKey('bar-send-back')), findsNothing);

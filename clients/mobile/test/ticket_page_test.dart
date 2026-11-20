@@ -31,7 +31,8 @@ void main() {
   group('a ticket in Backlog', () {
     testWidgets('the details: priority, owner (the dispatcher), mode, labels, created by (MU1-07), in the properties', (tester) async {
       await open(tester, detailOf(ticketOf(number: 51, title: 'Vault UI', priority: TicketPriority.urgent, labels: const ['ui', 'vault'], description: 'Board members log in.')));
-      expect(find.text('#51 · Atlas'), findsOneWidget);
+      expect(find.byKey(const ValueKey('session-kind-ticket')), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('session-head-detail'))).data, '#51 · Backlog');
       expect(find.text('Vault UI'), findsWidgets);
       expect(find.text('This server has no ticket conversation.'), findsOneWidget, reason: 'a server without ticket conversations');
       await openTicketProperties(tester);
@@ -365,7 +366,7 @@ void main() {
     testWidgets('the gate shows the plan and opens the whole plan', (tester) async {
       await open(tester, planned(), messages: plan);
       expect(find.text('Plan review · your decision'), findsOneWidget);
-      expect(find.text('◆ Plan to review'), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('session-head-detail'))).data, '#42 · ◆ Plan to review');
       expect(find.textContaining('Hash with argon2'), findsOneWidget);
       await tapKey(tester, 'gate-whole-plan');
       expect(find.text('plan k1'), findsOneWidget);

@@ -294,7 +294,7 @@ void main() {
     testWidgets('in Review a quick task has Approve and merge; it asks, then sends ticket.accept', (tester) async {
       final repo = await open(tester, quickIn(ColumnKind.review));
       expect(barDone(tester), approveAndMerge);
-      expect(find.byKey(const ValueKey('quick-tag-page')), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('session-head-detail'))).data, '#9 · Quick · ◆ Report to review');
       await tapKey(tester, 'bar-done');
       expect(find.text('$approveAndMerge #9?'), findsOneWidget);
       expect(find.textContaining('Nothing is pushed.'), findsOneWidget);

@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import '../activity/activity_chip.dart';
 
 import '../../core/net/connection.dart' show LinkState;
 import '../../core/theme/tokens.dart';
@@ -25,13 +24,14 @@ import '../project/new_task_page.dart' show maxTaskFiles;
 import '../links/link_actions.dart';
 import '../markdown/links.dart';
 import '../chat/run_author.dart';
+import '../sessions/session_chrome.dart';
+import '../sessions/session_screen_rules.dart';
 import 'ticket_actions.dart';
 import 'ticket_bloc.dart';
 import 'ticket_gate.dart';
 import 'ticket_properties.dart';
 import 'ticket_session_rules.dart';
 import 'ticket_text_dialog.dart';
-import 'ticket_card.dart' show QuickTag;
 
 /// `/ticket/:tid` (ticket #71, after the desktop's session of ticket #70): a
 /// ticket as one session. Its conversation is the main view; the head says
@@ -147,44 +147,45 @@ class _TicketViewState extends State<_TicketView> {
     // Yours to do or not, anyone can decide (B6, §1.4).
     final othersNote = state.needsYou && !needsMe(ticket, state, me: me) ? '${responsibleLabel(ticket)} is responsible. You can decide too.' : null;
     Widget gate({required bool input}) => TicketGateView(page: page, state: state, online: online, composer: input ? _composer : null, note: othersNote);
-    final scaffold = Scaffold(
-      appBar: GlassAppBar(
-        title: Text('#${ticket.number} · ${ticket.projectName}'),
-        actions: [
-          IconButton(
-            key: const ValueKey('ticket-properties'),
-            tooltip: 'Ticket properties',
-            icon: const Icon(Icons.view_sidebar_outlined),
-            onPressed: () => showTicketProperties(context),
-          ),
-          _moreMenu(context, ticket, root, conversation, online),
-        ],
-      ),
-      body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        _Head(ticket: ticket, owner: owner, me: me, quick: isQuickTask(ticket, on: quickTasksOn(link)), status: status, mine: mine),
-        Expanded(
-          child: conversation == null
-              ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    final quick = isQuickTask(ticket, on: quickTasksOn(link));
+    final scaffold = Builder(
+      builder: (context) => SessionScaffold(
+        head: SessionHead(
+          title: ticket.title,
+          titleKey: const ValueKey('ticket-title'),
+          kind: SessionKind.ticket,
+          moreLabel: 'Ticket actions',
+          // "#42 · Pulse is testing…", "#42 · ◆ Report to review" when it is yours, else the column.
+          detail: ticketHeadDetail(ticket, columnName(ticket.column), status: status, mine: mine, quick: quick),
+          detailAccent: mine && status != null,
+          onMore: (anchor) => _more(context, anchor, ticket, root, conversation, online),
+        ),
+        body: conversation == null
+            ? Padding(
+                padding: EdgeInsets.only(top: sessionHeadInset(context)),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   const Expanded(child: EmptyState('This server has no ticket conversation.', key: ValueKey('ticket-no-conversation'))),
                   gate(input: false),
                   if (readOnly != null) _ReadOnlyBar(text: readOnly) else SizedBox(height: MediaQuery.paddingOf(context).bottom),
-                ])
-              : ChatView(
-                  key: ValueKey('discussion-${ticket.id}'),
-                  revealMessage: widget.message,
-                  emptyTitle: 'Discuss the ticket here',
-                  emptyDetail: sessionHint(ticket, owner: owner),
-                  composer: readOnly == null,
-                  readOnlyNote: readOnly,
-                  hint: sessionPlaceholder(ticket, owner: owner),
-                  source: TicketSource(from: 'Discussion of #${ticket.number}', projectId: ticket.projectId),
-                  taskProjectId: ticket.projectId,
-                  composerText: _composer,
-                  aboveComposer: readOnly == null ? gate(input: true) : null,
-                  composerActions: (context, _) => TicketUnderInput(ticket: ticket, online: online, owner: owner),
-                ),
-        ),
-      ]),
+                ]),
+              )
+            : ChatView(
+                key: ValueKey('discussion-${ticket.id}'),
+                floating: true,
+                topInset: sessionHeadInset(context),
+                revealMessage: widget.message,
+                emptyTitle: 'Discuss the ticket here',
+                emptyDetail: sessionHint(ticket, owner: owner),
+                composer: readOnly == null,
+                readOnlyNote: readOnly,
+                hint: sessionPlaceholder(ticket, owner: owner),
+                source: TicketSource(from: 'Discussion of #${ticket.number}', projectId: ticket.projectId),
+                taskProjectId: ticket.projectId,
+                composerText: _composer,
+                aboveComposer: readOnly == null ? gate(input: true) : null,
+                composerActions: (context, _) => TicketUnderInput(ticket: ticket, online: online, owner: owner),
+              ),
+      ),
     );
     if (conversation == null) return scaffold;
     // One chat for the conversation while the session is open; another conversation gets its own.
@@ -214,73 +215,49 @@ class _TicketViewState extends State<_TicketView> {
     );
   }
 
-  Widget _moreMenu(BuildContext context, TicketView ticket, TaskView? root, String? conversation, bool online) => GlassMenuButton<String>(
-        tooltip: 'Ticket actions',
-        items: () => [
-          GlassMenuItem('copy', 'Copy #${ticket.number}'),
-          if (context.read<ConnectionBloc>().state.has(messageLocateFeature)) const GlassMenuItem('link', 'Copy link'),
-          const GlassMenuItem('activity', 'Activity'),
-          if (ticket.column != ColumnKind.backlog && ticket.column != ColumnKind.done && online) GlassMenuItem('backlog', ticket.column == ColumnKind.planReview ? 'Reject plan' : 'Back to Backlog', danger: true),
-          if ((ticket.column == ColumnKind.backlog || ticket.column == ColumnKind.done) && online) GlassMenuItem('archive', 'Archive'),
-          // P-23: the main task's own conversation stays reachable.
-          if (conversation != null && root?.conversationId != null) const GlassMenuItem('main', 'Open main task conversation'),
-        ],
-        onSelected: (v) async {
-          switch (v) {
-            case 'copy':
-              await Clipboard.setData(ClipboardData(text: '#${ticket.number} ${ticket.title}'));
-              if (context.mounted) toast(context, 'Copied #${ticket.number}.');
-            case 'link':
-              await copyTicketLink(context, ticket.id, ticket.number);
-            case 'activity':
-              await showTicketProperties(context, activity: true);
-            case 'main':
-              await context.push('/conversation/${root!.conversationId}?e=${root.employeeId ?? ''}');
-            case 'backlog':
-              await backToBacklog(context, ticket);
-            case 'archive':
-              final done = await ticketWrite(context, ticketArchive(ticketId: ticket.id), expectedVersion: ticket.version, retry: false, done: '#${ticket.number} is archived.');
-              if (done && context.mounted && context.canPop()) context.pop();
-          }
-        },
-      );
+  /// "…": Properties first (the design's one button), then the ticket's actions.
+  Future<void> _more(BuildContext context, BuildContext anchor, TicketView ticket, TaskView? root, String? conversation, bool online) async {
+    final v = await showGlassMenu<String>(anchor, [
+      const GlassMenuItem('properties', 'Properties'),
+      const GlassMenuItem('activity', 'Activity'),
+      GlassMenuItem('copy', 'Copy #${ticket.number}'),
+      if (context.read<ConnectionBloc>().state.has(messageLocateFeature)) const GlassMenuItem('link', 'Copy link'),
+      // P-23: the main task's own conversation stays reachable.
+      if (conversation != null && root?.conversationId != null) const GlassMenuItem('main', 'Open main task conversation'),
+      if (ticket.column != ColumnKind.backlog && ticket.column != ColumnKind.done && online) GlassMenuItem('backlog', ticket.column == ColumnKind.planReview ? 'Reject plan' : 'Back to Backlog', danger: true),
+      if ((ticket.column == ColumnKind.backlog || ticket.column == ColumnKind.done) && online) const GlassMenuItem('archive', 'Archive'),
+    ]);
+    if (v == null || !context.mounted) return;
+    switch (v) {
+      case 'properties':
+        await showTicketProperties(context);
+      case 'copy':
+        await Clipboard.setData(ClipboardData(text: '#${ticket.number} ${ticket.title}'));
+        if (context.mounted) toast(context, 'Copied #${ticket.number}.');
+      case 'link':
+        await copyTicketLink(context, ticket.id, ticket.number);
+      case 'activity':
+        await showTicketProperties(context, activity: true);
+      case 'main':
+        await context.push('/conversation/${root!.conversationId}?e=${root.employeeId ?? ''}');
+      case 'backlog':
+        await backToBacklog(context, ticket);
+      case 'archive':
+        final done = await ticketWrite(context, ticketArchive(ticketId: ticket.id), expectedVersion: ticket.version, retry: false, done: '#${ticket.number} is archived.');
+        if (done && context.mounted && context.canPop()) context.pop();
+    }
+  }
 }
 
-/// The head (TS-05.1): the title, the column chip and "owner X · responsible Y · Project".
-class _Head extends StatelessWidget {
-  const _Head({required this.ticket, required this.owner, required this.me, required this.quick, this.status, this.mine = false});
-
-  final TicketView ticket;
-  final String? owner;
-  final String? me;
-  final bool quick;
-
-  /// What the ticket waits for, as on its card ("Report to review"); [mine] marks it ◆.
-  final String? status;
-  final bool mine;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(ticket.title, key: const ValueKey('ticket-title'), maxLines: 2, overflow: TextOverflow.ellipsis, style: Tokens.title(size: 20)),
-          const SizedBox(height: 4),
-          Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-            Container(
-              key: const ValueKey('ticket-column'),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-              decoration: BoxDecoration(color: Tokens.cell2, borderRadius: BorderRadius.circular(999)),
-              child: Text(columnName(ticket.column), style: const TextStyle(fontWeight: FontWeight.w600)),
-            ),
-            if (quick) const QuickTag(keyId: 'page'),
-            if (status != null) Text(mine ? '◆ $status' : status!, key: const ValueKey('ticket-status'), style: TextStyle(color: mine ? Tokens.accentText : Tokens.label2, fontWeight: mine ? FontWeight.w600 : null)),
-          ]),
-          const SizedBox(height: 2),
-          Text(headLine(ticket, owner: owner, me: me), key: const ValueKey('ticket-head-line'), style: TextStyle(color: Tokens.label2, fontSize: 13)),
-          TicketActivityLine(ticketId: ticket.id, padding: const EdgeInsets.only(top: 2)),
-        ]),
-      );
-}
+/// The line beside the head's Ticket pill: the number, "Quick" for a quick
+/// task, then what the ticket waits for ("◆ Report to review" when it is
+/// yours, "Pulse is testing…") or, without a status, its column ("Done").
+/// The column itself is in Properties.
+String ticketHeadDetail(TicketView ticket, String column, {String? status, bool mine = false, bool quick = false}) => [
+      '#${ticket.number}',
+      if (quick) 'Quick',
+      status == null ? column : (mine ? '◆ $status' : status),
+    ].join(' · ');
 
 /// The read-only bar of a Done or archived ticket without a conversation (BR5).
 class _ReadOnlyBar extends StatelessWidget {

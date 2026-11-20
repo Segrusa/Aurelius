@@ -5,23 +5,27 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/net/protocol.dart';
-import '../../core/theme/tokens.dart';
 import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
-import '../../data/protocol/protocol.dart';
 import '../chat/chat_bloc.dart';
 import '../chat/chat_view.dart';
 import '../company/company_bloc.dart';
-import '../connection/connection_banner.dart';
+import '../runtime/runtime_bloc.dart';
+import '../../data/run_config.dart';
+import '../../data/views.dart';
+import 'session_chrome.dart';
 import 'session_rules.dart';
+import 'session_screen_rules.dart';
 import 'sessions_bloc.dart';
 import 'sessions_page.dart';
 
-/// `/session/:cid` (ticket #71): one work session. The conversation through
-/// the chat view (later messages go in with `chat.send`, with live steps and
-/// Stop), a status line, and while the dispatcher has not given it to anyone
-/// the choice of who takes it (`work_session.assign`) in the composer's place.
+/// `/session/:cid` (ticket #71, design "Aurelius sessiescherm"): one work
+/// session. The conversation fills the screen under a glass head and a
+/// floating composer (later messages go in with `chat.send`, with live steps
+/// and Stop); its status and run are in Properties behind "…". While the
+/// dispatcher has not given it to anyone, the choice of who takes it
+/// (`work_session.assign`) stands in the composer's place.
 class SessionPage extends StatelessWidget {
   const SessionPage({super.key, required this.conversationId});
 
@@ -44,36 +48,78 @@ class _SessionBody extends StatelessWidget {
     final state = context.watch<SessionsBloc>().state;
     final session = state.byId(conversationId);
     if (session == null) return _Missing(state: state);
-    return Scaffold(
-      appBar: GlassAppBar(
-        titleSpacing: 0,
-        title: Text(session.title.isEmpty ? 'Session' : session.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Tokens.title(size: 18)),
-      ),
-      body: Column(children: [
-        const ConnectionBanner(),
-        Expanded(
-          // A new employee (after Choose who takes it) gets a new bloc: messages go to them.
-          child: BlocProvider(
-            key: ValueKey('session-$conversationId-${session.employeeId}'),
-            create: (context) => ChatBloc(context.read<AureliusRepository>(), conversationId: conversationId, employeeId: session.employeeId, session: true),
-            child: Column(children: [
-              SessionStatusLine(session: session),
-              Expanded(
-                child: ChatView(
-                  key: ValueKey('session-chat-$conversationId'),
-                  emptyTitle: 'This session is starting.',
-                  emptyDetail: 'The first answer appears here. Talk with the employee as in a chat; there is no ticket.',
-                  composer: session.dispatch == null,
-                  readOnlyNote: chooserText(session),
-                  readOnlyAction: session.dispatch == null ? null : _ChooseWho(session: session),
-                ),
-              ),
-            ]),
+    // A new employee (after Choose who takes it) gets a new bloc: messages go to them.
+    return BlocProvider(
+      key: ValueKey('session-$conversationId-${session.employeeId}'),
+      create: (context) => ChatBloc(context.read<AureliusRepository>(), conversationId: conversationId, employeeId: session.employeeId, session: true),
+      child: Builder(
+        builder: (context) => SessionScaffold(
+          head: SessionHead(
+            title: session.title.isEmpty ? 'Session' : session.title,
+            titleKey: const ValueKey('session-title'),
+            kind: SessionKind.session,
+            onMore: (_) => showSessionProperties(context, session),
+          ),
+          body: ChatView(
+            key: ValueKey('session-chat-$conversationId'),
+            floating: true,
+            topInset: sessionHeadInset(context),
+            emptyTitle: 'This session is starting.',
+            emptyDetail: 'The first answer appears here. Talk with the employee as in a chat; there is no ticket.',
+            composer: session.dispatch == null,
+            hint: session.dispatch == null ? 'Reply to ${session.employeeName}' : null,
+            readOnlyNote: chooserText(session),
+            readOnlyAction: session.dispatch == null ? null : _ChooseWho(session: session),
           ),
         ),
-      ]),
+      ),
     );
   }
+}
+
+/// The session's Properties (desktop: its side panel): who, its status, where,
+/// what it runs on and since when; then the files its runs wrote and the
+/// guidelines of its latest run.
+Future<void> showSessionProperties(BuildContext context, WorkSessionView session) async {
+  final chat = context.read<ChatBloc>();
+  final repository = context.read<AureliusRepository>();
+  final run = ConversationRun.of(context, runtime: context.read<RuntimeBloc>().state, chat: chat.state, company: context.read<CompanyBloc>().state);
+  final messages = chat.state.messages;
+  final running = session.running || chat.state.streaming != null;
+  final files = filesWritten(messages);
+  final runId = lastRunOf(messages);
+  // The guidelines are read once per opening; a server without them shows none.
+  List<RunGuideline> guidelines = const [];
+  if (runId != null) {
+    try {
+      guidelines = await repository.guidelinesOfRun(runId);
+    } on Object {
+      guidelines = const [];
+    }
+  }
+  if (!context.mounted) return;
+  final model = run?.effectiveModel;
+  final effort = run?.effectiveEffort;
+  await showPropertiesSheet(
+    context,
+    rows: [
+      ('Employee', Text(session.dispatch == null ? session.employeeName : 'Not chosen yet', key: const ValueKey('session-prop-employee'))),
+      ('Status', StatusChip(key: const ValueKey('session-status'), tone: sessionTone(running, session.dispatch), text: sessionStatus(running, session.dispatch))),
+      ('Project', Text(session.projectName)),
+      if (session.branch case final branch?) ('Branch', Text(branch, maxLines: 1, overflow: TextOverflow.ellipsis)),
+      ('Folder', Text(sessionFolder(session), maxLines: 2, overflow: TextOverflow.ellipsis)),
+      ('Model', Text(model == null ? 'Default' : ModelCatalog.friendly(model))),
+      if (run?.effortShown ?? true) ('Effort', Text(effort == null ? 'Default' : ModelCatalog.effortLabel(effort))),
+      ('Mode', Text(chat.state.mode.label)),
+      ('Started', Text(startedLabel(session.createdAtMs), style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]))),
+    ],
+    links: [
+      if (files.isNotEmpty)
+        PropertiesLink('Files written', files.length, () => showPropertiesSheet(context, title: 'Files written', body: SheetList(entries: [for (final f in files) (f, null)]))),
+      if (guidelines.isNotEmpty)
+        PropertiesLink('Guidelines in this run', guidelines.length, () => showPropertiesSheet(context, title: 'Guidelines in this run', body: SheetList(entries: [for (final g in guidelines) (g.title, 'v${g.version}')]))),
+    ],
+  );
 }
 
 /// A session the list does not have (yet): loading, its error with Try again, or gone.
@@ -108,29 +154,6 @@ class _Missing extends StatelessWidget {
       );
     }
     return Scaffold(appBar: const GlassAppBar(title: Text('Session')), body: body);
-  }
-}
-
-/// The session's status (desktop's Status row). Stop is the chat view's own, on the answer and in the composer.
-class SessionStatusLine extends StatelessWidget {
-  const SessionStatusLine({super.key, required this.session});
-
-  final WorkSessionView session;
-
-  @override
-  Widget build(BuildContext context) {
-    final runId = context.select<ChatBloc, String?>((b) => b.state.streaming?.runId);
-    final running = session.running || runId != null;
-    return Container(
-      key: const ValueKey('session-status'),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Tokens.border, width: 0.5))),
-      child: Row(children: [
-        SessionMark(signal: runId != null ? SessionSignal.working : sessionSignal(session)),
-        const SizedBox(width: 8),
-        Expanded(child: Text(sessionStatus(running, session.dispatch), key: const ValueKey('session-status-text'), style: TextStyle(fontSize: 13, color: Tokens.label2))),
-      ]),
-    );
   }
 }
 

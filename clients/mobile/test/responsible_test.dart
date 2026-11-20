@@ -222,9 +222,9 @@ void main() {
       return repo;
     }
 
-    testWidgets('the head names the responsible; the properties have Owner, then Responsible with its explanation, then Runs on (ticket #71)', (tester) async {
+    testWidgets('the head leaves who out; the properties have Owner, then Responsible with its explanation, then Runs on (ticket #71)', (tester) async {
       await open(tester, ticketOf(number: 42, responsible: bo));
-      expect(find.text('No owner · responsible bo · Atlas'), findsOneWidget);
+      expect(find.text('No owner · responsible bo · Atlas'), findsNothing, reason: 'who and where are in Properties');
       await openTicketProperties(tester);
       expect(find.byKey(const ValueKey('ticket-row-responsible')), findsOneWidget);
       expect(find.text(responsibleExplained), findsOneWidget);
@@ -274,12 +274,12 @@ void main() {
       expect(find.byKey(const ValueKey('bar-done')), findsOneWidget);
       expect(find.byKey(const ValueKey('bar-send-back')), findsOneWidget);
       expect(find.text('◆ Report to review'), findsNothing);
-      expect(find.text('Waiting for review'), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('session-head-detail'))).data, '#42 · Waiting for review');
     });
 
     testWidgets('my own review keeps the ◆ and no note', (tester) async {
       await open(tester, ticketOf(number: 42, column: ColumnKind.review, responsible: testUser));
-      expect(find.text('◆ Report to review'), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('session-head-detail'))).data, '#42 · ◆ Report to review');
       expect(find.byKey(const ValueKey('bar-others-note')), findsNothing);
     });
 

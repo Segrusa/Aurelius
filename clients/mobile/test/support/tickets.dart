@@ -239,10 +239,13 @@ Future<void> settleBoard(WidgetTester tester) async {
   }
 }
 
-/// Opens the sheet "Ticket properties" of a ticket's session (ticket #71); with
+/// Opens the sheet "Ticket properties" of a ticket's session (ticket #71)
+/// through the head's "…" menu (design "Aurelius sessiescherm"); with
 /// [activity] on its Activity tab.
 Future<void> openTicketProperties(WidgetTester tester, {bool activity = false}) async {
-  await tester.tap(find.byKey(const ValueKey('ticket-properties')));
+  await tester.tap(find.byTooltip('Ticket actions'));
+  await settleBoard(tester);
+  await tester.tap(find.byKey(const ValueKey('menu-properties')));
   await settleBoard(tester);
   if (activity) {
     await tester.tap(find.descendant(of: find.byKey(const ValueKey('ticket-segments')), matching: find.text('Activity')));

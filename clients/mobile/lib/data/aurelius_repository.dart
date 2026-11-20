@@ -200,6 +200,9 @@ class AureliusRepository {
   Future<ActivityView> activity(String messageId, String callId) async =>
       (await _ask<ResponseBodyActivity>(activityGet(messageId: messageId, callId: callId))).value;
 
+  /// The guidelines the server put in a run's system text (`run.guidelines`).
+  Future<List<RunGuideline>> guidelinesOfRun(String runId) async => (await _ask<ResponseBodyRunGuidelines>(runGuidelines(runId: runId))).value.guidelines;
+
   /// The company's employees (archived ones left out by the server).
   Future<List<EmployeeSummary>> employees() async => (await _ask<ResponseBodyEmployees>(employeeList())).value.employees;
 

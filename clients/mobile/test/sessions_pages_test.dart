@@ -12,6 +12,7 @@ import 'package:aurelius_mobile/features/inbox/inbox_bloc.dart';
 import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:aurelius_mobile/features/sessions/new_session_page.dart';
 import 'package:aurelius_mobile/features/sessions/session_page.dart';
+import 'package:aurelius_mobile/features/sessions/session_screen_rules.dart';
 import 'package:aurelius_mobile/features/sessions/sessions_page.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/cupertino.dart';
@@ -55,6 +56,12 @@ MockRepository repoWith({List<WorkSessionView> sessions = const [], LinkState? l
   when(() => repo.boardMembers()).thenAnswer((_) async => const [testUser]);
   when(() => repo.workSessions()).thenAnswer((_) async => sessions);
   return repo;
+}
+
+/// Opens the session's Properties behind the head's "…".
+Future<void> openSessionProperties(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('session-more')));
+  await settleBoard(tester);
 }
 
 /// [page] under a router that knows where the session pages lead.
@@ -437,14 +444,15 @@ void main() {
   });
 
   group('a session', () {
-    testWidgets('shows its title and the status, not who works where; a message goes in with chat.send', (tester) async {
+    testWidgets('shows its title and the Session pill, not who works where; a message goes in with chat.send', (tester) async {
       final repo = repoWith(sessions: [sessionOf('c1')], messages: snapshotOf('c1', messages: [messageOf('m1', MessageRole.user, 'Fix the login')]));
       when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
           .thenAnswer((_) async => receiptOf(const CommandResultChatMessageSent(conversationId: 'c1', messageId: 'm2', runId: 'r2')));
       await pumpSessions(tester, repo, const SessionPage(conversationId: 'c1'));
       expect(find.text('Fix the login'), findsWidgets);
-      expect(find.textContaining('project folder'), findsNothing);
-      expect(find.text('Waiting for you'), findsOneWidget);
+      expect(find.byKey(const ValueKey('session-kind-session')), findsOneWidget);
+      expect(find.textContaining('folder'), findsNothing, reason: 'where it works is in Properties');
+      expect(find.text('Reply to Forge'), findsOneWidget);
       await tester.enterText(find.byType(TextField).last, 'Also the logout');
       await tester.pump();
       await tester.tap(find.byKey(const Key('composer-send')));
@@ -461,7 +469,10 @@ void main() {
         messages: snapshotOf('c1', messages: [messageOf('m1', MessageRole.user, 'Go'), messageOf('a1', MessageRole.assistant, 'Looking', status: MessageStatus.partial, runId: 'r1')]),
       );
       await pumpSessions(tester, repo, const SessionPage(conversationId: 'c1'));
-      expect(find.text('Working'), findsOneWidget);
+      await openSessionProperties(tester);
+      expect(find.descendant(of: find.byKey(const ValueKey('session-status')), matching: find.text('Working')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('properties-close')));
+      await settleBoard(tester);
       await tester.tap(find.byKey(const Key('composer-stop')));
       await settleBoard(tester);
       expect(writesOf(repo).single['method'], 'run.stop');
@@ -470,8 +481,12 @@ void main() {
     testWidgets('while the dispatcher chose nobody: no composer, the choice of who takes it (work_session.assign)', (tester) async {
       final repo = repoWith(sessions: [sessionOf('c1', dispatch: SessionDispatch.nobody, employeeId: 'orion', employee: 'Orion')], messages: snapshotOf('c1'));
       await pumpSessions(tester, repo, const SessionPage(conversationId: 'c1'));
-      expect(find.text('Waiting for your choice'), findsOneWidget);
       expect(find.text('The dispatcher chose nobody. Choose who takes this session.'), findsOneWidget);
+      await openSessionProperties(tester);
+      expect(find.text('Waiting for your choice'), findsOneWidget);
+      expect(find.text('Not chosen yet'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('properties-close')));
+      await settleBoard(tester);
       expect(find.byKey(const Key('composer-send')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('session-choose')));
       await settleBoard(tester);
@@ -480,6 +495,31 @@ void main() {
       final assign = writesOf(repo).single;
       expect(assign['method'], 'work_session.assign');
       expect(paramsOf(assign), {'conversation_id': 'c1', 'employee_id': 'forge'});
+    });
+
+    testWidgets('Properties (behind …) show who, status, where, the run and when, then the files written and the run\'s guidelines', (tester) async {
+      final edit = ActivityView(callId: 'e1', input: const {'file_path': '/repo/lib/ios.dart', 'old_string': 'a', 'new_string': 'b'}, offset: 0, ok: true, tool: 'Edit');
+      final repo = repoWith(
+        sessions: [sessionOf('c1')],
+        messages: snapshotOf('c1', messages: [messageOf('m1', MessageRole.user, 'Go'), messageOf('a1', MessageRole.assistant, 'Done.', ordinal: 1, runId: 'r1', activity: [edit])]),
+      );
+      when(() => repo.guidelinesOfRun('r1')).thenAnswer((_) async => const [RunGuideline(chars: 10, guidelineId: 'g1', level: GuidelineLevel.project, runId: 'r1', title: 'Rust style', version: 2)]);
+      await pumpSessions(tester, repo, const SessionPage(conversationId: 'c1'));
+      expect(find.byKey(const Key('diff-card')), findsOneWidget, reason: 'an edit shows what changed');
+      await openSessionProperties(tester);
+      expect(find.text('Forge'), findsWidgets);
+      expect(find.text('Waiting for you'), findsOneWidget);
+      expect(find.text('Project folder'), findsOneWidget);
+      expect(find.text(startedLabel(0)), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('properties-link-Files written')));
+      await settleBoard(tester);
+      expect(find.text('/repo/lib/ios.dart'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('properties-close')).last);
+      await settleBoard(tester);
+      await tester.tap(find.byKey(const ValueKey('properties-link-Guidelines in this run')));
+      await settleBoard(tester);
+      expect(find.text('Rust style'), findsOneWidget);
+      expect(find.text('v2'), findsOneWidget);
     });
 
     testWidgets('a failed read shows what failed and Try again', (tester) async {

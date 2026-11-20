@@ -90,13 +90,13 @@ void main() {
   }
 
   group('Doing', () {
-    testWidgets('one screen: the head with #N, title, column and who, the conversation, the BR1 placeholder, no gate while it runs', (tester) async {
+    testWidgets('one screen: the head with the title, the Ticket pill and #N with its status, the conversation, the BR1 placeholder, no gate while it runs', (tester) async {
       await open(tester, _ticket(responsible: bo), messages: [_post('m1', 'I am on the migration.', author: 'Forge')]);
-      expect(find.text('#42 · Atlas'), findsOneWidget);
       expect(find.byKey(const ValueKey('ticket-title')), findsOneWidget);
       expect(find.text('Hash passwords with argon2'), findsOneWidget);
-      expect(find.descendant(of: find.byKey(const ValueKey('ticket-column')), matching: find.text('Doing')), findsOneWidget);
-      expect(find.text('owner Forge · responsible bo · Atlas'), findsOneWidget);
+      expect(find.byKey(const ValueKey('session-kind-ticket')), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('session-head-detail'))).data, '#42 · Working');
+      expect(find.text('owner Forge · responsible bo · Atlas'), findsNothing, reason: 'who and where are in Properties');
       expect(find.text('I am on the migration.'), findsOneWidget, reason: 'the conversation is the main view');
       expect(find.text('Message Forge (owner)…'), findsOneWidget);
       expect(find.byKey(const ValueKey('ticket-segments')), findsNothing, reason: 'no tabs any more');
@@ -171,7 +171,7 @@ void main() {
       expect(find.text('#42 is Done · read-only.'), findsOneWidget);
       expect(find.byKey(const ValueKey('gate-review')), findsNothing);
       expect(find.byKey(const Key('composer-send')), findsNothing);
-      expect(find.descendant(of: find.byKey(const ValueKey('ticket-column')), matching: find.text('Done')), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('session-head-detail'))).data, '#42 · Done');
     });
 
     testWidgets('Send back takes the words in the input and sends ticket.send_back', (tester) async {

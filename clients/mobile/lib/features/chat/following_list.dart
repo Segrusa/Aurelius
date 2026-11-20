@@ -34,7 +34,10 @@ const revealStepsMax = 200;
 /// shifts what they read. Following keeps the position glued to the end
 /// during layout, so it never lags a frame behind.
 class FollowingList extends StatefulWidget {
-  const FollowingList({super.key, required this.items, this.liveFrom, this.resetKey, this.padding = const EdgeInsets.fromLTRB(16, 12, 16, 12)});
+  const FollowingList({super.key, required this.items, this.liveFrom, this.resetKey, this.padding = defaultPadding});
+
+  /// Around the list in a chat.
+  static const defaultPadding = EdgeInsets.fromLTRB(16, 12, 16, 12);
 
   final List<FollowItem> items;
 

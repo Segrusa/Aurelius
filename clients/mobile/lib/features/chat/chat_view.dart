@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -50,15 +51,16 @@ import 'message_edit.dart';
 import 'live_steps.dart';
 import 'subagent_chip.dart';
 import 'upload_files.dart';
+import '../sessions/session_screen_rules.dart' show answerFooter;
 
 MarkdownStyleSheet markdownStyle(BuildContext context, {double size = 15}) {
   final base = MarkdownStyleSheet.fromTheme(Theme.of(context));
   return base.copyWith(
-    p: TextStyle(fontSize: size, height: 1.7, color: Tokens.text),
+    p: TextStyle(fontSize: size, height: 23 / 15, color: Tokens.text),
     h1: Tokens.title(size: 24),
     h2: Tokens.title(size: 20),
     h3: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Tokens.text),
-    code: TextStyle(fontFamily: Tokens.mono, fontSize: size - 2, color: Tokens.accentText, backgroundColor: Tokens.surface2),
+    code: TextStyle(fontFamily: Tokens.mono, fontSize: size - 2, color: Tokens.accentDeep, backgroundColor: Tokens.surface2),
     codeblockDecoration: BoxDecoration(color: Tokens.surface, borderRadius: BorderRadius.circular(Tokens.radius), border: Border.all(color: Tokens.border)),
     blockquoteDecoration: BoxDecoration(border: Border(left: BorderSide(color: Tokens.borderStrong, width: 3))),
     blockquote: TextStyle(color: Tokens.text2),
@@ -105,6 +107,8 @@ class ChatView extends StatefulWidget {
     this.draftSlot,
     this.readOnlyAction,
     this.revealMessage,
+    this.floating = false,
+    this.topInset = 0,
   });
 
   final String emptyTitle;
@@ -144,6 +148,11 @@ class ChatView extends StatefulWidget {
   /// A link opened here: scroll to this message once it is read, and mark it.
   final String? revealMessage;
 
+  /// The session screen (design "Aurelius sessiescherm"): the messages run
+  /// under a floating head [topInset] high and under a floating composer.
+  final bool floating;
+  final double topInset;
+
   @override
   State<ChatView> createState() => _ChatViewState();
 }
@@ -152,9 +161,13 @@ class _ChatViewState extends State<ChatView> {
   /// What is typed in the composer; quick replies give way to it.
   final _draft = ValueNotifier<String>('');
 
+  /// The floating composer's height: the messages end above it.
+  final _bottom = ValueNotifier<double>(0);
+
   @override
   void dispose() {
     _draft.dispose();
+    _bottom.dispose();
     super.dispose();
   }
 
@@ -186,9 +199,9 @@ class _ChatViewState extends State<ChatView> {
           toast(context, state.notice!);
           context.read<RuntimeBloc>().add(const RuntimeNoticeShown());
         },
-        child: Column(
-          children: [
-            Expanded(child: _Messages(emptyTitle: emptyTitle, emptyDetail: emptyDetail, config: widget)),
+        child: _layout(
+          messages: (padding) => _Messages(emptyTitle: emptyTitle, emptyDetail: emptyDetail, config: widget, padding: padding),
+          chrome: [
             BlocSelector<ChatBloc, ChatState, bool>(
               selector: (s) => s.awaitingStart,
               builder: (context, waiting) => LoadBanner(waiting: waiting),
@@ -214,8 +227,11 @@ class _ChatViewState extends State<ChatView> {
               Container(
                 key: const Key('chat-read-only'),
                 width: double.infinity,
-                decoration: BoxDecoration(color: Tokens.plain, border: Border(top: BorderSide(color: Tokens.sep, width: 0.5))),
-                padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + MediaQuery.paddingOf(context).bottom),
+                decoration: widget.floating
+                    ? BoxDecoration(color: Tokens.cell, border: Border.all(color: Tokens.sep), borderRadius: BorderRadius.circular(Tokens.cardRadius))
+                    : BoxDecoration(color: Tokens.plain, border: Border(top: BorderSide(color: Tokens.sep, width: 0.5))),
+                margin: widget.floating ? EdgeInsets.fromLTRB(16, 0, 16, 12 + MediaQuery.paddingOf(context).bottom) : null,
+                padding: widget.floating ? const EdgeInsets.fromLTRB(16, 12, 16, 12) : EdgeInsets.fromLTRB(20, 12, 20, 12 + MediaQuery.paddingOf(context).bottom),
                 child: Wrap(
                   alignment: WrapAlignment.center,
                   crossAxisAlignment: WrapCrossAlignment.center,
@@ -231,6 +247,64 @@ class _ChatViewState extends State<ChatView> {
       ),
       ),
     );
+  }
+
+  /// The messages above the composer and the rest under them; on the session
+  /// screen the messages fill the page and the rest floats over its bottom,
+  /// on a fade of the page colour.
+  Widget _layout({required Widget Function(EdgeInsets padding) messages, required List<Widget> chrome}) {
+    if (!widget.floating) return Column(children: [Expanded(child: messages(FollowingList.defaultPadding)), ...chrome]);
+    final bg = Tokens.bg;
+    return Stack(children: [
+      Positioned.fill(
+        child: ValueListenableBuilder<double>(
+          valueListenable: _bottom,
+          builder: (context, bottom, _) => messages(EdgeInsets.fromLTRB(20, widget.topInset + 8, 20, bottom + 8)),
+        ),
+      ),
+      Positioned(
+        left: 0,
+        right: 0,
+        bottom: 0,
+        child: MeasuredSize(
+          onSize: (size) => _bottom.value = size.height,
+          child: DecoratedBox(
+            decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [bg.withValues(alpha: 0), bg], stops: const [0, 0.32])),
+            child: Padding(padding: const EdgeInsets.only(top: 24), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: chrome)),
+          ),
+        ),
+      ),
+    ]);
+  }
+}
+
+/// Tells its child's size after each layout that changed it.
+class MeasuredSize extends SingleChildRenderObjectWidget {
+  const MeasuredSize({super.key, required this.onSize, required super.child});
+
+  final ValueChanged<Size> onSize;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => RenderMeasuredSize(onSize);
+
+  @override
+  void updateRenderObject(BuildContext context, RenderMeasuredSize renderObject) => renderObject.onSize = onSize;
+}
+
+/// The render object of [MeasuredSize].
+class RenderMeasuredSize extends RenderProxyBox {
+  RenderMeasuredSize(this.onSize);
+
+  ValueChanged<Size> onSize;
+  Size? _last;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (size == _last) return;
+    _last = size;
+    final now = size;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onSize(now));
   }
 }
 
@@ -320,7 +394,10 @@ class _QuickRepliesCardState extends State<_QuickRepliesCard> {
 }
 
 class _Messages extends StatefulWidget {
-  const _Messages({required this.emptyTitle, this.emptyDetail, required this.config});
+  const _Messages({required this.emptyTitle, this.emptyDetail, required this.config, required this.padding});
+
+  /// Around the list; on the session screen it clears the floating head and composer.
+  final EdgeInsets padding;
 
   final String emptyTitle;
   final String? emptyDetail;
@@ -407,16 +484,18 @@ class _MessagesState extends State<_Messages> {
   }
 
   Widget _build(ChatState state, ApprovalView? blocking, bool group, List<ApprovalView> approvals, List<String> mainChats) {
-    if (state.loading && state.messages.isEmpty) return const Center(child: CircularProgressIndicator());
+    // On the session screen the floating head and composer stay clear of these too.
+    Widget clear(Widget child) => widget.config.floating ? Padding(padding: widget.padding, child: child) : child;
+    if (state.loading && state.messages.isEmpty) return clear(const Center(child: CircularProgressIndicator()));
     if (state.messages.isEmpty && state.unsent.isEmpty && state.loadError != null) {
-      return EmptyState(
+      return clear(EmptyState(
         'This conversation could not be loaded',
         key: const Key('chat-load-error'),
         detail: state.loadError,
         action: OutlinedButton(onPressed: () => context.read<ChatBloc>().add(const ChatRefreshed()), child: const Text('Try again')),
-      );
+      ));
     }
-    if (state.messages.isEmpty && state.unsent.isEmpty) return EmptyState(widget.emptyTitle, detail: widget.emptyDetail);
+    if (state.messages.isEmpty && state.unsent.isEmpty) return clear(EmptyState(widget.emptyTitle, detail: widget.emptyDetail));
     final versions = _versions(state.messages);
     // What a run in an employee's own chat asks with no answer streaming here to show it under.
     final asks = [
@@ -476,6 +555,7 @@ class _MessagesState extends State<_Messages> {
     // scroll up while text comes in.
     final list = FollowingList(
       key: _list,
+      padding: widget.padding,
       items: items,
       liveFrom: live < 0 ? state.messages.length : live,
       resetKey: state.conversationId,
@@ -854,18 +934,19 @@ class _UserBubble extends StatelessWidget {
             builder: (context, cut) => GestureDetector(
               onLongPress: () => _longPress(context),
               // Markdown as it was written (AUR-CHAT-001 §4), its @names marked.
+              // The board member's words: white on green (design "Aurelius sessiescherm").
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                key: const Key('user-bubble'),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 decoration: BoxDecoration(
-                  color: queuedId != null ? Tokens.cell2.withValues(alpha: 0.55) : Tokens.cell2,
-                  border: mentioned ? Border.all(color: Tokens.accent.withValues(alpha: 0.6)) : null,
+                  color: Tokens.accent.withValues(alpha: muted ? 0.55 : 1),
+                  border: mentioned ? Border.all(color: Tokens.accentDeep, width: 1.5) : null,
                   borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20), bottomLeft: Radius.circular(20), bottomRight: Radius.circular(6)),
                 ),
-                child: LinkedText(cut == null ? text : text.substring(0, cut), scope: chatFileScope(context), style: TextStyle(fontSize: 16, height: 1.4, color: muted ? Tokens.label2 : Tokens.label)),
+                child: LinkedText(cut == null ? text : text.substring(0, cut), scope: chatFileScope(context), style: TextStyle(fontSize: 15, height: 23 / 15, color: Tokens.accentInk)),
               ),
             ),
           ),
-          if (text.isNotEmpty) CopyButton(key: const Key('copy-user'), text: text),
           if (messageEditedShown(context, message)) EditedMark(message: message!),
           if (ticket != null) TicketPill(ticket: ticket!),
           if (files.isNotEmpty) MessageFiles(files: files),
@@ -1038,16 +1119,18 @@ class _AssistantMessage extends StatelessWidget {
   Widget build(BuildContext context) {
     final author = message.author?.trim();
     final role = group && author != null && author.isNotEmpty ? context.select<CompanyBloc, String?>((b) => employeeRole(b.state, author)) : null;
+    // Several employees in one conversation: who speaks stands on top. Else
+    // who answered and on which model sit beside Copy, under the answer.
     final header = [
-      if (author != null && author.isNotEmpty) withRole(author, role),
+      if (group && author != null && author.isNotEmpty) withRole(author, role),
       // A group chat answer: the mode the employee answered in.
       if (message.mode case final mode?) '${mode.label} mode',
-      if (message.producedBy != null) message.producedBy!,
       if (version != null) 'version ${version!.$1}/${version!.$2}',
       if (mentioned) '@ you',
     ].join(' · ');
+    final footer = answerFooter(author: group ? null : author, producedBy: message.producedBy);
     return Padding(
-      padding: const EdgeInsets.only(top: 18),
+      padding: const EdgeInsets.only(top: 14),
       child: GestureDetector(
         onLongPress: () => _actions(context),
         child: Column(
@@ -1072,7 +1155,14 @@ class _AssistantMessage extends StatelessWidget {
                   ],
                 ),
               ),
-            if (message.text.isNotEmpty && !message.isStreaming) CopyButton(key: const Key('copy-assistant'), text: message.text),
+            if (message.text.isNotEmpty && !message.isStreaming)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(children: [
+                  Transform.translate(offset: const Offset(-6, 0), child: CopyButton(key: const Key('copy-assistant'), text: message.text, tooltip: 'Copy message')),
+                  if (footer.isNotEmpty) Flexible(child: Text(footer, key: const Key('answer-footer'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: Tokens.label2))),
+                ]),
+              ),
             if (ticket != null) TicketPill(ticket: ticket!),
             _StatusLine(message: message, blocking: blocking, retryTarget: _replyTarget(context.read<ChatBloc>().state)),
           ],
@@ -1458,12 +1548,29 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
     if (mode != null && mode != current) bloc.add(ChatModeSelected(mode));
   }
 
+  /// On the session screen the field, the clip and Send sit in one white pill.
+  Widget _inputShell(Widget row) {
+    if (!widget.config.floating) return row;
+    return Container(
+      key: const Key('composer-pill'),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: Tokens.cell,
+        border: Border.all(color: Tokens.sep),
+        borderRadius: BorderRadius.circular(26),
+        boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 2, offset: Offset(0, 1)), BoxShadow(color: Color(0x0D000000), blurRadius: 16, offset: Offset(0, 6))],
+      ),
+      child: row,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<ChatBloc>().state;
     final link = context.watch<ConnectionBloc>().state;
     final readOnly = state.history || (link.isOnline && !link.can('chat'));
     final group = context.read<ChatBloc>().group;
+    final floating = widget.config.floating;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.enter, meta: true): _sendDefault,
@@ -1477,11 +1584,19 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
       // the keyboard up; a tap on the messages above closes it.
       child: TextFieldTapRegion(
         child: Container(
-        decoration: BoxDecoration(color: Tokens.plain, border: Border(top: BorderSide(color: Tokens.sep, width: 0.5))),
-        padding: EdgeInsets.fromLTRB(12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
+        decoration: floating ? null : BoxDecoration(color: Tokens.plain, border: Border(top: BorderSide(color: Tokens.sep, width: 0.5))),
+        padding: floating ? EdgeInsets.fromLTRB(16, 0, 16, 12 + MediaQuery.paddingOf(context).bottom) : EdgeInsets.fromLTRB(12, 8, 12, 8 + MediaQuery.paddingOf(context).bottom),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // The session screen: mode and model in glass pills above the field.
+            if (floating && !group) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: _FloatingChips(state: state, readOnly: readOnly, pickMode: () => _pickMode(state.mode), toggleBrowser: () => _toggleBrowser(state), toggleScreen: () => _toggleScreen(state)),
+              ),
+              const SizedBox(height: 10),
+            ],
             // Team chat: who the `@name` being typed can be, with their role.
             if (group)
               ValueListenableBuilder<TextEditingValue>(
@@ -1591,17 +1706,31 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                   ],
                 ),
               ),
-            Row(
+            _inputShell(Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 if (_canAttach(context.read<ChatBloc>()) || !context.read<ChatBloc>().group)
-                IconButton(
-                  key: const Key('composer-plus'),
-                  tooltip: 'Attach, web, browser, screen',
-                  onPressed: readOnly ? null : () => _attach(state),
-                  icon: const Icon(CupertinoIcons.plus_circle),
-                  style: IconButton.styleFrom(fixedSize: const Size.square(42), minimumSize: const Size.square(42)),
-                ),
+                  floating
+                      ? Glass(
+                          radius: 20,
+                          child: SizedBox.square(
+                            dimension: 40,
+                            child: IconButton(
+                              key: const Key('composer-plus'),
+                              tooltip: 'Attach file',
+                              padding: EdgeInsets.zero,
+                              onPressed: readOnly ? null : () => _attach(state),
+                              icon: Icon(CupertinoIcons.paperclip, size: 20, color: Tokens.ink2),
+                            ),
+                          ),
+                        )
+                      : IconButton(
+                          key: const Key('composer-plus'),
+                          tooltip: 'Attach, web, browser, screen',
+                          onPressed: readOnly ? null : () => _attach(state),
+                          icon: const Icon(CupertinoIcons.plus_circle),
+                          style: IconButton.styleFrom(fixedSize: const Size.square(42), minimumSize: const Size.square(42)),
+                        ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: TextField(
@@ -1617,10 +1746,12 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                       allowedMimeTypes: pastedImageMimeTypes,
                       onContentInserted: _insert,
                     ),
+                    style: floating ? TextStyle(fontSize: 16, color: Tokens.label) : null,
                     decoration: InputDecoration(
                       hintText: state.history ? 'Read-only: an earlier chat' : readOnly ? 'Read-only: this phone may not chat' : widget.config.hint ?? (group ? 'Message the team · @Name asks someone' : 'Message'),
+                      hintStyle: floating ? TextStyle(fontSize: 16, color: Tokens.label2) : null,
                       isDense: true,
-                      fillColor: Tokens.cell2,
+                      fillColor: floating ? Colors.transparent : Tokens.cell2,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(21), borderSide: BorderSide.none),
                       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(21), borderSide: BorderSide.none),
@@ -1637,7 +1768,13 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                   builder: (context, value, _) {
                     final running = state.streaming;
                     final empty = value.text.trim().isEmpty && state.images.isEmpty && state.files.isEmpty;
-                    final style = IconButton.styleFrom(backgroundColor: Tokens.accent, foregroundColor: Tokens.accentInk, fixedSize: const Size.square(42), minimumSize: const Size.square(42));
+                    final side = floating ? 40.0 : 42.0;
+                    final style = IconButton.styleFrom(
+                      backgroundColor: Tokens.accent.withValues(alpha: floating ? 0.92 : 1),
+                      foregroundColor: Tokens.accentInk,
+                      fixedSize: Size.square(side),
+                      minimumSize: Size.square(side),
+                    );
                     // The group chat: several may answer at once; each answer has its own Stop.
                     final runId = group ? null : running?.runId;
                     if (runId != null && empty) {
@@ -1666,11 +1803,11 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
                   },
                 ),
               ],
-            ),
+            )),
             if (widget.config.composerActions case final actions?) actions(context, _text),
-            if (!group) const SizedBox(height: 6),
+            if (!group && !floating) const SizedBox(height: 6),
             // Mode and model, then what is switched on under "+" (tap to switch it off).
-            if (!group) SingleChildScrollView(
+            if (!group && !floating) SingleChildScrollView(
               key: const Key('composer-chips'),
               scrollDirection: Axis.horizontal,
               child: Row(
@@ -1732,6 +1869,89 @@ class _GlassPill extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
               child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: danger ? Tokens.negative : accent ? Tokens.accentText : Tokens.label)),
+            ),
+          ),
+        ),
+      );
+}
+
+/// The session screen's mode and model pills above the composer, then what
+/// is switched on under the clip (tap to switch it off).
+class _FloatingChips extends StatelessWidget {
+  const _FloatingChips({required this.state, required this.readOnly, required this.pickMode, required this.toggleBrowser, required this.toggleScreen});
+
+  final ChatState state;
+  final bool readOnly;
+  final VoidCallback pickMode;
+  final VoidCallback toggleBrowser;
+  final VoidCallback toggleScreen;
+
+  @override
+  Widget build(BuildContext context) {
+    final run = _watchRun(context);
+    final history = state.history;
+    final overridden = run?.overridden ?? false;
+    final model = run == null || run.effectiveModel == null && !overridden ? 'Model' : runLabel(run.effectiveModel, run.effectiveEffort, effortShown: run.effortShown);
+    return SingleChildScrollView(
+      key: const Key('composer-chips'),
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Row(children: [
+        _ChromePill(
+          key: const Key('composer-mode'),
+          leading: Icon(Icons.tune, size: 14, color: state.mode == AgentMode.auto ? Tokens.warning : Tokens.ink2),
+          label: state.mode.label,
+          onTap: readOnly ? null : pickMode,
+        ),
+        const SizedBox(width: 6),
+        _ChromePill(
+          key: const Key('conversation-model-chip'),
+          label: model,
+          accent: overridden,
+          trailing: Icon(CupertinoIcons.chevron_down, size: 12, color: overridden ? Tokens.accentText : Tokens.ink2),
+          onTap: history ? null : () => _showConversationModelSheet(context),
+        ),
+        if (state.browserAllowed) ...[
+          const SizedBox(width: 6),
+          _ChromePill(key: const Key('browser-chip'), leading: Icon(Icons.language, size: 14, color: Tokens.warning), label: 'Browser', trailing: Icon(Icons.close, size: 12, color: Tokens.ink2), onTap: readOnly ? null : toggleBrowser),
+        ],
+        if (state.screenAllowed) ...[
+          const SizedBox(width: 6),
+          _ChromePill(key: const Key('screen-chip'), leading: Icon(Icons.screenshot_monitor, size: 14, color: Tokens.warning), label: 'Screen', trailing: Icon(Icons.close, size: 12, color: Tokens.ink2), onTap: readOnly ? null : toggleScreen),
+        ],
+      ]),
+    );
+  }
+}
+
+/// A 30 pt glass capsule with a label (the session screen's mode and model).
+class _ChromePill extends StatelessWidget {
+  const _ChromePill({super.key, required this.label, this.onTap, this.leading, this.trailing, this.accent = false});
+
+  final String label;
+  final VoidCallback? onTap;
+  final Widget? leading;
+  final Widget? trailing;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) => Glass(
+        radius: 15,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onTap,
+            child: Container(
+              height: 30,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (leading case final leading?) ...[leading, const SizedBox(width: 5)],
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 200),
+                  child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13, color: accent ? Tokens.accentText : Tokens.ink2)),
+                ),
+                if (trailing case final trailing?) ...[const SizedBox(width: 4), trailing],
+              ]),
             ),
           ),
         ),

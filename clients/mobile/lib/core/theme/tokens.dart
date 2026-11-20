@@ -38,6 +38,18 @@ abstract final class Tokens {
 
   /// Text on an accent tint (a chosen project in a menu).
   static Color get accentDeep => _p(0xFF8FE0A8, 0xFF0F5A39);
+
+  /// The "Ticket" pill in a session's head (design "Aurelius sessiescherm").
+  static Color get ticketBlue => _p(0xFF3D7FD1, 0xFF1F5FAD);
+
+  /// The "Waiting for you" chip: tint, text and dot.
+  static Color get waitTint => _p(0x33FF9F0A, 0xFFFCEFD6);
+  static Color get waitText => _p(0xFFFFC46B, 0xFF7A4300);
+  static Color get waitDot => _p(0xFFFF9F0A, 0xFFC77700);
+
+  /// A removed line in a diff card (an added one uses [accentTint] and [accentDeep]).
+  static Color get diffDelTint => _p(0x33FF453A, 0xFFFDECEC);
+  static Color get diffDelText => _p(0xFFFF8A80, 0xFF8F1F14);
   static Color get red => _p(0xFFFF453A, 0xFFB42318);
   static Color get orange => _p(0xFFFF9F0A, 0xFFFF9500);
   static Color get gray => _p(0xFF636366, 0xFF8E8E93);

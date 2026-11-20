@@ -109,7 +109,7 @@ void main() {
     expect(find.text('Shortened'), findsOneWidget);
     await tester.tap(find.text('Show in full'));
     await tester.pumpAndSettle();
-    expect(find.text('> $long'), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is SelectableText && w.data == long), findsOneWidget, reason: 'the whole command, under its step');
   });
 
   testWidgets('a call no longer kept says so and keeps the preview', (tester) async {
