@@ -78,9 +78,12 @@ pub fn worktree_working(conn: &Connection, project: ProjectId, path: &str) -> Re
     }
 }
 
+/// id, number, title, owner id, owner name.
+type TicketRow = (String, i64, String, Option<String>, Option<String>);
+
 /// The ticket of `project` with `number` (a quick task only when `quick`), with its owner.
 fn ticket_of(conn: &Connection, project: ProjectId, number: u32, quick: bool) -> Result<Option<(CodeTicket, Option<CodeOwner>)>, StorageError> {
-    let row: Option<(String, i64, String, Option<String>, Option<String>)> = conn
+    let row: Option<TicketRow> = conn
         .query_row(
             "SELECT k.id, k.number, k.title, e.id, e.name FROM tickets k LEFT JOIN employees e ON e.id = k.owner_employee_id
              WHERE k.project_id = ?1 AND k.number = ?2 AND (?3 = 0 OR k.kind = 'quick')",

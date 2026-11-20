@@ -35,10 +35,10 @@ fn the_status_names_each_file_once_and_a_rename_by_its_new_name() {
 
 #[test]
 fn for_each_ref_lines_give_the_branch_its_upstream_and_last_commit() {
-    let text = "refs/heads/main\0aaaa\0origin/main\0behind 3\01700000000\0Ann\0Merge feat/x (ticket #4)\n\
-                refs/heads/feat/ticket-77-code\0bbbb\0\0\01700000100\0Bob\0code: a subject, with commas\n\
-                refs/heads/pushed\0cccc\0origin/pushed\0ahead 2, behind 1\01700000200\0Cy\0\n\
-                refs/heads/stale\0dddd\0origin/stale\0gone\01700000300\0Di\0x\n";
+    let text = "refs/heads/main\0aaaa\0origin/main\0behind 3\x001700000000\0Ann\0Merge feat/x (ticket #4)\n\
+                refs/heads/feat/ticket-77-code\0bbbb\0\0\x001700000100\0Bob\0code: a subject, with commas\n\
+                refs/heads/pushed\0cccc\0origin/pushed\0ahead 2, behind 1\x001700000200\0Cy\0\n\
+                refs/heads/stale\0dddd\0origin/stale\0gone\x001700000300\0Di\0x\n";
     let refs = parse_refs(text);
     assert_eq!(refs.len(), 4);
     assert_eq!(
@@ -61,7 +61,7 @@ fn for_each_ref_lines_give_the_branch_its_upstream_and_last_commit() {
 
 #[test]
 fn log_records_give_hash_parents_time_author_and_subject() {
-    let text = "h3\0h2 h1\01700000002\0Ann\0Merge x\u{1e}\nh2\0h0\01700000001\0Bob\0with \u{1f} odd\u{1e}\nh0\0\01700000000\0Ann\0first\u{1e}\n";
+    let text = "h3\0h2 h1\x001700000002\0Ann\0Merge x\u{1e}\nh2\0h0\x001700000001\0Bob\0with \u{1f} odd\u{1e}\nh0\0\x001700000000\0Ann\0first\u{1e}\n";
     let log = parse_log(text);
     assert_eq!(log.len(), 3);
     assert_eq!(log[0], LogRecord { hash: "h3".into(), parents: vec!["h2".into(), "h1".into()], at_ms: 1_700_000_002_000, author: "Ann".into(), subject: "Merge x".into() });
