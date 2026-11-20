@@ -70,6 +70,14 @@ pub struct AssignWorkSession {
     pub employee_id: EmployeeId,
 }
 
+/// A board member asks for a session's summary in the History now (feature
+/// `session_history`): after it failed, for a session without one, or to bring
+/// it up to date. Any board member may, as the History shows every session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RetrySessionSummary {
+    pub conversation_id: ConversationId,
+}
+
 /// Where the dispatcher is with a session (`WorkSessionView::dispatch`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]

@@ -116,6 +116,11 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             let filter = aurelius_storage::history::Filter { project: project_id, employee: employee_id, from_ms, to_ms, query, before };
             ticket_history(shared, filter, limit).await
         }
+        Method::WorkSessionHistory { project_id, employee_id, from_ms, to_ms, query, before_last_activity_ms, before_conversation_id, limit } => {
+            let before = before_last_activity_ms.zip(before_conversation_id);
+            let filter = aurelius_storage::work_sessions::HistoryFilter { project: project_id, employee: employee_id, from_ms, to_ms, query, before };
+            session_history(shared, filter, limit).await
+        }
         Method::MessageHistory { message_id } => message_history(shared, reader, message_id).await,
         Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
         Method::ApprovalList { project_id } => approvals(shared, project_id).await,
@@ -861,6 +866,21 @@ async fn ticket_history(shared: &Arc<Shared>, filter: aurelius_storage::history:
         entry.summary = entry.summary.take().map(aurelius_runtime::redact::string);
     }
     Ok(ResponseBody::History(HistoryPage { as_of_seq, entries, has_more }))
+}
+
+/// `work_session.history`: every board member's sessions that were not deleted,
+/// the latest activity first. Each summary goes through the vault redactor on the
+/// way out too, as a ticket's does.
+async fn session_history(shared: &Arc<Shared>, filter: aurelius_storage::work_sessions::HistoryFilter, limit: Option<u32>) -> Result<ResponseBody, ProtocolError> {
+    use aurelius_domain::history::{HISTORY_PAGE, HISTORY_PAGE_MAX, SessionHistoryPage};
+    let store = shared.store().clone();
+    let limit = limit.unwrap_or(HISTORY_PAGE).clamp(1, HISTORY_PAGE_MAX);
+    let kind = aurelius_application::conversation::session_history::SESSION_SUMMARY_JOB_KIND;
+    let (as_of_seq, (mut entries, has_more)) = storage_task(move || store.read(|c| Ok((queries::last_seq(c)?, aurelius_storage::work_sessions::history(c, &filter, limit, kind)?)))).await?;
+    for entry in &mut entries {
+        entry.summary = entry.summary.take().map(aurelius_runtime::redact::string);
+    }
+    Ok(ResponseBody::SessionHistory(SessionHistoryPage { as_of_seq, entries, has_more }))
 }
 
 /// `ticket.my_tickets`: the tickets of the board member of the session, never of

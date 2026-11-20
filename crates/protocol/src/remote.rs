@@ -119,6 +119,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::TicketMyTickets { .. }
         // The History: what the board shows, so the board's right (B3).
         | Method::TicketHistory { .. }
+        // Sessions in the History: the same right as the tickets next to them.
+        | Method::WorkSessionHistory { .. }
         // The vault: every own device of a board member lists it and its audit log
         // (one role, MU4-10); the session decides who.
         | Method::VaultList { .. }
@@ -311,6 +313,7 @@ fn command_needs(command: &Command) -> Needs {
         | Command::SetTicketResponsible(_)
         | Command::FollowTicket(_)
         | Command::RetryTicketSummary(_)
+        | Command::RetrySessionSummary(_)
         // Running a ticket on one's own Claude login, or the company's background
         // jobs: the board member's own subscription, from any device that controls tasks.
         | Command::UseMyLogin(_)

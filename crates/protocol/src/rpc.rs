@@ -399,6 +399,13 @@ pub mod feature {
     /// says `changed: ["summary"]` when it comes, fails or is made again. A client
     /// without this feature does not show the History.
     pub const TICKET_HISTORY: &str = "ticket_history";
+    /// Work sessions in the History (protocol 5, additive): the read
+    /// `work_session.history` of every board member's sessions on the day of their last
+    /// activity, each with a short AI summary made once the session has been quiet a
+    /// while (`conversation.settings_changed` says `changed: ["summary"]` when it comes
+    /// or fails), and the write `work_session.retry_summary`. A client without this
+    /// feature shows only tickets in the History.
+    pub const SESSION_HISTORY: &str = "session_history";
     /// Work sessions (protocol 5, additive): `work_session.start` starts one employee in one
     /// project's folder without a ticket (optionally in a worktree of its own), later messages
     /// go in with `chat.send`, and `work_session.list` lists the reader's sessions. A client
@@ -479,6 +486,7 @@ pub const FEATURES: &[&str] = &[
     feature::WORK_SESSIONS,
     feature::SESSION_DISPATCH,
     feature::TICKET_HISTORY,
+    feature::SESSION_HISTORY,
     feature::CHAT_FILES,
     feature::SUBAGENT_STEPS,
     feature::COMPACTION_SETTING,
@@ -605,6 +613,8 @@ pub enum ResponseBody {
     MyTickets(aurelius_domain::ticket::MyTicketsView),
     /// `ticket.history`.
     History(aurelius_domain::history::HistoryPage),
+    /// `work_session.history`.
+    SessionHistory(aurelius_domain::history::SessionHistoryPage),
     /// `message.locate`.
     MessageLocation(aurelius_domain::views::MessageLocation),
     /// `message.history`.

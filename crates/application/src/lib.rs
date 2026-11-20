@@ -259,6 +259,7 @@ impl CommandService {
             Command::StartWorkSession(cmd) => self.start_work_session(ctx, &envelope, hash, cmd),
             Command::DispatchWorkSession(cmd) => self.dispatch_work_session(ctx, &envelope, hash, cmd),
             Command::AssignWorkSession(cmd) => self.assign_work_session(ctx, &envelope, hash, cmd),
+            Command::RetrySessionSummary(cmd) => self.retry_session_summary(ctx, &envelope, hash, cmd),
             Command::SendProjectMessage(cmd) => self.send_project_message(ctx, &envelope, hash, cmd),
             Command::DeleteQueuedMessage(cmd) => self.delete_queued_message(ctx, &envelope, hash, cmd),
             Command::SendQueuedNow(cmd) => self.send_queued_now(ctx, &envelope, hash, cmd),

@@ -199,6 +199,10 @@ pub enum CommandResult {
         message_id: MessageId,
         run_id: RunId,
     },
+    /// A work session's summary for the History was asked for (`work_session.retry_summary`).
+    SessionSummaryAsked {
+        conversation_id: ConversationId,
+    },
     /// A work session was made; the dispatcher chooses who answers its first message.
     WorkSessionDispatching {
         project_id: ProjectId,
