@@ -128,23 +128,6 @@ export function taskStateLine(t: TaskView): { text: string; color: string } {
   }
 }
 
-export interface Steps {
-  count: number;
-  failed: number;
-  last: string;
-}
-
-/** A message's tool calls as one line: "9 steps, 2 failed", and the last one. */
-export function stepsOf(activity: { tool: string; input: unknown; ok?: boolean | null }[]): Steps | null {
-  if (activity.length === 0) return null;
-  const last = activity[activity.length - 1];
-  return {
-    count: activity.length,
-    failed: activity.filter((a) => a.ok === false).length,
-    last: last ? stepLine(last) : "",
-  };
-}
-
 export function stepLine(step: { tool: string; input: unknown }): string {
   const input = (step.input ?? {}) as Record<string, unknown>;
   for (const key of ["command", "file_path", "path", "pattern", "url", "query", "description"]) {

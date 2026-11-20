@@ -8,15 +8,7 @@ import { List, ListItem } from "@astryxdesign/core/List";
 import { Table } from "@astryxdesign/core/Table";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { arrived, expectBody } from "@aurelius/client";
-import type {
-  DirEntryView,
-  FileRef,
-  FileScope,
-  MessageFileView,
-  MessageView,
-  TaskRun,
-  TokenUsage,
-} from "@aurelius/protocol";
+import type { DirEntryView, FileRef, FileScope, MessageFileView, MessageView, TokenUsage } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
@@ -25,11 +17,9 @@ import { useKeyed } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { Markdown } from "../ui/markdown";
-import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { FormDialog, Hint, Loading, Problem } from "./org-kit";
 import { markdownPaths, screenshotId, traceSessionText, usageLine, waitingText } from "./run-logic";
-import { modelName } from "./settings-kit";
 import { costText, tokensShort } from "./usage-logic";
 
 const styles = stylex.create({
@@ -41,18 +31,6 @@ const styles = stylex.create({
     borderColor: "var(--color-border)",
     paddingInline: 8,
     paddingBlock: 2,
-    fontSize: 12,
-    color: "var(--color-text-secondary)",
-  },
-  runMenu: {
-    height: 24,
-    cursor: "pointer",
-    borderRadius: 5,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--color-border)",
-    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
-    paddingInline: 8,
     fontSize: 12,
     color: "var(--color-text-secondary)",
   },
@@ -183,50 +161,6 @@ export function UsageChip({ conversationId, taskId }: { conversationId?: string 
       {tokensShort(all(t.total))} tokens · {cost}
       {subtasks > 0 ? ` · ${subtasks} subtask${subtasks === 1 ? "" : "s"}` : ""}
     </span>
-  );
-}
-
-const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
-
-/** Ctrl+M: what this conversation runs on, from its next run. */
-export function RunMenu({ conversationId, run, models }: { conversationId: string; run: TaskRun; models: string[] }) {
-  const connection = useConnection();
-  const client = useQueryClient();
-  const set = async (next: { model: string | null; effort: string | null }) => {
-    try {
-      await connection.write("conversation.set_run", { conversation_id: conversationId, ...next }, { retry: false });
-      await client.invalidateQueries({ queryKey: ["messages", conversationId] });
-    } catch (e) {
-      toast(e instanceof Error ? e.message : "This did not work.");
-    }
-  };
-  const [open, setOpen] = useState(false);
-  useAction("CycleModel", () => setOpen(true));
-  const current = run.model ?? null;
-  const effort = run.effort ?? null;
-  const label = `${current ? modelName(current) : "Employee default"}${effort ? ` · ${effort}` : ""}`;
-  const options = [
-    { key: "default", label: `${current || effort ? "" : "✓ "}Employee default` },
-    ...models.map((m) => ({ key: `m:${m}`, label: `${m === current ? "✓ " : ""}${modelName(m)}` })),
-    ...EFFORTS.map((e) => ({ key: `e:${e}`, label: `${e === effort ? "✓ " : ""}Effort ${e}` })),
-  ];
-  return (
-    <Menu
-      label="Model"
-      open={open}
-      onOpenChange={setOpen}
-      options={options}
-      onPick={(key) => {
-        if (key === "default") void set({ model: null, effort: null });
-        else if (key.startsWith("m:")) void set({ model: key.slice(2), effort });
-        else void set({ model: current, effort: key.slice(2) });
-      }}
-      trigger={
-        <button type="button" {...stylex.props(styles.runMenu)}>
-          {label}
-        </button>
-      }
-    />
   );
 }
 
