@@ -26,6 +26,7 @@ import '../../data/links.dart' show messageLocateFeature;
 import '../../data/views.dart';
 import '../../data/markdown_paths.dart';
 import '../../data/run_config.dart';
+import '../../data/run_decisions.dart';
 import '../runtime/runtime_bloc.dart';
 import '../company/company_bloc.dart';
 import 'everyone_audience.dart';
@@ -37,6 +38,7 @@ import '../team/mentions.dart';
 import 'answer_body.dart';
 import 'chat_bloc.dart';
 import 'collapse.dart';
+import 'decision_card.dart';
 import 'secret_check.dart';
 import 'file_page.dart';
 import '../links/link_actions.dart' show copyMessageLink;
@@ -471,6 +473,7 @@ class _MessagesState extends State<_Messages> {
     // Only the last summary line can be tried again: a later one saved it or failed anew.
     final lastSummary = state.messages.where((m) => m.system?.kind == SystemLineKind.summary || m.system?.kind == SystemLineKind.summaryFailed).lastOrNull?.id;
     bool named(MessageView m) => group && authorOf(m) != _me && mentionsName(m.text, _me);
+    final decisions = {for (final m in state.messages) m.id: ?decisionOf(m)};
     final items = <FollowItem>[
       for (final m in state.messages)
         FollowItem(
@@ -491,6 +494,9 @@ class _MessagesState extends State<_Messages> {
                   source: source,
                   ticket: made[m.id],
                 )
+              // The board member's answer or plan decision on a run: a card under the question.
+              : decisions[m.id] != null
+                  ? DecisionCard(message: m, decision: decisions[m.id]!)
               // A line the server writes in the group chat itself: a quiet note.
               : isSystemLine(m, inGroup: group)
                   ? _SystemLine(message: m)
@@ -564,6 +570,7 @@ class _MessagesState extends State<_Messages> {
       if (m.system != null) {
         return SystemLineView(message: m, ticketId: context.read<ChatBloc>().ticketId, taskProjectId: widget.config.taskProjectId, summarized: m.id != lastSummary, compact: true, openChannel: channel.openChannel);
       }
+      if (decisionOf(m) case final d?) return DecisionCard(message: m, decision: d);
       if (!m.isUser && isSystemLine(m, inGroup: true)) return _SystemLine(message: m);
       if (!m.isUser && m.update != null && m.update != 'group') return _TaskUpdate(message: m);
       final author = m.isUser ? (m.authorUser?.username ?? me ?? 'You') : (m.author?.trim().isNotEmpty == true ? m.author!.trim() : 'Employee');
