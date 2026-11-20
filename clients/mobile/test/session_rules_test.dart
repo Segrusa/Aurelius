@@ -69,11 +69,6 @@ void main() {
       expect(sessionWho(session(dispatch: SessionDispatch.nobody)), 'Nobody yet');
     });
 
-    test('sessionPlace says who works where', () {
-      expect(sessionPlace(session()), 'Forge · Aurelius · project folder');
-      expect(sessionPlace(session(branch: 'session/fix')), 'Forge · Aurelius · own worktree on session/fix');
-    });
-
     test('sessionStatus follows the run and the dispatcher', () {
       expect(sessionStatus(true, null), 'Working');
       expect(sessionStatus(false, null), 'Waiting for you');

@@ -88,8 +88,6 @@ type Row =
 export interface ChatFrame {
   /** The head's title; the employee's name when not given. */
   title?: string;
-  /** The head's second line while nobody answers. */
-  subtitle?: string;
   empty: { title: string; description: string };
   /** Controls in the composer's bottom row, from what the conversation runs on now. */
   footer?: (snapshot: MessagesSnapshot) => ReactNode;
@@ -194,10 +192,9 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
         <Heading level={1} xstyle={styles.title}>
           {frame?.title || name}
         </Heading>
+        {/* A session's head has the title only; a chat says the employee's role, or that it answers. */}
         <span {...stylex.props(styles.subtitle)}>
-          {live.length > 0
-            ? `${name} answering`
-            : (frame?.subtitle ?? (employee ? (employee.title ?? employee.role) : ""))}
+          {frame ? null : live.length > 0 ? `${name} answering` : employee ? (employee.title ?? employee.role) : ""}
         </span>
         {frame?.actions}
         <InboxBell />

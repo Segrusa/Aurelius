@@ -98,13 +98,6 @@ String sessionWho(WorkSessionView s) => switch (s.dispatch) {
       null => s.employeeName,
     };
 
-/// The head's second line: who works where.
-String sessionPlace(WorkSessionView s) {
-  final branch = s.branch;
-  final where = branch == null || branch.isEmpty ? 'project folder' : 'own worktree on $branch';
-  return '${sessionWho(s)} · ${s.projectName} · $where';
-}
-
 /// What stands where the composer is while nobody works in the session yet; null once somebody does.
 String? chooserText(WorkSessionView s) => switch (s.dispatch) {
       SessionDispatch.choosing => '${s.employeeName} is choosing who takes this session. You can also choose yourself.',

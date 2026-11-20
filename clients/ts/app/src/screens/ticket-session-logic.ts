@@ -79,24 +79,6 @@ export function sessionRedirect(path: string, search: { ticket?: string }): Redi
   return null;
 }
 
-/** The head's second line: who answers now, else owner, responsible and project. */
-export function headLine(
-  t: Pick<TicketView, "owner_name" | "responsible_user_id" | "responsible_username" | "project_name">,
-  me: string | null | undefined,
-  answering: string[],
-): string {
-  if (answering.length > 0) return `${answering.join(", ")} answering`;
-  const responsible =
-    t.responsible_user_id && t.responsible_user_id === me
-      ? "responsible You"
-      : t.responsible_username
-        ? `responsible ${t.responsible_username}`
-        : null;
-  return [t.owner_name ? `owner ${t.owner_name}` : "No owner", responsible, t.project_name || null]
-    .filter(Boolean)
-    .join(" · ");
-}
-
 /** `usage.get_totals { ticket_id }`'s total as the side panel's usage; none without one. */
 export function ticketUsage(total: TokenUsage | null | undefined): UsageTotals | null {
   if (!total) return null;

@@ -386,13 +386,13 @@ void main() {
   });
 
   group('a session', () {
-    testWidgets('shows its title, who works where and the status; a message goes in with chat.send', (tester) async {
+    testWidgets('shows its title and the status, not who works where; a message goes in with chat.send', (tester) async {
       final repo = repoWith(sessions: [sessionOf('c1')], messages: snapshotOf('c1', messages: [messageOf('m1', MessageRole.user, 'Fix the login')]));
       when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
           .thenAnswer((_) async => receiptOf(const CommandResultChatMessageSent(conversationId: 'c1', messageId: 'm2', runId: 'r2')));
       await pumpSessions(tester, repo, const SessionPage(conversationId: 'c1'));
       expect(find.text('Fix the login'), findsWidgets);
-      expect(find.text('Forge · Atlas · project folder'), findsOneWidget);
+      expect(find.textContaining('project folder'), findsNothing);
       expect(find.text('Waiting for you'), findsOneWidget);
       await tester.enterText(find.byType(TextField).last, 'Also the logout');
       await tester.pump();

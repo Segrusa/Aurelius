@@ -6,7 +6,6 @@ import {
   filesWrittenAcross,
   gateKeyAllowed,
   gateOf,
-  headLine,
   latestRunAcross,
   ownerAnswers,
   readOnly,
@@ -159,28 +158,6 @@ describe("sessionRedirect (BR6)", () => {
     expect(sessionRedirect("/history", { ticket: "t70" })).toEqual({ ticketId: "t70" });
     expect(sessionRedirect("/board", {})).toBeNull();
     expect(sessionRedirect("/tasks", { ticket: "t70" })).toBeNull();
-  });
-});
-
-describe("headLine", () => {
-  it("says who answers while someone runs", () => {
-    expect(headLine(tv(), "u", ["Flux", "Pixel"])).toBe("Flux, Pixel answering");
-  });
-
-  it("names the owner, the responsible and the project", () => {
-    expect(headLine(tv({ responsible_user_id: "u2", responsible_username: "Ann" }), "u", [])).toBe(
-      "owner Pixel · responsible Ann · Aurelius",
-    );
-  });
-
-  it("calls me You", () => {
-    expect(headLine(tv({ responsible_user_id: "u", responsible_username: "Sam" }), "u", [])).toBe(
-      "owner Pixel · responsible You · Aurelius",
-    );
-  });
-
-  it("says No owner and leaves out an empty responsible", () => {
-    expect(headLine(tv({ owner_name: null, owner_employee_id: null }), null, [])).toBe("No owner · Aurelius");
   });
 });
 

@@ -49,8 +49,7 @@ import {
   runLocked,
 } from "./board-logic";
 import { type SessionSlots, TicketSessionBody } from "./chat";
-import { useLiveAll, useLiveStore } from "./chat-live";
-import { readOnlyBar, runAuthor } from "./chat-logic";
+import { readOnlyBar } from "./chat-logic";
 import { artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { parseDeadline, parseLabels, useModels } from "./dialogs";
 import { InboxBell } from "./inbox-bell";
@@ -88,7 +87,6 @@ import {
   composerPlaceholder,
   filesWrittenAcross,
   gateOf,
-  headLine,
   latestRunAcross,
   readOnly,
   resolveNumber,
@@ -104,7 +102,7 @@ const styles = stylex.create({
   main: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column" },
   top: {
     display: "flex",
-    minHeight: 52,
+    minHeight: 44,
     flexShrink: 0,
     alignItems: "center",
     gap: 10,
@@ -117,7 +115,6 @@ const styles = stylex.create({
   },
   lines: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column", gap: 2 },
   line1: { display: "flex", minWidth: 0, alignItems: "center", gap: 8 },
-  line2: { display: "flex", minWidth: 0, alignItems: "center", gap: 12 },
   title: {
     margin: 0,
     display: "flex",
@@ -129,17 +126,6 @@ const styles = stylex.create({
   },
   titleText: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   hash: { flexShrink: 0, color: "var(--precision-text3)", fontWeight: 500 },
-  subtitle: {
-    minWidth: 0,
-    flexGrow: 1,
-    flexBasis: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    fontSize: 12,
-    color: "var(--precision-text3)",
-  },
-  project: { display: { default: "inline", "@media (max-width: 900px)": "none" } },
   tools: { display: "flex", flexShrink: 0, gap: 2 },
   gate: {
     marginInline: "auto",
@@ -330,12 +316,12 @@ function Session({
   thread: string | null;
 }) {
   const navigate = useNavigate();
-  const { features, user } = useLinkState();
+  const { features } = useLinkState();
   const conversation = features.includes("ticket_channels") ? (t.conversation_id ?? null) : null;
   const closed = readOnly(t, null);
   const dock = usePropertiesDock();
   // The head spans the screen; the properties dock beside the conversation, below it.
-  const head = <Head t={t} conversation={conversation} me={user?.id ?? null} dock={dock} />;
+  const head = <Head t={t} dock={dock} />;
   const gate = <TicketGate detail={detail} t={t} />;
   const aside = (
     <PropertiesPanel dock={dock} label="Ticket properties" wide>
@@ -388,29 +374,19 @@ function Session({
 
 function Head({
   t,
-  conversation,
-  me,
   dock,
 }: {
   t: TicketView;
-  conversation: string | null;
-  me: string | null;
   /** The properties panel the head's button shows or hides. */
   dock: PropertiesDock;
 }) {
   const { status } = useLinkState();
   const board = useBoard(null);
-  const employees = useEmployees();
   const write = useTicketWrite();
   const { choosing } = useDispatcherLine(t);
   const menu = useTicketMenu(t, choosing);
-  const live = useLiveAll(useLiveStore(conversation));
-  const answering = [...new Set(live.flatMap((u) => runAuthor(employees.data ?? [], u.run_id) ?? []))];
   const column = board.data?.columns.find((c) => c.column.kind === t.column)?.column.name ?? t.column.replace("_", " ");
   const open = !readOnly(t, null) && status === "online";
-  const line = headLine(t, me, answering);
-  // The project leaves the second line on a narrow window; it is in the properties.
-  const project = answering.length === 0 && line.endsWith(` · ${t.project_name}`) ? t.project_name : null;
   return (
     <header data-titlebar {...stylex.props(styles.top)}>
       {menu.dialogs}
@@ -432,12 +408,6 @@ function Head({
             <ColumnGlyph kind={t.column} />
             {column}
           </Chip>
-        </div>
-        <div {...stylex.props(styles.line2)}>
-          <span {...stylex.props(styles.subtitle)}>
-            {project ? line.slice(0, -project.length - 3) : line}
-            {project ? <span {...stylex.props(styles.project)}> · {project}</span> : null}
-          </span>
         </div>
       </div>
       <div {...stylex.props(styles.tools)}>

@@ -6,10 +6,8 @@ import {
   runChipLabel,
   SIDEBAR_SESSIONS,
   sessionFolder,
-  sessionPlace,
   sessionSignal,
   sessionStatus,
-  sessionWho,
   sidebarSessions,
   startOfDay,
   withEarlier,
@@ -30,27 +28,7 @@ describe("the session's side panel", () => {
   });
 });
 
-describe("sessionPlace", () => {
-  it("names the employee, the project and the folder it works in", () => {
-    expect(sessionPlace({ employee_name: "Orion", project_name: "Planora", branch: null })).toBe(
-      "Orion · Planora · project folder",
-    );
-    expect(sessionPlace({ employee_name: "Orion", project_name: "Planora", branch: "session/1a2b3c4d" })).toBe(
-      "Orion · Planora · own worktree on session/1a2b3c4d",
-    );
-  });
-});
-
 describe("a session the dispatcher gives to someone", () => {
-  it("names the dispatcher while it chooses, nobody after it chose nobody, else the employee", () => {
-    expect(sessionWho({ employee_name: "Orion", dispatch: "choosing" })).toBe("Orion is choosing who takes it");
-    expect(sessionWho({ employee_name: "Orion", dispatch: "nobody" })).toBe("Nobody yet");
-    expect(sessionWho({ employee_name: "Flux" })).toBe("Flux");
-    expect(sessionPlace({ employee_name: "Orion", project_name: "Planora", branch: null, dispatch: "choosing" })).toBe(
-      "Orion is choosing who takes it · Planora · project folder",
-    );
-  });
-
   it("puts a chooser where the composer is until somebody takes it", () => {
     expect(chooserText({ employee_name: "Orion", dispatch: "choosing" })).toContain("You can also choose yourself");
     expect(chooserText({ employee_name: "Orion", dispatch: "nobody" })).toBe(

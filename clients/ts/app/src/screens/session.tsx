@@ -30,7 +30,7 @@ import {
   SideRow,
   usePropertiesDock,
 } from "./run-side";
-import { chooserText, runChange, runChipLabel, sessionFolder, sessionPlace, sessionStatus } from "./session-logic";
+import { chooserText, runChange, runChipLabel, sessionFolder, sessionStatus } from "./session-logic";
 import { modelName } from "./settings-kit";
 import { SubagentsAtWork } from "./subagents";
 import { filesWritten } from "./tasks-logic";
@@ -68,7 +68,6 @@ export function SessionScreen({ conversationId }: { conversationId: string }) {
         conversationId={conversationId}
         frame={{
           ...(session ? { title: session.title || "Session" } : {}),
-          ...(session ? { subtitle: sessionPlace(session) } : {}),
           empty: {
             title: "This session is starting.",
             description: "The first answer appears here. Talk with the employee as in a chat; there is no ticket.",

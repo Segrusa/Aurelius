@@ -47,10 +47,7 @@ class _SessionBody extends StatelessWidget {
     return Scaffold(
       appBar: GlassAppBar(
         titleSpacing: 0,
-        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(session.title.isEmpty ? 'Session' : session.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Tokens.title(size: 18)),
-          Text(sessionPlace(session), key: const ValueKey('session-place'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: Tokens.muted)),
-        ]),
+        title: Text(session.title.isEmpty ? 'Session' : session.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: Tokens.title(size: 18)),
       ),
       body: Column(children: [
         const ConnectionBanner(),
