@@ -272,3 +272,17 @@ fn a_sessions_worktree_is_found_also_when_its_path_is_written_differently() {
     let idle = vec![SessionWorktree { path: real.clone(), working: false }, SessionWorktree { path: real.clone(), working: true }];
     assert!(!working_at(&idle, &real), "the newest session of the folder decides");
 }
+
+#[test]
+fn a_git_line_that_reaches_the_client_is_redacted() {
+    let token = "t77f2-vault-value-in-a-remote-url";
+    aurelius_runtime::redact::add_to_set("code-tests", aurelius_runtime::redact::Secret { name: "remote".into(), label: "Remote".into(), value: token.to_owned().into() });
+    let (dir, repo) = repo();
+    let remote = dir.path().join(token);
+    run(&repo, &["remote", "add", "origin", &remote.to_string_lossy()]);
+    let e = apply(&repo, HostWrite::CodeFetch { project_id: ProjectId::new() }, &nobody(), Duration::from_secs(30)).expect_err("no repository there");
+    assert!(e.message.starts_with("The fetch failed"), "{}", e.message);
+    assert!(!e.message.contains(token), "{}", e.message);
+    let shown = problem(ProjectId::new(), String::new(), format!("fatal: {token}"));
+    assert!(!shown.problem.unwrap_or_default().contains(token));
+}

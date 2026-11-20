@@ -143,8 +143,10 @@ fn working_at(sessions: &[SessionWorktree], path: &str) -> bool {
     sessions.iter().find(|s| same_path(&s.path, path)).is_some_and(|s| s.working)
 }
 
+/// A refusal for the client. Its text often carries a line of git (a remote's URL, a path),
+/// so it passes the vault's redactor first.
 fn invalid(message: impl Into<String>) -> ProtocolError {
-    ProtocolError::new(ErrorCode::Validation, message.into())
+    ProtocolError::new(ErrorCode::Validation, aurelius_runtime::redact::string(message.into()))
 }
 
 /// The project's folder; an unknown project is `NotFound`.
@@ -169,7 +171,9 @@ async fn links_of(shared: &Arc<Shared>, project: ProjectId, branches: Vec<String
     .await
 }
 
+/// A view that only says why there is nothing to show; `why` may be git's own line, so it is redacted.
 fn problem(project: ProjectId, repo_path: String, why: String) -> CodeView {
+    let why = aurelius_runtime::redact::string(why);
     CodeView { project_id: project, repo_path, main_branch: None, problem: Some(why), has_remote: false, fetched_at_ms: None, worktrees: vec![], branches: vec![], commits: vec![] }
 }
 
