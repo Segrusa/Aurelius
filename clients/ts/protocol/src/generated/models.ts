@@ -7012,7 +7012,8 @@ export interface WorkSessionView {
    */
   running: boolean;
   /**
-   * Named after its first message.
+   * Named after its first message, until a title made from its content
+   * replaces it after the first answer.
    */
   title: string;
   /**

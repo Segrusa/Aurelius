@@ -20301,7 +20301,8 @@ final class WorkSessionView {
   final String projectName;
   /// Whether a run of it is queued or working now.
   final bool running;
-  /// Named after its first message.
+  /// Named after its first message, until a title made from its content
+  /// replaces it after the first answer.
   final String title;
   /// Its own worktree and branch; none when it works in the project's folder.
   final String? worktree;
