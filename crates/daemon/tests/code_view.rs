@@ -308,6 +308,11 @@ async fn a_branch_an_employee_works_on_is_never_merged_deleted_or_removed_nor_on
     let extra = format!("fix/{number}-extra");
     git(&repo, &["branch", &extra, &feature]);
     until_working(&client, hermes, &feature, true).await;
+    // The worktree says so too (T77-R2 N4), so the page never offers to remove it.
+    let view = get(&client, hermes).await;
+    let busy_worktree = view.worktrees.iter().find(|w| w.branch.as_deref() == Some(feature.as_str())).expect("the ticket's worktree");
+    assert!(busy_worktree.working, "{busy_worktree:?}");
+    assert!(view.worktrees.iter().filter(|w| w.is_main).all(|w| !w.working), "the project's folder is not the ticket's");
 
     let main_before = git(&repo, &["rev-parse", "main"]);
     refused(host(&client, HostWrite::CodeMerge { project_id: hermes, branch: feature.clone() }).await, ErrorCode::Validation, &format!("An employee works on {feature} now"));

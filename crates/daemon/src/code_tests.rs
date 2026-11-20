@@ -286,3 +286,63 @@ fn a_git_line_that_reaches_the_client_is_redacted() {
     let shown = problem(ProjectId::new(), String::new(), format!("fatal: {token}"));
     assert!(!shown.problem.unwrap_or_default().contains(token));
 }
+
+#[cfg(unix)]
+#[test]
+fn a_fetch_uses_the_repositorys_own_ssh_command() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, repo) = repo();
+    let marker = dir.path().join("own-ssh-ran");
+    let script = dir.path().join("own-ssh.sh");
+    std::fs::write(&script, format!("#!/bin/sh\ntouch '{}'\nexit 1\n", marker.display())).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    run(&repo, &["remote", "add", "origin", "ssh://git@example.invalid/x.git"]);
+    run(&repo, &["config", "core.sshCommand", &script.to_string_lossy()]);
+    let result = apply(&repo, HostWrite::CodeFetch { project_id: ProjectId::new() }, &nobody(), Duration::from_secs(20));
+    assert_eq!(result.expect_err("the script fails the fetch").code, ErrorCode::Validation);
+    assert!(marker.exists(), "the repository's core.sshCommand ran, not ours");
+}
+
+/// The `git` processes whose working folder is `repo` (Linux: read from /proc).
+#[cfg(target_os = "linux")]
+fn gits_in(repo: &Path) -> Vec<String> {
+    let repo = std::fs::canonicalize(repo).unwrap();
+    std::fs::read_dir("/proc")
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| std::fs::read_link(e.path().join("cwd")).is_ok_and(|cwd| cwd == repo))
+        .filter_map(|e| std::fs::read(e.path().join("cmdline")).ok())
+        .map(|c| String::from_utf8_lossy(&c).replace('\0', " "))
+        .filter(|c| c.contains("fetch"))
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_stopped_fetch_of_two_silent_remotes_leaves_no_git_running() {
+    let (_dir, repo) = repo();
+    let (a, b) = (std::net::TcpListener::bind("127.0.0.1:0").unwrap(), std::net::TcpListener::bind("127.0.0.1:0").unwrap());
+    run(&repo, &["remote", "add", "a", &format!("git://127.0.0.1:{}/repo.git", a.local_addr().unwrap().port())]);
+    run(&repo, &["remote", "add", "b", &format!("git://127.0.0.1:{}/repo.git", b.local_addr().unwrap().port())]);
+    let started = Instant::now();
+    let e = apply(&repo, HostWrite::CodeFetch { project_id: ProjectId::new() }, &nobody(), Duration::from_secs(2)).expect_err("stopped");
+    assert_eq!(e.message, "The fetch did not finish within 2 s.");
+    assert!(started.elapsed() < Duration::from_secs(4), "one deadline for every remote, took {:?}", started.elapsed());
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(gits_in(&repo), Vec::<String>::new(), "no fetch left running after the stop");
+    drop((a, b));
+}
+
+#[test]
+fn an_open_branch_says_whether_its_ticket_or_its_work_session_keeps_it() {
+    let ticket = aurelius_domain::code::CodeTicket { ticket_id: aurelius_domain::TicketId::new(), number: 7, title: "T".into() };
+    let mut links = HashMap::new();
+    links.insert("feat/ticket-7-x".to_owned(), BranchLink { ticket: Some(ticket), open: true, ..BranchLink::default() });
+    links.insert("session/1a2b3c4d".to_owned(), BranchLink { open: true, ..BranchLink::default() });
+    links.insert("feat/closed".to_owned(), BranchLink::default());
+    let busy = Busy { links, loose_working: vec![] };
+    assert_eq!(busy.open_why("feat/ticket-7-x"), Some(STILL_OPEN));
+    assert_eq!(busy.open_why("session/1a2b3c4d"), Some(SESSION_OPEN));
+    assert_eq!(busy.open_why("feat/closed"), None);
+    assert_eq!(busy.open_why("unknown"), None);
+}

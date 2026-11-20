@@ -40,9 +40,10 @@ const FETCH_POLL_MS: u64 = 50;
 const FETCH_STDERR_WAIT_MS: u64 = 1_000;
 /// git's own limit on a slow http transfer: under 1000 bytes/s for 30 s ends it.
 const FETCH_HTTP_LIMITS: [&str; 4] = ["-c", "http.lowSpeedLimit=1000", "-c", "http.lowSpeedTime=30"];
-/// The ssh a fetch uses when the environment names none: never a prompt, and a host that
-/// does not answer is given up after 15 s.
-const FETCH_SSH_COMMAND: &str = "ssh -o BatchMode=yes -o ConnectTimeout=15";
+/// The ssh a fetch uses when neither the environment nor git's config names one: never a
+/// prompt, a host that does not answer is given up after 15 s, and one that stops answering
+/// after the handshake after a minute. A configured ssh (`core.sshCommand`) is always kept.
+const FETCH_SSH_COMMAND: &str = "core.sshCommand=ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4";
 
 /// `code.get`: the project's git state. A project without a usable repository answers a
 /// view with `problem` set; only an unknown project is an error.
@@ -69,6 +70,15 @@ pub async fn view(shared: &Arc<Shared>, project: ProjectId) -> Result<CodeView, 
         branch.owner = link.owner.clone();
         branch.working = link.working;
         branch.open = link.open;
+    }
+    // A worktree works when its branch does, or (without a branch) when a session runs in it.
+    let store = shared.store().clone();
+    let sessions = storage_task(move || store.read(|c| aurelius_storage::code::session_worktrees(c, project))).await?;
+    for worktree in &mut view.worktrees {
+        worktree.working = match &worktree.branch {
+            Some(branch) => links.get(branch).is_some_and(|l| l.working),
+            None => working_at(&sessions, &worktree.path),
+        };
     }
     Ok(view)
 }
@@ -127,6 +137,12 @@ impl Busy {
     /// Its ticket or work session is still open: Clean up merged leaves it alone.
     fn open(&self, branch: &str) -> bool {
         self.links.get(branch).is_some_and(|l| l.open)
+    }
+
+    /// Why `branch` stays because it is open: its ticket's, else its work session's reason.
+    fn open_why(&self, branch: &str) -> Option<&'static str> {
+        let link = self.links.get(branch).filter(|l| l.open)?;
+        Some(if link.ticket.is_some() { STILL_OPEN } else { SESSION_OPEN })
     }
 
     fn worktree(&self, worktree: &WorktreeEntry) -> bool {
@@ -202,7 +218,7 @@ fn read_view(project: ProjectId, repo: &Path) -> Result<CodeView, String> {
         .map(|w| {
             let missing = w.prunable || !Path::new(&w.path).is_dir();
             let (changed_files, changed_count) = if missing { (vec![], 0) } else { changes(Path::new(&w.path)) };
-            CodeWorktree { path: w.path.clone(), branch: w.branch.clone(), is_main: same_path(&w.path, &repo_path), head: w.head.clone(), changed_files, changed_count, missing }
+            CodeWorktree { path: w.path.clone(), branch: w.branch.clone(), is_main: same_path(&w.path, &repo_path), head: w.head.clone(), changed_files, changed_count, missing, working: false }
         })
         .collect();
     // The project's folder first; git lists the main worktree first, which is the same unless
@@ -353,18 +369,37 @@ fn perform(repo: &Path, write: HostWrite, busy: &Busy) -> Result<(), ProtocolErr
     }
 }
 
-/// `code.fetch`: `git fetch --all --prune`, stopped at `deadline`. A repository without a
-/// remote has nothing to fetch.
+/// `code.fetch`: `git fetch --prune` of every remote in turn, all within `deadline`. One
+/// process per remote (not `--all`, whose per-remote children a kill would not reach). A
+/// repository without a remote has nothing to fetch.
 fn fetch(repo: &Path, deadline: Duration) -> Result<(), ProtocolError> {
-    if read(repo, &["remote"]).map_err(invalid)?.is_empty() {
+    let remotes = read(repo, &["remote"]).map_err(invalid)?;
+    let remotes: Vec<&str> = remotes.lines().map(str::trim).filter(|r| !r.is_empty()).collect();
+    if remotes.is_empty() {
         return Err(invalid("This repository has no remote to fetch from."));
     }
-    let mut args = FETCH_HTTP_LIMITS.to_vec();
-    args.extend(["fetch", "--all", "--prune"]);
-    let mut command = quick::command(repo, &args);
-    if std::env::var_os("GIT_SSH_COMMAND").is_none() && std::env::var_os("GIT_SSH").is_none() {
-        command.env("GIT_SSH_COMMAND", FETCH_SSH_COMMAND);
+    // Our ssh options only when nobody chose an ssh: git ranks the environment above
+    // `core.sshCommand`, so setting `GIT_SSH_COMMAND` would override the repository's own.
+    let own_ssh = std::env::var_os("GIT_SSH_COMMAND").is_some()
+        || std::env::var_os("GIT_SSH").is_some()
+        || !read(repo, &["config", "--get", "core.sshCommand"]).unwrap_or_default().is_empty();
+    let started = Instant::now();
+    for remote in remotes {
+        let left = deadline.saturating_sub(started.elapsed());
+        fetch_remote(repo, remote, own_ssh, left, deadline)?;
     }
+    Ok(())
+}
+
+/// One remote's `git fetch --prune`, killed when `left` runs out (`deadline` is the whole
+/// fetch's, for the message).
+fn fetch_remote(repo: &Path, remote: &str, own_ssh: bool, left: Duration, deadline: Duration) -> Result<(), ProtocolError> {
+    let mut args = FETCH_HTTP_LIMITS.to_vec();
+    if !own_ssh {
+        args.extend(["-c", FETCH_SSH_COMMAND]);
+    }
+    args.extend(["fetch", "--prune", "--end-of-options", remote]);
+    let mut command = quick::command(repo, &args);
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let mut child = command.spawn().map_err(|e| invalid(format!("git could not run: {e}")))?;
     // Read on a thread of its own, so a full pipe never stalls git. After a kill a helper of
@@ -382,7 +417,7 @@ fn fetch(repo: &Path, deadline: Duration) -> Result<(), ProtocolError> {
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() >= deadline => {
+            Ok(None) if started.elapsed() >= left => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(invalid(format!("The fetch did not finish within {} s.", deadline.as_secs())));
@@ -432,9 +467,11 @@ fn merge_failure(branch: &str, reason: &str, files: &[String]) -> String {
     message
 }
 
-/// Why a branch of an open ticket or work session keeps its worktree and stays: work on it
-/// may still come, also when it has no commit of its own yet (as Clean up merged leaves it).
+/// Why a branch of an open ticket keeps its worktree and stays: work on it may still come,
+/// also when it has no commit of its own yet (as Clean up merged leaves it).
 const STILL_OPEN: &str = "Its ticket is still open; it is cleaned up after the ticket is done.";
+/// The same for a branch of a work session that is not deleted (it has no ticket).
+const SESSION_OPEN: &str = "Its work session is still open; it is cleaned up after the session is deleted.";
 
 /// `code.remove_worktree`: never the project's folder, one with changes, one an employee
 /// works in or one of a branch whose ticket or session is still open.
@@ -446,8 +483,8 @@ fn remove_worktree(repo: &Path, state: &RepoState, path: &str, busy: &Busy) -> R
     if busy.worktree(worktree) {
         return Err(invalid("An employee works in this worktree now; wait until they are done."));
     }
-    if worktree.branch.as_deref().is_some_and(|b| busy.open(b)) {
-        return Err(invalid(STILL_OPEN));
+    if let Some(why) = worktree.branch.as_deref().and_then(|b| busy.open_why(b)) {
+        return Err(invalid(why));
     }
     let missing = worktree.prunable || !Path::new(&worktree.path).is_dir();
     if !missing {
@@ -473,8 +510,8 @@ fn delete_branch(repo: &Path, state: &RepoState, branch: &str, force: bool, busy
     if busy.branch(branch) {
         return Err(invalid(format!("An employee works on {branch} now; wait until they are done.")));
     }
-    if busy.open(branch) {
-        return Err(invalid(STILL_OPEN));
+    if let Some(why) = busy.open_why(branch) {
+        return Err(invalid(why));
     }
     let ahead = ahead_of_main(repo, &state.main, branch)?;
     if ahead > 0 && !force {

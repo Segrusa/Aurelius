@@ -559,7 +559,7 @@ mod tests {
             problem: Some("why".into()),
             has_remote: true,
             fetched_at_ms: Some(7),
-            worktrees: vec![CodeWorktree { path: "/repo".into(), branch: Some("main".into()), is_main: true, head: "h".into(), changed_files: vec![], changed_count: 0, missing: false }],
+            worktrees: vec![CodeWorktree { path: "/repo".into(), branch: Some("main".into()), is_main: true, head: "h".into(), changed_files: vec![], changed_count: 0, missing: false, working: false }],
             branches: vec![],
             commits: vec![CodeCommit { hash: "h".into(), parents: vec![], subject: "first".into(), author: "Ann".into(), at_ms: 1, branches: vec!["main".into()] }],
         };
