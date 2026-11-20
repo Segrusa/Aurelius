@@ -40,6 +40,7 @@ export const METHODS = {
   "claude_login.link": "host",
   "claude_login.status": "read",
   "claude_login.unlink": "host",
+  "command.applied": "read",
   "compaction.get_setting": "read",
   "compaction.set_threshold": "host",
   "company.get": "read",
@@ -357,6 +358,14 @@ export interface MethodParams {
    * removed). Answers `ClaudeLogin`.
    */
   "claude_login.unlink": undefined;
+  /**
+   * Whether the server committed the write sent with `idempotency_key` (feature
+   * `command_applied`), answered with `CommandApplied`. A client asks this after
+   * the connection dropped or timed out under a write it will not resend, so it
+   * can tell "it arrived, the answer was lost" from "it never arrived". Only yes
+   * or no: the receipt's result stays with the connection that wrote it.
+   */
+  "command.applied": { idempotency_key: string };
   /**
    * Above how many tokens a session is compacted (feature `compaction_setting`).
    */

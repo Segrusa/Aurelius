@@ -77,6 +77,12 @@ abstract final class Methods {
   /// Disconnect the session's own Claude login (`claude auth logout`, its folder
   /// removed). Answers `ClaudeLogin`.
   static const String claudeLoginUnlink = 'claude_login.unlink';
+  /// Whether the server committed the write sent with `idempotency_key` (feature
+  /// `command_applied`), answered with `CommandApplied`. A client asks this after
+  /// the connection dropped or timed out under a write it will not resend, so it
+  /// can tell "it arrived, the answer was lost" from "it never arrived". Only yes
+  /// or no: the receipt's result stays with the connection that wrote it.
+  static const String commandApplied = 'command.applied';
   /// Above how many tokens a session is compacted (feature `compaction_setting`).
   static const String compactionGetSetting = 'compaction.get_setting';
   /// Above how many tokens of context a session is compacted before its next turn
@@ -658,6 +664,18 @@ Map<String, dynamic> claudeLoginInput(ClaudeLoginInputParams params) => <String,
 /// The session's own Claude login (`ClaudeLoginView`). Feature of protocol 5.
 Map<String, dynamic> claudeLoginStatus() => <String, dynamic>{
   'method': Methods.claudeLoginStatus,
+};
+
+/// Whether the server committed the write sent with `idempotency_key` (feature
+/// `command_applied`), answered with `CommandApplied`. A client asks this after
+/// the connection dropped or timed out under a write it will not resend, so it
+/// can tell "it arrived, the answer was lost" from "it never arrived". Only yes
+/// or no: the receipt's result stays with the connection that wrote it.
+Map<String, dynamic> commandApplied({required String idempotencyKey}) => <String, dynamic>{
+  'method': Methods.commandApplied,
+  'params': <String, dynamic>{
+    'idempotency_key': idempotencyKey,
+  },
 };
 
 /// Above how many tokens a session is compacted (feature `compaction_setting`).

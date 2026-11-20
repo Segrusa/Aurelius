@@ -3327,6 +3327,24 @@ final class CommandVerifyConnection extends Command {
     };
 }
 
+/// The answer of `command.applied`.
+final class CommandApplied {
+  const CommandApplied({
+    required this.applied,
+  });
+
+  /// True: a write with this key committed. False: none did (yet).
+  final bool applied;
+
+  factory CommandApplied.fromJson(Map<String, dynamic> json) => CommandApplied(
+    applied: (json['applied'] as bool),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'applied': applied,
+  };
+}
+
 sealed class CommandResult {
   const CommandResult();
 
@@ -10656,6 +10674,13 @@ sealed class Method {
         return MethodClaudeLoginInput(params: ClaudeLoginInputParams.fromJson(json['params'] as Map<String, dynamic>));
       case 'claude_login.status':
         return const MethodClaudeLoginStatus();
+      case 'command.applied':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodCommandApplied(
+          idempotencyKey: (src['idempotency_key'] as String),
+        );
+        }
       case 'compaction.get_setting':
         return const MethodCompactionGetSetting();
       case 'company.get':
@@ -11328,6 +11353,27 @@ final class MethodClaudeLoginStatus extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'claude_login.status',
+    };
+}
+
+/// Whether the server committed the write sent with `idempotency_key` (feature
+/// `command_applied`), answered with `CommandApplied`. A client asks this after
+/// the connection dropped or timed out under a write it will not resend, so it
+/// can tell "it arrived, the answer was lost" from "it never arrived". Only yes
+/// or no: the receipt's result stays with the connection that wrote it.
+final class MethodCommandApplied extends Method {
+  const MethodCommandApplied({
+    required this.idempotencyKey,
+  });
+
+  final String idempotencyKey;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'command.applied',
+      'params': <String, dynamic>{
+      'idempotency_key': idempotencyKey,
+    },
     };
 }
 
@@ -14003,6 +14049,8 @@ sealed class ResponseBody {
         return ResponseBodyChannels(value: ChannelsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'claude_login':
         return ResponseBodyClaudeLogin(value: ClaudeLoginView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'command_applied':
+        return ResponseBodyCommandApplied(value: CommandApplied.fromJson(json['value'] as Map<String, dynamic>));
       case 'compaction_setting':
         return ResponseBodyCompactionSetting(value: CompactionSetting.fromJson(json['value'] as Map<String, dynamic>));
       case 'company':
@@ -14350,6 +14398,21 @@ final class ResponseBodyClaudeLogin extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'claude_login',
+      'value': value.toJson(),
+    };
+}
+
+/// `command.applied`.
+final class ResponseBodyCommandApplied extends ResponseBody {
+  const ResponseBodyCommandApplied({
+    required this.value,
+  });
+
+  final CommandApplied value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'command_applied',
       'value': value.toJson(),
     };
 }

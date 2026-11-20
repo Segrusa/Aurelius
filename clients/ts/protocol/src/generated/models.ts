@@ -983,6 +983,16 @@ export type Command =
   | ({ type: "verify_connection" } & VerifyConnection)
 ;
 
+/**
+ * The answer of `command.applied`.
+ */
+export interface CommandApplied {
+  /**
+   * True: a write with this key committed. False: none did (yet).
+   */
+  applied: boolean;
+}
+
 export type CommandResult =
   | ({ type: "agent_mode_set"; conversation_id: string; mode: AgentMode })
   | ({ type: "approval_decided"; approval_id: string; ok: boolean; output: string; status: ApprovalStatus })
@@ -3601,6 +3611,14 @@ export type Method =
    */
   | ({ method: "claude_login.status" })
   /**
+   * Whether the server committed the write sent with `idempotency_key` (feature
+   * `command_applied`), answered with `CommandApplied`. A client asks this after
+   * the connection dropped or timed out under a write it will not resend, so it
+   * can tell "it arrived, the answer was lost" from "it never arrived". Only yes
+   * or no: the receipt's result stays with the connection that wrote it.
+   */
+  | ({ method: "command.applied"; params: { idempotency_key: string } })
+  /**
    * Above how many tokens a session is compacted (feature `compaction_setting`).
    */
   | ({ method: "compaction.get_setting" })
@@ -4532,6 +4550,10 @@ export type ResponseBody =
   | ({ type: "browser"; value: BrowserSetting })
   | ({ type: "channels"; value: ChannelsSnapshot })
   | ({ type: "claude_login"; value: ClaudeLoginView })
+  /**
+   * `command.applied`.
+   */
+  | ({ type: "command_applied"; value: CommandApplied })
   | ({ type: "compaction_setting"; value: CompactionSetting })
   | ({ type: "company"; value: CompanySnapshot })
   | ({ type: "connections"; value: ConnectionsSnapshot })
