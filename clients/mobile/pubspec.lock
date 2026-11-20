@@ -193,6 +193,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.0.0"
+  cupertino_native_better:
+    dependency: "direct main"
+    description:
+      name: cupertino_native_better
+      sha256: "99acb7ba9eb77f14d9c8222e930a95403d8a93474389d7ee8286e4bb6dd7a7f2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.10.2"
   cupertino_ui:
     dependency: transitive
     description:

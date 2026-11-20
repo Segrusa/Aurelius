@@ -3,6 +3,7 @@ import 'package:aurelius_mobile/app/shell.dart';
 import 'package:aurelius_mobile/core/hosts/host.dart';
 import 'package:aurelius_mobile/core/net/connection.dart';
 import 'package:aurelius_mobile/core/theme/theme.dart';
+import 'package:aurelius_mobile/core/widgets/ios.dart' show AppTabBar, GlassTabBar;
 import 'package:aurelius_mobile/data/aurelius_repository.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/chat/chat_bloc.dart';
@@ -198,13 +199,13 @@ void main() {
     expect(isSystemLine(messageOf('u', MessageRole.user, 'hi', update: 'system'), inGroup: true), isFalse);
   });
 
-  testWidgets("an employee's own chat typed in as a conversation opens /team (Sessions since ticket #71)", (tester) async {
+  testWidgets("an employee's own chat typed in as a conversation opens Sessions", (tester) async {
     final company = MockCompanyBloc();
     whenListen(company, const Stream<CompanyState>.empty(), initialState: CompanyState(loading: false, employees: [employeeOf(id: 'mgr', name: 'Iris', conversationId: 'own')]));
     final connection = MockConnectionBloc();
     whenListen(connection, const Stream<LinkState>.empty(), initialState: online);
     final router = GoRouter(initialLocation: '/conversation/own', routes: [
-      GoRoute(path: '/team', builder: (_, _) => const Scaffold(body: Text('page team'))),
+      GoRoute(path: '/sessions', builder: (_, _) => const Scaffold(body: Text('page team'))),
       GoRoute(path: '/conversation/:cid', builder: (_, s) => ConversationPage(conversationId: s.pathParameters['cid']!)),
     ]);
     addTearDown(router.dispose);
@@ -226,13 +227,13 @@ void main() {
     setUp(() => router = AppRouter(host));
     tearDown(() => router.dispose());
 
-    test('Sessions is the first tab, then Inbox, Board and Profile; the app opens on Sessions (tickets #71, #72)', () {
+    test('Chat is the first tab, then Sessions, Inbox and Profile; the app opens on Chat; no Board tab', () {
       final shell = router.config.configuration.routes.whereType<StatefulShellRoute>().single;
       final first = [for (final b in shell.branches) (b.routes.first as GoRoute).path];
-      expect(first, ['/sessions', '/inbox', '/board', '/profile']);
+      expect(first, ['/chat', '/sessions', '/inbox', '/profile']);
       expect(first, shellTabPatterns);
-      expect(shellTabs.map((t) => t.label), ['Sessions', 'Inbox', 'Board', 'Profile']);
-      expect(router.config.routeInformationProvider.value.uri.path, '/sessions', reason: 'the app opens on Sessions');
+      expect(shellTabs.map((t) => t.label), ['Chat', 'Sessions', 'Inbox', 'Profile']);
+      expect(router.config.routeInformationProvider.value.uri.path, '/chat', reason: 'the app opens on Chat');
       final paths = pathsOf(router.config.configuration.routes);
       expect(paths, containsAll(['/sessions/new', '/session/:cid', '/board/new', '/ticket/:tid', '/ticket/:tid/plan', '/settings/board']));
       expect(paths, isNot(contains('/channel/:cid')), reason: 'chat is gone: no channel screen');
@@ -263,12 +264,24 @@ void main() {
       expect(team.redirect, isNotNull);
     });
 
+    testWidgets('an old place of the Board opens the open tickets; New session opens Chat', (tester) async {
+      await tester.pumpWidget(const SizedBox());
+      final context = tester.element(find.byType(SizedBox));
+      GoRouterState state(String path) => GoRouterState(router.config.configuration, uri: Uri.parse(path), matchedLocation: path, fullPath: path, pathParameters: const {}, pageKey: const ValueKey('k'));
+      final board = router.config.configuration.routes.whereType<GoRoute>().singleWhere((r) => r.path == '/board');
+      expect(board.redirect!(context, state('/board')), '/sessions?tab=tickets');
+      final shell = router.config.configuration.routes.whereType<StatefulShellRoute>().single;
+      final sessions = shell.branches[1].routes.first as GoRoute;
+      final newSession = sessions.routes.whereType<GoRoute>().singleWhere((r) => r.path == 'new');
+      expect(newSession.redirect!(context, state('/sessions/new')), '/chat');
+    });
+
     test("an employee's own chat has no route any more; conversations have their own", () {
       final paths = pathsOf(router.config.configuration.routes);
       expect(paths, contains('/employee/:eid'));
       expect(paths, contains('/employee/:eid/tasks'));
       expect(paths, isNot(contains('/employee/:eid/chat')));
-      expect(paths.where((p) => p.endsWith('/chat')), isEmpty);
+      expect(paths.where((p) => p.endsWith('/chat')), ['/chat'], reason: 'only the Chat tab');
       expect(paths, contains('/conversation/:cid'));
     });
   });
@@ -280,16 +293,14 @@ void main() {
       whenListen(inboxBloc, const Stream<InboxState>.empty(), initialState: inbox);
       final connection = MockConnectionBloc();
       whenListen(connection, const Stream<LinkState>.empty(), initialState: link);
-      final router = GoRouter(initialLocation: '/sessions', routes: [
+      final router = GoRouter(initialLocation: '/chat', routes: [
         StatefulShellRoute.indexedStack(
           builder: (context, state, shell) => HomeShell(shell: shell),
           branches: [
-            for (final name in ['sessions', 'inbox', 'board', 'more'])
+            for (final name in ['chat', 'sessions', 'inbox', 'profile'])
               StatefulShellBranch(routes: [GoRoute(path: '/$name', builder: (_, _) => Scaffold(body: Center(child: Text('page $name'))))]),
           ],
         ),
-        GoRoute(path: '/sessions/new', builder: (_, _) => const Scaffold(body: Text('page new session'))),
-        GoRoute(path: '/board/new', builder: (_, _) => const Scaffold(body: Text('page new ticket'))),
       ]);
       addTearDown(router.dispose);
       await tester.pumpWidget(RepositoryProvider<AureliusRepository>.value(
@@ -314,11 +325,12 @@ void main() {
       expect(find.text('Team'), findsNothing);
     });
 
-    testWidgets('the shell opens on Sessions; ⌘2 opens the inbox, ⌘1 Sessions again; the Board is a tab', (tester) async {
+    testWidgets('the shell opens on Chat; ⌘3 opens the inbox, ⌘1 Chat again; Sessions is a tab; no Board', (tester) async {
       await pump(tester, const InboxState(loading: false));
-      expect(find.text('page sessions'), findsOneWidget);
+      expect(find.text('page chat'), findsOneWidget);
+      expect(find.text('Board'), findsNothing);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+      await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
       expect(find.text('page inbox'), findsOneWidget);
@@ -326,28 +338,34 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pumpAndSettle();
-      expect(find.text('page sessions'), findsOneWidget);
-      await tester.tap(find.text('Board'));
+      expect(find.text('page chat'), findsOneWidget);
+      await tester.tap(find.text('Sessions'));
       await tester.pumpAndSettle();
-      expect(find.text('page board'), findsOneWidget);
+      expect(find.text('page sessions'), findsOneWidget);
     });
 
-    testWidgets('⌘N opens New session on a server with work sessions', (tester) async {
-      await pump(tester, const InboxState(loading: false), link: const LinkState(status: LinkStatus.online, capabilities: ['read', 'chat'], features: ['work_sessions']));
+    testWidgets('⌘N opens the Chat tab', (tester) async {
+      await pump(tester, const InboxState(loading: false));
+      await tester.tap(find.text('Profile'));
+      await tester.pumpAndSettle();
+      expect(find.text('page profile'), findsOneWidget);
       await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
-      expect(find.text('page new session'), findsOneWidget);
+      expect(find.text('page chat'), findsOneWidget);
     });
 
-    testWidgets('⌘N without work sessions opens New ticket', (tester) async {
+    testWidgets('the busy and waiting-for-a-slot chip is gone from above the tabs', (tester) async {
+      await pump(tester, const InboxState(loading: false), link: const LinkState(status: LinkStatus.online, capabilities: ['read', 'chat'], features: ['activity_overview']));
+      expect(find.textContaining('waiting for a slot'), findsNothing);
+      expect(find.textContaining('busy'), findsNothing);
+    });
+
+    testWidgets('off iOS the tab bar is the Flutter glass bar', (tester) async {
       await pump(tester, const InboxState(loading: false));
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      await tester.pumpAndSettle();
-      expect(find.text('page new ticket'), findsOneWidget);
+      expect(find.byType(GlassTabBar), findsOneWidget);
+      expect(AppTabBar.native, isFalse);
     });
   });
 

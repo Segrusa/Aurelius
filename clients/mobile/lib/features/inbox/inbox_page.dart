@@ -332,7 +332,7 @@ class _AnswerRow extends StatelessWidget {
     final conversationId = answer.agent.conversationId;
     return GroupRow(
       key: ValueKey('inbox-answer-${m.id}-$conversationId'),
-      onTap: () => conversationId == null || conversationId == m.conversationId ? context.go('/team') : context.push('/conversation/$conversationId'),
+      onTap: () => conversationId == null || conversationId == m.conversationId ? context.go('/sessions') : context.push('/conversation/$conversationId'),
       title: '${m.name} · ${answer.agent.label}',
       subtitle: conversationId == null ? null : m.threadTitle(conversationId),
       trailing: Row(mainAxisSize: MainAxisSize.min, children: [

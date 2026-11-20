@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
+import 'package:cupertino_native_better/cupertino_native_better.dart' show CNSymbol, CNTabBar, CNTabBarItem;
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -502,16 +504,57 @@ class TabScaffold extends StatelessWidget {
       );
 }
 
-/// One item of [GlassTabBar].
+/// One item of [GlassTabBar] and [AppTabBar].
 class GlassTab {
-  const GlassTab(this.icon, this.label, {this.badge = 0, this.dot = false});
+  const GlassTab(this.icon, this.label, {this.badge = 0, this.dot = false, this.symbol});
 
   final IconData icon;
   final String label;
   final int badge;
 
+  /// The SF Symbol of the tab on the native iOS bar ([AppTabBar]); [icon] where there is none.
+  final String? symbol;
+
   /// Something unread without a count (the Team tab, B8): a small dot when [badge] is 0.
   final bool dot;
+}
+
+/// The app's bottom tab bar. On iOS the system's own tab bar ([CNTabBar]: the
+/// Liquid Glass `UITabBar` from iOS 26, a Cupertino bar below it); elsewhere
+/// (Android, tests) the Flutter [GlassTabBar]. The router keeps the selected
+/// tab: a tap only reports its index.
+class AppTabBar extends StatelessWidget {
+  const AppTabBar({super.key, required this.tabs, required this.current, required this.onTap, this.fade});
+
+  final List<GlassTab> tabs;
+  final int current;
+  final ValueChanged<int> onTap;
+  final Color? fade;
+
+  /// Whether the native bar is used on this platform.
+  static bool get native => defaultTargetPlatform == TargetPlatform.iOS;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!native) return GlassTabBar(tabs: tabs, current: current, onTap: onTap, fade: fade);
+    return SafeArea(
+      top: false,
+      child: CNTabBar(
+        currentIndex: current,
+        onTap: onTap,
+        tint: Tokens.accent,
+        items: [
+          for (final t in tabs)
+            CNTabBarItem(
+              label: t.label,
+              icon: switch (t.symbol) { final s? => CNSymbol(s), null => null },
+              customIcon: t.symbol == null ? t.icon : null,
+              badge: t.badge > 0 ? '${t.badge}' : (t.dot ? CNTabBarItem.dotBadge : null),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 /// The floating Liquid Glass tab bar, over a fade of the page behind it.

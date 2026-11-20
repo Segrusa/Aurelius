@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:cupertino_native_better/cupertino_native_better.dart' show CNTabBarRouteObserver;
 import 'package:go_router/go_router.dart';
 
 import '../core/hosts/host.dart';
@@ -15,7 +16,6 @@ import '../data/aurelius_repository.dart';
 import '../features/employee_runs/employee_runs_page.dart';
 import '../features/account/account.dart';
 import '../features/account/claude_login.dart' show ClaudeLoginPage;
-import '../features/board/board_page.dart';
 import '../features/board/board_settings_page.dart';
 import '../data/discussion.dart';
 import '../data/links.dart' show messageLocateFeature;
@@ -54,7 +54,9 @@ class AppRouter {
 
   late final GoRouter config = GoRouter(
     navigatorKey: _root,
-    initialLocation: '/sessions',
+    initialLocation: '/chat',
+    // Keeps the native tab bar under sheets and dialogs (iOS 26 Liquid Glass).
+    observers: [CNTabBarRouteObserver()],
     refreshListenable: boardMember,
     redirect: (context, state) => boardMember == null ? null : boardMemberRedirect(boardMember!.value, state.matchedLocation),
     routes: [
@@ -81,11 +83,15 @@ class AppRouter {
         builder: (context, state, shell) => HomeShell(shell: shell),
         branches: [
           StatefulShellBranch(routes: [
+            GoRoute(path: '/chat', pageBuilder: (context, state) => routePage(state, const NewSessionPage())),
+          ]),
+          StatefulShellBranch(routes: [
             GoRoute(
               path: '/sessions',
-              pageBuilder: (context, state) => routePage(state, const WorkSessionsPage()),
+              pageBuilder: (context, state) => routePage(state, WorkSessionsPage(tickets: state.uri.queryParameters['tab'] == 'tickets')),
               routes: [
-                GoRoute(parentNavigatorKey: _root, path: 'new', pageBuilder: (context, state) => routePage(state, const NewSessionPage())),
+                // New session is the Chat tab now.
+                GoRoute(path: 'new', redirect: (context, state) => '/chat'),
               ],
             ),
           ]),
@@ -93,13 +99,12 @@ class AppRouter {
             GoRoute(path: '/inbox', pageBuilder: (context, state) => routePage(state, const InboxPage())),
           ]),
           StatefulShellBranch(routes: [
-            GoRoute(path: '/board', pageBuilder: (context, state) => routePage(state, const BoardTab())),
-          ]),
-          StatefulShellBranch(routes: [
             GoRoute(path: '/profile', pageBuilder: (context, state) => routePage(state, const ProfilePage())),
           ]),
         ],
       ),
+      // The Board is not on the phone: an old place of it opens the open tickets.
+      GoRoute(path: '/board', redirect: (context, state) => '/sessions?tab=tickets'),
       // The Team tab is gone (ticket #71): an old place of it opens Sessions.
       GoRoute(path: '/team', redirect: (context, state) => '/sessions'),
       // More became Profile (ticket #72).
@@ -234,7 +239,7 @@ class AppRouter {
     final messageId = data['message_id'] as String?;
     final place = pushPlace(data);
     if (place == null) return false;
-    if (place != inboxRoute) config.go(data['ticket_id'] != null ? '/board' : '/sessions');
+    if (place != inboxRoute) config.go(data['ticket_id'] != null ? '/sessions?tab=tickets' : '/sessions');
     // A reply in a thread has its own place; only the server knows it.
     final context = _root.currentContext;
     if (messageId != null && context != null && context.mounted && repository.linkState.has(messageLocateFeature)) {

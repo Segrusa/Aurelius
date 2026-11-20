@@ -207,8 +207,8 @@ void main() {
     });
 
     test('with one the onboarding is left; before the first hello nothing is decided', () {
-      expect(boardMemberRedirect(BoardMemberStep.ready, '/onboarding'), '/team');
-      expect(boardMemberRedirect(BoardMemberStep.ready, '/onboarding/new'), '/team');
+      expect(boardMemberRedirect(BoardMemberStep.ready, '/onboarding'), '/chat');
+      expect(boardMemberRedirect(BoardMemberStep.ready, '/onboarding/new'), '/chat');
       expect(boardMemberRedirect(BoardMemberStep.ready, '/home'), isNull);
       expect(boardMemberRedirect(BoardMemberStep.unknown, '/home'), isNull);
     });
@@ -266,14 +266,14 @@ void main() {
       step.dispose();
     });
 
-    Future<GoRouter> pump(WidgetTester tester, LinkState initial, {String at = '/team'}) async {
+    Future<GoRouter> pump(WidgetTester tester, LinkState initial, {String at = '/chat'}) async {
       setLink(initial);
       final router = GoRouter(
         initialLocation: at,
         refreshListenable: step,
         redirect: (context, state) => boardMemberRedirect(step.value, state.matchedLocation),
         routes: [
-          GoRoute(path: '/team', builder: (_, _) => const Scaffold(body: Text('page team'))),
+          GoRoute(path: '/chat', builder: (_, _) => const Scaffold(body: Text('page team'))),
           GoRoute(path: '/hosts', builder: (_, _) => const Scaffold(body: Text('page hosts'))),
           GoRoute(path: '/profile', builder: (_, _) => const Scaffold(body: Text('page profile'))),
           GoRoute(path: '/onboarding', builder: (_, _) => const OnboardingPage(), routes: [

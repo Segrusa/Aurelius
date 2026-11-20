@@ -504,7 +504,7 @@ class ConversationPage extends StatelessWidget {
     // An employee's own chat has no page: the group chat (Team) took its place.
     if (company.employees.any((e) => e.conversationId == conversationId)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) context.go('/team');
+        if (context.mounted) context.go('/sessions');
       });
       return const Scaffold(body: SizedBox.shrink());
     }
