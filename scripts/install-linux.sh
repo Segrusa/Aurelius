@@ -8,11 +8,12 @@
 #   scripts/install-linux.sh --install-deps     also install the system packages (sudo)
 #   scripts/install-linux.sh --prefix <dir>     install into <dir>/bin instead of ~/.local
 #
-# Running it again replaces the programs in place (that's how you update: git
-# pull, then run it again). Your data in ~/.local/share/Aurelius and your
-# secrets stay. A running server (aurelius-daemon) is restarted on the new
-# version, which stops the answers it is working on; a running app keeps its
-# old version until you restart it.
+# To update later, run scripts/update-linux.sh: it pulls main and replaces the
+# server and the app (the in-app updater only installs Windows releases).
+# Running this script again also replaces everything, with what is checked out
+# now. Your data in ~/.local/share/Aurelius and your secrets stay. A running
+# server (aurelius-daemon) is restarted on the new version, which stops the
+# answers it is working on; a running app is closed and opened again.
 #
 # The app starts its own server (aurelius-daemon) in the background. The programs
 # must stay together in one folder: the app finds the server and the approval
@@ -25,6 +26,7 @@
 # script prints. One-time: chmod +x scripts/install-linux.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/linux-common.sh
 
 prefix="$HOME/.local"
 open_after=0
@@ -103,7 +105,8 @@ if [[ ${#missing[@]} -gt 0 ]]; then
     $install
 fi
 
-version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+version="$(workspace_version)"
+commit="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 
 echo "Building Aurelius $version ..."
 cargo build --release -p aurelius-daemon -p aurelius-agent-bridge -p aurelius-client
@@ -113,9 +116,16 @@ npx -y pnpm@12.16.1 install --frozen-lockfile
 npx -y pnpm@12.16.1 build
 npx -y pnpm@12.16.1 --filter @aurelius/electron package
 
-# Atomic replacement: a running Aurelius keeps its old program until restarted.
+# Atomic replacement: a running server keeps its old program until restarted.
 bin="$prefix/bin"
 mkdir -p "$bin"
+server_running="$(daemon_pids)"
+app_was_running=0
+if app_running; then
+    app_was_running=1
+    echo "Closing the running app ..."
+    stop_app
+fi
 for program in aurelius-daemon aurelius-bridge aurelius-ctl; do
     install -m 755 "target/release/$program" "$bin/.$program.new"
     mv -f "$bin/.$program.new" "$bin/$program"
@@ -129,6 +139,10 @@ rm -rf "$bin/.app.old"
 ln -sfn app/aurelius "$bin/.aurelius.new"
 mv -Tf "$bin/.aurelius.new" "$bin/aurelius"
 printf '%s' "$version" > "$bin/aurelius.version"
+# What update-server.sh and update-desktop.sh compare against.
+printf '%s' "$commit" > "$bin/aurelius-server.commit"
+printf '%s' "$commit" > "$bin/aurelius.commit"
+remove_windows_leftovers
 
 # The application menu entry and the icon.
 icons="$prefix/share/icons/hicolor/512x512/apps"
@@ -154,27 +168,15 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then gtk-update-icon-cache 
 echo "Aurelius $version is installed in $bin"
 # The app connects to a server that is already running and never restarts it,
 # so without this the old server would keep going.
-if pgrep -u "$(id -u)" -x aurelius-daemon >/dev/null 2>&1; then
+if [[ -n "$server_running" ]]; then
     echo "Restarting the running server on the new version ..."
-    # An older server of another protocol major refuses the new aurelius-ctl
-    # ("Update needed"): then stop its process and start the new one ourselves.
-    if ! "$bin/aurelius-ctl" restart; then
-        echo "The running server did not take the restart; stopping it ..."
-        pkill -TERM -u "$(id -u)" -x aurelius-daemon || true
-        for _ in $(seq 1 50); do
-            pgrep -u "$(id -u)" -x aurelius-daemon >/dev/null 2>&1 || break
-            sleep 0.2
-        done
-        pkill -KILL -u "$(id -u)" -x aurelius-daemon 2>/dev/null || true
-        setsid "$bin/aurelius-daemon" </dev/null >/dev/null 2>&1 &
-        echo "The new server is started. Restart a running app too."
-    fi
+    restart_daemon
 fi
 case ":$PATH:" in
     *":$bin:"*) ;;
     *) echo "Note: $bin is not on your PATH. The application menu entry works anyway." ;;
 esac
 echo "First time? Claude Code must be installed and logged in (https://claude.com/claude-code)."
-if [[ $open_after -eq 1 ]]; then
-    nohup "$bin/aurelius" >/dev/null 2>&1 &
+if [[ $open_after -eq 1 || $app_was_running -eq 1 ]]; then
+    start_app
 fi

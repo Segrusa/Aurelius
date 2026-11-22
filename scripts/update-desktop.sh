@@ -38,32 +38,14 @@ fi
 if ! command -v cargo >/dev/null 2>&1 && [[ -f "$HOME/.cargo/env" ]]; then
     source "$HOME/.cargo/env"
 fi
-
-branch="$(git rev-parse --abbrev-ref HEAD)"
-if [[ "$branch" != "main" ]]; then
-    echo "This checkout is on '$branch', not main. Switch first: git switch main" >&2
-    exit 1
-fi
-if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "This checkout has local changes. Commit or stash them first (git status)." >&2
-    exit 1
-fi
+source scripts/linux-common.sh
 
 old_commit="$(cat "$bin/aurelius.commit" 2>/dev/null || true)"
 old_version="$(cat "$bin/aurelius.version" 2>/dev/null || echo "?")"
 
-echo "Fetching origin/main ..."
-if git fetch -q origin main 2>/dev/null; then
-    if git merge-base --is-ancestor HEAD FETCH_HEAD; then
-        git merge -q --ff-only FETCH_HEAD
-    elif ! git merge-base --is-ancestor FETCH_HEAD HEAD; then
-        echo "Note: main and origin/main have both moved on; building the local main as it is."
-    fi
-else
-    echo "Note: origin could not be reached; building the local main as it is."
-fi
+fetch_main
 new_commit="$(git rev-parse HEAD)"
-new_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+new_version="$(workspace_version)"
 
 if [[ "$old_commit" == "$new_commit" && $force -eq 0 ]]; then
     echo "Already up to date: Aurelius $old_version (${new_commit:0:7})."
@@ -79,16 +61,9 @@ npx -y pnpm@12.16.1 --filter @aurelius/electron package || fail
 
 # A running app is stopped, replaced and started again. The server keeps running.
 running=0
-# Started as app/aurelius or through the aurelius link; not aurelius-daemon or the others.
-app_pattern="^$bin/(app/)?aurelius( |$)"
-if pgrep -u "$(id -u)" -f "$app_pattern" >/dev/null 2>&1; then
+if app_running; then
     running=1
-    pkill -TERM -u "$(id -u)" -f "$app_pattern" || true
-    for _ in $(seq 1 50); do
-        pgrep -u "$(id -u)" -f "$app_pattern" >/dev/null 2>&1 || break
-        sleep 0.2
-    done
-    pkill -KILL -u "$(id -u)" -f "$app_pattern" 2>/dev/null || true
+    stop_app
 fi
 
 rm -rf "$bin/.app.new" "$bin/.app.old"
@@ -97,8 +72,9 @@ mv "$bin/app" "$bin/.app.old"
 mv "$bin/.app.new" "$bin/app"
 rm -rf "$bin/.app.old"
 printf '%s' "$new_commit" > "$bin/aurelius.commit"
+printf '%s' "$new_version" > "$bin/aurelius.version"
 
 if [[ $running -eq 1 ]]; then
-    setsid nohup "$bin/aurelius" </dev/null >/dev/null 2>&1 &
+    start_app
 fi
 echo "Aurelius app updated to $new_version (${new_commit:0:7})."

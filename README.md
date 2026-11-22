@@ -18,6 +18,14 @@ On Linux and macOS, `scripts/install-linux.sh` and `scripts/install-mac.sh` buil
 
 The app starts the server for you.
 
+### Update
+
+Only the Windows app updates itself; on Linux and macOS the app's update page points to the script. From your checkout on `main`:
+
+- Linux: `scripts/update-linux.sh` pulls `main` and replaces the server and then the app; it restarts whatever was running. `scripts/update-server.sh` and `scripts/update-desktop.sh` do only one of the two.
+- macOS: `scripts/update-mac.sh`.
+- Windows: the app's update page, or `scripts\update-server.ps1` and `scripts\update-desktop.ps1`.
+
 ## Mobile app
 
 The Flutter app in `clients/mobile` connects to Aurelius on your own PC over Tailscale. See [docs/mobile.md](docs/mobile.md).

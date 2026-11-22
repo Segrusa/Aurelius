@@ -9,6 +9,10 @@ The server and the desktop app are released separately. They work together
 as long as their protocol major matches. Releases up to v0.6.0 were combined:
 see [CHANGELOG.md](../../CHANGELOG.md).
 
+## Unreleased
+
+- **Updates on Linux and macOS** (ticket #78): the in-app update is only offered on Windows, the only platform with release packages. On Linux it used to copy the Windows programs (`aurelius-daemon.exe` and the others) beside the installed ones and restart the same old server, so nothing changed and the update came back. `update.get` now answers `enabled: false` there, with a `reason` that names the script to run. The new `scripts/update-linux.sh` updates the server and then the app in one go; `install-linux.sh` run again now closes and reopens a running app, restarts only its own server (without a signed-in board member) and records what it installed, so a later update knows. The scripts remove the Windows programs an earlier update left behind.
+
 ## v0.9.5
 
 Protocol 5, migrations 43 to 47. The database is backed up before migration 45.
