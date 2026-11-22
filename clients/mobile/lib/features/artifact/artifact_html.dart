@@ -23,7 +23,10 @@ final _relAttribute = RegExp(r'''(?<=[\s/"'])rel\s*=\s*(?=("[^"]*"|'[^']*'|[^\s>
 final _space = RegExp(r'\s+');
 final _quote = RegExp('["\']');
 
-final _doctype = RegExp(r'^﻿?\s*<!doctype[^>]*>', caseSensitive: false);
+/// A leading doctype, after a BOM, whitespace and comments. A comment ends where
+/// the parser ends it (`<!-->`, `<!--->` and `--!>` too), so markup the parser
+/// sees never counts as part of one and never lands in front of the policy.
+final _doctype = RegExp(r'^\uFEFF?(?:\s|<!--(?!-?>)(?:(?!--!?>).)*--!?>)*<!doctype[^>]*>', caseSensitive: false, dotAll: true);
 
 const _quietRel = 'rel="nofollow"';
 

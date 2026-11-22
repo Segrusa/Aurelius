@@ -202,6 +202,17 @@ void main() {
       expect(artifactDocument(html), endsWith(html));
     });
 
+    test('the policy also goes after a doctype that comes after comments', () {
+      final doc = artifactDocument('\uFEFF<!-- made by Claude -->\n<!--\n two\n lines --><!doctype html><html></html>');
+      expect(doc, startsWith('\uFEFF<!-- made by Claude -->\n<!--\n two\n lines --><!doctype html><meta http-equiv="Content-Security-Policy"'));
+    });
+
+    test('a comment the parser closes early cannot carry markup in front of the policy', () {
+      for (final html in ['<!--><link rel=stylesheet href=//a.invalid>--><!doctype html>', '<!---><img src=//a.invalid>--><!doctype html>', '<!-- a --!><img src=//a.invalid>--><!doctype html>']) {
+        expect(artifactDocument(html), startsWith('<meta http-equiv="Content-Security-Policy"'), reason: html);
+      }
+    });
+
     test('the policy goes after the doctype, so the page keeps its standards mode', () {
       final doc = artifactDocument('﻿  <!DOCTYPE html>\n<html><head><title>x</title></head></html>');
       expect(doc, startsWith('﻿  <!DOCTYPE html><meta http-equiv="Content-Security-Policy"'));
