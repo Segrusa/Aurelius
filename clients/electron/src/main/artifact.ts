@@ -173,6 +173,35 @@ export const EXPORT_WIDTH_MAX = 1920;
 export const EXPORT_HEIGHT_DEFAULT = 900;
 /** The tallest PNG: Chromium cannot paint a surface much larger. */
 export const EXPORT_HEIGHT_MAX = 16_384;
+/**
+ * How long an export may take, load included. A busy artifact (an endless loop, a getter that
+ * spins) never finishes by itself; after this the export fails and its renderer is ended.
+ */
+export const EXPORT_TIMEOUT_MS = 20_000;
+/** What the page shows when an export ran out of time. */
+export const EXPORT_TIMEOUT_MESSAGE = "This artifact did not finish rendering.";
+/**
+ * The isolated world main reads the page height in: the artifact's own prototypes (a getter on
+ * `scrollHeight`) are not that world's.
+ */
+export const EXPORT_WORLD_ID = 1_079;
+
+/**
+ * `work`, or a failure with `message` once `ms` passed. A late result or failure of `work` is
+ * dropped, so it never surfaces as an unhandled rejection.
+ */
+export async function withinTime<R>(work: Promise<R>, ms: number, message: string): Promise<R> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  work.catch(() => undefined);
+  const limit = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  try {
+    return await Promise.race([work, limit]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** A file name for an export: the artifact's name without folders or its extension, plus the format's. */
 export function exportName(name: string, kind: ArtifactExport): string {

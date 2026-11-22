@@ -14,7 +14,11 @@ import {
   artifactMayNavigate,
   artifactRequestAllowed,
   EXPORT_HEIGHT_DEFAULT,
+  EXPORT_TIMEOUT_MESSAGE,
+  EXPORT_TIMEOUT_MS,
+  EXPORT_WORLD_ID,
   viewBounds,
+  withinTime,
 } from "./artifact";
 
 /** The same preferences for every WebContents that shows an artifact: no preload, no Node. */
@@ -160,8 +164,16 @@ export class ArtifactViews {
 
 /**
  * Loads an artifact in a window nobody sees, in the artifact session, to print or capture it.
- * It may not go anywhere else or open anything; it is always closed afterwards.
+ * It may not go anywhere else or open anything. Load and `make` together get EXPORT_TIMEOUT_MS;
+ * the window is always closed afterwards, its renderer ended first (a busy one does not stop).
  */
+/** The artifact's page height, read in a world of main's own and without a user gesture. */
+export function pageHeight(contents: WebContents): Promise<unknown> {
+  return contents.executeJavaScriptInIsolatedWorld(EXPORT_WORLD_ID, [
+    { code: "document.documentElement.scrollHeight" },
+  ]);
+}
+
 export async function renderArtifact<R>(
   ready: Promise<Session>,
   url: string,
@@ -179,13 +191,17 @@ export async function renderArtifact<R>(
   const contents = window.webContents;
   guardArtifact(contents, url);
   window.setContentSize(width, EXPORT_HEIGHT_DEFAULT);
-  try {
+  const work = async () => {
     // A navigation the artifact tries (and that is refused) can end the load early; the page is there.
     await window.loadURL(url).catch((error: unknown) => {
       if (contents.getURL() !== url) throw error;
     });
-    return await make(window);
+    return make(window);
+  };
+  try {
+    return await withinTime(work(), EXPORT_TIMEOUT_MS, EXPORT_TIMEOUT_MESSAGE);
   } finally {
+    if (!contents.isDestroyed()) contents.forcefullyCrashRenderer();
     window.destroy();
   }
 }

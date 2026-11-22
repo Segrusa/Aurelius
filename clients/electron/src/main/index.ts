@@ -43,7 +43,7 @@ import {
   exportName,
   exportWidth,
 } from "./artifact";
-import { ArtifactViews, artifactSession, renderArtifact } from "./artifact-session";
+import { ArtifactViews, artifactSession, pageHeight, renderArtifact } from "./artifact-session";
 import { connectOrStart, daemonProgram, installDir, startDaemon } from "./daemon";
 import { appendLinkLog, linkLine, PageWatch } from "./link-life";
 import { linkInArguments, linkOf } from "./links";
@@ -178,10 +178,7 @@ function serveArtifacts(): void {
       if (format === "pdf") return hidden.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
       // The whole page, not only the first screen. The number comes from the artifact: checked.
       // The width is the one asked for: a window nobody sees does not always report its own.
-      const tall = captureHeight(
-        await hidden.webContents.executeJavaScript("document.documentElement.scrollHeight", true),
-        EXPORT_HEIGHT_DEFAULT,
-      );
+      const tall = captureHeight(await pageHeight(hidden.webContents), EXPORT_HEIGHT_DEFAULT);
       hidden.setContentSize(wide, tall);
       await new Promise((resolve) => setTimeout(resolve, 150));
       return (await hidden.webContents.capturePage({ x: 0, y: 0, width: wide, height: tall })).toPNG();

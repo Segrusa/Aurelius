@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ARTIFACT_BYTES_MAX,
   ARTIFACT_CSP,
@@ -10,9 +10,12 @@ import {
   artifactToken,
   captureHeight,
   EXPORT_HEIGHT_MAX,
+  EXPORT_TIMEOUT_MESSAGE,
+  EXPORT_TIMEOUT_MS,
   exportName,
   exportWidth,
   viewBounds,
+  withinTime,
 } from "./artifact";
 
 const counting = () => {
@@ -214,5 +217,48 @@ describe("exports", () => {
     expect(captureHeight(1e9, 800)).toBe(EXPORT_HEIGHT_MAX);
     expect(captureHeight("tall", 800)).toBe(800);
     expect(captureHeight(Number.NaN, 800)).toBe(800);
+  });
+});
+
+describe("the export's time limit", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is twenty seconds", () => {
+    expect(EXPORT_TIMEOUT_MS).toBe(20_000);
+    expect(EXPORT_TIMEOUT_MESSAGE).toBe("This artifact did not finish rendering.");
+  });
+
+  it("gives the result of work that finishes in time", async () => {
+    await expect(withinTime(Promise.resolve(42), EXPORT_TIMEOUT_MS, EXPORT_TIMEOUT_MESSAGE)).resolves.toBe(42);
+  });
+
+  it("fails work that never finishes once the time is up", async () => {
+    vi.useFakeTimers();
+    const never = new Promise<number>(() => undefined);
+    const raced = withinTime(never, EXPORT_TIMEOUT_MS, EXPORT_TIMEOUT_MESSAGE);
+    const seen = expect(raced).rejects.toThrow(EXPORT_TIMEOUT_MESSAGE);
+    await vi.advanceTimersByTimeAsync(EXPORT_TIMEOUT_MS);
+    await seen;
+  });
+
+  it("passes on the work's own failure, and drops a failure that comes after the limit", async () => {
+    await expect(withinTime(Promise.reject(new Error("no")), 1_000, EXPORT_TIMEOUT_MESSAGE)).rejects.toThrow("no");
+    vi.useFakeTimers();
+    let fail: (error: Error) => void = () => undefined;
+    const late = new Promise<number>((_resolve, reject) => {
+      fail = reject;
+    });
+    const unhandled = vi.fn();
+    process.on("unhandledRejection", unhandled);
+    const raced = withinTime(late, 1_000, EXPORT_TIMEOUT_MESSAGE);
+    const seen = expect(raced).rejects.toThrow(EXPORT_TIMEOUT_MESSAGE);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await seen;
+    fail(new Error("too late"));
+    await vi.advanceTimersByTimeAsync(0);
+    process.off("unhandledRejection", unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
   });
 });
