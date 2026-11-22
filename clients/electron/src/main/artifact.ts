@@ -207,8 +207,11 @@ export const EXPORT_WIDTH_MIN = 320;
 export const EXPORT_WIDTH_MAX = 1920;
 /** The height an export window starts at, and the PNG's when the artifact reports none. */
 export const EXPORT_HEIGHT_DEFAULT = 900;
-/** The tallest PNG: Chromium cannot paint a surface much larger. */
-export const EXPORT_HEIGHT_MAX = 16_384;
+/**
+ * The tallest PNG in device pixels: Chromium cannot paint a surface much taller (UnknownVizError).
+ * On a HiDPI display a CSS pixel is `scale` device pixels, so the page may be this / scale tall.
+ */
+export const EXPORT_DEVICE_HEIGHT_MAX = 16_384;
 /**
  * The most device pixels a PNG may have (64 Mpx, 256 MB as a bitmap). A HiDPI display multiplies
  * both sides by its scale factor, so it counts twice.
@@ -257,12 +260,15 @@ export function exportWidth(width: unknown): number {
 }
 
 /**
- * The page height the artifact reported, kept within what can be captured: at most
- * EXPORT_HEIGHT_MAX, and lower when `width` at `scale` would pass EXPORT_PIXELS_MAX.
+ * The page height the artifact reported, in CSS pixels, kept within what can be captured at
+ * `scale`: at most EXPORT_DEVICE_HEIGHT_MAX device pixels tall and EXPORT_PIXELS_MAX in all.
  */
 export function captureHeight(reported: unknown, fallback: number, width: number, scale = 1): number {
   const factor = Number.isFinite(scale) && scale > 0 ? scale : 1;
-  const tallest = Math.min(EXPORT_HEIGHT_MAX, Math.floor(EXPORT_PIXELS_MAX / (width * factor * factor)));
+  const tallest = Math.min(
+    Math.floor(EXPORT_DEVICE_HEIGHT_MAX / factor),
+    Math.floor(EXPORT_PIXELS_MAX / (width * factor * factor)),
+  );
   if (typeof reported !== "number" || !Number.isFinite(reported) || reported < 1) return Math.min(fallback, tallest);
   return Math.min(tallest, Math.ceil(reported));
 }

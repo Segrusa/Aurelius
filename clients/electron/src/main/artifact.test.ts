@@ -11,7 +11,7 @@ import {
   artifactResponse,
   artifactToken,
   captureHeight,
-  EXPORT_HEIGHT_MAX,
+  EXPORT_DEVICE_HEIGHT_MAX,
   EXPORT_PIXELS_MAX,
   EXPORT_TIMEOUT_MESSAGE,
   EXPORT_TIMEOUT_MS,
@@ -273,7 +273,7 @@ describe("exports", () => {
     expect(exportWidth(1e9)).toBe(1920);
     expect(exportWidth("wide")).toBe(1280);
     expect(captureHeight(2000.4, 800, 1280)).toBe(2001);
-    expect(captureHeight(1e9, 800, 1920)).toBe(EXPORT_HEIGHT_MAX);
+    expect(captureHeight(1e9, 800, 1920)).toBe(EXPORT_DEVICE_HEIGHT_MAX);
     expect(captureHeight("tall", 800, 1280)).toBe(800);
     expect(captureHeight(Number.NaN, 800, 1280)).toBe(800);
   });
@@ -281,11 +281,27 @@ describe("exports", () => {
   it("keeps a PNG within EXPORT_PIXELS_MAX device pixels, also on a HiDPI display", () => {
     expect(captureHeight(1e9, 800, 1920, 1) * 1920).toBeLessThanOrEqual(EXPORT_PIXELS_MAX);
     const atTwo = captureHeight(1e9, 800, 1920, 2);
-    expect(atTwo).toBe(Math.floor(EXPORT_PIXELS_MAX / (1920 * 4)));
+    expect(atTwo).toBe(Math.min(EXPORT_DEVICE_HEIGHT_MAX / 2, Math.floor(EXPORT_PIXELS_MAX / (1920 * 4))));
     expect(atTwo * 1920 * 2 * 2).toBeLessThanOrEqual(EXPORT_PIXELS_MAX);
     expect(captureHeight(1e9, 800, 1920, 3) * 1920 * 9).toBeLessThanOrEqual(EXPORT_PIXELS_MAX);
     expect(captureHeight(2000, 800, 390, 2)).toBe(2000);
-    expect(captureHeight(1e9, 800, 1920, Number.NaN)).toBe(EXPORT_HEIGHT_MAX);
+    expect(captureHeight(1e9, 800, 1920, Number.NaN)).toBe(EXPORT_DEVICE_HEIGHT_MAX);
+  });
+
+  it("keeps a PNG within EXPORT_DEVICE_HEIGHT_MAX device pixels tall at every scale", () => {
+    // Chromium failed with UnknownVizError at 390 px wide on a 2x display (Sentinel, SEC2 N2).
+    expect(captureHeight(1e9, 800, 390, 2)).toBe(8192);
+    expect(captureHeight(1e9, 800, 1280, 2)).toBe(8192);
+    expect(captureHeight(1e9, 800, 390, 1.5)).toBe(10_922);
+    for (const width of [320, 390, 768, 1024, 1280, 1920])
+      for (const scale of [1, 1.25, 1.5, 2, 2.5, 3, 4]) {
+        const tall = captureHeight(1e9, 800, width, scale);
+        expect(tall * scale).toBeLessThanOrEqual(EXPORT_DEVICE_HEIGHT_MAX);
+        expect(width * scale * tall * scale).toBeLessThanOrEqual(EXPORT_PIXELS_MAX);
+        expect(tall).toBeGreaterThan(0);
+        expect(captureHeight(1e9, 1e9, width, scale)).toBe(tall);
+        expect(captureHeight(Number.NaN, 1e9, width, scale)).toBe(tall);
+      }
   });
 });
 
