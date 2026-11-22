@@ -1,32 +1,30 @@
 # Design artifacts on mobile (ticket #79, phase C)
 
-The mobile app opens a kept `text/html` file as a live artifact, like the desktop's viewer (`design.md`). No server or protocol change: the file comes with `file.get` (`AureliusRepository.file`), and the only write is an ordinary chat message.
+The mobile app opens a kept `text/html` file as an artifact preview, like the desktop's viewer (`design.md`) but **without JavaScript** (see Security). No server or protocol change: the file comes with `file.get` (`AureliusRepository.file`), and the only write is an ordinary chat message.
 
 ## Page
-- `lib/features/artifact/`: `artifact_versions.dart` (pure: versions, labels, widths, the feedback text), `artifact_html.dart` (pure: the document with the policy and the nonce), `artifact_bloc.dart`, `artifact_page.dart`, `artifact_webview.dart`.
+- `lib/features/artifact/`: `artifact_versions.dart` (pure: versions, labels, widths, the feedback text), `artifact_html.dart` (pure: the document with the policy, resource hints made quiet), `artifact_bloc.dart`, `artifact_page.dart`, `artifact_webview.dart`.
 - The chip of a kept HTML file in a chat (session, task, ticket discussion) opens the **Artifact page**. Other files keep the File page.
 - **Versions**: every kept HTML file with the same name in the conversation, in message order, newest first in the picker (`v3 · 14:05`). The same rule as the desktop's `artifact-logic.ts`. A new version that comes in while the page is open joins the picker.
 - **Desktop / Tablet / Mobile**: the artifact is laid out at 1280, 768 or 390 CSS px and scaled down to the stage's width (never up).
-- **Reload** loads the same HTML again with a fresh nonce. **Share HTML** saves the file as the server keeps it through the platform's save dialog (`file_picker`'s `saveFile`; the app has no share sheet and gets no new dependency).
+- Under the width toggle: "Preview without scripts. Open it on your computer to try it out." A tab or price toggle that does nothing on the phone is then not taken for a broken design.
+- **Reload** loads the same HTML again. **Share HTML** saves the file as the server keeps it through the platform's save dialog (`file_picker`'s `saveFile`; the app has no share sheet and gets no new dependency).
 - **Ask for changes** asks for a text and posts one message, `Feedback on pricing.html v3: <text>`, through the chat's own send (`ChatMessageSent`, without the composer's pending attachments), so it lands in the conversation the file came from, with the chat's retry and secret check. It is offered only where the chat can be written to. The file name is the kept name (the server keeps no folder). No element picking on mobile.
 - A failed load shows "This artifact could not be loaded: <reason>" with **Try again**.
 
 ## Security
-The desktop's boundary is an isolated session without network. A mobile webview has no such session, no per-response headers and no hook for every frame, so the phone takes the layers the platform offers and the rest is written down in `target/ticket-79/c/report.md` (per channel, Android and iOS).
+The desktop's boundary is an isolated session without network. A mobile webview has no such session, no per-response headers and no hook for every frame. The first build ran the artifact's scripts behind a nonce policy, and the Android probe found two channels that stayed open: WebRTC through about:blank and srcdoc frames (STUN packets and TURN-name lookups), and `<link rel=preconnect>` lookups (`target/ticket-79/c/report.md`).
 
-1. The HTML is loaded with `loadHtmlString` and no base URL: an `about:blank` document with an opaque origin of its own.
-2. In front of it (after its doctype) come two CSP `<meta>` tags: the desktop's policy without `sandbox` (a meta tag cannot carry it) plus `script-src 'nonce-<n>'; script-src-attr 'unsafe-inline'`, and the second policy `script-src 'unsafe-inline'`. The nonce is 128 random bits, fresh per load, and is put on every `<script` of the artifact. So `javascript:` URLs never run, and script elements run only inline.
-3. `x-dns-prefetch-control: off` as a meta tag: CSP has no directive for DNS prefetch.
-4. A first script (with the nonce) removes WebRTC's constructors from the main document, as the desktop preload does. The plugin offers no document-start script for every frame, so frames the artifact makes itself are not covered (see the report).
-5. Navigation: only the main-frame `about:blank` the page itself just loaded is allowed; links, forms, `window.open`, redirects and frame navigations are refused (`artifactNavigationAllowed`).
+**Decision (Titan, AUR-T79-C2): the phone shows an artifact without JavaScript.** That closes WebRTC through frames and every other script channel at once, without native code. The cost: a design's interaction (tabs, toggles, menus) does nothing on the phone; the note under the toggle says so, and the desktop stays the place to try it out.
+
+1. The webview has JavaScript off (`JavaScriptMode.disabled`, `artifactBaseline` in `artifact_webview.dart`) and no JavaScript channel.
+2. The HTML is loaded with `loadHtmlString` and no base URL: an `about:blank` document with an opaque origin of its own.
+3. In front of it (after its doctype) comes a CSP `<meta>`: the desktop's policy without `sandbox` (a meta tag cannot carry it) and with `script-src 'none'`, so the policy says what the webview does. Plus `x-dns-prefetch-control: off` (CSP has no directive for DNS prefetch) and `referrer: no-referrer`.
+4. Resource hints: every `rel` that names `preconnect`, `dns-prefetch`, `prefetch`, `prerender`, `preload` or `modulepreload` becomes `rel="nofollow"`, on any element, in any case and quoting, also several tokens. A value with a character reference (`pre&#99;onnect`) or an unclosed quote counts as a hint too (`artifactQuietRels`). Without scripts the artifact cannot add a hint later, so a text rewrite is enough.
+5. Navigation: only the main-frame `about:blank` the page itself just loaded is allowed; links, forms, meta refresh, redirects and frame navigations are refused (`artifactNavigationAllowed`).
 6. Every permission request (camera, microphone, …) is denied. Android: file and content access off, geolocation off, no file chooser, media needs a gesture. iOS: link previews off, not inspectable, media needs a gesture, no automatic windows.
-7. No JavaScript channel: the page never hears from the artifact.
 
-### What stays open (Android WebView 124, emulator probe; iOS not testable here)
-Measured against local sinks with a bare webview as the positive control (`target/ticket-79/c/report.md`):
-- Blocked: fetch, XHR, beacon, WebSocket, images, CSS, fonts, frames by URL, `<link rel=prefetch>`, every navigation (link, form, `location`, meta refresh, `target=_blank`, `window.open`) and `javascript:` URLs and frames.
-- **Open: WebRTC through frames.** The prelude takes WebRTC out of the main document, but an empty `<iframe>` (about:blank) and a `srcdoc` frame have the page's own origin, so the artifact reaches their `RTCPeerConnection`: STUN packets go out and TURN host names are resolved. Without the CSP `sandbox` (header only) and without a document-start script for every frame (the plugin has none), the platform cannot close this.
-- **Open: `<link rel=preconnect>`** resolves its host name. CSP has no directive for it and `x-dns-prefetch-control` does not cover it.
-- Not done by the platform at all (also not in the control): `<link rel=dns-prefetch>`, anchor prefetch, speculation rules.
+### What is left
+Measured on Android WebView 124 (emulator) against local sinks, with a bare webview as the positive control (`target/ticket-79/c/report-c2.md`): in the artifact, 0 requests and 0 lookups of the artifact's host names for WebRTC (main document and frames), preconnect and the other hints, `javascript:` frames, fetch and images, and no navigation. The control still reaches every sink.
 
-Which of these the phone may keep is Titan's decision; nothing is worked around in the page.
+The residue is **static markup only**. A `<noscript>` block now renders, but it is markup like the rest and goes through the same policy and rewrite. Whatever the engine might still look up by itself from static markup (a hint we do not know of, a future engine feature) carries no data the artifact did not already have when it was written: without scripts nothing on the phone (what the board member types, taps or has on screen) can get into a host name or a URL. iOS was not testable here; WKWebView honours JavaScript off and `x-dns-prefetch-control`, so the same is expected.
