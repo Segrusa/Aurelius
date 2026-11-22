@@ -29,6 +29,9 @@ export const ARTIFACT_PROXY = {
 export const ARTIFACT_CSP =
   "sandbox allow-scripts; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
 
+/** The second policy of an artifact response: script elements run only inline. */
+export const INLINE_ONLY_CSP = "script-src 'unsafe-inline'";
+
 /** What main sends for one artifact request: the HTML with its scripts marked, and the policy. */
 export interface ArtifactResponse {
   body: string;
@@ -41,13 +44,15 @@ export interface ArtifactResponse {
  * URLs, and a `javascript:` frame is an about:blank document the artifact preload does not reach:
  * it got WebRTC back and resolved a TURN host name the artifact chose (Sentinel, AUR-T79-SEC2 N1).
  * The nonce must be fresh for every response, so a page cannot know it before it is served.
+ * A nonce also allows a script from any URL, so a second policy in the same header (a script must
+ * pass both) allows only inline scripts: no `src` from the web or `data:` (AUR-T79-SEC3 m-1).
  */
 export function artifactResponse(html: string, nonce: string): ArtifactResponse {
   if (!/^[0-9a-f]{16,}$/.test(nonce)) throw new Error("An artifact nonce is hex.");
   return {
-    // Hex needs no quotes. A nonce the artifact wrote itself comes later in the tag; the first wins.
+    // Hex needs no quotes. A script with a nonce of its own gets it twice, and Chromium refuses it.
     body: html.replace(/<script\b/gi, `<script nonce=${nonce}`),
-    csp: `${ARTIFACT_CSP}; script-src 'nonce-${nonce}'; script-src-attr 'unsafe-inline'`,
+    csp: `${ARTIFACT_CSP}; script-src 'nonce-${nonce}'; script-src-attr 'unsafe-inline', ${INLINE_ONLY_CSP}`,
   };
 }
 

@@ -19,6 +19,7 @@ import {
   exportFailure,
   exportName,
   exportWidth,
+  INLINE_ONLY_CSP,
   viewBounds,
   withinTime,
 } from "./artifact";
@@ -41,13 +42,21 @@ describe("the artifact policy", () => {
     '<!doctype html><SCRIPT>a()</SCRIPT><body><script type="module">b()</script>' +
     '<script\nsrc="x.js"></script><button onclick="c()">c</button><scripts-list></scripts-list>';
   const served = artifactResponse(page, nonce);
-  const directives = parse(served.csp);
+  const policies = served.csp.split(", ");
+  const directives = parse(policies[0] ?? "");
 
   it("runs only scripts with this response's nonce and on…= attributes, never javascript: URLs", () => {
     expect(directives.get("script-src")).toBe(`'nonce-${nonce}'`);
     expect(directives.get("script-src")).not.toContain("unsafe-inline");
     expect(directives.get("script-src-attr")).toBe("'unsafe-inline'");
-    expect(served.csp.match(/script-src /g)).toHaveLength(1);
+    expect(policies[0]?.match(/script-src /g)).toHaveLength(1);
+  });
+
+  it("adds a second policy that allows only inline scripts, no script from a URL", () => {
+    expect(policies).toHaveLength(2);
+    expect(policies[1]).toBe(INLINE_ONLY_CSP);
+    expect(parse(policies[1] ?? "").get("script-src")).toBe("'unsafe-inline'");
+    expect(policies[1]).not.toMatch(/https?:|data:|\*|nonce/);
   });
 
   it("gives every <script element the nonce and leaves the rest of the page alone", () => {
@@ -59,7 +68,7 @@ describe("the artifact policy", () => {
   });
 
   it("keeps the rest of the policy and accepts only a hex nonce", () => {
-    expect(served.csp.startsWith(`${ARTIFACT_CSP}; `)).toBe(true);
+    expect(policies[0]?.startsWith(`${ARTIFACT_CSP}; `)).toBe(true);
     expect(parse(ARTIFACT_CSP).has("script-src")).toBe(false);
     expect(() => artifactResponse(page, "x' 'unsafe-inline")).toThrow();
     expect(() => artifactResponse(page, "")).toThrow();
