@@ -123,6 +123,7 @@ const styles = stylex.create({
     fontSize: 12.5,
   },
   itemText: { display: "flex", flexDirection: "column", gap: 2, flexGrow: 1, minWidth: 0, overflowWrap: "anywhere" },
+  keep: { flexShrink: 0 },
   actions: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: "auto" },
   colorRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 13 },
   color: { width: 44, height: 28, padding: 0, borderWidth: 0, backgroundColor: "transparent", cursor: "pointer" },
@@ -430,13 +431,15 @@ function CommentPanel({
                 <span>{`${i + 1}. ${c.label}`}</span>
                 <span>{c.text}</span>
               </span>
-              <Button
-                label="Delete"
-                size="sm"
-                variant="ghost"
-                aria-label={`Delete comment ${i + 1}`}
-                onClick={() => artifactComments.remove(storeKey, c.id)}
-              />
+              <span {...stylex.props(styles.keep)}>
+                <Button
+                  label="Delete"
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Delete comment ${i + 1}`}
+                  onClick={() => artifactComments.remove(storeKey, c.id)}
+                />
+              </span>
             </li>
           ))}
         </ol>
