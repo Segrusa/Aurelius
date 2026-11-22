@@ -152,7 +152,8 @@ class ArtifactPage extends StatelessWidget {
   }
 }
 
-/// The version picker: "v3 · 14:05", newest first in its menu.
+/// The version picker: "v3" on the toolbar (a narrow phone keeps the whole
+/// width toggle), "v3 · 14:05" newest first in its menu.
 class _VersionPicker extends StatelessWidget {
   const _VersionPicker({required this.state});
 
@@ -161,7 +162,6 @@ class _VersionPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final label = versionLabel(state.current, now);
     final only = state.versions.length < 2;
     return Builder(
       builder: (anchor) => TextButton.icon(
@@ -176,7 +176,7 @@ class _VersionPicker extends StatelessWidget {
               },
         iconAlignment: IconAlignment.end,
         icon: only ? const SizedBox.shrink() : const Icon(CupertinoIcons.chevron_down, size: 14),
-        label: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        label: Text('v${state.current.version}', semanticsLabel: 'Version ${state.current.version}', style: const TextStyle(fontWeight: FontWeight.w600)),
       ),
     );
   }

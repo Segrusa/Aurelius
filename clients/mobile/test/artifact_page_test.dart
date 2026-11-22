@@ -7,7 +7,6 @@ import 'package:aurelius_mobile/data/discussion.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/artifact/artifact_bloc.dart';
 import 'package:aurelius_mobile/features/artifact/artifact_page.dart';
-import 'package:aurelius_mobile/features/artifact/artifact_versions.dart';
 import 'package:aurelius_mobile/features/artifact/artifact_webview.dart';
 import 'package:aurelius_mobile/features/board/ticket_page.dart';
 import 'package:flutter/material.dart';
@@ -192,7 +191,7 @@ void main() {
     testWidgets('the HTML chip opens the newest version with its toolbar', (tester) async {
       await open(tester);
       expect(find.text('pricing.html'), findsOneWidget);
-      expect(find.text('v2 · ${versionLabel(ArtifactVersion(version: 2, file: html('f2'), messageId: 'm2', atMs: DateTime(2026, 11, 22, 14, 5).millisecondsSinceEpoch), DateTime.now()).split(' · ').last}'), findsOneWidget);
+      expect(find.text('v2'), findsOneWidget);
       expect(find.byTooltip('Reload'), findsOneWidget);
       expect(find.byTooltip('Share HTML'), findsOneWidget);
       for (final w in ['Desktop', 'Tablet', 'Mobile']) {
