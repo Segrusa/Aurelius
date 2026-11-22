@@ -63,6 +63,16 @@ describe("the desktop app's Content-Security-Policy", () => {
   });
 });
 
+describe("the desktop app's switches", () => {
+  const source = readFileSync(resolve(repo, "clients/electron/src/main/index.ts"), "utf8");
+
+  it("turns DNS prefetch off before the app is ready", () => {
+    const at = source.indexOf('app.commandLine.appendSwitch("blink-settings", "dnsPrefetchingEnabled=false");');
+    expect(at).toBeGreaterThan(-1);
+    expect(at).toBeLessThan(source.indexOf("app.whenReady()"));
+  });
+});
+
 describe("the style hashes in the Content-Security-Policy", () => {
   for (const file of ["clients/electron/src/main/index.ts", "crates/remote-gateway/src/web.rs"]) {
     it(`match what the installed Astryx writes: ${file}`, async () => {

@@ -79,6 +79,10 @@ const ENVIRONMENT =
 /** One second process per environment gives its link to the first and ends. */
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
+// No DNS prefetch anywhere: CSP has no directive for `<link rel="dns-prefetch">`, so an artifact
+// could leak data in a host name it has resolved. The app itself never needs it. Before ready.
+app.commandLine.appendSwitch("blink-settings", "dnsPrefetchingEnabled=false");
+
 const ROOT = dataDir(process.env, ENVIRONMENT);
 const INSTALL = installDir(process.execPath, app.isPackaged);
 const PROGRAM = daemonProgram(process.env, INSTALL);
