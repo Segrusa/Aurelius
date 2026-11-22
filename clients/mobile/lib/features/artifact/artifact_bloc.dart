@@ -88,7 +88,7 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
   ArtifactBloc(this._repository,
       {required FileRef file, required List<MessageView> messages, required int openedAtMs, @visibleForTesting String Function(String html) document = artifactDocument})
       : _file = file,
-        _document = document,
+        _toDocument = document,
         _openedAtMs = openedAtMs,
         super(ArtifactState(versions: versionsFor(messages, file, openedAtMs), fileId: file.id)) {
     on<ArtifactMessagesChanged>(_messages);
@@ -102,7 +102,7 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
   final AureliusRepository _repository;
   final FileRef _file;
   final int _openedAtMs;
-  final String Function(String html) _document;
+  final String Function(String html) _toDocument;
 
   /// The HTML of versions already fetched, by file id: a kept file never changes.
   final _fetched = <String, String>{};
@@ -162,7 +162,7 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
     String? document;
     String? error;
     try {
-      document = _document(html);
+      document = _toDocument(html);
     } on ArtifactHintLeft {
       error = ArtifactHintLeft.message;
     }
