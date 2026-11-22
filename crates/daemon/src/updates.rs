@@ -21,10 +21,26 @@ use tokio::process::Command;
 const CHECK_EVERY_MS: i64 = 6 * 60 * 60 * 1000;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Why this operating system gets no in-app updates, or None where it does.
+/// The releases hold Windows programs only (`*-windows-x64.zip` with `.exe`
+/// files); on Linux an "update" used to copy those beside the installed
+/// programs and restart the same old server, so it was offered again forever.
+fn unsupported_reason(os: &str) -> Option<&'static str> {
+    match os {
+        "windows" => None,
+        "linux" => Some("Updates on Linux come from the source: run scripts/update-linux.sh in your Aurelius checkout."),
+        "macos" => Some("Updates on macOS come from the source: run scripts/update-mac.sh in your Aurelius checkout."),
+        _ => Some("Updates are only published for Windows."),
+    }
+}
+
 /// Folder of the running programs, if this is an installed production build.
 fn install_dir() -> Result<PathBuf, String> {
     if aurelius_host::Environment::current() != aurelius_host::Environment::Production {
         return Err("Updates are only for the production app.".into());
+    }
+    if let Some(reason) = unsupported_reason(std::env::consts::OS) {
+        return Err(reason.into());
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let dir = exe.parent().ok_or("no install folder")?.to_path_buf();
@@ -457,6 +473,14 @@ mod tests {
 
     fn read(dir: &Path, name: &str) -> String {
         std::fs::read_to_string(dir.join(name)).unwrap_or_default()
+    }
+
+    #[test]
+    fn only_windows_gets_in_app_updates_and_the_others_are_told_which_script_to_run() {
+        assert_eq!(unsupported_reason("windows"), None);
+        assert!(unsupported_reason("linux").is_some_and(|r| r.contains("scripts/update-linux.sh")));
+        assert!(unsupported_reason("macos").is_some_and(|r| r.contains("scripts/update-mac.sh")));
+        assert!(unsupported_reason("freebsd").is_some());
     }
 
     #[test]
