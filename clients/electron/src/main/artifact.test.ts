@@ -12,9 +12,11 @@ import {
   artifactToken,
   captureHeight,
   EXPORT_DEVICE_HEIGHT_MAX,
+  EXPORT_FAILED_MESSAGE,
   EXPORT_PIXELS_MAX,
   EXPORT_TIMEOUT_MESSAGE,
   EXPORT_TIMEOUT_MS,
+  exportFailure,
   exportName,
   exportWidth,
   viewBounds,
@@ -265,6 +267,14 @@ describe("exports", () => {
     expect(exportName("design/landing-page.html", "pdf")).toBe("landing-page.pdf");
     expect(exportName("C:\\work\\Plan.HTM", "png")).toBe("Plan.png");
     expect(exportName(".html", "pdf")).toBe("artifact.pdf");
+  });
+
+  it("tells the page only that an export ran out of time, or that it did not work", () => {
+    expect(exportFailure(new Error(EXPORT_TIMEOUT_MESSAGE))).toBe(EXPORT_TIMEOUT_MESSAGE);
+    expect(exportFailure(new Error("UnknownVizError"))).toBe(EXPORT_FAILED_MESSAGE);
+    expect(exportFailure(new Error("EACCES: permission denied, open '/home/u/x.png'"))).toBe(EXPORT_FAILED_MESSAGE);
+    expect(exportFailure("printToPDF failed")).toBe(EXPORT_FAILED_MESSAGE);
+    expect(exportFailure(undefined)).toBe("The export did not work.");
   });
 
   it("keeps the width and height within what can be made", () => {

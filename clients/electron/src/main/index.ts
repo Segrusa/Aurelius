@@ -40,6 +40,7 @@ import {
   ArtifactStore,
   captureHeight,
   EXPORT_HEIGHT_DEFAULT,
+  exportFailure,
   exportName,
   exportWidth,
 } from "./artifact";
@@ -176,18 +177,28 @@ function serveArtifacts(): void {
     const chosen = await (window ? dialog.showSaveDialog(window, options) : dialog.showSaveDialog(options));
     if (chosen.canceled || !chosen.filePath) return null;
     const wide = exportWidth(width);
-    const bytes = await renderArtifact(ready, url, wide, async (hidden) => {
-      if (format === "pdf") return hidden.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
-      // The whole page, not only the first screen. The number comes from the artifact: checked.
-      // The width is the one asked for: a window nobody sees does not always report its own.
-      const scale = screen.getDisplayMatching(hidden.getBounds()).scaleFactor;
-      const tall = captureHeight(await pageHeight(hidden.webContents), EXPORT_HEIGHT_DEFAULT, wide, scale);
-      hidden.setContentSize(wide, tall);
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      return (await hidden.webContents.capturePage({ x: 0, y: 0, width: wide, height: tall })).toPNG();
-    });
-    writeFileSync(chosen.filePath, bytes);
-    return chosen.filePath;
+    try {
+      const bytes = await renderArtifact(ready, url, wide, async (hidden) => {
+        if (format === "pdf") return hidden.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
+        // The whole page, not only the first screen. The number comes from the artifact: checked.
+        // The width is the one asked for: a window nobody sees does not always report its own.
+        const scale = screen.getDisplayMatching(hidden.getBounds()).scaleFactor;
+        const tall = captureHeight(await pageHeight(hidden.webContents), EXPORT_HEIGHT_DEFAULT, wide, scale);
+        hidden.setContentSize(wide, tall);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return (await hidden.webContents.capturePage({ x: 0, y: 0, width: wide, height: tall })).toPNG();
+      });
+      writeFileSync(chosen.filePath, bytes);
+      return chosen.filePath;
+    } catch (error) {
+      // The page gets a clear sentence; Chromium's or the file system's own text goes to the log.
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      appendLinkLog(
+        join(app.getPath("logs"), "artifacts.log"),
+        `${new Date().toISOString()} export failed format=${format} width=${wide} error=${JSON.stringify(detail)}`,
+      );
+      throw new Error(exportFailure(error));
+    }
   });
 }
 

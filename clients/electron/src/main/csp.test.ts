@@ -71,6 +71,19 @@ describe("the desktop app's switches", () => {
     expect(at).toBeGreaterThan(-1);
     expect(at).toBeLessThan(source.indexOf("app.whenReady()"));
   });
+
+  it("gives the page a clear sentence for a failed export and logs the details", () => {
+    const start = source.indexOf('handle("artifact:export"');
+    const handler = source.slice(start, source.indexOf("\n  });", start));
+    expect(start).toBeGreaterThan(-1);
+    const caught = handler.slice(handler.indexOf("} catch (error) {"));
+    expect(caught).toContain('"artifacts.log"');
+    expect(caught).toContain("throw new Error(exportFailure(error));");
+    expect(caught.match(/throw /g)).toHaveLength(1);
+    // Rendering and writing the file are both inside the try.
+    expect(handler.indexOf("try {")).toBeLessThan(handler.indexOf("renderArtifact("));
+    expect(handler.indexOf("writeFileSync(")).toBeLessThan(handler.indexOf("} catch (error) {"));
+  });
 });
 
 describe("the style hashes in the Content-Security-Policy", () => {

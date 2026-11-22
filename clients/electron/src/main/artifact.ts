@@ -224,6 +224,18 @@ export const EXPORT_PIXELS_MAX = 64_000_000;
 export const EXPORT_TIMEOUT_MS = 20_000;
 /** What the page shows when an export ran out of time. */
 export const EXPORT_TIMEOUT_MESSAGE = "This artifact did not finish rendering.";
+/** What the page shows when an export failed otherwise; the details go to main's log. */
+export const EXPORT_FAILED_MESSAGE = "The export did not work.";
+
+/**
+ * The message the page gets for a failed export. Only the time limit says more: anything else is
+ * Chromium's or the file system's own text (UnknownVizError, a path), which is for the log.
+ */
+export function exportFailure(error: unknown): string {
+  return error instanceof Error && error.message === EXPORT_TIMEOUT_MESSAGE
+    ? EXPORT_TIMEOUT_MESSAGE
+    : EXPORT_FAILED_MESSAGE;
+}
 /**
  * The isolated world main reads the page height in: the artifact's own prototypes (a getter on
  * `scrollHeight`) are not that world's.
