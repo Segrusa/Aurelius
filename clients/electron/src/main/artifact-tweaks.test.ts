@@ -9,6 +9,7 @@ import {
   PICK_TEXT_MAX,
   parseTweaks,
   TWEAK_CHOICES_MAX,
+  TWEAK_DIGITS_MAX,
   TWEAKS_JSON_MAX,
   TWEAKS_MAX,
   tweakValue,
@@ -239,6 +240,18 @@ describe("tweakValue", () => {
     expect(tweakValue(space, "4.5px")).toBe("4.5px");
     for (const bad of ["20", "20rem", "2px", "40px", "20 px", "calc(20px)", "20px;color:red", "px"])
       expect(tweakValue(space, bad)).toBeNull();
+  });
+
+  it("takes a length or number of at most 16 digits, and only a finite one, also without min and max", () => {
+    const free: ArtifactTweak = { var: "--free", label: "Free", type: "length", unit: "px" };
+    const count: ArtifactTweak = { var: "--count", label: "Count", type: "number" };
+    expect(TWEAK_DIGITS_MAX).toBe(16);
+    expect(tweakValue(free, `${"9".repeat(400)}px`)).toBeNull();
+    expect(tweakValue(count, "9".repeat(400))).toBeNull();
+    expect(tweakValue(free, `${"1".repeat(16)}px`)).toBe(`${Number("1".repeat(16))}px`);
+    expect(tweakValue(free, `${"1".repeat(17)}px`)).toBeNull();
+    expect(tweakValue(count, "-12345678.12345678")).toBe("-12345678.12345678");
+    expect(tweakValue(count, "-12345678.123456789")).toBeNull();
   });
 
   it("takes a number within min and max", () => {

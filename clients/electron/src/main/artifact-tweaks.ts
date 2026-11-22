@@ -150,12 +150,21 @@ export function parseTweaks(json: unknown): ArtifactTweak[] {
 }
 
 const NUMBER = /^-?(\d+(\.\d+)?|\.\d+)$/;
+/** The most digits a length or number value may have: more gives nothing a page could use. */
+export const TWEAK_DIGITS_MAX = 16;
 const inRange = (n: number, t: Range) => (t.min === undefined || n >= t.min) && (t.max === undefined || n <= t.max);
+
+/** `text` as a number `tweak` takes: plain, at most TWEAK_DIGITS_MAX digits, finite and in range. */
+function numberIn(text: string, tweak: Range): number | null {
+  if (!NUMBER.test(text) || text.replace(/\D/g, "").length > TWEAK_DIGITS_MAX) return null;
+  const n = Number(text);
+  return Number.isFinite(n) && inRange(n, tweak) ? n : null;
+}
 
 /**
  * The value main sets for `tweak`, or null when it is not one this tweak takes: a colour is a hex
- * colour, a length a number with the tweak's unit, a number a plain number (both within min and
- * max), a choice one of its options.
+ * colour, a length a number with the tweak's unit, a number a plain number (both finite, of at
+ * most TWEAK_DIGITS_MAX digits and within min and max), a choice one of its options.
  */
 export function tweakValue(tweak: ArtifactTweak, value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -164,11 +173,13 @@ export function tweakValue(tweak: ArtifactTweak, value: unknown): string | null 
       return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value) ? value.toLowerCase() : null;
     case "length": {
       if (!value.endsWith(tweak.unit)) return null;
-      const n = value.slice(0, -tweak.unit.length);
-      return NUMBER.test(n) && inRange(Number(n), tweak) ? `${Number(n)}${tweak.unit}` : null;
+      const n = numberIn(value.slice(0, -tweak.unit.length), tweak);
+      return n === null ? null : `${n}${tweak.unit}`;
     }
-    case "number":
-      return NUMBER.test(value) && inRange(Number(value), tweak) ? String(Number(value)) : null;
+    case "number": {
+      const n = numberIn(value, tweak);
+      return n === null ? null : String(n);
+    }
     case "choice":
       return tweak.options.includes(value) ? value : null;
   }
