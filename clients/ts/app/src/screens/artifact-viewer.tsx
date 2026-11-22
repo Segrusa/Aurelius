@@ -78,8 +78,15 @@ function useServed(artifacts: Artifacts, html: string | undefined): string | nul
   return url;
 }
 
-/** A menu or list of the page is open: the view, which lies above the page, would cover it. */
-const menuOpen = () => document.querySelector('[role="listbox"], [role="menu"]') !== null;
+/**
+ * The open menus and lists of the page: the view, which lies above the page, would cover them.
+ * Closed menus stay in the document, hidden, and do not count.
+ */
+const openMenus = () =>
+  [...document.querySelectorAll('[role="listbox"], [role="menu"]')]
+    .filter((menu) => menu.checkVisibility())
+    .map((menu) => menu.getBoundingClientRect())
+    .filter((r) => r.width > 0 && r.height > 0);
 
 /**
  * Shows the served artifact in the desktop's view over `frame`, and keeps the view on it: every
@@ -100,7 +107,7 @@ function useArtifactView(artifacts: Artifacts, url: string | null, reloads: numb
         box.getBoundingClientRect(),
         around.getBoundingClientRect(),
         { width: window.innerWidth, height: window.innerHeight },
-        menuOpen(),
+        openMenus(),
       );
     let sent = "";
     let shown = false;

@@ -83,21 +83,22 @@ interface Edges {
 /**
  * Where the desktop lays the artifact view: the frame box (the chosen width, centred in the stage)
  * cut to the stage and the window, in CSS pixels. Null hides the view: when nothing of it is in
- * sight, or a menu of the page is open, which the view would cover (it lies above the page).
+ * sight, or an open menu of the page lies over it, which the view would cover (it lies above the
+ * page). `menus` are the rectangles of the menus that are open.
  */
 export function stageBounds(
   frame: Edges,
   stage: Edges,
   window: { width: number; height: number },
-  menuOpen: boolean,
+  menus: readonly Edges[] = [],
 ): { x: number; y: number; width: number; height: number } | null {
-  if (menuOpen) return null;
   const left = Math.max(frame.left, stage.left, 0);
   const top = Math.max(frame.top, stage.top, 0);
   const right = Math.min(frame.right, stage.right, window.width);
   const bottom = Math.min(frame.bottom, stage.bottom, window.height);
   if (right <= left || bottom <= top) return null;
-  return { x: left, y: top, width: right - left, height: bottom - top };
+  const covered = menus.some((m) => m.left < right && m.right > left && m.top < bottom && m.bottom > top);
+  return covered ? null : { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 /** HTML that arrived as base64 from `file.get`, read as UTF-8 like a browser would read the file. */

@@ -129,14 +129,14 @@ describe("the frame", () => {
 
   it("lies over the frame box where it is inside the stage", () => {
     const frame = { left: 330, top: 100, right: 720, bottom: 700 };
-    expect(stageBounds(frame, stage, window, false)).toEqual({ x: 330, y: 100, width: 390, height: 600 });
+    expect(stageBounds(frame, stage, window)).toEqual({ x: 330, y: 100, width: 390, height: 600 });
   });
 
   it("is cut to the stage and to the window", () => {
     const wide = { left: 0, top: 100, right: 1600, bottom: 700 };
-    expect(stageBounds(wide, stage, window, false)).toEqual({ x: 40, y: 100, width: 1360, height: 600 });
+    expect(stageBounds(wide, stage, window)).toEqual({ x: 40, y: 100, width: 1360, height: 600 });
     const low = { left: 40, top: 600, right: 1400, bottom: 1200 };
-    expect(stageBounds(low, { ...stage, bottom: 1200 }, window, false)).toEqual({
+    expect(stageBounds(low, { ...stage, bottom: 1200 }, window)).toEqual({
       x: 40,
       y: 600,
       width: 1360,
@@ -144,10 +144,18 @@ describe("the frame", () => {
     });
   });
 
-  it("is hidden when nothing of it shows, or a menu of the page is open over it", () => {
-    expect(stageBounds({ left: 40, top: 900, right: 1400, bottom: 1500 }, stage, window, false)).toBeNull();
-    expect(stageBounds({ left: 40, top: 100, right: 40, bottom: 700 }, stage, window, false)).toBeNull();
-    expect(stageBounds({ left: 330, top: 100, right: 720, bottom: 700 }, stage, window, true)).toBeNull();
+  it("is hidden when nothing of it shows, or an open menu of the page lies over it", () => {
+    const frame = { left: 330, top: 100, right: 720, bottom: 700 };
+    expect(stageBounds({ left: 40, top: 900, right: 1400, bottom: 1500 }, stage, window)).toBeNull();
+    expect(stageBounds({ left: 40, top: 100, right: 40, bottom: 700 }, stage, window)).toBeNull();
+    const versionList = { left: 300, top: 80, right: 500, bottom: 220 };
+    expect(stageBounds(frame, stage, window, [versionList])).toBeNull();
+  });
+
+  it("stays when a menu is open elsewhere", () => {
+    const frame = { left: 330, top: 100, right: 720, bottom: 700 };
+    const sidebarMenu = { left: 0, top: 0, right: 300, bottom: 90 };
+    expect(stageBounds(frame, stage, window, [sidebarMenu])).toEqual({ x: 330, y: 100, width: 390, height: 600 });
   });
 
   it("has a width per viewport", () => {
