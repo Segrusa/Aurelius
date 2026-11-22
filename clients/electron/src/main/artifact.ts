@@ -1,12 +1,25 @@
 // A design artifact: one HTML file a run kept with its message. The page hands it here, and main
-// serves it on `artifact://view/<token>` with a policy that lets it run its own inline code and
-// nothing else: no network, no forms, no frames, no way back into the app.
+// serves it on `artifact://view/<token>` in a session of its own that has no network (see
+// artifact-session.ts). The policy below lets it run its own inline code and nothing else, but CSP
+// and the sandbox are not a network boundary in Chromium (WebRTC, DNS prefetch and speculation
+// rules get past them): the session is.
 
 import { randomBytes } from "node:crypto";
 
-/** The scheme main serves artifacts on; the app's own policy may frame only this. */
+/** The scheme main serves artifacts on, only in the artifact session. */
 export const ARTIFACT_SCHEME = "artifact";
 const ARTIFACT_PREFIX = `${ARTIFACT_SCHEME}://view/`;
+
+/** The session every artifact runs in: in memory (no `persist:`), apart from the app's own. */
+export const ARTIFACT_PARTITION = "artifact";
+/**
+ * A proxy that is not there (the discard port), for every scheme, loopback included: what slips
+ * past the request filter (WebRTC's TURN over TCP does) reaches nothing.
+ */
+export const ARTIFACT_PROXY = {
+  proxyRules: "http=127.0.0.1:9;https=127.0.0.1:9;socks=127.0.0.1:9",
+  proxyBypassRules: "<-loopback>",
+} as const;
 
 /**
  * The policy of every artifact response. Inline code runs; nothing can be fetched or sent. `sandbox`
@@ -33,6 +46,11 @@ export function artifactToken(url: string): string | null {
     .replace(/[?#].*$/, "")
     .replace(/\/$/, "");
   return TOKEN.test(rest) ? rest : null;
+}
+
+/** The only request the artifact session lets through: an artifact document itself. */
+export function artifactRequestAllowed(url: string): boolean {
+  return artifactToken(url) !== null;
 }
 
 interface Held {
@@ -75,6 +93,12 @@ export class ArtifactStore {
     return this.html(url) !== null;
   }
 
+  /** Whether a URL is an artifact main holds now for this window. */
+  owns(owner: number, url: string): boolean {
+    const token = artifactToken(url);
+    return token !== null && this.held.get(token)?.owner === owner;
+  }
+
   /** Lets go of one artifact, only for the window that asked for it. */
   release(owner: number, url: string): void {
     const token = artifactToken(url);
@@ -99,14 +123,44 @@ export class ArtifactStore {
 }
 
 /**
- * Whether a subframe may go to `target`. A frame starts empty and may load an artifact main holds
- * once; after that it may only move within its own document (an anchor). Anything else, also
- * another artifact, is a new frame the page makes.
+ * Whether a WebContents that shows `own` may go to `target`, in any frame: only to its own document
+ * (an anchor in it, or a reload). Anything else, also another artifact, is refused.
  */
-export function subframeMayNavigate(current: string, target: string, held: (url: string) => boolean): boolean {
+export function artifactMayNavigate(own: string, target: string): boolean {
   const withoutHash = (url: string) => url.replace(/#.*$/, "");
-  if (current === "" || current === "about:blank") return held(target);
-  return artifactToken(current) !== null && withoutHash(current) === withoutHash(target);
+  return artifactToken(own) !== null && withoutHash(own) === withoutHash(target);
+}
+
+/** Where the viewer lies over the window, in the window's content coordinates (device-independent). */
+export interface ViewBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * The bounds the page reported for the viewer's stage, in its CSS pixels, as window coordinates:
+ * scaled by the page's zoom and kept inside the window. Null: nothing to show (hidden, off the
+ * window, or not a rectangle at all).
+ */
+export function viewBounds(
+  reported: unknown,
+  zoom: number,
+  content: { width: number; height: number },
+): ViewBounds | null {
+  if (typeof reported !== "object" || reported === null) return null;
+  const r = reported as Record<string, unknown>;
+  const values = [r.x, r.y, r.width, r.height];
+  if (!values.every((v): v is number => typeof v === "number" && Number.isFinite(v))) return null;
+  const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const [x, y, width, height] = values.map((v) => v * scale) as [number, number, number, number];
+  const left = Math.max(0, Math.round(x));
+  const top = Math.max(0, Math.round(y));
+  const right = Math.min(content.width, Math.round(x + width));
+  const bottom = Math.min(content.height, Math.round(y + height));
+  if (right <= left || bottom <= top) return null;
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 /** The export formats main makes itself; HTML is saved by the page. */

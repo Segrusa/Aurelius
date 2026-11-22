@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   ARTIFACT_BYTES_MAX,
   ARTIFACT_CSP,
+  ARTIFACT_PROXY,
   ARTIFACTS_MAX,
   ArtifactStore,
+  artifactMayNavigate,
+  artifactRequestAllowed,
   artifactToken,
   captureHeight,
   EXPORT_HEIGHT_MAX,
   exportName,
   exportWidth,
-  subframeMayNavigate,
+  viewBounds,
 } from "./artifact";
 
 const counting = () => {
@@ -75,6 +78,14 @@ describe("ArtifactStore", () => {
     expect(store.has(url)).toBe(true);
   });
 
+  it("knows which window an artifact belongs to", () => {
+    const store = new ArtifactStore(counting());
+    const url = store.serve(1, "a");
+    expect(store.owns(1, url)).toBe(true);
+    expect(store.owns(2, url)).toBe(false);
+    expect(store.owns(1, "artifact://view/ffffffffffffffffffffffffffffffff")).toBe(false);
+  });
+
   it("drops everything of a window that closed and keeps the others", () => {
     const store = new ArtifactStore(counting());
     const mine = store.serve(1, "a");
@@ -110,27 +121,80 @@ describe("ArtifactStore", () => {
   });
 });
 
-describe("subframeMayNavigate", () => {
-  const live = "artifact://view/0123456789abcdef0123456789abcdef";
-  const other = "artifact://view/ffffffffffffffffffffffffffffffff";
-  const held = (url: string) => url === live || url === other;
+describe("the artifact session", () => {
+  const token = "0123456789abcdef0123456789abcdef";
 
-  it("lets a new frame load an artifact main holds", () => {
-    expect(subframeMayNavigate("", live, held)).toBe(true);
-    expect(subframeMayNavigate("about:blank", live, held)).toBe(true);
+  it("lets only an artifact document through", () => {
+    expect(artifactRequestAllowed(`artifact://view/${token}`)).toBe(true);
+    expect(artifactRequestAllowed(`artifact://view/${token}#top`)).toBe(true);
+    expect(artifactRequestAllowed("http://127.0.0.1:3478/leak?d=x")).toBe(false);
+    expect(artifactRequestAllowed("https://exfil.example/")).toBe(false);
+    expect(artifactRequestAllowed("ws://127.0.0.1/")).toBe(false);
+    expect(artifactRequestAllowed(`artifact://exfil.example/?d=${token}`)).toBe(false);
+    expect(artifactRequestAllowed("artifact://view/favicon.ico")).toBe(false);
+    expect(artifactRequestAllowed("app://aurelius/index.html")).toBe(false);
   });
 
-  it("refuses an artifact that is not held, and anything that is not an artifact", () => {
-    expect(subframeMayNavigate("", "artifact://view/00000000000000000000000000000000", held)).toBe(false);
-    expect(subframeMayNavigate("", "https://example.com/", held)).toBe(false);
-    expect(subframeMayNavigate("about:blank", "app://aurelius/", held)).toBe(false);
+  it("sends whatever gets past the filter to a proxy that is not there, loopback too", () => {
+    for (const scheme of ["http", "https", "socks"])
+      expect(ARTIFACT_PROXY.proxyRules).toContain(`${scheme}=127.0.0.1:9`);
+    expect(ARTIFACT_PROXY.proxyBypassRules).toBe("<-loopback>");
+  });
+});
+
+describe("artifactMayNavigate", () => {
+  const own = "artifact://view/0123456789abcdef0123456789abcdef";
+
+  it("keeps an artifact on its own document", () => {
+    expect(artifactMayNavigate(own, own)).toBe(true);
+    expect(artifactMayNavigate(own, `${own}#pricing`)).toBe(true);
+    expect(artifactMayNavigate(`${own}#a`, `${own}#b`)).toBe(true);
   });
 
-  it("keeps a loaded artifact on its own document", () => {
-    expect(subframeMayNavigate(live, `${live}#pricing`, held)).toBe(true);
-    expect(subframeMayNavigate(live, other, held)).toBe(false);
-    expect(subframeMayNavigate(live, "https://example.com/", held)).toBe(false);
-    expect(subframeMayNavigate(live, "app://aurelius/settings", held)).toBe(false);
+  it("refuses another artifact and anything that is not one", () => {
+    expect(artifactMayNavigate(own, "artifact://view/ffffffffffffffffffffffffffffffff")).toBe(false);
+    expect(artifactMayNavigate(own, `${own}?leak=1`)).toBe(false);
+    expect(artifactMayNavigate(own, "https://example.com/")).toBe(false);
+    expect(artifactMayNavigate(own, "app://aurelius/settings")).toBe(false);
+    expect(artifactMayNavigate(own, "about:srcdoc")).toBe(false);
+    expect(artifactMayNavigate("https://example.com/", "https://example.com/")).toBe(false);
+  });
+});
+
+describe("viewBounds", () => {
+  const content = { width: 1440, height: 900 };
+
+  it("places the view where the page's stage is, scaled by the page's zoom", () => {
+    expect(viewBounds({ x: 50.4, y: 120, width: 1280, height: 600 }, 1, content)).toEqual({
+      x: 50,
+      y: 120,
+      width: 1280,
+      height: 600,
+    });
+    expect(viewBounds({ x: 10, y: 20, width: 100, height: 50 }, 1.5, content)).toEqual({
+      x: 15,
+      y: 30,
+      width: 150,
+      height: 75,
+    });
+  });
+
+  it("keeps the view inside the window", () => {
+    expect(viewBounds({ x: -100, y: 800, width: 2000, height: 400 }, 1, content)).toEqual({
+      x: 0,
+      y: 800,
+      width: 1440,
+      height: 100,
+    });
+  });
+
+  it("shows nothing for what is off the window or not a rectangle", () => {
+    expect(viewBounds({ x: 1500, y: 0, width: 100, height: 100 }, 1, content)).toBeNull();
+    expect(viewBounds({ x: 0, y: 0, width: 0, height: 100 }, 1, content)).toBeNull();
+    expect(viewBounds({ x: 0, y: 0, width: Number.NaN, height: 100 }, 1, content)).toBeNull();
+    expect(viewBounds({ x: "0", y: 0, width: 10, height: 10 }, 1, content)).toBeNull();
+    expect(viewBounds(null, 1, content)).toBeNull();
+    expect(viewBounds("everywhere", 1, content)).toBeNull();
   });
 });
 

@@ -35,7 +35,6 @@ import {
   type WebContents,
 } from "electron";
 import {
-  ARTIFACT_CSP,
   ARTIFACT_SCHEME,
   type ArtifactExport,
   ArtifactStore,
@@ -43,8 +42,8 @@ import {
   EXPORT_HEIGHT_DEFAULT,
   exportName,
   exportWidth,
-  subframeMayNavigate,
 } from "./artifact";
+import { ArtifactViews, artifactSession, renderArtifact } from "./artifact-session";
 import { connectOrStart, daemonProgram, installDir, startDaemon } from "./daemon";
 import { appendLinkLog, linkLine, PageWatch } from "./link-life";
 import { linkInArguments, linkOf } from "./links";
@@ -69,7 +68,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const SITE = join(here, "../renderer");
 const ORIGIN = "app://aurelius";
 const CSP =
-  "default-src 'self'; style-src 'self' 'sha256-K63bSR1LetGtaTb/2K6EIsLtf78i2//qEkOoBZCNcBQ=' 'sha256-0KUt1GaAbAKiIczMgRikTmhynZoYPcw+0bnDtqcsh14='; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; frame-src artifact:";
+  "default-src 'self'; style-src 'self' 'sha256-K63bSR1LetGtaTb/2K6EIsLtf78i2//qEkOoBZCNcBQ=' 'sha256-0KUt1GaAbAKiIczMgRikTmhynZoYPcw+0bnDtqcsh14='; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 const DEV_URL = (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) || undefined;
 const ENVIRONMENT =
   process.env.AURELIUS_ENV === "production" || (app.isPackaged && process.env.AURELIUS_ENV !== "dev")
@@ -134,62 +133,10 @@ function serveSite(): void {
   });
 }
 
-/** Every artifact response carries its own policy; what is not held is not found. */
-function serveArtifactScheme(): void {
-  protocol.handle(ARTIFACT_SCHEME, (request) => {
-    const html = artifacts.html(request.url);
-    const headers = new Headers({
-      "Content-Security-Policy": ARTIFACT_CSP,
-      "X-Content-Type-Options": "nosniff",
-      "Cache-Control": "no-store",
-    });
-    if (html === null || request.method !== "GET") return new Response("Not found", { status: 404, headers });
-    headers.set("Content-Type", "text/html; charset=utf-8");
-    return new Response(html, { status: 200, headers });
-  });
-}
-
-/** Keeps every frame of a window on the artifact it loaded, and opens nothing from one. */
-function guardSubframes(contents: WebContents): void {
-  contents.on("will-frame-navigate", (details) => {
-    if (details.isMainFrame) return;
-    if (!subframeMayNavigate(details.frame?.url ?? "", details.url, (url) => artifacts.has(url))) {
-      details.preventDefault();
-    }
-  });
-}
-
-/**
- * Loads an artifact in a window nobody sees, sandboxed and without preload, to print or capture it.
- * It may not go anywhere else or open anything; it is always closed afterwards.
- */
-async function renderArtifact<R>(url: string, width: number, make: (window: BrowserWindow) => Promise<R>): Promise<R> {
-  const window = new BrowserWindow({
-    show: false,
-    width,
-    height: EXPORT_HEIGHT_DEFAULT,
-    useContentSize: true,
-    backgroundColor: "#FFFFFF",
-    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
-  });
-  const contents = window.webContents;
-  contents.setWindowOpenHandler(() => ({ action: "deny" }));
-  contents.on("will-navigate", (event) => event.preventDefault());
-  contents.on("will-redirect", (event) => event.preventDefault());
-  guardSubframes(contents);
-  window.setContentSize(width, EXPORT_HEIGHT_DEFAULT);
-  try {
-    // A navigation the artifact tries (and that is refused) can end the load early; the page is there.
-    await window.loadURL(url).catch((error: unknown) => {
-      if (contents.getURL() !== url) throw error;
-    });
-    return await make(window);
-  } finally {
-    window.destroy();
-  }
-}
-
+/** The artifact session and the viewers in it; artifacts never load in the app's own session. */
 function serveArtifacts(): void {
+  const ready = artifactSession(artifacts);
+  const views = new ArtifactViews(artifacts, ready);
   const watched = new Set<number>();
   handle("artifact:serve", (sender, html: unknown) => {
     if (typeof html !== "string") throw new Error("Not an artifact.");
@@ -208,6 +155,13 @@ function serveArtifacts(): void {
   handle("artifact:release", (sender, url: unknown) => {
     if (typeof url === "string") artifacts.release(sender.id, url);
   });
+  // The viewer: a view over the page's stage, which the page keeps up to date with its bounds.
+  handle("artifact:show", (sender, url: unknown, bounds: unknown) => {
+    if (typeof url !== "string") throw new Error("Not an artifact.");
+    return views.show(sender, url, bounds);
+  });
+  handle("artifact:bounds", (sender, bounds: unknown) => views.place(sender, bounds));
+  handle("artifact:hide", (sender) => views.hide(sender.id));
   handle("artifact:export", async (sender, url: unknown, kind: unknown, name: unknown, width: unknown) => {
     if (typeof url !== "string" || !artifacts.has(url)) throw new Error("This artifact is not open any more.");
     if (kind !== "pdf" && kind !== "png") throw new Error("Unknown format.");
@@ -220,7 +174,7 @@ function serveArtifacts(): void {
     const chosen = await (window ? dialog.showSaveDialog(window, options) : dialog.showSaveDialog(options));
     if (chosen.canceled || !chosen.filePath) return null;
     const wide = exportWidth(width);
-    const bytes = await renderArtifact(url, wide, async (hidden) => {
+    const bytes = await renderArtifact(ready, url, wide, async (hidden) => {
       if (format === "pdf") return hidden.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
       // The whole page, not only the first screen. The number comes from the artifact: checked.
       // The width is the one asked for: a window nobody sees does not always report its own.
@@ -680,7 +634,6 @@ function makeWindow(extra: Electron.BrowserWindowConstructorOptions, path: strin
     },
   });
   window.once("ready-to-show", () => window.show());
-  guardSubframes(window.webContents);
   // A link in a report or a message opens in the browser; only a web address leaves the app. An
   // artifact's frame has no popups (sandbox), and never reaches this with a link of its own.
   window.webContents.setWindowOpenHandler(({ url, referrer }) => {
@@ -792,7 +745,6 @@ void app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   recordVersion();
   serveSite();
-  serveArtifactScheme();
   serveArtifacts();
   serveLinks();
   serveOsLinks();

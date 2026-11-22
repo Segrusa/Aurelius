@@ -3,6 +3,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 type FrameListener = (text: string) => void;
+type ArtifactBounds = { x: number; y: number; width: number; height: number };
 type ClosedListener = (code: number | null) => void;
 
 const listeners = new Map<number, { frame: FrameListener; closed: ClosedListener }>();
@@ -63,6 +64,9 @@ contextBridge.exposeInMainWorld("aurelius", {
   openFolder: (path: string) => invoke("folder:open", path),
   serveArtifact: (html: string) => invoke("artifact:serve", html),
   releaseArtifact: (url: string) => invoke("artifact:release", url),
+  showArtifact: (url: string, bounds: ArtifactBounds | null) => invoke("artifact:show", url, bounds),
+  placeArtifact: (bounds: ArtifactBounds | null) => invoke("artifact:bounds", bounds),
+  hideArtifact: () => invoke("artifact:hide"),
   exportArtifact: (url: string, kind: "pdf" | "png", name: string, width: number) =>
     invoke("artifact:export", url, kind, name, width),
 });

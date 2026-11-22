@@ -1,10 +1,10 @@
 import type { FileRef, MessageView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
-  ARTIFACT_SANDBOX,
   artifactVersions,
   htmlOf,
   isArtifact,
+  stageBounds,
   versionLabel,
   versionOf,
   versionsFor,
@@ -124,8 +124,30 @@ describe("versionLabel", () => {
 });
 
 describe("the frame", () => {
-  it("only lets scripts run: no same origin, popups, top navigation or forms", () => {
-    expect(ARTIFACT_SANDBOX.split(" ")).toEqual(["allow-scripts"]);
+  const stage = { left: 40, top: 100, right: 1400, bottom: 700 };
+  const window = { width: 1440, height: 900 };
+
+  it("lies over the frame box where it is inside the stage", () => {
+    const frame = { left: 330, top: 100, right: 720, bottom: 700 };
+    expect(stageBounds(frame, stage, window, false)).toEqual({ x: 330, y: 100, width: 390, height: 600 });
+  });
+
+  it("is cut to the stage and to the window", () => {
+    const wide = { left: 0, top: 100, right: 1600, bottom: 700 };
+    expect(stageBounds(wide, stage, window, false)).toEqual({ x: 40, y: 100, width: 1360, height: 600 });
+    const low = { left: 40, top: 600, right: 1400, bottom: 1200 };
+    expect(stageBounds(low, { ...stage, bottom: 1200 }, window, false)).toEqual({
+      x: 40,
+      y: 600,
+      width: 1360,
+      height: 300,
+    });
+  });
+
+  it("is hidden when nothing of it shows, or a menu of the page is open over it", () => {
+    expect(stageBounds({ left: 40, top: 900, right: 1400, bottom: 1500 }, stage, window, false)).toBeNull();
+    expect(stageBounds({ left: 40, top: 100, right: 40, bottom: 700 }, stage, window, false)).toBeNull();
+    expect(stageBounds({ left: 330, top: 100, right: 720, bottom: 700 }, stage, window, true)).toBeNull();
   });
 
   it("has a width per viewport", () => {

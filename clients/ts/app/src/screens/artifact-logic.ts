@@ -73,8 +73,32 @@ export function viewportWidth(viewport: Viewport): number {
   return VIEWPORTS.find((v) => v.value === viewport)?.width ?? 1280;
 }
 
-/** The iframe sandbox: scripts run, in an origin of their own; nothing else is allowed. */
-export const ARTIFACT_SANDBOX = "allow-scripts";
+interface Edges {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Where the desktop lays the artifact view: the frame box (the chosen width, centred in the stage)
+ * cut to the stage and the window, in CSS pixels. Null hides the view: when nothing of it is in
+ * sight, or a menu of the page is open, which the view would cover (it lies above the page).
+ */
+export function stageBounds(
+  frame: Edges,
+  stage: Edges,
+  window: { width: number; height: number },
+  menuOpen: boolean,
+): { x: number; y: number; width: number; height: number } | null {
+  if (menuOpen) return null;
+  const left = Math.max(frame.left, stage.left, 0);
+  const top = Math.max(frame.top, stage.top, 0);
+  const right = Math.min(frame.right, stage.right, window.width);
+  const bottom = Math.min(frame.bottom, stage.bottom, window.height);
+  if (right <= left || bottom <= top) return null;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
 
 /** HTML that arrived as base64 from `file.get`, read as UTF-8 like a browser would read the file. */
 export function htmlOf(base64: string): string {

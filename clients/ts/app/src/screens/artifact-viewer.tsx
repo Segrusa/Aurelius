@@ -1,21 +1,24 @@
-// A design artifact, live: the HTML a run kept, in a sandboxed frame that main serves on its own
-// scheme (clients/electron/src/main/artifact.ts). Its scripts run; it reaches nothing outside it.
+// A design artifact, live: the HTML a run kept. It does not run in this page: the desktop lays a
+// view of its own over the stage, in a session without network (clients/electron/src/main/
+// artifact-session.ts). Its scripts run; it reaches nothing outside it. The page only says where
+// the stage is. The view lies above the page, so a toast that falls over the stage is under it.
 
 import { Button } from "@astryxdesign/core/Button";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { expectBody } from "@aurelius/client";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useState } from "react";
+import { useRouterState } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
 import { useConnection } from "../connection";
 import { useKeyed } from "../data";
 import type { Platform } from "../platform";
 import { saveBlob } from "../ui/download";
 import { toast } from "../ui/toast";
 import {
-  ARTIFACT_SANDBOX,
   type ArtifactVersion,
   htmlOf,
+  stageBounds,
   VIEWPORTS,
   type Viewport,
   versionLabel,
@@ -43,8 +46,7 @@ const styles = stylex.create({
     flexShrink: 0,
     height: "100%",
     maxWidth: "100%",
-    borderWidth: 0,
-    // An artifact paints its own page; without a background of its own it is a white one.
+    // Under the view, which paints the artifact; white like its page until the view is there.
     backgroundColor: "white",
   },
   footerStart: { marginInlineEnd: "auto" },
@@ -76,6 +78,59 @@ function useServed(artifacts: Artifacts, html: string | undefined): string | nul
   return url;
 }
 
+/** A menu or list of the page is open: the view, which lies above the page, would cover it. */
+const menuOpen = () => document.querySelector('[role="listbox"], [role="menu"]') !== null;
+
+/**
+ * Shows the served artifact in the desktop's view over `frame`, and keeps the view on it: every
+ * animation frame the bounds are measured, and sent when they changed (resize, scroll, the width
+ * toggle, the dialog moving). The view goes when the viewer closes, or a new version or reload
+ * shows a new one.
+ */
+function useArtifactView(artifacts: Artifacts, url: string | null, reloads: number) {
+  const frame = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a reload shows the artifact in a new view.
+  useEffect(() => {
+    const box = frame.current;
+    const around = stage.current;
+    if (url === null || box === null || around === null) return;
+    const measure = () =>
+      stageBounds(
+        box.getBoundingClientRect(),
+        around.getBoundingClientRect(),
+        { width: window.innerWidth, height: window.innerHeight },
+        menuOpen(),
+      );
+    let sent = "";
+    let shown = false;
+    let next = 0;
+    const follow = () => {
+      const now = measure();
+      const key = JSON.stringify(now);
+      if (shown && key !== sent) {
+        sent = key;
+        void artifacts.place(now);
+      }
+      next = requestAnimationFrame(follow);
+    };
+    const first = measure();
+    sent = JSON.stringify(first);
+    artifacts
+      .show(url, first)
+      .then(() => {
+        shown = true;
+      })
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : "This artifact did not open."));
+    next = requestAnimationFrame(follow);
+    return () => {
+      cancelAnimationFrame(next);
+      void artifacts.hide();
+    };
+  }, [artifacts, url, reloads]);
+  return { frame, stage };
+}
+
 export function ArtifactViewer({
   versions,
   openId,
@@ -103,6 +158,13 @@ export function ArtifactViewer({
     Boolean(id),
   );
   const url = useServed(artifacts, file.data?.html);
+  const { frame, stage } = useArtifactView(artifacts, url, reloads);
+  // Another screen: the viewer closes with it (main takes the view away as well).
+  const path = useRouterState({ select: (s) => s.location.href });
+  const openedAt = useRef(path);
+  useEffect(() => {
+    if (path !== openedAt.current) onClose();
+  }, [path, onClose]);
   const name = current?.file.name ?? file.data?.name ?? "Artifact";
   const width = viewportWidth(viewport);
   const now = Date.now();
@@ -172,15 +234,12 @@ export function ArtifactViewer({
           ))}
         </SegmentedControl>
       </div>
-      <div {...stylex.props(styles.stage)}>
+      <div ref={stage} {...stylex.props(styles.stage)}>
         {url ? (
-          <iframe
-            // A new frame for every version and reload: main lets a frame load one artifact only.
-            key={`${url}#${reloads}`}
-            src={url}
-            title={name}
-            sandbox={ARTIFACT_SANDBOX}
-            referrerPolicy="no-referrer"
+          <div
+            ref={frame}
+            role="img"
+            aria-label={name}
             {...stylex.props(styles.frame)}
             // After stylex's props, which carry a `style` of their own.
             style={{ width }}

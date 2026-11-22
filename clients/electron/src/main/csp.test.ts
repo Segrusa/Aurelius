@@ -44,7 +44,8 @@ describe("the desktop app's Content-Security-Policy", () => {
   const policy = /const CSP =\s*"([^"]+)"/.exec(source)?.[1] ?? "";
   const directives = policy.split(";").map((d) => d.trim());
 
-  it("frames only artifacts, and gained nothing else for them", () => {
+  // Artifacts are not framed in the app's page any more: they run in a view of their own.
+  it("does not let the page frame artifacts, and gained nothing for them", () => {
     expect(directives.map((d) => d.split(" ")[0])).toEqual([
       "default-src",
       "style-src",
@@ -53,9 +54,8 @@ describe("the desktop app's Content-Security-Policy", () => {
       "base-uri",
       "frame-ancestors",
       "form-action",
-      "frame-src",
     ]);
-    expect(directives).toContain("frame-src artifact:");
+    expect(policy).not.toContain("artifact");
     expect(directives).toContain("default-src 'self'");
     expect(directives).toContain("img-src 'self' data: blob:");
     expect(directives).toContain("frame-ancestors 'none'");
