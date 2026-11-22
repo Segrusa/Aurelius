@@ -8,9 +8,13 @@ import { randomBytes } from "node:crypto";
 export const ARTIFACT_SCHEME = "artifact";
 const ARTIFACT_PREFIX = `${ARTIFACT_SCHEME}://view/`;
 
-/** The policy of every artifact response. Inline code runs; nothing can be fetched or sent. */
+/**
+ * The policy of every artifact response. Inline code runs; nothing can be fetched or sent. `sandbox`
+ * makes it a sandbox of its own also where it is not in the viewer's frame (the export window):
+ * an opaque origin without storage, popups, forms or navigation of the top.
+ */
 export const ARTIFACT_CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
+  "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
 
 /** How many artifacts main holds at once, over all windows; the oldest goes first. */
 export const ARTIFACTS_MAX = 16;
@@ -111,6 +115,8 @@ export type ArtifactExport = "pdf" | "png";
 /** The widths the viewer shows an artifact at, and the widths an export is made at. */
 export const EXPORT_WIDTH_MIN = 320;
 export const EXPORT_WIDTH_MAX = 1920;
+/** The height an export window starts at, and the PNG's when the artifact reports none. */
+export const EXPORT_HEIGHT_DEFAULT = 900;
 /** The tallest PNG: Chromium cannot paint a surface much larger. */
 export const EXPORT_HEIGHT_MAX = 16_384;
 

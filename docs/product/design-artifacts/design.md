@@ -12,7 +12,7 @@
 
 ## Viewer (desktop, Electron)
 1. A new privileged scheme `artifact:` that main serves. The renderer hands the HTML to main over IPC (`artifact:serve`, checked with `fromOurPage`), and main returns `artifact://view/<random token>`. Tokens live in memory, are dropped when the viewer closes, and are capped by count and size.
-2. Every response from `artifact:` gets its own CSP: `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'`, plus `X-Content-Type-Options: nosniff`.
+2. Every response from `artifact:` gets its own CSP: `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'`, plus `X-Content-Type-Options: nosniff`. It also carries `sandbox allow-scripts`, so an artifact is sandboxed where it is not in the viewer's frame too (the hidden export window).
 3. The app CSP gains only `frame-src artifact:` (update `csp.test.ts`).
 4. The iframe has `sandbox="allow-scripts"`. Never `allow-same-origin`, `allow-top-navigation`, `allow-popups` or `allow-forms`.
 5. Main blocks every navigation of a subframe away from its artifact URL (`will-frame-navigate`) and every `window.open`. The preload runs only in the main frame, and no IPC is reachable from the artifact.

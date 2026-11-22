@@ -26,6 +26,7 @@ describe("the artifact policy", () => {
   );
 
   it("lets inline code run and blocks every way out", () => {
+    expect(directives.get("sandbox")).toBe("allow-scripts");
     expect(directives.get("default-src")).toBe("'none'");
     expect(directives.get("script-src")).toBe("'unsafe-inline'");
     expect(directives.get("style-src")).toBe("'unsafe-inline'");

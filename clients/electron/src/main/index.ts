@@ -40,6 +40,7 @@ import {
   type ArtifactExport,
   ArtifactStore,
   captureHeight,
+  EXPORT_HEIGHT_DEFAULT,
   exportName,
   exportWidth,
   subframeMayNavigate,
@@ -162,7 +163,7 @@ async function renderArtifact<R>(url: string, width: number, make: (window: Brow
   const window = new BrowserWindow({
     show: false,
     width,
-    height: 900,
+    height: EXPORT_HEIGHT_DEFAULT,
     useContentSize: true,
     backgroundColor: "#FFFFFF",
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
@@ -172,8 +173,12 @@ async function renderArtifact<R>(url: string, width: number, make: (window: Brow
   contents.on("will-navigate", (event) => event.preventDefault());
   contents.on("will-redirect", (event) => event.preventDefault());
   guardSubframes(contents);
+  window.setContentSize(width, EXPORT_HEIGHT_DEFAULT);
   try {
-    await window.loadURL(url);
+    // A navigation the artifact tries (and that is refused) can end the load early; the page is there.
+    await window.loadURL(url).catch((error: unknown) => {
+      if (contents.getURL() !== url) throw error;
+    });
     return await make(window);
   } finally {
     window.destroy();
@@ -210,17 +215,18 @@ function serveArtifacts(): void {
     };
     const chosen = await (window ? dialog.showSaveDialog(window, options) : dialog.showSaveDialog(options));
     if (chosen.canceled || !chosen.filePath) return null;
-    const bytes = await renderArtifact(url, exportWidth(width), async (hidden) => {
+    const wide = exportWidth(width);
+    const bytes = await renderArtifact(url, wide, async (hidden) => {
       if (format === "pdf") return hidden.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
       // The whole page, not only the first screen. The number comes from the artifact: checked.
-      const [w, h] = hidden.getContentSize() as [number, number];
+      // The width is the one asked for: a window nobody sees does not always report its own.
       const tall = captureHeight(
         await hidden.webContents.executeJavaScript("document.documentElement.scrollHeight", true),
-        h,
+        EXPORT_HEIGHT_DEFAULT,
       );
-      hidden.setContentSize(w, tall);
+      hidden.setContentSize(wide, tall);
       await new Promise((resolve) => setTimeout(resolve, 150));
-      return (await hidden.webContents.capturePage({ x: 0, y: 0, width: w, height: tall })).toPNG();
+      return (await hidden.webContents.capturePage({ x: 0, y: 0, width: wide, height: tall })).toPNG();
     });
     writeFileSync(chosen.filePath, bytes);
     return chosen.filePath;
