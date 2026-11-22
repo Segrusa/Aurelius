@@ -82,6 +82,24 @@ enum ArtifactViewport {
 /// has the server's own limit, this keeps the field sane.
 const artifactFeedbackMax = 4000;
 
+/// The most characters of a file name that Ask for changes quotes: the run chose
+/// the name, so it stays a short label and not a second message.
+const artifactNameShownMax = 80;
+
+final _lineBreaks = RegExp(r'[\p{Cc}\p{Zl}\p{Zp}\s]+', unicode: true);
+// Format characters: bidi overrides and isolates, zero-width marks.
+final _format = RegExp(r'\p{Cf}', unicode: true);
+
+/// A kept file's [name] as data inside a message: one line, without control or
+/// bidi characters, with no double quote to end the quoting, and at most
+/// [artifactNameShownMax] characters.
+String artifactNameShown(String name) {
+  final clean = name.replaceAll(_format, '').replaceAll(_lineBreaks, ' ').replaceAll('"', "'").trim();
+  final runes = clean.runes;
+  return runes.length <= artifactNameShownMax ? clean : '${String.fromCharCodes(runes.take(artifactNameShownMax - 1)).trimRight()}…';
+}
+
 /// "Ask for changes": the one message that goes back to the conversation the
-/// artifact came from. The employee makes a new version of the same file.
-String artifactFeedback(String name, int version, String text) => 'Feedback on $name v$version: ${text.trim()}';
+/// artifact came from. The employee makes a new version of the same file. The
+/// name is quoted as data (SEC5 m1): the run chose it, the board member did not.
+String artifactFeedback(String name, int version, String text) => 'Feedback on the file "${artifactNameShown(name)}" (v$version): ${text.trim()}';

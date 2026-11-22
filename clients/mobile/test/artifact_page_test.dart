@@ -280,7 +280,7 @@ void main() {
       final posts = writesOf(repo).where((w) => w['method'] == 'ticket.post').toList();
       expect(posts, hasLength(1));
       expect(paramsOf(posts.single)['ticket_id'], 'k1');
-      expect(paramsOf(posts.single)['text'], 'Feedback on pricing.html v2: Make the Team plan stand out.');
+      expect(paramsOf(posts.single)['text'], 'Feedback on the file "pricing.html" (v2): Make the Team plan stand out.');
       expect(find.text('Sent to the conversation.'), findsOneWidget);
     });
 
