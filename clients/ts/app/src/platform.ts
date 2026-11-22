@@ -21,6 +21,26 @@ export interface ArtifactBounds {
   height: number;
 }
 
+/** Which view of the viewer: its own, or the older version beside it while it compares. */
+export type ArtifactSlot = "main" | "compare";
+
+/** The element the board member clicked in comment mode, as the desktop checked it. */
+export interface ArtifactPick {
+  selector: string;
+  tag: string;
+  /** Its text on one line, at most 120 characters. */
+  text: string;
+  rect: ArtifactBounds;
+}
+
+/** A tweak an artifact declares (authoring.md), as the desktop checked it, with its value now. */
+export type ArtifactTweak = { var: string; label: string; value: string } & (
+  | { type: "color" }
+  | { type: "length"; unit: string; min?: number; max?: number; step?: number }
+  | { type: "number"; min?: number; max?: number; step?: number }
+  | { type: "choice"; options: string[] }
+);
+
 export interface Platform {
   kind: "electron" | "web";
   openLink: OpenLink;
@@ -86,9 +106,20 @@ export interface Platform {
      * Shows a served artifact over the page, at `bounds` (the stage, in the page's CSS pixels);
      * `place` follows the stage, null hides it for now; `hide` takes the view away.
      */
-    show(url: string, bounds: ArtifactBounds | null): Promise<void>;
-    place(bounds: ArtifactBounds | null): Promise<void>;
-    hide(): Promise<void>;
+    show(url: string, bounds: ArtifactBounds | null, slot?: ArtifactSlot): Promise<void>;
+    place(bounds: ArtifactBounds | null, slot?: ArtifactSlot): Promise<void>;
+    /** Without a slot: every view of this page. */
+    hide(slot?: ArtifactSlot): Promise<void>;
+    /**
+     * Comment mode in the viewer's own view: resolves with the element the board member clicks,
+     * or null when `stopPick` ended it or the view went.
+     */
+    pick(): Promise<ArtifactPick | null>;
+    stopPick(): Promise<void>;
+    /** The tweaks the artifact in the viewer's own view declares; `tweak` gives the value set, null if refused. */
+    tweaks(): Promise<ArtifactTweak[]>;
+    tweak(name: string, value: string): Promise<string | null>;
+    resetTweaks(): Promise<void>;
     /** Asks where to save and makes the file; null: cancelled. */
     export(url: string, kind: "pdf" | "png", name: string, width: number): Promise<string | null>;
   } | null;

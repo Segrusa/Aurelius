@@ -19,6 +19,7 @@ import { usePlatform } from "../platform";
 import { saveBlob } from "../ui/download";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
+import type { ArtifactSend } from "./artifact-feedback";
 import { isArtifact, versionOf, versionsFor } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 import { FormDialog, Hint, Loading, Problem } from "./org-kit";
@@ -429,7 +430,18 @@ const sizeText = (size: number) =>
  * where the app can run one safely (`messages`: the conversation, for its versions), anything
  * else is saved.
  */
-export function KeptFiles({ files, messages = [] }: { files: FileRef[]; messages?: readonly MessageView[] }) {
+export function KeptFiles({
+  files,
+  messages = [],
+  conversationId = null,
+  send = null,
+}: {
+  files: FileRef[];
+  messages?: readonly MessageView[];
+  conversationId?: string | null;
+  /** Where the artifact viewer sends comments, tweaks and requests (ChatContext.artifactSend). */
+  send?: ArtifactSend | null;
+}) {
   const connection = useConnection();
   const { artifacts } = usePlatform();
   const [shown, setShown] = useState<{ name: string; url: string } | null>(null);
@@ -487,6 +499,9 @@ export function KeptFiles({ files, messages = [] }: { files: FileRef[]; messages
           versions={versionsFor(messages, artifact, Date.now())}
           openId={artifact.id}
           artifacts={artifacts}
+          messages={messages}
+          conversationId={conversationId}
+          send={send}
           onClose={() => setArtifact(null)}
         />
       ) : null}

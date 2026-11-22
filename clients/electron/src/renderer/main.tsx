@@ -1,6 +1,9 @@
 import {
   App,
   type ArtifactBounds,
+  type ArtifactPick,
+  type ArtifactSlot,
+  type ArtifactTweak,
   adoptDesktopPrefs,
   type DesktopPrefs,
   guardStrayDrops,
@@ -52,9 +55,14 @@ interface Bridge {
   openFolder(path: string): Promise<void>;
   serveArtifact(html: string): Promise<string>;
   releaseArtifact(url: string): Promise<void>;
-  showArtifact(url: string, bounds: ArtifactBounds | null): Promise<void>;
-  placeArtifact(bounds: ArtifactBounds | null): Promise<void>;
-  hideArtifact(): Promise<void>;
+  showArtifact(url: string, bounds: ArtifactBounds | null, slot?: ArtifactSlot): Promise<void>;
+  placeArtifact(bounds: ArtifactBounds | null, slot?: ArtifactSlot): Promise<void>;
+  hideArtifact(slot?: ArtifactSlot): Promise<void>;
+  pickInArtifact(): Promise<ArtifactPick | null>;
+  stopArtifactPick(): Promise<void>;
+  artifactTweaks(): Promise<ArtifactTweak[]>;
+  tweakArtifact(name: string, value: string): Promise<string | null>;
+  resetArtifactTweaks(): Promise<void>;
   exportArtifact(url: string, kind: "pdf" | "png", name: string, width: number): Promise<string | null>;
 }
 
@@ -145,9 +153,14 @@ const platform: Platform = {
   artifacts: {
     serve: (html) => bridge.serveArtifact(html),
     release: (url) => bridge.releaseArtifact(url),
-    show: (url, bounds) => bridge.showArtifact(url, bounds),
-    place: (bounds) => bridge.placeArtifact(bounds),
-    hide: () => bridge.hideArtifact(),
+    show: (url, bounds, slot) => bridge.showArtifact(url, bounds, slot),
+    place: (bounds, slot) => bridge.placeArtifact(bounds, slot),
+    hide: (slot) => bridge.hideArtifact(slot),
+    pick: () => bridge.pickInArtifact(),
+    stopPick: () => bridge.stopArtifactPick(),
+    tweaks: () => bridge.artifactTweaks(),
+    tweak: (name, value) => bridge.tweakArtifact(name, value),
+    resetTweaks: () => bridge.resetArtifactTweaks(),
     export: (url, kind, name, width) => bridge.exportArtifact(url, kind, name, width),
   },
   quit: () => void bridge.quit(),

@@ -264,6 +264,18 @@ export async function withinTime<R>(work: Promise<R>, ms: number, message: strin
   }
 }
 
+/**
+ * How long one call of the viewer's tools in an artifact's world may take, the wait for its
+ * document included. A page that hangs its renderer never answers; a pick is not limited, it waits
+ * for the board member and ends with stopPick.
+ */
+export const WORLD_CALL_MS = 5_000;
+
+/** `work`'s result, or null when it fails or takes longer than `ms` (withinTime). */
+export async function resultWithin<R>(work: Promise<R>, ms: number): Promise<R | null> {
+  return withinTime(work, ms, "The artifact did not answer.").catch(() => null);
+}
+
 /** A file name for an export: the artifact's name without folders or its extension, plus the format's. */
 export function exportName(name: string, kind: ArtifactExport): string {
   const base = (name.replaceAll("\\", "/").split("/").pop() ?? "").replace(/\.html?$/i, "").trim();
