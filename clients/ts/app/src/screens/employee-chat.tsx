@@ -12,6 +12,7 @@ import { useApprovals, useEmployees, useMessages } from "../data";
 import { CHAT_FILES_FEATURE } from "../ui/attach-logic";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
+import type { ArtifactSend } from "./artifact-feedback";
 import { Composer } from "./chat";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import { before, localDay, quickReplies, streamTo } from "./chat-logic";
@@ -137,6 +138,17 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
   const handle = useRef<VirtuosoHandle>(null);
   const employee = employees.data?.find((e) => e.id === feed.data?.employee_id);
   const name = employee?.name ?? "Employee";
+  // An artifact's viewer sends with this chat's own send (below): one ordinary message, as typed.
+  const composerSend = useRef<((message: ChatMessage) => Promise<unknown>) | null>(null);
+  const artifactSend = useMemo<ArtifactSend>(
+    () => ({
+      to: name,
+      send: (text) =>
+        composerSend.current?.({ text, images: [], files: [], confirmSecret: false }) ??
+        Promise.reject(new Error("This chat cannot send yet.")),
+    }),
+    [name],
+  );
 
   // A finished message ends its stream.
   useEffect(() => {
@@ -193,8 +205,9 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
       retryTarget: { employeeId: null },
       speaker: name,
       flash: null,
+      artifactSend,
     }),
-    [store, features, user, name, employeesData, approvalMap, list, lastAnswerId, conversationId],
+    [store, features, user, name, employeesData, approvalMap, list, lastAnswerId, conversationId, artifactSend],
   );
 
   const running =
@@ -227,6 +240,7 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
         },
         { retry: false },
       ));
+  composerSend.current = send;
 
   return (
     <section aria-label={frame?.title ?? `Chat with ${name}`} {...stylex.props(styles.screen)}>

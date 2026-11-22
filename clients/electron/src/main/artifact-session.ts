@@ -234,8 +234,16 @@ export class ArtifactViews {
   }
 
   /** Runs `code` in the tools world of a view; a page that went or a renderer that failed gives null. */
-  private run(shown: Shown, code: string): Promise<unknown> {
-    return shown.view.webContents.executeJavaScriptInIsolatedWorld(TOOLS_WORLD_ID, [{ code }]).catch(() => null);
+  private async run(shown: Shown, code: string): Promise<unknown> {
+    const contents = shown.view.webContents;
+    // A view the page just showed may still load its document; the tools work on the loaded one.
+    if (contents.isLoadingMainFrame())
+      await new Promise<void>((resolve) => {
+        contents.once("did-stop-loading", () => resolve());
+        contents.once("destroyed", () => resolve());
+      });
+    if (contents.isDestroyed()) return null;
+    return contents.executeJavaScriptInIsolatedWorld(TOOLS_WORLD_ID, [{ code }]).catch(() => null);
   }
 
   /**

@@ -39,6 +39,7 @@ import { TypingDots } from "../ui/typing";
 import { useDelayed } from "../ui/use-delayed";
 import { answerParts, stepsLabel } from "./answer-steps-logic";
 import { ApprovalCard, ReplyCard } from "./approval-card";
+import type { ArtifactSend } from "./artifact-feedback";
 import type { LiveStore } from "./chat-live";
 import { useLive } from "./chat-live";
 import {
@@ -578,6 +579,11 @@ export interface ChatContext {
   speaker?: string | null;
   /** The message a link led to, marked for a moment. */
   flash: string | null;
+  /**
+   * Where an artifact's comments, tweaks and requests go: the conversation's one employee, through
+   * its composer's send. None in a channel.
+   */
+  artifactSend?: ArtifactSend | null;
 }
 
 const Context = createContext<ChatContext | null>(null);
@@ -1527,8 +1533,19 @@ export const MessageRow = memo(function MessageRow({
   grouped: boolean;
   inThread?: boolean;
 }) {
-  const { roleOf, caps, approvals, me, messages, lastAnswer, conversationId, channel, retryTarget, speaker } =
-    useChat();
+  const {
+    roleOf,
+    caps,
+    approvals,
+    me,
+    messages,
+    lastAnswer,
+    conversationId,
+    channel,
+    retryTarget,
+    speaker,
+    artifactSend,
+  } = useChat();
   const made = useMemo(() => ticketFrom(messages, m.id), [messages, m.id]);
   const { flash } = useChat();
   const connection = useConnection();
@@ -1564,7 +1581,12 @@ export const MessageRow = memo(function MessageRow({
         scope={conversationId ? { kind: "conversation", conversation_id: conversationId } : null}
       />
       <FileChips files={m.uploads} />
-      <KeptFiles files={m.files ?? []} messages={messages} />
+      <KeptFiles
+        files={m.files ?? []}
+        messages={messages}
+        conversationId={conversationId}
+        send={artifactSend ?? null}
+      />
       {m.run_id && m.role === "assistant" ? <TraceLink run={m.run_id} /> : null}
       {m.status === "interrupted" ? <Meta>Stopped; text up to that point is kept.</Meta> : null}
       {m.status === "failed" ? (

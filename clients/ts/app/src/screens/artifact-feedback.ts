@@ -167,3 +167,13 @@ export function changedTweaks(
     return set !== undefined && set !== t.value.trim() ? [{ var: t.var, value: set }] : [];
   });
 }
+
+/**
+ * Who gets what the viewer sends, and how: the employee of the conversation the artifact came
+ * from, through the send that chat's composer uses. None where a conversation has no one employee
+ * to answer (a group channel).
+ */
+export interface ArtifactSend {
+  to: string;
+  send(text: string): Promise<unknown>;
+}
