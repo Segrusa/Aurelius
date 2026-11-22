@@ -10,3 +10,32 @@ An artifact is a design that the board member opens and tries out in the Aureliu
 - Make it responsive for desktop, tablet and mobile widths, with realistic content and no lorem ipsum. Build interactions (tabs, dialogs, states) in plain JS.
 - Before you publish, check it: open the file in a headless browser (Playwright) and take a screenshot at 1280 and 390 px wide.
 - Keep it under 5 MB. Never put secrets or real customer data in an artifact.
+
+## Tweaks: values the board member can try
+
+An artifact may declare a few of its CSS variables as tweaks. The viewer then shows a control for each (a colour picker, a slider or a list), changes the variable live, and can send the chosen values back to you as a message: `Tweaks for design/pricing.html v3: --accent #1f6feb, --space 20px. Put these values in the file as the new defaults and make a new version.` When that arrives, put those values in `:root` and publish a new version of the same file.
+
+Declare them in one block in the `<head>`. It is JSON, not a script: nothing in it runs.
+
+```html
+<script type="application/json" id="aurelius-tweaks">
+[
+  { "var": "--accent", "label": "Accent", "type": "color" },
+  { "var": "--space", "label": "Spacing", "type": "length", "min": 4, "max": 32, "step": 1, "unit": "px" },
+  { "var": "--radius", "label": "Radius", "type": "length", "min": 0, "max": 24, "unit": "px" },
+  { "var": "--scale", "label": "Type scale", "type": "number", "min": 0.8, "max": 1.4, "step": 0.05 },
+  { "var": "--density", "label": "Density", "type": "choice", "options": ["comfortable", "compact"] }
+]
+</script>
+```
+
+- At most 20 entries. Each `var` is a custom property of `:root`: `--` followed by 1 to 40 lowercase letters, digits or `-`. Give it a default in `:root`, because the control starts from the value the page computes.
+- `type` is `color`, `length`, `number` or `choice`. A colour is set as a hex colour (`#1f6feb`), so write its default as hex too. A length is a number with its `unit` (`px` by default; also `rem`, `em`, `%`, `vh`, `vw`, `ch`, `pt`). `min`, `max` and `step` are plain numbers. A `choice` has 1 to 8 `options` of at most 40 characters each; read it in CSS with a style query (`@container style(--density: compact) { … }`).
+- `label` is what the panel shows (at most 40 characters); without one it shows the variable's name.
+- The viewer drops an entry it cannot use, and keeps the others. Check your block in a headless browser: `JSON.parse` of the element's text must give the list.
+
+## Comments and other requests
+
+The board member can also click elements of the artifact and comment on them. That comes as one message: `Feedback on design/pricing.html v3:`, a numbered list with each element (`button "Choose Team" (selector #plans > div:nth-of-type(2) > button)`) and its comment, and `Make a new version of the same file and name its path.` Make the changes in the same file, keep its name and name its full path in your answer.
+
+`Make a PowerPoint (.pptx) of design/pricing.html v3: …` asks for slides of the design: use the pptx skill, save the file next to the HTML (`design/pricing.pptx`) and name its full path, so it is kept with your answer.

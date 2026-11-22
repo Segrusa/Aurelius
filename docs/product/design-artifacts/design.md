@@ -33,4 +33,48 @@ The security boundary is **an isolated session without network**, not CSP and th
 - Any other failure (Chromium's, or writing the file) shows "The export did not work."; the details go to `artifacts.log` in the app's log folder.
 
 ## Out of phase A
-Comments on an element, sliders/knobs, a side-by-side compare, mobile, PPTX, React/Tailwind runtime injection, storage, AI calls from the artifact and public links.
+Comments on an element, sliders/knobs, a side-by-side compare, mobile, PPTX, React/Tailwind runtime injection, storage, AI calls from the artifact and public links. Phase B (below) adds the comments, the tweaks, the compare and the PPTX request on the desktop.
+
+# Phase B: iterating on an artifact (desktop)
+
+Everything the board member asks of the employee goes back as **one ordinary message in the conversation the artifact came from**, through the send that chat's composer already uses (`ChatContext.artifactSend`, set by the employee chat: a chat, a work session, a task's run). The employee then makes a new version, which becomes v(N+1) by its file name. No server or protocol change. A group channel has no one employee to answer, so there the viewer has no Send.
+
+The messages name the artifact by the path the employee named in the answer that kept it: `design/<name>` when it sits in a `design` folder (the authoring convention), else that full path, else the file name (`artifactPath`, `artifact-feedback.ts`).
+
+## The isolated world (main only)
+Comments and tweaks need to read the artifact's DOM and change it a little. The artifact still gets no IPC, bridge or channel:
+
+- Main runs **its own code** in an isolated world of the viewer's view (`TOOLS_WORLD_ID` 1080, `executeJavaScriptInIsolatedWorld`, `artifact-world.ts`). That world shares the DOM, not the page's JavaScript: the artifact cannot reach its globals, and a prototype the artifact replaces (`EventTarget.prototype.addEventListener`) is the page's own, not the world's. Each function is sent as its source with JSON arguments (`worldCall`); nothing of the page or the app is spliced in as code.
+- Main only reads the promise's result, and checks it before the page gets it (`artifact-tweaks.ts`). The page that shows the viewer asks main over its own IPC (`artifact:pick`, `artifact:pick-stop`, `artifact:tweaks`, `artifact:tweak`, `artifact:tweaks-reset`, checked with `fromOurPage` like every handler); main finds the view that page showed, never another window's.
+- Main waits for the view's document to finish loading before it runs anything there.
+
+## B1: Comment on an element
+- The **Comment** toggle opens a side panel beside the stage (not over the view) and starts comment mode: main runs `pickInWorld`. It outlines the element under the pointer with a box of its own (fixed, `pointer-events: none`, on the document element) and resolves with the element that is clicked: `{ selector, tag, text, rect }`.
+- Only real input counts (`event.isTrusted`): a click or pointer move the artifact dispatches is ignored, so a page can at most decide what lies under the pointer. The click and the presses around it are taken in the capture phase on the window, with `preventDefault` and `stopImmediatePropagation`, so the artifact's own handler does not act on a pick. Listeners the page put on the window earlier still see the click first; such a page can block a pick (deny it), not change what main gets.
+- The selector starts at the nearest ancestor with a plain, unique id, else at `body`, with `tag:nth-of-type(n)` steps. Main refuses a selector over 300 characters or with a newline (the world keeps itself to 300 by dropping the steps furthest from the element), folds the text to one line of at most 120 characters, and checks the tag and the rectangle (`checkPick`).
+- The outline box goes when the mode switches off, the panel closes, the version changes or the view goes (`stopPickInWorld`; main also ends a waiting pick with null).
+- Per pick the board member types a comment. A comment holds the version, a short element label (`button "Choose Team"`, the text cut at 40) and the text. Comments are kept in the page per conversation, artifact and version, in memory (`CommentStore`, at most 50 per version), and can be deleted.
+- **Send to <employee>** posts one message, and clears the list once the server has it:
+  ```
+  Feedback on design/pricing.html v3:
+  1. button "Choose Team" (selector #plans > div:nth-of-type(2) > button): <comment>
+  2. …
+  Make a new version of the same file and name its path.
+  ```
+  A comment's line breaks become spaces, so each stays one item.
+
+## B2: Tweaks
+- The convention for authors is in `authoring.md`: `<script type="application/json" id="aurelius-tweaks">` with a list of `{ var, label, type, … }`. JSON is not executed, so the nonce policy does not apply to it.
+- Main reads the element's `textContent` in the world (only a `<script>` of type `application/json`, at most 20,000 characters) and validates it as pure logic (`parseTweaks`, a unit test per rule): at most 20 entries; `var` matches `^--[a-z0-9-]{1,40}$`; the type is color, length, number or choice; min, max and step are finite numbers (min ≤ max, step > 0); a length has a known unit (px by default); a choice has 1 to 8 options of at most 40 characters without control characters; a label is one line of at most 40. Anything invalid is dropped, a variable named twice is kept once, and nothing is evaluated.
+- The **Tweaks** panel shows a control per entry, starting from its computed value (`getComputedStyle`). A change calls `document.documentElement.style.setProperty(var, value)` in the world, after main checked both: only a variable main read from that view, and a value the tweak takes (`tweakValue`: a colour is a hex colour, a length a number with the tweak's unit, a number a plain number, both within min and max, a choice one of its options).
+- **Reset** puts back the inline values the document element had before the first change. **Send to <employee>** lists only the values that changed: `Tweaks for design/pricing.html v3: --accent #1f6feb, --space 20px. Put these values in the file as the new defaults and make a new version.`
+
+## B3: Compare versions
+- The **Compare** toggle shows two views side by side: on the left a chosen version ("Compare with", default the one before the current, N-1), on the right the current one. Each is its own `WebContentsView` with the same guards, session and preload; main keeps them apart per page by slot (`main`, `compare`). The width toggle applies to both.
+- Closing the compare, the viewer or the page releases both views and both served artifacts. Comments and tweaks work on the current version only, so Compare closes their panel.
+
+## B4: Ask for PPTX
+- **Export** is a menu: Export HTML, Export PDF, Export PNG and, where there is a Send, **Ask for PPTX**. That posts `Make a PowerPoint (.pptx) of design/pricing.html v3: one slide per section, editable text, the same colours. Save it next to the HTML and name its path.` The employee uses Claude Code's pptx skill, and the file comes back as a kept `.pptx` (that already works).
+
+## Out of phase B
+Comments on mobile (phase C has a plain "Ask for changes"), comments kept across a reload or shared with other board members, a pick inside the artifact's own frames, tweaks on the older version of a compare, and a Send from a group channel.
