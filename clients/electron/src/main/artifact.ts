@@ -29,7 +29,7 @@ export const ARTIFACT_PROXY = {
 export const ARTIFACT_CSP =
   "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
 
-/** How many artifacts main holds at once, over all windows; the oldest goes first. */
+/** How many artifacts main holds at once for one window; that window's oldest goes first. */
 export const ARTIFACTS_MAX = 16;
 /** One artifact; the server keeps files up to 25 MB, the authoring guide asks for under 5 MB. */
 export const ARTIFACT_BYTES_MAX = 25 * 1024 * 1024;
@@ -66,15 +66,24 @@ export class ArtifactStore {
 
   constructor(private readonly token: () => string = () => randomBytes(16).toString("hex")) {}
 
-  /** Keeps the HTML and gives the URL to frame it. Throws when it is too large. */
+  /**
+   * Keeps the HTML and gives the URL to show it. To make room it lets go of this window's own
+   * oldest artifacts, never another window's. Throws when it is too large, or when the other
+   * windows hold so much that it does not fit.
+   */
   serve(owner: number, html: string): string {
     const bytes = Buffer.byteLength(html, "utf8");
     if (bytes > ARTIFACT_BYTES_MAX) throw new Error("This artifact is larger than 25 MB.");
-    // A Map keeps insertion order: the first key is the oldest.
-    while (this.held.size >= ARTIFACTS_MAX || this.total + bytes > ARTIFACTS_TOTAL_BYTES_MAX) {
-      const oldest = this.held.keys().next();
-      if (oldest.done) break;
-      this.drop(oldest.value);
+    // A Map keeps insertion order: the first of a window's keys is its oldest.
+    const own = () => [...this.held].filter(([, entry]) => entry.owner === owner).map(([token]) => token);
+    let mine = own();
+    while (mine.length >= ARTIFACTS_MAX || (this.total + bytes > ARTIFACTS_TOTAL_BYTES_MAX && mine.length > 0)) {
+      const [oldest, ...rest] = mine;
+      if (oldest !== undefined) this.drop(oldest);
+      mine = rest;
+    }
+    if (this.total + bytes > ARTIFACTS_TOTAL_BYTES_MAX) {
+      throw new Error("Other windows hold too many large artifacts; close one of them first.");
     }
     const token = this.token();
     this.held.set(token, { owner, html, bytes });
@@ -174,6 +183,11 @@ export const EXPORT_HEIGHT_DEFAULT = 900;
 /** The tallest PNG: Chromium cannot paint a surface much larger. */
 export const EXPORT_HEIGHT_MAX = 16_384;
 /**
+ * The most device pixels a PNG may have (64 Mpx, 256 MB as a bitmap). A HiDPI display multiplies
+ * both sides by its scale factor, so it counts twice.
+ */
+export const EXPORT_PIXELS_MAX = 64_000_000;
+/**
  * How long an export may take, load included. A busy artifact (an endless loop, a getter that
  * spins) never finishes by itself; after this the export fails and its renderer is ended.
  */
@@ -215,8 +229,13 @@ export function exportWidth(width: unknown): number {
   return Math.min(EXPORT_WIDTH_MAX, Math.max(EXPORT_WIDTH_MIN, Math.round(width)));
 }
 
-/** The page height the artifact reported, kept within what can be captured. */
-export function captureHeight(reported: unknown, fallback: number): number {
-  if (typeof reported !== "number" || !Number.isFinite(reported) || reported < 1) return fallback;
-  return Math.min(EXPORT_HEIGHT_MAX, Math.ceil(reported));
+/**
+ * The page height the artifact reported, kept within what can be captured: at most
+ * EXPORT_HEIGHT_MAX, and lower when `width` at `scale` would pass EXPORT_PIXELS_MAX.
+ */
+export function captureHeight(reported: unknown, fallback: number, width: number, scale = 1): number {
+  const factor = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  const tallest = Math.min(EXPORT_HEIGHT_MAX, Math.floor(EXPORT_PIXELS_MAX / (width * factor * factor)));
+  if (typeof reported !== "number" || !Number.isFinite(reported) || reported < 1) return Math.min(fallback, tallest);
+  return Math.min(tallest, Math.ceil(reported));
 }

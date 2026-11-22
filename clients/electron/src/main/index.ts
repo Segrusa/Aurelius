@@ -163,7 +163,9 @@ function serveArtifacts(): void {
   handle("artifact:bounds", (sender, bounds: unknown) => views.place(sender, bounds));
   handle("artifact:hide", (sender) => views.hide(sender.id));
   handle("artifact:export", async (sender, url: unknown, kind: unknown, name: unknown, width: unknown) => {
-    if (typeof url !== "string" || !artifacts.has(url)) throw new Error("This artifact is not open any more.");
+    // Only an artifact this window holds: another window's is not its to export.
+    if (typeof url !== "string" || !artifacts.owns(sender.id, url))
+      throw new Error("This artifact is not open any more.");
     if (kind !== "pdf" && kind !== "png") throw new Error("Unknown format.");
     const format: ArtifactExport = kind;
     const window = BrowserWindow.fromWebContents(sender);
@@ -178,7 +180,8 @@ function serveArtifacts(): void {
       if (format === "pdf") return hidden.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
       // The whole page, not only the first screen. The number comes from the artifact: checked.
       // The width is the one asked for: a window nobody sees does not always report its own.
-      const tall = captureHeight(await pageHeight(hidden.webContents), EXPORT_HEIGHT_DEFAULT);
+      const scale = screen.getDisplayMatching(hidden.getBounds()).scaleFactor;
+      const tall = captureHeight(await pageHeight(hidden.webContents), EXPORT_HEIGHT_DEFAULT, wide, scale);
       hidden.setContentSize(wide, tall);
       await new Promise((resolve) => setTimeout(resolve, 150));
       return (await hidden.webContents.capturePage({ x: 0, y: 0, width: wide, height: tall })).toPNG();
@@ -631,10 +634,9 @@ function makeWindow(extra: Electron.BrowserWindowConstructorOptions, path: strin
     },
   });
   window.once("ready-to-show", () => window.show());
-  // A link in a report or a message opens in the browser; only a web address leaves the app. An
-  // artifact's frame has no popups (sandbox), and never reaches this with a link of its own.
-  window.webContents.setWindowOpenHandler(({ url, referrer }) => {
-    if (referrer.url.startsWith(`${ARTIFACT_SCHEME}:`)) return { action: "deny" };
+  // A link in a report or a message opens in the browser; only a web address leaves the app.
+  // Artifacts never reach this: they run in views of their own, whose handler denies everything.
+  window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });

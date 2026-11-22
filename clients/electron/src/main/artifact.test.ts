@@ -10,6 +10,7 @@ import {
   artifactToken,
   captureHeight,
   EXPORT_HEIGHT_MAX,
+  EXPORT_PIXELS_MAX,
   EXPORT_TIMEOUT_MESSAGE,
   EXPORT_TIMEOUT_MS,
   exportName,
@@ -105,6 +106,28 @@ describe("ArtifactStore", () => {
     expect(store.has(urls[0] ?? "")).toBe(false);
     expect(store.has(urls[1] ?? "")).toBe(false);
     expect(store.has(urls.at(-1) ?? "")).toBe(true);
+  });
+
+  it("counts ARTIFACTS_MAX per window: another window's artifacts never push out mine", () => {
+    const store = new ArtifactStore(counting());
+    const mine = store.serve(1, "a");
+    const theirs = Array.from({ length: ARTIFACTS_MAX + 4 }, (_, i) => store.serve(2, `b${i}`));
+    expect(store.has(mine)).toBe(true);
+    expect(store.has(theirs[0] ?? "")).toBe(false);
+    expect(store.has(theirs.at(-1) ?? "")).toBe(true);
+    expect(store.size).toBe(ARTIFACTS_MAX + 1);
+  });
+
+  it("makes room in bytes from the window's own artifacts, and refuses what only another's could free", () => {
+    const store = new ArtifactStore(counting());
+    const big = "x".repeat(ARTIFACT_BYTES_MAX);
+    const first = store.serve(1, big);
+    const second = store.serve(1, big);
+    expect(() => store.serve(2, big)).toThrow(/Other windows hold too many large artifacts/);
+    expect(store.has(first)).toBe(true);
+    expect(store.has(second)).toBe(true);
+    store.serve(1, big);
+    expect(store.has(first)).toBe(false);
   });
 
   it("refuses an artifact that is too large", () => {
@@ -213,10 +236,20 @@ describe("exports", () => {
     expect(exportWidth(10)).toBe(320);
     expect(exportWidth(1e9)).toBe(1920);
     expect(exportWidth("wide")).toBe(1280);
-    expect(captureHeight(2000.4, 800)).toBe(2001);
-    expect(captureHeight(1e9, 800)).toBe(EXPORT_HEIGHT_MAX);
-    expect(captureHeight("tall", 800)).toBe(800);
-    expect(captureHeight(Number.NaN, 800)).toBe(800);
+    expect(captureHeight(2000.4, 800, 1280)).toBe(2001);
+    expect(captureHeight(1e9, 800, 1920)).toBe(EXPORT_HEIGHT_MAX);
+    expect(captureHeight("tall", 800, 1280)).toBe(800);
+    expect(captureHeight(Number.NaN, 800, 1280)).toBe(800);
+  });
+
+  it("keeps a PNG within EXPORT_PIXELS_MAX device pixels, also on a HiDPI display", () => {
+    expect(captureHeight(1e9, 800, 1920, 1) * 1920).toBeLessThanOrEqual(EXPORT_PIXELS_MAX);
+    const atTwo = captureHeight(1e9, 800, 1920, 2);
+    expect(atTwo).toBe(Math.floor(EXPORT_PIXELS_MAX / (1920 * 4)));
+    expect(atTwo * 1920 * 2 * 2).toBeLessThanOrEqual(EXPORT_PIXELS_MAX);
+    expect(captureHeight(1e9, 800, 1920, 3) * 1920 * 9).toBeLessThanOrEqual(EXPORT_PIXELS_MAX);
+    expect(captureHeight(2000, 800, 390, 2)).toBe(2000);
+    expect(captureHeight(1e9, 800, 1920, Number.NaN)).toBe(EXPORT_HEIGHT_MAX);
   });
 });
 
