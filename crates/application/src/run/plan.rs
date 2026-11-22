@@ -201,6 +201,10 @@ pub const DISCUSSION_FIRST_GUIDANCE: &str = "The board member responsible for th
 /// When the owner of a ticket uses `report_ready` and when not (ticket #46).
 pub const REPORT_GUIDANCE: &str = "You own the main task of this ticket. The ticket goes to Review only when you call report_ready with your report, and only when your run ends. Call it once, when the work is finished and you need nothing from the board member to call it done: the report says what you did, what you checked and what is still open. Do not call it when you still need something from the board member (a decision, approval, access, an answer), when you ask a question, or when you stop halfway: post what you need in the discussion with post_to_discussion, mention the responsible board member, and end your answer without report_ready. The ticket then stays in Doing, the board member sees that you wait, and their reply wakes you. A question mark or a closing sentence does not report anything; only report_ready does. While a handoff, a delegated task or another run is open on the ticket it stays in Doing even after report_ready.";
 
+/// The owner of a ticket's main task plans first: the ticket's Plan card shows its todo list,
+/// and without one the board member sees "No plan yet" while the work goes on.
+pub const PLAN_FIRST_GUIDANCE: &str = "Plan first: before you read code, change anything or delegate, make your todo list with TaskCreate (TodoWrite if that is the tool you have), one item per step you will take. The ticket's Plan card shows that list to the board member. Keep it current as you work: mark the step you are on as in progress and each finished step as completed, and add or remove steps when the plan changes. When a later run continues the work, update the existing list instead of starting a new one.";
+
 /// The note for a ticket's run: the general rule, and who to mention.
 fn discussion_first_note(responsible_username: Option<&str>) -> String {
     match responsible_username {
@@ -699,6 +703,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                     None => false,
                 };
                 if report {
+                    tail.push(PLAN_FIRST_GUIDANCE.to_string());
                     tail.push(REPORT_GUIDANCE.to_string());
                 }
                 // Claude Design: the workspace's styleguide and the ticket's design (a quick answer has no tools).
@@ -950,6 +955,13 @@ mod tests {
     fn the_report_guidance_says_when_report_ready_is_used_and_when_it_is_not() {
         for needed in ["report_ready", "only when your run ends", "need nothing from the board member", "Do not call it when you still need", "post_to_discussion", "A question mark or a closing sentence does not report anything", "handoff"] {
             assert!(REPORT_GUIDANCE.contains(needed), "{needed}");
+        }
+    }
+
+    #[test]
+    fn the_owner_of_a_main_task_is_told_to_make_its_todo_list_first() {
+        for needed in ["Plan first", "before you read code", "TaskCreate", "TodoWrite", "Plan card", "completed", "update the existing list"] {
+            assert!(PLAN_FIRST_GUIDANCE.contains(needed), "{needed}");
         }
     }
 
