@@ -89,6 +89,7 @@ const platform: Platform = {
   startup: null,
   windowProject: null,
   openProjectWindow: null,
+  artifacts: null,
   quit: null,
 };
 
