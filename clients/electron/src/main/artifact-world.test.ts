@@ -57,6 +57,11 @@ describe("selectorOf", () => {
     expect(selectorOf(kid(tree, 0, 2), always, 300)).toBe("body > *:nth-child(3)");
   });
 
+  it("checks the raw tag name, so a Kelvin sign that lowercases to k cannot name another element", () => {
+    const tree = build(["html", [["body", [["a\u212A", [["button"]]]]]]]);
+    expect(selectorOf(kid(tree, 0, 0, 0), always, 300)).toBe("body > *:nth-child(1) > button");
+  });
+
   it("keeps the steps nearest to the element when it would be too long", () => {
     let spec: Spec = ["span"];
     for (let i = 0; i < 60; i++) spec = ["div", [spec, ["div"]]];

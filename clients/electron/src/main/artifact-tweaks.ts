@@ -35,7 +35,7 @@ export function checkPick(raw: unknown): ArtifactPick | null {
   const { selector, tag, text, rect } = r;
   if (typeof selector !== "string" || selector === "" || selector.length > PICK_SELECTOR_MAX) return null;
   if (CONTROL.test(selector) || !SELECTOR.test(selector)) return null;
-  if (typeof tag !== "string" || !/^[a-z][a-z0-9-]{0,40}$/.test(tag)) return null;
+  if (typeof tag !== "string" || !/^(?:[a-z][a-z0-9-]{0,40}|\*)$/.test(tag)) return null;
   if (typeof text !== "string") return null;
   if (typeof rect !== "object" || rect === null) return null;
   const box = rect as Record<string, unknown>;

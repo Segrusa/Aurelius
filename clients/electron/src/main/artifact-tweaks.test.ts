@@ -84,6 +84,7 @@ describe("checkPick", () => {
     expect(checkPick(null)).toBeNull();
     expect(checkPick("button")).toBeNull();
     expect(checkPick({ ...pick, tag: "BUTTON onclick" })).toBeNull();
+    expect(checkPick({ ...pick, tag: "*" })?.tag).toBe("*");
     expect(checkPick({ ...pick, text: 3 })).toBeNull();
     expect(checkPick({ ...pick, rect: { x: 1, y: 2, width: Number.NaN, height: 4 } })).toBeNull();
     expect(checkPick({ ...pick, rect: null })).toBeNull();

@@ -28,7 +28,7 @@ export interface SelectorNode {
  * `unique`) and plain (letters, digits, `-`, `_`), else from `body`, as `tag:nth-of-type(n)`
  * steps (without `:nth-of-type` for an only child of its type). A tag name that is not a plain one
  * (the HTML parser takes quotes, colons and any other text in a tag name) becomes
- * `*:nth-child(k)`, so no page text gets into the selector. Over `max` characters it keeps the
+ * `*:nth-child(k)`, so a selector holds only plain tag names and ids, quoted as data in a message. Over `max` characters it keeps the
  * steps nearest to the element: still a selector, only a less precise one.
  */
 export function selectorOf(element: SelectorNode, unique: (id: string) => boolean, max: number): string {
@@ -44,7 +44,9 @@ export function selectorOf(element: SelectorNode, unique: (id: string) => boolea
       steps.unshift("body");
       break;
     }
-    if (!/^[a-z][a-z0-9-]{0,40}$/.test(tag)) {
+    // The raw name: toLowerCase is Unicode-aware (a Kelvin sign becomes k), and a name that only
+    // passes after it would point at another element (Sentinel, AUR-T79-SEC6 n-1).
+    if (!/^[A-Za-z][A-Za-z0-9-]{0,40}$/.test(node.tagName)) {
       let k = 1;
       for (let s = node.previousElementSibling; s !== null; s = s.previousElementSibling) k++;
       steps.unshift(`*:nth-child(${k})`);
@@ -107,7 +109,7 @@ export function pickInWorld(options: PickOptions, selector: typeof selectorOf): 
           (id) => document.querySelectorAll(`[id="${id}"]`).length === 1,
           options.selectorMax,
         ),
-        tag: target.tagName.toLowerCase(),
+        tag: /^[A-Za-z][A-Za-z0-9-]{0,40}$/.test(target.tagName) ? target.tagName.toLowerCase() : "*",
         text: said.replace(/\s+/g, " ").trim().slice(0, options.textMax),
         rect: { x: r.left, y: r.top, width: r.width, height: r.height },
       };
