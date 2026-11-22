@@ -4,6 +4,8 @@
 // WebContents, so the viewer is a WebContentsView of its own that main lays over the page's stage,
 // and the export window uses the same session.
 
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { BrowserWindow, type Session, session, type WebContents, WebContentsView } from "electron";
 import {
   ARTIFACT_CSP,
@@ -21,13 +23,22 @@ import {
   withinTime,
 } from "./artifact";
 
-/** The same preferences for every WebContents that shows an artifact: no preload, no Node. */
+/**
+ * The artifact's preload (src/preload/artifact.ts): no bridge and no IPC; it only takes WebRTC out
+ * of every frame, because Chromium resolves a TURN server's host name even through the dead proxy.
+ */
+const ARTIFACT_PRELOAD = join(dirname(fileURLToPath(import.meta.url)), "../preload/artifact.cjs");
+
+/** The same preferences for every WebContents that shows an artifact: no Node, no bridge. */
 const preferences = (artifactSession: Session): Electron.WebPreferences => ({
   session: artifactSession,
   sandbox: true,
   contextIsolation: true,
   nodeIntegration: false,
   webSecurity: true,
+  preload: ARTIFACT_PRELOAD,
+  // In child frames too: an artifact's srcdoc frame runs code of its own.
+  nodeIntegrationInSubFrames: true,
 });
 
 /**
