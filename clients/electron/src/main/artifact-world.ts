@@ -26,8 +26,10 @@ export interface SelectorNode {
 /**
  * A CSS selector for `element`: from the nearest ancestor with an id that is unique (by
  * `unique`) and plain (letters, digits, `-`, `_`), else from `body`, as `tag:nth-of-type(n)`
- * steps (without `:nth-of-type` for an only child of its type). Over `max` characters it keeps
- * the steps nearest to the element: still a selector, only a less precise one.
+ * steps (without `:nth-of-type` for an only child of its type). A tag name that is not a plain one
+ * (the HTML parser takes quotes, colons and any other text in a tag name) becomes
+ * `*:nth-child(k)`, so no page text gets into the selector. Over `max` characters it keeps the
+ * steps nearest to the element: still a selector, only a less precise one.
  */
 export function selectorOf(element: SelectorNode, unique: (id: string) => boolean, max: number): string {
   const steps: string[] = [];
@@ -41,6 +43,12 @@ export function selectorOf(element: SelectorNode, unique: (id: string) => boolea
     if (tag === "body") {
       steps.unshift("body");
       break;
+    }
+    if (!/^[a-z][a-z0-9-]{0,40}$/.test(tag)) {
+      let k = 1;
+      for (let s = node.previousElementSibling; s !== null; s = s.previousElementSibling) k++;
+      steps.unshift(`*:nth-child(${k})`);
+      continue;
     }
     let before = 0;
     let after = false;

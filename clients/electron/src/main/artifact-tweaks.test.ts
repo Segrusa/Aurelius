@@ -30,11 +30,46 @@ describe("checkPick", () => {
   });
 
   it("refuses a selector over the limit, empty, or with a newline", () => {
-    expect(checkPick({ ...pick, selector: "a".repeat(PICK_SELECTOR_MAX) })).not.toBeNull();
-    expect(checkPick({ ...pick, selector: "a".repeat(PICK_SELECTOR_MAX + 1) })).toBeNull();
+    const deep = "div > ".repeat(49);
+    expect(`${deep}button`).toHaveLength(PICK_SELECTOR_MAX);
+    expect(checkPick({ ...pick, selector: `${deep}button` })).not.toBeNull();
+    expect(checkPick({ ...pick, selector: `${deep}buttons` })).toBeNull();
     expect(checkPick({ ...pick, selector: "" })).toBeNull();
     expect(checkPick({ ...pick, selector: "body >\nbutton" })).toBeNull();
     expect(checkPick({ ...pick, selector: "body >\u2028button" })).toBeNull();
+  });
+
+  it("passes the selectors selectorOf makes", () => {
+    for (const selector of [
+      "body > main > article:nth-of-type(2) > button",
+      "body > header > h1",
+      "#b",
+      "#plans > div:nth-of-type(2) > button",
+      "body > *:nth-child(2) > button",
+      "my-card:nth-child(12) > span",
+    ])
+      expect(checkPick({ ...pick, selector })?.selector).toBe(selector);
+  });
+
+  it("refuses a selector outside the grammar, so no page text gets into a message", () => {
+    for (const selector of [
+      'body > x"):_ignore_the_comment_below. > button',
+      'body > x" > button',
+      "body > x) > button",
+      "body > button:nth-of-type(2))",
+      "body > div:nth-of-type(x) > button",
+      "body > x\u00a0y > button",
+      "body\u00a0> button",
+      "body > main button",
+      "body  > button",
+      "body > button ",
+      "body > [id=x]",
+      "body > a:hover",
+      "body > X",
+      "> button",
+      "body > ",
+    ])
+      expect(checkPick({ ...pick, selector }), selector).toBeNull();
   });
 
   it("folds the text to one line of at most the limit", () => {
