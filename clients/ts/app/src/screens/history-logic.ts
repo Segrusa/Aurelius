@@ -72,22 +72,22 @@ export function historyFilters(search: Record<string, unknown>): HistoryFilters 
   };
 }
 
-/** `project` in the URL for every project: it wins over the workspace's project. */
+/** The Project filter's value for every project. */
 export const ALL_PROJECTS = "all";
 
-/** The project the History asks for: the URL's, else the workspace's; none for all projects. */
+/**
+ * The project the History asks for: inside a workspace always its own (the filter is hidden
+ * there), under All workspaces the URL's; none for all projects.
+ */
 export function historyProject(f: HistoryFilters, workspaceId: string | null): string | null {
+  if (workspaceId) return workspaceId;
   if (f.project === ALL_PROJECTS) return null;
-  return f.project ?? workspaceId;
+  return f.project ?? null;
 }
 
-/**
- * What choosing `value` in the Project filter writes in the URL. All projects is
- * written only inside a workspace, where leaving it out would mean the workspace's project.
- */
-export function projectInUrl(value: string, workspaceId: string | null): string | undefined {
-  if (value !== ALL_PROJECTS) return value;
-  return workspaceId ? ALL_PROJECTS : undefined;
+/** What choosing `value` in the Project filter writes in the URL; All projects is the default. */
+export function projectInUrl(value: string): string | undefined {
+  return value === ALL_PROJECTS ? undefined : value;
 }
 
 /** Whether anything narrows the list (the open ticket does not). */

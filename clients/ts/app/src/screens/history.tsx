@@ -40,7 +40,7 @@ import {
   starterName,
   summaryShown,
 } from "./history-logic";
-import { failureOf, Hint, Loading, Page, Problem } from "./org-kit";
+import { failureOf, Loading, Page, Problem } from "./org-kit";
 import { ticketPlace } from "./ticket-session-logic";
 import { useTicketWrite } from "./tickets-kit";
 
@@ -269,7 +269,7 @@ export function HistoryScreen({ filters }: { filters: HistoryFilters }) {
   // Without sessions on the server, the History lists tickets whatever the URL says.
   const type: HistoryType | undefined = withSessions ? filters.type : undefined;
   const workspace = useWorkspace();
-  // The project in the URL, else the workspace's; "all" in the URL wins over the workspace.
+  // The workspace's project; under All workspaces the one chosen in the URL.
   const project = historyProject(filters, workspace.id);
   const history = useHistory(filters, project, supported && type !== "sessions");
   const sessionHistory = useSessionHistory(filters, project, withSessions && type !== "tickets");
@@ -344,16 +344,19 @@ export function HistoryScreen({ filters }: { filters: HistoryFilters }) {
                     ) : (
                       <>
                         <div {...stylex.props(styles.filters)}>
-                          <Selector
-                            label="Project"
-                            size="sm"
-                            value={project ?? ALL_PROJECTS}
-                            onChange={(v) => change({ project: projectInUrl(v, workspace.id) })}
-                            options={[
-                              { value: ALL_PROJECTS, label: "All projects" },
-                              ...(projects.data ?? []).map((p) => ({ value: p.id, label: p.name })),
-                            ]}
-                          />
+                          {/* A workspace is one project, so only All workspaces chooses one. */}
+                          {workspace.id ? null : (
+                            <Selector
+                              label="Project"
+                              size="sm"
+                              value={project ?? ALL_PROJECTS}
+                              onChange={(v) => change({ project: projectInUrl(v) })}
+                              options={[
+                                { value: ALL_PROJECTS, label: "All projects" },
+                                ...(projects.data ?? []).map((p) => ({ value: p.id, label: p.name })),
+                              ]}
+                            />
+                          )}
                           <Selector
                             label="Employee"
                             size="sm"
@@ -411,9 +414,6 @@ export function HistoryScreen({ filters }: { filters: HistoryFilters }) {
                             />
                           </div>
                         </div>
-                        {workspace.project && !filters.project ? (
-                          <Hint>Only {workspace.project.name}. Choose All projects to see everything.</Hint>
-                        ) : null}
                         {pending ? <Loading rows={6} /> : null}
                         {failed ? (
                           <div {...stylex.props(styles.failed)}>

@@ -48,17 +48,18 @@ describe("the History's filters in the URL", () => {
     expect(historyFilters({ period: "custom", from: "1 Nov", to: "2026-13-45" })).toEqual({ period: "custom" });
   });
 
-  it("lets All projects win over the workspace's project", () => {
-    // No project in the URL: the workspace's project, if one is chosen.
+  it("keeps a workspace to its own project and lets only All workspaces choose one", () => {
+    // Inside a workspace it is always that project, whatever the URL says.
     expect(historyProject({}, "w1")).toBe("w1");
+    expect(historyProject({ project: "p1" }, "w1")).toBe("w1");
+    expect(historyProject({ project: ALL_PROJECTS }, "w1")).toBe("w1");
+    // Under All workspaces the URL's project, else every project.
     expect(historyProject({}, null)).toBeNull();
-    // A project in the URL wins; "all" means every project, also inside a workspace.
-    expect(historyProject({ project: "p1" }, "w1")).toBe("p1");
-    expect(historyProject({ project: ALL_PROJECTS }, "w1")).toBeNull();
-    // Choosing All projects writes "all" only when a workspace would otherwise narrow it.
-    expect(projectInUrl(ALL_PROJECTS, "w1")).toBe(ALL_PROJECTS);
-    expect(projectInUrl(ALL_PROJECTS, null)).toBeUndefined();
-    expect(projectInUrl("p1", "w1")).toBe("p1");
+    expect(historyProject({ project: "p1" }, null)).toBe("p1");
+    expect(historyProject({ project: ALL_PROJECTS }, null)).toBeNull();
+    // All projects is the default there, so it leaves the URL.
+    expect(projectInUrl(ALL_PROJECTS)).toBeUndefined();
+    expect(projectInUrl("p1")).toBe("p1");
     expect(narrowed({ project: ALL_PROJECTS })).toBe(false);
   });
 
