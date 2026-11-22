@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/artifact/artifact_html.dart';
 import 'package:aurelius_mobile/features/artifact/artifact_versions.dart';
@@ -21,8 +19,6 @@ MessageView keptBy(String id, int ordinal, List<FileRef> files, {int at = 0, int
       text: 'Saved design/pricing.html',
       uploads: const [],
     );
-
-const nonce = '00112233445566778899aabbccddeeff';
 
 void main() {
   group('versions', () {
@@ -91,60 +87,31 @@ void main() {
     });
   });
 
-  group('html with nonce', () {
-    test('a nonce is 128 bits of hex, and two are not the same', () {
-      final a = artifactNonce();
-      expect(a, matches(RegExp(r'^[0-9a-f]{32}$')));
-      expect(artifactNonce(), isNot(a));
-      expect(artifactNonce(Random(1)), artifactNonce(Random(1)));
-    });
-
-    test('every script of the artifact gets the nonce, in any case and spacing', () {
-      final doc = artifactDocument('<script>a()</script><SCRIPT>b()</SCRIPT><ScRiPt\n>c()</ScRiPt>', nonce);
-      expect('<script nonce=$nonce>a()'.allMatches(doc).length, 1);
-      expect(doc, contains('<script nonce=$nonce>b()'));
-      expect(doc, contains('<script nonce=$nonce\n>c()'));
-      expect(RegExp(r'<script(?! nonce=)', caseSensitive: false).hasMatch(doc), isFalse);
-    });
-
-    test('a script with its own nonce gets ours too, so it has two and is refused', () {
-      expect(artifactDocument('<script nonce="x">a()</script>', nonce), contains('<script nonce=$nonce nonce="x">'));
-    });
-
-    test('the policies, without sandbox, and the WebRTC prelude come first', () {
-      final doc = artifactDocument('<p>hi</p>', nonce);
-      expect(doc, startsWith('<meta http-equiv="Content-Security-Policy" content="$artifactCsp; script-src \'nonce-$nonce\'; script-src-attr \'unsafe-inline\'">'));
-      expect(doc, contains('<meta http-equiv="Content-Security-Policy" content="script-src \'unsafe-inline\'">'));
+  group('html without scripts', () {
+    test('the policy, without sandbox and with no scripts, comes before the artifact', () {
+      final doc = artifactDocument('<p>hi</p>');
+      expect(doc, startsWith('<meta http-equiv="Content-Security-Policy" content="$artifactCsp">'));
+      expect(artifactCsp, contains("script-src 'none'"));
+      expect(artifactCsp, contains("connect-src 'none'"));
+      expect(artifactCsp, contains("frame-src 'none'"));
+      expect(artifactCsp, isNot(contains('nonce')));
+      expect(RegExp(r"script-src[^;]*'unsafe-inline'").hasMatch(artifactCsp), isFalse);
       expect(doc, contains('<meta http-equiv="x-dns-prefetch-control" content="off">'));
+      expect(doc, contains('<meta name="referrer" content="no-referrer">'));
       expect(doc.indexOf('x-dns-prefetch-control'), lessThan(doc.indexOf('<p>hi</p>')));
       expect(doc, isNot(contains('sandbox')));
-      expect(doc, isNot(contains("script-src 'self'")));
-      expect(doc, contains("connect-src 'none'"));
-      expect(doc, contains("frame-src 'none'"));
-      final prelude = doc.indexOf('<script nonce=$nonce>(function(){');
-      expect(prelude, greaterThan(0));
-      expect(prelude, lessThan(doc.indexOf('<p>hi</p>')));
-      for (final name in artifactWebRtcNames) {
-        expect(doc, contains("'$name'"));
-      }
+      expect(doc, isNot(contains('<script')));
     });
 
-    test('the first policy has no unsafe-inline for script elements: javascript: URLs stay refused', () {
-      final first = artifactScriptCsp(nonce);
-      expect(first, contains("script-src 'nonce-$nonce';"));
-      expect(RegExp(r"script-src [^;]*'unsafe-inline'").hasMatch(first), isFalse);
+    test('the artifact itself is left as it is, scripts too (the webview does not run them)', () {
+      const html = '<p>one</p><script>a()</script>';
+      expect(artifactDocument(html), endsWith(html));
     });
 
     test('the policy goes after the doctype, so the page keeps its standards mode', () {
-      final doc = artifactDocument('﻿  <!DOCTYPE html>\n<html><head><title>x</title></head></html>', nonce);
+      final doc = artifactDocument('﻿  <!DOCTYPE html>\n<html><head><title>x</title></head></html>');
       expect(doc, startsWith('﻿  <!DOCTYPE html><meta http-equiv="Content-Security-Policy"'));
       expect(doc.indexOf('<html>'), greaterThan(doc.indexOf('Content-Security-Policy')));
-    });
-
-    test('a nonce that is not hex is refused, so nothing gets into the policy through it', () {
-      for (final bad in ['', 'abc', "00112233445566778899aabbccddeeff' 'unsafe-inline", 'ABCDEF0123456789ABCD', '0011223344556677"><script>']) {
-        expect(() => artifactDocument('<p></p>', bad), throwsArgumentError, reason: bad);
-      }
     });
   });
 }

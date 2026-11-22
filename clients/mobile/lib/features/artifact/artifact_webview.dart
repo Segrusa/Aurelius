@@ -11,8 +11,17 @@ import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 bool artifactNavigationAllowed({required String url, required bool isMainFrame, required bool expectingLoad}) =>
     expectingLoad && isMainFrame && url == 'about:blank';
 
-/// The platform webview an artifact runs in: JavaScript on, nothing else.
-/// There is no JavaScript channel: the page never hears from the artifact.
+/// What every artifact webview gets before it loads anything, on both
+/// platforms: JavaScript off and [navigation] as the judge of every navigation.
+/// Called without awaiting, so both reach the platform before the first load.
+@visibleForTesting
+void artifactBaseline(WebViewController controller, NavigationDelegate navigation) => controller
+  ..setJavaScriptMode(JavaScriptMode.disabled)
+  ..setNavigationDelegate(navigation);
+
+/// The platform webview an artifact is shown in: JavaScript off, so the
+/// artifact is static markup and no script (WebRTC, frames, links it builds)
+/// can reach the network. Nor is there a JavaScript channel.
 class ArtifactWebView extends StatefulWidget {
   const ArtifactWebView({super.key, required this.document, required this.load, required this.width});
 
@@ -40,16 +49,18 @@ class _ArtifactWebViewState extends State<ArtifactWebView> {
     final params = platform is WebKitWebViewPlatform
         ? WebKitWebViewControllerCreationParams(mediaTypesRequiringUserAction: const {PlaybackMediaTypes.audio, PlaybackMediaTypes.video}, javaScriptCanOpenWindowsAutomatically: false)
         : const PlatformWebViewControllerCreationParams();
-    final controller = WebViewController.fromPlatformCreationParams(params, onPermissionRequest: (request) => request.deny())
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
+    final controller = WebViewController.fromPlatformCreationParams(params, onPermissionRequest: (request) => request.deny());
+    artifactBaseline(
+      controller,
+      NavigationDelegate(
         onNavigationRequest: (request) {
           final allowed = artifactNavigationAllowed(url: request.url, isMainFrame: request.isMainFrame, expectingLoad: _expectingLoad);
           if (allowed) _expectingLoad = false;
           return allowed ? NavigationDecision.navigate : NavigationDecision.prevent;
         },
         onPageFinished: (_) => _expectingLoad = false,
-      ));
+      ),
+    );
     final native = controller.platform;
     if (native is AndroidWebViewController) {
       native

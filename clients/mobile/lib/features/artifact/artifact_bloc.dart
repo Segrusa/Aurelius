@@ -33,7 +33,7 @@ class ArtifactViewportSelected extends ArtifactEvent {
   final ArtifactViewport viewport;
 }
 
-/// Load the shown version again from the start, with a fresh nonce.
+/// Load the shown version again from the start.
 class ArtifactReloaded extends ArtifactEvent {
   const ArtifactReloaded();
 }
@@ -64,7 +64,7 @@ class ArtifactState extends Equatable {
   /// The shown version's HTML as the server keeps it (for Share HTML).
   final String? html;
 
-  /// What the webview loads: [html] with the policy and a nonce of this load.
+  /// What the webview loads: [html] with the policy in front of it.
   final String? document;
 
   /// Why the shown version could not be fetched.
@@ -84,10 +84,9 @@ class ArtifactState extends Equatable {
 /// One artifact opened from a kept file: its versions in the conversation, the
 /// shown one fetched with `file.get` and wrapped for the webview.
 class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
-  ArtifactBloc(this._repository, {required FileRef file, required List<MessageView> messages, required int openedAtMs, String Function()? nonce})
+  ArtifactBloc(this._repository, {required FileRef file, required List<MessageView> messages, required int openedAtMs})
       : _file = file,
         _openedAtMs = openedAtMs,
-        _nonce = nonce ?? artifactNonce,
         super(ArtifactState(versions: versionsFor(messages, file, openedAtMs), fileId: file.id)) {
     on<ArtifactMessagesChanged>(_messages);
     on<ArtifactVersionSelected>((e, emit) => _show(e.fileId, emit), transformer: restartable());
@@ -100,7 +99,6 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
   final AureliusRepository _repository;
   final FileRef _file;
   final int _openedAtMs;
-  final String Function() _nonce;
 
   /// The HTML of versions already fetched, by file id: a kept file never changes.
   final _fetched = <String, String>{};
@@ -127,7 +125,7 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
     if (fetch) _fetched.remove(fileId);
     final kept = _fetched[fileId];
     if (kept != null) {
-      emit(_with(fileId: fileId, html: kept, document: artifactDocument(kept, _nonce()), load: state.load + 1, clear: true));
+      emit(_with(fileId: fileId, html: kept, document: artifactDocument(kept), load: state.load + 1, clear: true));
       return;
     }
     emit(_with(fileId: fileId, load: state.load + 1, clear: true));
@@ -135,7 +133,7 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
       final html = utf8.decode(await _repository.file(fileId), allowMalformed: true);
       _fetched[fileId] = html;
       if (state.fileId != fileId) return;
-      emit(_with(html: html, document: artifactDocument(html, _nonce())));
+      emit(_with(html: html, document: artifactDocument(html)));
     } on ProtocolException catch (e) {
       emit(_with(error: e.message));
     } on DisconnectedException catch (e) {
@@ -148,6 +146,6 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
   void _reload(ArtifactReloaded event, Emitter<ArtifactState> emit) {
     final html = state.html;
     if (html == null) return;
-    emit(_with(document: artifactDocument(html, _nonce()), load: state.load + 1));
+    emit(_with(document: artifactDocument(html), load: state.load + 1));
   }
 }

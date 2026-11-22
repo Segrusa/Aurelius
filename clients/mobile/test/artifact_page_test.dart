@@ -6,12 +6,14 @@ import 'package:aurelius_mobile/core/net/protocol.dart';
 import 'package:aurelius_mobile/data/discussion.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/artifact/artifact_bloc.dart';
+import 'package:aurelius_mobile/features/artifact/artifact_html.dart';
 import 'package:aurelius_mobile/features/artifact/artifact_page.dart';
 import 'package:aurelius_mobile/features/artifact/artifact_webview.dart';
 import 'package:aurelius_mobile/features/board/ticket_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import 'support/builders.dart';
 import 'support/tickets.dart';
@@ -49,8 +51,16 @@ Uint8List bytesOf(String s) => Uint8List.fromList(utf8.encode(s));
 /// What the stage was asked to show, in place of the platform webview.
 final shown = <ArtifactState>[];
 
+class _MockController extends Mock implements WebViewController {}
+
+class _MockNavigation extends Mock implements NavigationDelegate {}
+
 void main() {
-  setUpAll(() => registerFallbackValue(<String, dynamic>{}));
+  setUpAll(() {
+    registerFallbackValue(<String, dynamic>{});
+    registerFallbackValue(JavaScriptMode.disabled);
+    registerFallbackValue(_MockNavigation());
+  });
 
   setUp(() {
     shown.clear();
@@ -62,12 +72,9 @@ void main() {
 
   group('ArtifactBloc', () {
     late MockRepository repo;
-    var nonces = 0;
-    String nextNonce() => (++nonces).toRadixString(16).padLeft(32, '0');
 
     setUp(() {
       repo = MockRepository();
-      nonces = 0;
       when(() => repo.file('f1')).thenAnswer((_) async => bytesOf('<p>one</p><script>a()</script>'));
       when(() => repo.file('f2')).thenAnswer((_) async => bytesOf('<p>two</p>'));
     });
@@ -77,7 +84,6 @@ void main() {
           file: html(fileId),
           messages: [answerWith('m1', 1, [html('f1')], at: 10), answerWith('m2', 2, [html('f2')], at: 20)],
           openedAtMs: 0,
-          nonce: nextNonce,
         );
 
     test('opens on the version tapped, with the versions newest first', () async {
@@ -87,19 +93,16 @@ void main() {
       expect([for (final v in ready.versions) (v.version, v.file.id)], [(2, 'f2'), (1, 'f1')]);
       expect(ready.current.version, 1);
       expect(ready.html, '<p>one</p><script>a()</script>');
-      final nonce = '1'.padLeft(32, '0');
-      expect(ready.document, contains("script-src 'nonce-$nonce'"));
-      expect(ready.document, contains('<script nonce=$nonce>a()'));
+      expect(ready.document, artifactDocument('<p>one</p><script>a()</script>'));
     });
 
-    test('Reload loads the same HTML again with a fresh nonce, without asking the server again', () async {
+    test('Reload loads the same HTML again, without asking the server again', () async {
       final bloc = open('f1');
       addTearDown(bloc.close);
       final first = await stateWhere(bloc, (s) => s.document != null);
       bloc.add(const ArtifactReloaded());
       final again = await stateWhere(bloc, (s) => s.load > first.load);
-      expect(again.document, isNot(first.document));
-      expect(again.document, contains("'nonce-${'2'.padLeft(32, '0')}'"));
+      expect(again.document, first.document);
       verify(() => repo.file('f1')).called(1);
     });
 
@@ -150,6 +153,19 @@ void main() {
       for (final url in ['https://example.invalid/', 'http://127.0.0.1:9/', 'javascript:alert(1)', 'data:text/html,x', 'file:///etc/hosts', 'about:srcdoc']) {
         expect(artifactNavigationAllowed(url: url, isMainFrame: true, expectingLoad: true), isFalse, reason: url);
       }
+    });
+
+    test('the webview gets JavaScript off and the navigation delegate, before anything else', () {
+      final controller = _MockController();
+      final navigation = _MockNavigation();
+      when(() => controller.setJavaScriptMode(any())).thenAnswer((_) async {});
+      when(() => controller.setNavigationDelegate(any())).thenAnswer((_) async {});
+      artifactBaseline(controller, navigation);
+      verifyInOrder([
+        () => controller.setJavaScriptMode(JavaScriptMode.disabled),
+        () => controller.setNavigationDelegate(navigation),
+      ]);
+      verifyNoMoreInteractions(controller);
     });
   });
 
