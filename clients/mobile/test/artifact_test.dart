@@ -138,6 +138,42 @@ void main() {
       }
     });
 
+    // SEC5 M1: an earlier rel=' or rel=" must not swallow a later, real rel.
+    test('a rel quote earlier in a comment does not hide a later preconnect', () {
+      expect(artifactQuietRels("<!-- rel=' --><link rel=preconnect href=//a.invalid><p>it's</p>"), "<!-- rel=' --><link $quiet href=//a.invalid><p>it's</p>");
+    });
+
+    test('a rel double quote earlier in a comment does not hide a later preconnect', () {
+      expect(artifactQuietRels('<!-- rel=" --><link rel=preconnect href=//a.invalid><p title="t"></p>'), '<!-- rel=" --><link $quiet href=//a.invalid><p title="t"></p>');
+    });
+
+    test('a rel quote earlier in the text does not hide a later preconnect', () {
+      expect(artifactQuietRels("<p> rel='</p><link rel=preconnect href=//a.invalid><p>don't</p>"), "<p> rel='</p><link $quiet href=//a.invalid><p>don't</p>");
+    });
+
+    test('a rel quote inside another attribute does not hide the real rel after it', () {
+      expect(artifactQuietRels("<link title=\"a rel='b\" rel=preconnect href=//a.invalid><b class='c'>x</b>"), "<link title=\"a rel='b\" $quiet href=//a.invalid><b class='c'>x</b>");
+    });
+
+    test('a rel quote earlier in a comment does not hide a later quoted preconnect', () {
+      expect(artifactQuietRels("<!-- rel=' --><link rel=\"preconnect\" href=\"//a.invalid\"><i id='z'></i>"), "<!-- rel=' --><link $quiet href=\"//a.invalid\"><i id='z'></i>");
+    });
+
+    test('a hint inside a hinted value goes with the outer one, also where it runs past it', () {
+      expect(artifactQuietRels('<p title="x" rel="preconnect rel=prefetch">'), '<p title="x" $quiet>');
+      expect(artifactQuietRels("<a rel='preconnect rel=\"prefetch' b\" href=y>"), '<a $quiet href=y>');
+    });
+
+    test('after the rewrite no hint is left, and the check says so', () {
+      const html = "<!-- rel=' --><link rel=preconnect href=//a.invalid><p>it's</p>";
+      expect(artifactHasHints(html), isTrue);
+      expect(artifactHasHints(artifactQuietRels(html)), isFalse);
+    });
+
+    test('a document whose hint the rewrite missed is not made at all', () {
+      expect(() => artifactDocument('<link rel=preconnect href=//a.invalid>', quiet: (html) => html), throwsA(isA<ArtifactHintLeft>()));
+    });
+
     test('the document the webview loads has its hints made quiet', () {
       final doc = artifactDocument('<!doctype html><link rel=preconnect href=https://art-preconnect.c79.invalid>');
       expect(doc, contains('<link $quiet href=https://art-preconnect.c79.invalid>'));

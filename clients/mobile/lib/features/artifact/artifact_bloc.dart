@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:bloc_concurrency/bloc_concurrency.dart';
 import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/net/protocol.dart';
@@ -84,8 +85,10 @@ class ArtifactState extends Equatable {
 /// One artifact opened from a kept file: its versions in the conversation, the
 /// shown one fetched with `file.get` and wrapped for the webview.
 class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
-  ArtifactBloc(this._repository, {required FileRef file, required List<MessageView> messages, required int openedAtMs})
+  ArtifactBloc(this._repository,
+      {required FileRef file, required List<MessageView> messages, required int openedAtMs, @visibleForTesting String Function(String html) document = artifactDocument})
       : _file = file,
+        _document = document,
         _openedAtMs = openedAtMs,
         super(ArtifactState(versions: versionsFor(messages, file, openedAtMs), fileId: file.id)) {
     on<ArtifactMessagesChanged>(_messages);
@@ -99,6 +102,7 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
   final AureliusRepository _repository;
   final FileRef _file;
   final int _openedAtMs;
+  final String Function(String html) _document;
 
   /// The HTML of versions already fetched, by file id: a kept file never changes.
   final _fetched = <String, String>{};
@@ -125,7 +129,8 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
     if (fetch) _fetched.remove(fileId);
     final kept = _fetched[fileId];
     if (kept != null) {
-      emit(_with(fileId: fileId, html: kept, document: artifactDocument(kept), load: state.load + 1, clear: true));
+      emit(_with(fileId: fileId, html: kept, load: state.load + 1, clear: true));
+      _wrap(kept, emit);
       return;
     }
     emit(_with(fileId: fileId, load: state.load + 1, clear: true));
@@ -133,7 +138,8 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
       final html = utf8.decode(await _repository.file(fileId), allowMalformed: true);
       _fetched[fileId] = html;
       if (state.fileId != fileId) return;
-      emit(_with(html: html, document: artifactDocument(html)));
+      emit(_with(html: html));
+      _wrap(html, emit);
     } on ProtocolException catch (e) {
       emit(_with(error: e.message));
     } on DisconnectedException catch (e) {
@@ -146,6 +152,20 @@ class ArtifactBloc extends Bloc<ArtifactEvent, ArtifactState> {
   void _reload(ArtifactReloaded event, Emitter<ArtifactState> emit) {
     final html = state.html;
     if (html == null) return;
-    emit(_with(document: artifactDocument(html), load: state.load + 1));
+    emit(_with(load: state.load + 1));
+    _wrap(html, emit);
+  }
+
+  /// Shows [html] wrapped for the webview, or fails closed with an error (and
+  /// Try again) when a resource hint survived the rewrite.
+  void _wrap(String html, Emitter<ArtifactState> emit) {
+    String? document;
+    String? error;
+    try {
+      document = _document(html);
+    } on ArtifactHintLeft {
+      error = ArtifactHintLeft.message;
+    }
+    emit(ArtifactState(versions: state.versions, fileId: state.fileId, viewport: state.viewport, html: html, document: document, error: error, load: state.load));
   }
 }

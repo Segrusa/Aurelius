@@ -130,6 +130,24 @@ void main() {
       verify(() => repo.file('f1')).called(2);
     });
 
+    test('a hint the rewrite missed is not shown: an error with Try again, also after Try again', () async {
+      when(() => repo.file('f1')).thenAnswer((_) async => bytesOf('<link rel=preconnect href=//art.c79.invalid>'));
+      final bloc = ArtifactBloc(repo,
+          file: html('f1'), messages: [answerWith('m1', 1, [html('f1')], at: 10)], openedAtMs: 0, document: (h) => artifactDocument(h, quiet: (x) => x));
+      addTearDown(bloc.close);
+      final failed = await stateWhere(bloc, (s) => s.error != null);
+      expect(failed.error, ArtifactHintLeft.message);
+      expect(failed.document, isNull);
+      bloc.add(const ArtifactRetried());
+      final again = await stateWhere(bloc, (s) => s.load > failed.load && s.error != null);
+      expect(again.document, isNull);
+      verify(() => repo.file('f1')).called(2);
+      bloc.add(const ArtifactReloaded());
+      final reloaded = await stateWhere(bloc, (s) => s.load > again.load);
+      expect(reloaded.document, isNull);
+      expect(reloaded.error, ArtifactHintLeft.message);
+    });
+
     test('a new version in the conversation joins the list at the top', () async {
       final bloc = open('f2');
       addTearDown(bloc.close);
