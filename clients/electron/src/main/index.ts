@@ -34,6 +34,16 @@ import {
   shell,
   type WebContents,
 } from "electron";
+import {
+  ARTIFACT_CSP,
+  ARTIFACT_SCHEME,
+  type ArtifactExport,
+  ArtifactStore,
+  captureHeight,
+  exportName,
+  exportWidth,
+  subframeMayNavigate,
+} from "./artifact";
 import { connectOrStart, daemonProgram, installDir, startDaemon } from "./daemon";
 import { appendLinkLog, linkLine, PageWatch } from "./link-life";
 import { linkInArguments, linkOf } from "./links";
@@ -58,7 +68,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const SITE = join(here, "../renderer");
 const ORIGIN = "app://aurelius";
 const CSP =
-  "default-src 'self'; style-src 'self' 'sha256-K63bSR1LetGtaTb/2K6EIsLtf78i2//qEkOoBZCNcBQ=' 'sha256-0KUt1GaAbAKiIczMgRikTmhynZoYPcw+0bnDtqcsh14='; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+  "default-src 'self'; style-src 'self' 'sha256-K63bSR1LetGtaTb/2K6EIsLtf78i2//qEkOoBZCNcBQ=' 'sha256-0KUt1GaAbAKiIczMgRikTmhynZoYPcw+0bnDtqcsh14='; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'; frame-src artifact:";
 const DEV_URL = (!app.isPackaged && process.env.ELECTRON_RENDERER_URL) || undefined;
 const ENVIRONMENT =
   process.env.AURELIUS_ENV === "production" || (app.isPackaged && process.env.AURELIUS_ENV !== "dev")
@@ -98,7 +108,12 @@ const remoteFetch: typeof fetch = (input, init) => net.fetch(input instanceof UR
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  // No fetch, no CORS, no service workers: an artifact only ever loads as a document.
+  { scheme: ARTIFACT_SCHEME, privileges: { standard: true, secure: true } },
 ]);
+
+/** The artifacts the pages handed over, in memory only (artifact.ts). */
+const artifacts = new ArtifactStore();
 
 function serveSite(): void {
   protocol.handle("app", async (request) => {
@@ -111,6 +126,104 @@ function serveSite(): void {
     headers.set("Content-Security-Policy", CSP);
     headers.set("X-Content-Type-Options", "nosniff");
     return new Response(response.body, { status: response.status, headers });
+  });
+}
+
+/** Every artifact response carries its own policy; what is not held is not found. */
+function serveArtifactScheme(): void {
+  protocol.handle(ARTIFACT_SCHEME, (request) => {
+    const html = artifacts.html(request.url);
+    const headers = new Headers({
+      "Content-Security-Policy": ARTIFACT_CSP,
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "no-store",
+    });
+    if (html === null || request.method !== "GET") return new Response("Not found", { status: 404, headers });
+    headers.set("Content-Type", "text/html; charset=utf-8");
+    return new Response(html, { status: 200, headers });
+  });
+}
+
+/** Keeps every frame of a window on the artifact it loaded, and opens nothing from one. */
+function guardSubframes(contents: WebContents): void {
+  contents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame) return;
+    if (!subframeMayNavigate(details.frame?.url ?? "", details.url, (url) => artifacts.has(url))) {
+      details.preventDefault();
+    }
+  });
+}
+
+/**
+ * Loads an artifact in a window nobody sees, sandboxed and without preload, to print or capture it.
+ * It may not go anywhere else or open anything; it is always closed afterwards.
+ */
+async function renderArtifact<R>(url: string, width: number, make: (window: BrowserWindow) => Promise<R>): Promise<R> {
+  const window = new BrowserWindow({
+    show: false,
+    width,
+    height: 900,
+    useContentSize: true,
+    backgroundColor: "#FFFFFF",
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true },
+  });
+  const contents = window.webContents;
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.on("will-navigate", (event) => event.preventDefault());
+  contents.on("will-redirect", (event) => event.preventDefault());
+  guardSubframes(contents);
+  try {
+    await window.loadURL(url);
+    return await make(window);
+  } finally {
+    window.destroy();
+  }
+}
+
+function serveArtifacts(): void {
+  const watched = new Set<number>();
+  handle("artifact:serve", (sender, html: unknown) => {
+    if (typeof html !== "string") throw new Error("Not an artifact.");
+    // A window that closes or reloads lets go of all it asked for.
+    if (!watched.has(sender.id)) {
+      watched.add(sender.id);
+      const id = sender.id;
+      sender.on("did-navigate", () => artifacts.releaseAll(id));
+      sender.once("destroyed", () => {
+        artifacts.releaseAll(id);
+        watched.delete(id);
+      });
+    }
+    return artifacts.serve(sender.id, html);
+  });
+  handle("artifact:release", (sender, url: unknown) => {
+    if (typeof url === "string") artifacts.release(sender.id, url);
+  });
+  handle("artifact:export", async (sender, url: unknown, kind: unknown, name: unknown, width: unknown) => {
+    if (typeof url !== "string" || !artifacts.has(url)) throw new Error("This artifact is not open any more.");
+    if (kind !== "pdf" && kind !== "png") throw new Error("Unknown format.");
+    const format: ArtifactExport = kind;
+    const window = BrowserWindow.fromWebContents(sender);
+    const options = {
+      defaultPath: join(app.getPath("downloads"), exportName(typeof name === "string" ? name : "", format)),
+      filters: [format === "pdf" ? { name: "PDF", extensions: ["pdf"] } : { name: "PNG image", extensions: ["png"] }],
+    };
+    const chosen = await (window ? dialog.showSaveDialog(window, options) : dialog.showSaveDialog(options));
+    if (chosen.canceled || !chosen.filePath) return null;
+    const bytes = await renderArtifact(url, exportWidth(width), async (hidden) => {
+      if (format === "pdf") return hidden.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
+      // The whole page, not only the first screen. The number comes from the artifact: checked.
+      const [w, h] = hidden.getContentSize() as [number, number];
+      const tall = captureHeight(
+        await hidden.webContents.executeJavaScript("document.documentElement.scrollHeight", true),
+        h,
+      );
+      hidden.setContentSize(w, tall);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return (await hidden.webContents.capturePage({ x: 0, y: 0, width: w, height: tall })).toPNG();
+    });
+    writeFileSync(chosen.filePath, bytes);
+    return chosen.filePath;
   });
 }
 
@@ -557,8 +670,11 @@ function makeWindow(extra: Electron.BrowserWindowConstructorOptions, path: strin
     },
   });
   window.once("ready-to-show", () => window.show());
-  // A link in a report or a message opens in the browser; only a web address leaves the app.
-  window.webContents.setWindowOpenHandler(({ url }) => {
+  guardSubframes(window.webContents);
+  // A link in a report or a message opens in the browser; only a web address leaves the app. An
+  // artifact's frame has no popups (sandbox), and never reaches this with a link of its own.
+  window.webContents.setWindowOpenHandler(({ url, referrer }) => {
+    if (referrer.url.startsWith(`${ARTIFACT_SCHEME}:`)) return { action: "deny" };
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
@@ -666,6 +782,8 @@ void app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   recordVersion();
   serveSite();
+  serveArtifactScheme();
+  serveArtifacts();
   serveLinks();
   serveOsLinks();
   serveSessions();

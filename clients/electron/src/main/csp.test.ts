@@ -39,6 +39,30 @@ async function readHashes(): Promise<string[]> {
   return [hash(slideRulesCss()), hash(css)];
 }
 
+describe("the desktop app's Content-Security-Policy", () => {
+  const source = readFileSync(resolve(repo, "clients/electron/src/main/index.ts"), "utf8");
+  const policy = /const CSP =\s*"([^"]+)"/.exec(source)?.[1] ?? "";
+  const directives = policy.split(";").map((d) => d.trim());
+
+  it("frames only artifacts, and gained nothing else for them", () => {
+    expect(directives.map((d) => d.split(" ")[0])).toEqual([
+      "default-src",
+      "style-src",
+      "img-src",
+      "object-src",
+      "base-uri",
+      "frame-ancestors",
+      "form-action",
+      "frame-src",
+    ]);
+    expect(directives).toContain("frame-src artifact:");
+    expect(directives).toContain("default-src 'self'");
+    expect(directives).toContain("img-src 'self' data: blob:");
+    expect(directives).toContain("frame-ancestors 'none'");
+    expect(directives).toContain("form-action 'none'");
+  });
+});
+
 describe("the style hashes in the Content-Security-Policy", () => {
   for (const file of ["clients/electron/src/main/index.ts", "crates/remote-gateway/src/web.rs"]) {
     it(`match what the installed Astryx writes: ${file}`, async () => {
