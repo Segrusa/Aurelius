@@ -26,6 +26,9 @@ Future<Uri?> Function(String name, Uint8List bytes) artifactSave =
 Widget Function(ArtifactState state) artifactStage =
     (state) => ArtifactWebView(document: state.document!, load: state.load, width: state.viewport.width);
 
+/// The note under the width toggle: the phone shows an artifact without its scripts.
+const artifactNoScriptsNote = 'Preview without scripts. Open it on your computer to try it out.';
+
 /// An HTML file a run kept with its message, opened as a live design: its
 /// versions in the conversation, three widths, Reload, Share HTML and Ask for
 /// changes (one message in the conversation it came from).
@@ -113,6 +116,12 @@ class ArtifactPage extends StatelessWidget {
                       ),
                     ],
                   ),
+                ),
+                // The webview runs no scripts (artifact_webview.dart): say so, so a
+                // button that does nothing is not taken for a broken design.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(artifactNoScriptsNote, style: TextStyle(fontSize: 13, color: Tokens.label2)),
                 ),
                 Expanded(
                   child: Container(

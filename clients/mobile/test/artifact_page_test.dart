@@ -214,6 +214,7 @@ void main() {
         expect(find.text(w), findsOneWidget);
       }
       expect(find.text('Ask for changes'), findsOneWidget);
+      expect(find.text('Preview without scripts. Open it on your computer to try it out.'), findsOneWidget);
       expect(find.text('stage f2 load 1 Mobile'), findsOneWidget);
       // What the webview gets: the artifact after its doctype, behind the policy.
       expect(shown.last.document, startsWith('<!doctype html><meta http-equiv="Content-Security-Policy"'));
