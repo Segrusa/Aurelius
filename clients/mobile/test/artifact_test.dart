@@ -87,6 +87,64 @@ void main() {
     });
   });
 
+  group('resource hints', () {
+    const quiet = 'rel="nofollow"';
+
+    test('every hint keyword becomes nofollow, in double, single and no quotes', () {
+      for (final rel in artifactHintRels) {
+        for (final attr in ['rel="$rel"', "rel='$rel'", 'rel=$rel']) {
+          expect(artifactQuietRels('<link $attr href="https://art.c79.invalid/">'), '<link $quiet href="https://art.c79.invalid/">', reason: attr);
+        }
+      }
+    });
+
+    test('in any case, with spacing around the equals sign', () {
+      expect(artifactQuietRels('<LINK REL="PreConnect" HREF="//a.invalid">'), '<LINK $quiet HREF="//a.invalid">');
+      expect(artifactQuietRels('<link Rel = DNS-Prefetch href=//a.invalid>'), '<link $quiet href=//a.invalid>');
+      expect(artifactQuietRels("<link\nrel\t=\t'MODULEPRELOAD'>"), '<link\n$quiet>');
+    });
+
+    test('a hint among several tokens is enough', () {
+      expect(artifactQuietRels('<link rel="stylesheet preload" href="a.css">'), '<link $quiet href="a.css">');
+      expect(artifactQuietRels('<link rel="icon\tprefetch" href="a">'), '<link $quiet href="a">');
+      expect(artifactQuietRels("<a rel='noopener  prerender' href='//b.invalid'>x</a>"), '<a $quiet href=\'//b.invalid\'>x</a>');
+    });
+
+    test('rel on an anchor counts as on a link', () {
+      expect(artifactQuietRels('<a href="//b.invalid" rel=prefetch>x</a>'), '<a href="//b.invalid" $quiet>x</a>');
+      expect(artifactQuietRels('<area rel="preconnect" href="//b.invalid">'), '<area $quiet href="//b.invalid">');
+    });
+
+    test('also right after a slash or the quote of the attribute before it', () {
+      expect(artifactQuietRels('<link/rel=preconnect href=//a.invalid>'), '<link/$quiet href=//a.invalid>');
+      expect(artifactQuietRels('<link href="//a.invalid"rel="preconnect">'), '<link href="//a.invalid"$quiet>');
+    });
+
+    test('a character reference or an unclosed quote cannot hide a keyword', () {
+      expect(artifactQuietRels('<link rel="pre&#99;onnect" href="//a.invalid">'), '<link $quiet href="//a.invalid">');
+      expect(artifactQuietRels('<link rel="preconnect href=//a.invalid>'), '<link $quiet href=//a.invalid>');
+    });
+
+    test('other rel values and other attributes are left as they are', () {
+      for (final html in [
+        '<link rel="stylesheet" href="a.css">',
+        '<a rel="noopener noreferrer" href="#x">x</a>',
+        '<link rel=icon href=data:,>',
+        '<div data-rel="preconnect">x</div>',
+        '<p>Use preconnect sparingly.</p>',
+        '<link rel="preconnected">',
+      ]) {
+        expect(artifactQuietRels(html), html, reason: html);
+      }
+    });
+
+    test('the document the webview loads has its hints made quiet', () {
+      final doc = artifactDocument('<!doctype html><link rel=preconnect href=https://art-preconnect.c79.invalid>');
+      expect(doc, contains('<link $quiet href=https://art-preconnect.c79.invalid>'));
+      expect(doc, isNot(contains('rel=preconnect')));
+    });
+  });
+
   group('html without scripts', () {
     test('the policy, without sandbox and with no scripts, comes before the artifact', () {
       final doc = artifactDocument('<p>hi</p>');
