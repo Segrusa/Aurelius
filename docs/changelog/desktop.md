@@ -9,6 +9,21 @@ The server and the desktop app are released separately. They work together
 as long as their protocol major matches. Releases up to v0.6.0 were combined:
 see [CHANGELOG.md](../../CHANGELOG.md).
 
+## v0.9.5
+
+Needs server v0.9.5 for work sessions, the Code tab and the History; with an older server those parts stay hidden.
+
+- **Work sessions replace quick tasks.** New session starts an employee in a project's folder (optionally in its own worktree), with model, effort and mode chips in the composer; it opens on the last start's choices. You can leave the choice of employee to the dispatcher, whose choice shows as a card. A session gets a generated title after its first answer, and an orange dot marks a finished answer you have not opened.
+- **One prompt box.** New session, a session and a ticket share one prompt box that takes photos, files and folders. An answer shows the steps it took between its text, and "Compacting context…" while Claude Code compacts; the threshold is in Settings → Advanced.
+- **A ticket is a session.** Every way to a ticket opens it as its own session screen (`/ticket/N`), with its properties in a card under a full-width head. The ticket page shows what every task does now, its plan and an Activity filter, and Activity shows what its tasks read, edited and ran, the live call and the run's findings. A ticket started from New session gets a generated title, and a long description folds at 3 lines. A task's run opens as the employee chat, as a session does.
+- **Code tab** (ticket #77). A project's worktrees and branches, why each one stays, Fetch, merge, and removing worktrees and merged branches.
+- **History.** Work sessions with an AI summary next to Done tickets.
+- **New sidebar.** A workspace rail with the Inbox bell above your account, Sessions and Tickets as two sections that fold and scroll on their own (Running, Today, Earlier; Done tickets marked Done), the open row stays visible in a folded section, and the user menu sits in the sidebar. Employees and Knowledge moved into Settings under Company; the Settings icon is a cog.
+- **The bell is the Inbox.** The Inbox page is gone. Your answers and plan decisions read as a card, and a subagent opens as a read-only log of every step it took.
+- **Status bar.** The server, its CPU and memory and your usage; its activity rows open their work.
+- **Chatting with an employee and the Team chat are gone,** with the chat popout. Old chat links open the ticket or the Inbox.
+- **Steadier connection.** The link stays when a page change is blocked, and after a dropped connection the app asks the server whether a write arrived before calling it failed.
+
 ## v0.9.4
 
 The first published build of these changes (v0.9.3 was tagged, but its Windows package could not be made).
