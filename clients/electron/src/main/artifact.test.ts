@@ -6,7 +6,9 @@ import {
   ARTIFACTS_MAX,
   ArtifactStore,
   artifactMayNavigate,
+  artifactNonce,
   artifactRequestAllowed,
+  artifactResponse,
   artifactToken,
   captureHeight,
   EXPORT_HEIGHT_MAX,
@@ -25,17 +27,51 @@ const counting = () => {
 };
 
 describe("the artifact policy", () => {
-  const directives = new Map(
-    ARTIFACT_CSP.split(";").map((d) => {
-      const [name = "", ...values] = d.trim().split(/\s+/);
-      return [name, values.join(" ")] as const;
-    }),
-  );
+  const nonce = "0123456789abcdef0123456789abcdef";
+  const parse = (csp: string) =>
+    new Map(
+      csp.split(";").map((d) => {
+        const [name = "", ...values] = d.trim().split(/\s+/);
+        return [name, values.join(" ")] as const;
+      }),
+    );
+  const page =
+    '<!doctype html><SCRIPT>a()</SCRIPT><body><script type="module">b()</script>' +
+    '<script\nsrc="x.js"></script><button onclick="c()">c</button><scripts-list></scripts-list>';
+  const served = artifactResponse(page, nonce);
+  const directives = parse(served.csp);
 
-  it("lets inline code run and blocks every way out", () => {
+  it("runs only scripts with this response's nonce and on…= attributes, never javascript: URLs", () => {
+    expect(directives.get("script-src")).toBe(`'nonce-${nonce}'`);
+    expect(directives.get("script-src")).not.toContain("unsafe-inline");
+    expect(directives.get("script-src-attr")).toBe("'unsafe-inline'");
+    expect(served.csp.match(/script-src /g)).toHaveLength(1);
+  });
+
+  it("gives every <script element the nonce and leaves the rest of the page alone", () => {
+    const tags = served.body.match(/<script\b[^>]*>/gi) ?? [];
+    expect(tags).toHaveLength(3);
+    for (const tag of tags) expect(tag).toMatch(new RegExp(`^<script nonce=${nonce}[\\s>]`, "i"));
+    expect(served.body.replaceAll(` nonce=${nonce}`, "")).toBe(page.replace("<SCRIPT", "<script"));
+    expect(served.body).toContain("<scripts-list>");
+  });
+
+  it("keeps the rest of the policy and accepts only a hex nonce", () => {
+    expect(served.csp.startsWith(`${ARTIFACT_CSP}; `)).toBe(true);
+    expect(parse(ARTIFACT_CSP).has("script-src")).toBe(false);
+    expect(() => artifactResponse(page, "x' 'unsafe-inline")).toThrow();
+    expect(() => artifactResponse(page, "")).toThrow();
+  });
+
+  it("makes a fresh nonce for every response", () => {
+    const nonces = new Set(Array.from({ length: 50 }, () => artifactNonce()));
+    expect(nonces.size).toBe(50);
+    for (const n of nonces) expect(n).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it("blocks every way out", () => {
     expect(directives.get("sandbox")).toBe("allow-scripts");
     expect(directives.get("default-src")).toBe("'none'");
-    expect(directives.get("script-src")).toBe("'unsafe-inline'");
     expect(directives.get("style-src")).toBe("'unsafe-inline'");
     expect(directives.get("connect-src")).toBe("'none'");
     expect(directives.get("form-action")).toBe("'none'");

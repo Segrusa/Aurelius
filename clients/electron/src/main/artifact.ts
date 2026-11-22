@@ -22,12 +22,39 @@ export const ARTIFACT_PROXY = {
 } as const;
 
 /**
- * The policy of every artifact response. Inline code runs; nothing can be fetched or sent. `sandbox`
- * makes it a sandbox of its own also where it is not in the viewer's frame (the export window):
- * an opaque origin without storage, popups, forms or navigation of the top.
+ * The policy of every artifact response, apart from its scripts (see artifactResponse). Nothing can
+ * be fetched or sent. `sandbox` makes it a sandbox of its own also where it is not in the viewer's
+ * frame (the export window): an opaque origin without storage, popups, forms or navigation of the top.
  */
 export const ARTIFACT_CSP =
-  "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
+  "sandbox allow-scripts; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'";
+
+/** What main sends for one artifact request: the HTML with its scripts marked, and the policy. */
+export interface ArtifactResponse {
+  body: string;
+  csp: string;
+}
+
+/**
+ * The artifact with every `<script` element given `nonce`, and a policy that runs only those and
+ * `on…=` attributes. Without `'unsafe-inline'` for script elements Chromium refuses `javascript:`
+ * URLs, and a `javascript:` frame is an about:blank document the artifact preload does not reach:
+ * it got WebRTC back and resolved a TURN host name the artifact chose (Sentinel, AUR-T79-SEC2 N1).
+ * The nonce must be fresh for every response, so a page cannot know it before it is served.
+ */
+export function artifactResponse(html: string, nonce: string): ArtifactResponse {
+  if (!/^[0-9a-f]{16,}$/.test(nonce)) throw new Error("An artifact nonce is hex.");
+  return {
+    // Hex needs no quotes. A nonce the artifact wrote itself comes later in the tag; the first wins.
+    body: html.replace(/<script\b/gi, `<script nonce=${nonce}`),
+    csp: `${ARTIFACT_CSP}; script-src 'nonce-${nonce}'; script-src-attr 'unsafe-inline'`,
+  };
+}
+
+/** A fresh nonce for one artifact response: 128 bits, hex. */
+export function artifactNonce(): string {
+  return randomBytes(16).toString("hex");
+}
 
 /** How many artifacts main holds at once for one window; that window's oldest goes first. */
 export const ARTIFACTS_MAX = 16;

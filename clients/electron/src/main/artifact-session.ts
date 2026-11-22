@@ -14,7 +14,9 @@ import {
   ARTIFACT_SCHEME,
   type ArtifactStore,
   artifactMayNavigate,
+  artifactNonce,
   artifactRequestAllowed,
+  artifactResponse,
   EXPORT_HEIGHT_DEFAULT,
   EXPORT_TIMEOUT_MESSAGE,
   EXPORT_TIMEOUT_MS,
@@ -56,8 +58,11 @@ export async function artifactSession(store: ArtifactStore): Promise<Session> {
       "Cache-Control": "no-store",
     });
     if (html === null || request.method !== "GET") return new Response("Not found", { status: 404, headers });
+    // A fresh nonce for every response, a reload too.
+    const { body, csp } = artifactResponse(html, artifactNonce());
+    headers.set("Content-Security-Policy", csp);
     headers.set("Content-Type", "text/html; charset=utf-8");
-    return new Response(html, { status: 200, headers });
+    return new Response(body, { status: 200, headers });
   });
   artifactSession.webRequest.onBeforeRequest((details, callback) =>
     callback({ cancel: !artifactRequestAllowed(details.url) }),
