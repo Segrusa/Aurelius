@@ -2,8 +2,12 @@ import type { FileRef, MessageView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
   artifactVersions,
+  DIALOG_SELECTOR,
   htmlOf,
   isArtifact,
+  OVERLAY_SELECTOR,
+  type Overlay,
+  overlaysOver,
   stageBounds,
   versionLabel,
   versionOf,
@@ -156,6 +160,43 @@ describe("the frame", () => {
     const frame = { left: 330, top: 100, right: 720, bottom: 700 };
     const sidebarMenu = { left: 0, top: 0, right: 300, bottom: 90 };
     expect(stageBounds(frame, stage, window, [sidebarMenu])).toEqual({ x: 330, y: 100, width: 390, height: 600 });
+  });
+
+  it("steps aside for a toast, a confirm or another dialog that opened after it", () => {
+    const frame = { left: 330, top: 100, right: 720, bottom: 700 };
+    const over = (o: Partial<Overlay>): Overlay => ({
+      rect: { left: 400, top: 300, right: 700, bottom: 400, width: 300, height: 100 },
+      visible: true,
+      isDialog: false,
+      openBefore: false,
+      holdsStage: false,
+      ...o,
+    });
+    const toast = over({});
+    const confirm = over({ isDialog: true });
+    for (const shown of [toast, confirm]) expect(stageBounds(frame, stage, window, overlaysOver([shown]))).toBeNull();
+  });
+
+  it("stays for its own dialog, a dialog it opened from, and what is hidden or empty", () => {
+    const frame = { left: 330, top: 100, right: 720, bottom: 700 };
+    const all = { left: 0, top: 0, right: 1440, bottom: 900, width: 1440, height: 900 };
+    const under: Overlay[] = [
+      { rect: all, visible: true, isDialog: true, openBefore: true, holdsStage: true },
+      { rect: all, visible: true, isDialog: true, openBefore: false, holdsStage: true },
+      { rect: all, visible: true, isDialog: true, openBefore: true, holdsStage: false },
+      { rect: all, visible: false, isDialog: false, openBefore: false, holdsStage: false },
+      { rect: { ...all, right: 0, width: 0 }, visible: true, isDialog: false, openBefore: false, holdsStage: false },
+    ];
+    expect(overlaysOver(under)).toEqual([]);
+    expect(stageBounds(frame, stage, window, overlaysOver(under))).toEqual({ x: 330, y: 100, width: 390, height: 600 });
+    // A menu inside its own dialog (the version list) still counts.
+    expect(overlaysOver([{ ...under[0], isDialog: false } as Overlay])).toHaveLength(1);
+  });
+
+  it("looks for menus, toasts and dialogs", () => {
+    for (const part of ['[role="menu"]', '[role="listbox"]', "[data-toast-id]", "dialog[open]", '[role="alertdialog"]'])
+      expect(OVERLAY_SELECTOR).toContain(part);
+    expect(DIALOG_SELECTOR).toContain('[role="alertdialog"]');
   });
 
   it("has a width per viewport", () => {

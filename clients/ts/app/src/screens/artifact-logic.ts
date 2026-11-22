@@ -81,10 +81,43 @@ interface Edges {
 }
 
 /**
+ * What of the page can lie over the artifact view: menus and lists, toasts (Astryx gives each a
+ * `data-toast-id`) and dialogs. The view lies above the whole page, so it would hide them, and the
+ * artifact could draw a lookalike in their place.
+ */
+export const OVERLAY_SELECTOR =
+  '[role="listbox"], [role="menu"], [data-toast-id], dialog[open], [role="dialog"], [role="alertdialog"]';
+/** Which overlays are dialogs: only those that opened after the view count (see overlaysOver). */
+export const DIALOG_SELECTOR = 'dialog, [role="dialog"], [role="alertdialog"]';
+
+/** One element that matched OVERLAY_SELECTOR, as the viewer measured it. */
+export interface Overlay {
+  rect: Edges & { width: number; height: number };
+  visible: boolean;
+  isDialog: boolean;
+  /** Open before the view was shown: the viewer's own dialog, or one it was opened from. */
+  openBefore: boolean;
+  /** Holds the stage: the viewer's own dialog, which lies under the view. */
+  holdsStage: boolean;
+}
+
+/**
+ * The rectangles that make the view step aside: every visible menu, list and toast, and every
+ * visible dialog that opened after the view (a confirm, another dialog). Closed menus and toasts
+ * stay in the document, hidden, and do not count.
+ */
+export function overlaysOver(overlays: readonly Overlay[]): Edges[] {
+  return overlays
+    .filter((o) => o.visible && o.rect.width > 0 && o.rect.height > 0)
+    .filter((o) => !(o.isDialog && (o.openBefore || o.holdsStage)))
+    .map((o) => o.rect);
+}
+
+/**
  * Where the desktop lays the artifact view: the frame box (the chosen width, centred in the stage)
  * cut to the stage and the window, in CSS pixels. Null hides the view: when nothing of it is in
- * sight, or an open menu of the page lies over it, which the view would cover (it lies above the
- * page). `menus` are the rectangles of the menus that are open.
+ * sight, or an overlay of the page lies over it, which the view would cover (it lies above the
+ * page). `menus` are the rectangles of those overlays (overlaysOver).
  */
 export function stageBounds(
   frame: Edges,

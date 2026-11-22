@@ -1,7 +1,8 @@
 // A design artifact, live: the HTML a run kept. It does not run in this page: the desktop lays a
 // view of its own over the stage, in a session without network (clients/electron/src/main/
 // artifact-session.ts). Its scripts run; it reaches nothing outside it. The page only says where
-// the stage is. The view lies above the page, so a toast that falls over the stage is under it.
+// the stage is. The view lies above the page, so it steps aside while a menu, a toast or a later
+// dialog lies over the stage.
 
 import { Button } from "@astryxdesign/core/Button";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
@@ -17,7 +18,10 @@ import { saveBlob } from "../ui/download";
 import { toast } from "../ui/toast";
 import {
   type ArtifactVersion,
+  DIALOG_SELECTOR,
   htmlOf,
+  OVERLAY_SELECTOR,
+  overlaysOver,
   stageBounds,
   VIEWPORTS,
   type Viewport,
@@ -78,15 +82,20 @@ function useServed(artifacts: Artifacts, html: string | undefined): string | nul
   return url;
 }
 
-/**
- * The open menus and lists of the page: the view, which lies above the page, would cover them.
- * Closed menus stay in the document, hidden, and do not count.
- */
-const openMenus = () =>
-  [...document.querySelectorAll('[role="listbox"], [role="menu"]')]
-    .filter((menu) => menu.checkVisibility())
-    .map((menu) => menu.getBoundingClientRect())
-    .filter((r) => r.width > 0 && r.height > 0);
+/** The dialogs open now; the ones open when the view comes are under it and never count. */
+const openDialogs = () => new Set([...document.querySelectorAll(DIALOG_SELECTOR)].filter((d) => d.checkVisibility()));
+
+/** The page's overlays that the view, which lies above the page, would cover (overlaysOver). */
+const overlaysOf = (stage: Element, before: ReadonlySet<Element>) =>
+  overlaysOver(
+    [...document.querySelectorAll(OVERLAY_SELECTOR)].map((element) => ({
+      rect: element.getBoundingClientRect(),
+      visible: element.checkVisibility(),
+      isDialog: element.matches(DIALOG_SELECTOR),
+      openBefore: before.has(element),
+      holdsStage: element.contains(stage),
+    })),
+  );
 
 /**
  * Shows the served artifact in the desktop's view over `frame`, and keeps the view on it: every
@@ -102,12 +111,13 @@ function useArtifactView(artifacts: Artifacts, url: string | null, reloads: numb
     const box = frame.current;
     const around = stage.current;
     if (url === null || box === null || around === null) return;
+    const before = openDialogs();
     const measure = () =>
       stageBounds(
         box.getBoundingClientRect(),
         around.getBoundingClientRect(),
         { width: window.innerWidth, height: window.innerHeight },
-        openMenus(),
+        overlaysOf(around, before),
       );
     let sent = "";
     let shown = false;
