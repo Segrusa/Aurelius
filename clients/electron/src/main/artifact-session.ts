@@ -21,7 +21,9 @@ import {
   EXPORT_TIMEOUT_MESSAGE,
   EXPORT_TIMEOUT_MS,
   EXPORT_WORLD_ID,
+  resultWithin,
   viewBounds,
+  WORLD_CALL_MS,
   withinTime,
 } from "./artifact";
 import {
@@ -233,8 +235,16 @@ export class ArtifactViews {
     return shown === undefined || shown.view.webContents.isDestroyed() ? null : shown;
   }
 
-  /** Runs `code` in the tools world of a view; a page that went or a renderer that failed gives null. */
-  private async run(shown: Shown, code: string): Promise<unknown> {
+  /**
+   * Runs `code` in the tools world of a view; a page that went, a renderer that failed or a call
+   * over WORLD_CALL_MS gives null. Only a pick (`limited` false) waits as long as it takes.
+   */
+  private run(shown: Shown, code: string, limited = true): Promise<unknown> {
+    const work = this.runNow(shown, code);
+    return limited ? resultWithin(work, WORLD_CALL_MS) : work;
+  }
+
+  private async runNow(shown: Shown, code: string): Promise<unknown> {
     const contents = shown.view.webContents;
     // A view the page just showed may still load its document; the tools work on the loaded one.
     if (contents.isLoadingMainFrame())
@@ -261,6 +271,7 @@ export class ArtifactViews {
     const picked = this.run(
       shown,
       worldCall(pickInWorld, { selectorMax: PICK_SELECTOR_MAX, textMax: PICK_TEXT_MAX }, selectorOf),
+      false,
     );
     const raw = await Promise.race([picked, stopped]);
     return checkPick(raw);
@@ -294,7 +305,7 @@ export class ArtifactViews {
 
   /**
    * Sets one tweak in `owner`'s view: only a variable main read from it, with a value tweakValue
-   * takes. Gives the value set, or null when it was refused.
+   * takes. Gives the value set, or null when it was refused or the world did not set it in time.
    */
   async tweak(owner: WebContents, name: unknown, value: unknown): Promise<string | null> {
     const shown = this.own(owner);
@@ -302,8 +313,8 @@ export class ArtifactViews {
     if (shown === null || tweak === undefined) return null;
     const checked = tweakValue(tweak, value);
     if (checked === null) return null;
-    await this.run(shown, worldCall(setTweaksInWorld, [[tweak.var, checked]]));
-    return checked;
+    const set = await this.run(shown, worldCall(setTweaksInWorld, [[tweak.var, checked]]));
+    return set === true ? checked : null;
   }
 
   /** Puts back what the tweaks set in `owner`'s view. */

@@ -46,7 +46,7 @@ Comments and tweaks need to read the artifact's DOM and change it a little. The 
 
 - Main runs **its own code** in an isolated world of the viewer's view (`TOOLS_WORLD_ID` 1080, `executeJavaScriptInIsolatedWorld`, `artifact-world.ts`). That world shares the DOM, not the page's JavaScript: the artifact cannot reach its globals, and a prototype the artifact replaces (`EventTarget.prototype.addEventListener`) is the page's own, not the world's. Each function is sent as its source with JSON arguments (`worldCall`); nothing of the page or the app is spliced in as code.
 - Main only reads the promise's result, and checks it before the page gets it (`artifact-tweaks.ts`). The page that shows the viewer asks main over its own IPC (`artifact:pick`, `artifact:pick-stop`, `artifact:tweaks`, `artifact:tweak`, `artifact:tweaks-reset`, checked with `fromOurPage` like every handler); main finds the view that page showed, never another window's.
-- Main waits for the view's document to finish loading before it runs anything there.
+- Main waits for the view's document to finish loading before it runs anything there. Every world call except a pick, that wait included, gets `WORLD_CALL_MS` (5 s) and then gives null, so a page that hangs its renderer leaves no tools call pending (AUR-T79-SEC4 m-1). A pick waits for the board member and ends with `stopPick`.
 
 ## B1: Comment on an element
 - The **Comment** toggle opens a side panel beside the stage (not over the view) and starts comment mode: main runs `pickInWorld`. It outlines the element under the pointer with a box of its own (fixed, `pointer-events: none`, on the document element) and resolves with the element that is clicked: `{ selector, tag, text, rect }`.

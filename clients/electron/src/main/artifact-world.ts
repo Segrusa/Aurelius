@@ -168,9 +168,9 @@ export function valuesInWorld(names: string[]): string[] {
 
 /**
  * Sets custom properties on the document element; the first time a property is set, its own inline
- * value is kept, for a reset.
+ * value is kept, for a reset. True once they are set, so main can tell a call that never ended.
  */
-export function setTweaksInWorld(values: [string, string][]): void {
+export function setTweaksInWorld(values: [string, string][]): boolean {
   const scope = globalThis as unknown as { __aureliusTweaks?: Map<string, string> };
   scope.__aureliusTweaks ??= new Map();
   const style = document.documentElement.style;
@@ -178,6 +178,7 @@ export function setTweaksInWorld(values: [string, string][]): void {
     if (!scope.__aureliusTweaks.has(name)) scope.__aureliusTweaks.set(name, style.getPropertyValue(name));
     style.setProperty(name, value);
   }
+  return true;
 }
 
 /** Puts back what every tweak set: the inline value the document element had, or none. */
