@@ -115,6 +115,8 @@ void main() {
       final doc = artifactDocument('<p>hi</p>', nonce);
       expect(doc, startsWith('<meta http-equiv="Content-Security-Policy" content="$artifactCsp; script-src \'nonce-$nonce\'; script-src-attr \'unsafe-inline\'">'));
       expect(doc, contains('<meta http-equiv="Content-Security-Policy" content="script-src \'unsafe-inline\'">'));
+      expect(doc, contains('<meta http-equiv="x-dns-prefetch-control" content="off">'));
+      expect(doc.indexOf('x-dns-prefetch-control'), lessThan(doc.indexOf('<p>hi</p>')));
       expect(doc, isNot(contains('sandbox')));
       expect(doc, isNot(contains("script-src 'self'")));
       expect(doc, contains("connect-src 'none'"));

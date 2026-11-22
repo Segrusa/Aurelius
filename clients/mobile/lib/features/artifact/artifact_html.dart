@@ -68,6 +68,8 @@ String artifactDocument(String html, String nonce) {
   if (!_hex.hasMatch(nonce)) throw ArgumentError.value(nonce, 'nonce', 'An artifact nonce is hex.');
   final head = '<meta http-equiv="Content-Security-Policy" content="${artifactScriptCsp(nonce)}">'
       '<meta http-equiv="Content-Security-Policy" content="$artifactInlineOnlyCsp">'
+      // CSP has no directive for DNS prefetch; this switch cannot be turned back on.
+      '<meta http-equiv="x-dns-prefetch-control" content="off">'
       '<meta name="referrer" content="no-referrer">'
       '${artifactPrelude(nonce)}';
   final body = html.replaceAll(_scriptTag, '<script nonce=$nonce');
