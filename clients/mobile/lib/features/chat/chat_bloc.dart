@@ -47,12 +47,16 @@ class _LiveTicked extends ChatEvent {
 }
 
 class ChatMessageSent extends ChatEvent {
-  const ChatMessageSent(this.text, {this.now = false});
+  const ChatMessageSent(this.text, {this.now = false, this.withAttachments = true});
 
   final String text;
 
   /// "Send now": interrupt the running answer instead of waiting for it.
   final bool now;
+
+  /// `false` for a message made outside the composer (an artifact's "Ask for
+  /// changes"): the composer's images and files stay where they are.
+  final bool withAttachments;
 }
 
 /// Resend an unsent message with its original idempotency key (applied at most once).
@@ -651,9 +655,11 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   Future<void> _send(ChatMessageSent event, Emitter<ChatState> emit) async {
     final text = event.text.trim();
-    if (text.isEmpty && state.images.isEmpty && state.files.isEmpty) return;
-    final unsent = UnsentMessage(localId: _uuid.v4(), idempotencyKey: _uuid.v7(), text: text, images: state.images, files: state.files, interrupt: event.now);
-    emit(state.copyWith(unsent: [...state.unsent, unsent], images: const [], files: const []));
+    final images = event.withAttachments ? state.images : const <PendingImage>[];
+    final files = event.withAttachments ? state.files : const <PendingFile>[];
+    if (text.isEmpty && images.isEmpty && files.isEmpty) return;
+    final unsent = UnsentMessage(localId: _uuid.v4(), idempotencyKey: _uuid.v7(), text: text, images: images, files: files, interrupt: event.now);
+    emit(event.withAttachments ? state.copyWith(unsent: [...state.unsent, unsent], images: const [], files: const []) : state.copyWith(unsent: [...state.unsent, unsent]));
     // Stop first, so the running answer never answers this message; the new
     // answer starts once it has stopped and sees what it had written. The PC
     // also stops it with the message itself (`interrupt`), even when this view

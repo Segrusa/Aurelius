@@ -319,6 +319,28 @@ void main() {
       },
     );
 
+    blocTest<ChatBloc, ChatState>(
+      "a message from outside the composer (an artifact's Ask for changes) leaves the composer's image waiting",
+      build: () {
+        when(() => repo.upload(any(), any())).thenAnswer((_) async => const UploadedFile(path: r'C:\inbox\shot.png', name: 'shot.png', byteLength: 10));
+        when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
+            .thenAnswer((_) async => receipt(managerSent('thread-2')));
+        when(() => repo.messages('thread-2')).thenAnswer((_) async => snapshotOf('thread-2'));
+        return ChatBloc(repo, conversationId: 'thread-2', employeeId: 'mgr');
+      },
+      act: (bloc) async {
+        bloc.add(ChatImageAdded(File('shot.png'), 'shot.png'));
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        bloc.add(const ChatMessageSent('Feedback on pricing.html v2: bigger CTA', withAttachments: false));
+      },
+      wait: const Duration(milliseconds: 150),
+      verify: (bloc) {
+        expect(bloc.state.images.single.path, r'C:\inbox\shot.png', reason: 'still in the composer');
+        final command = verify(() => repo.write(captureAny(), idempotencyKey: any(named: 'idempotencyKey'), retry: any(named: 'retry'))).captured.single as Map<String, dynamic>;
+        expect(params(command), {'employee_id': 'mgr', 'text': 'Feedback on pricing.html v2: bigger CTA', 'conversation_id': 'thread-2', 'images': [], 'files': []});
+      },
+    );
+
     group('files for an employee', () {
       late File doc;
 

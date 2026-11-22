@@ -8,6 +8,8 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import '../../core/theme/tokens.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/views.dart';
+import '../artifact/artifact_page.dart';
+import '../artifact/artifact_versions.dart';
 import 'chat_view.dart';
 import '../markdown/links.dart';
 import '../markdown/markdown_page.dart' show markdownLinkTap;
@@ -30,9 +32,13 @@ class MessageFiles extends StatelessWidget {
         children: [
           for (final f in files)
             ActionChip(
-              avatar: Icon(f.isImage ? Icons.image_outlined : Icons.description_outlined, size: 18, color: Tokens.accentText),
+              avatar: Icon(isArtifact(f) ? Icons.web_outlined : f.isImage ? Icons.image_outlined : Icons.description_outlined, size: 18, color: Tokens.accentText),
               label: Text('${f.name} · ${f.sizeLabel}', overflow: TextOverflow.ellipsis),
-              onPressed: () => FilePage.open(context, f),
+              // An HTML file opens as a live artifact; Ask for changes only
+              // where the chat can be written to.
+              onPressed: () => isArtifact(f)
+                  ? ArtifactPage.open(context, f, canAsk: context.findAncestorWidgetOfExactType<ChatView>()?.composer ?? false)
+                  : FilePage.open(context, f),
             ),
         ],
       ),
