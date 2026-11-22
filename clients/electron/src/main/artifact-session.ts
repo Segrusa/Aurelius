@@ -24,6 +24,29 @@ import {
   viewBounds,
   withinTime,
 } from "./artifact";
+import {
+  type ArtifactPick,
+  type ArtifactTweak,
+  checkPick,
+  currentValue,
+  PICK_SELECTOR_MAX,
+  PICK_TEXT_MAX,
+  parseTweaks,
+  TWEAKS_ELEMENT_ID,
+  TWEAKS_JSON_MAX,
+  tweakValue,
+} from "./artifact-tweaks";
+import {
+  pickInWorld,
+  readTweaksInWorld,
+  resetTweaksInWorld,
+  selectorOf,
+  setTweaksInWorld,
+  stopPickInWorld,
+  TOOLS_WORLD_ID,
+  valuesInWorld,
+  worldCall,
+} from "./artifact-world";
 
 /**
  * The artifact's preload (src/preload/artifact.ts): no bridge and no IPC; it only takes WebRTC out
@@ -93,36 +116,59 @@ export function guardArtifact(contents: WebContents, own: string): void {
   });
 }
 
+/**
+ * Which of a page's views: the viewer's own, and the older version beside it while it compares.
+ * Comments and tweaks work only in the viewer's own.
+ */
+export type ViewSlot = "main" | "compare";
+
+/** The slot a page named; anything else is the viewer's own. */
+export function viewSlot(raw: unknown): ViewSlot {
+  return raw === "compare" ? "compare" : "main";
+}
+
+/** A tweak as the page gets it: what main checked, with its value now. */
+export type ShownTweak = ArtifactTweak & { value: string };
+
 interface Shown {
   view: WebContentsView;
   window: BrowserWindow;
   detach: () => void;
+  /** Ends a pick that is waiting, with null. */
+  stopPick: (() => void) | null;
+  /** The tweaks main read from this view's artifact: the only variables it sets in it. */
+  tweaks: ArtifactTweak[];
 }
 
+const key = (ownerId: number, slot: ViewSlot) => `${ownerId}/${slot}`;
+const SLOTS: readonly ViewSlot[] = ["main", "compare"];
+
 /**
- * The viewers that are open, at most one per page (the WebContents that asked). A view follows only
- * the page that showed it, and goes as soon as that page navigates, reloads, crashes or closes.
+ * The viewers that are open, at most one per page (the WebContents that asked) and slot. A view
+ * follows only the page that showed it, and goes as soon as that page navigates, reloads, crashes
+ * or closes.
  */
 export class ArtifactViews {
-  private readonly shown = new Map<number, Shown>();
-  /** Counts the shows of each page, so a show that a later show or hide overtook does nothing. */
-  private readonly asked = new Map<number, number>();
+  private readonly shown = new Map<string, Shown>();
+  /** Counts the shows of each page and slot, so a show that a later show or hide overtook does nothing. */
+  private readonly asked = new Map<string, number>();
 
   constructor(
     private readonly store: ArtifactStore,
     private readonly ready: Promise<Session>,
   ) {}
 
-  /** Lays a new view with `url` over `owner`'s stage; a view the page showed before goes first. */
-  async show(owner: WebContents, url: string, bounds: unknown): Promise<void> {
+  /** Lays a new view with `url` over `owner`'s stage; a view the page showed before in that slot goes first. */
+  async show(owner: WebContents, url: string, bounds: unknown, slot: ViewSlot = "main"): Promise<void> {
     if (!this.store.owns(owner.id, url)) throw new Error("This artifact is not open any more.");
     const window = BrowserWindow.fromWebContents(owner);
     if (window === null) throw new Error("No window to show this artifact in.");
-    this.hide(owner.id);
-    const ask = (this.asked.get(owner.id) ?? 0) + 1;
-    this.asked.set(owner.id, ask);
+    this.hide(owner.id, slot);
+    const at = key(owner.id, slot);
+    const ask = (this.asked.get(at) ?? 0) + 1;
+    this.asked.set(at, ask);
     const artifactSession = await this.ready;
-    if (this.asked.get(owner.id) !== ask || window.isDestroyed() || owner.isDestroyed()) return;
+    if (this.asked.get(at) !== ask || window.isDestroyed() || owner.isDestroyed()) return;
 
     const view = new WebContentsView({ webPreferences: preferences(artifactSession) });
     // An artifact paints its own page; without a background of its own it is a white one.
@@ -141,15 +187,15 @@ export class ArtifactViews {
       owner.off("destroyed", gone);
       window.off("closed", gone);
     };
-    this.shown.set(owner.id, { view, window, detach });
+    this.shown.set(at, { view, window, detach, stopPick: null, tweaks: [] });
     window.contentView.addChildView(view);
-    this.place(owner, bounds);
+    this.place(owner, bounds, slot);
     view.webContents.loadURL(url).catch(() => undefined);
   }
 
   /** Moves `owner`'s view to where its stage is now; null bounds hide it. Only its own view. */
-  place(owner: WebContents, bounds: unknown): void {
-    const shown = this.shown.get(owner.id);
+  place(owner: WebContents, bounds: unknown, slot: ViewSlot = "main"): void {
+    const shown = this.shown.get(key(owner.id, slot));
     if (shown === undefined || shown.window.isDestroyed()) return;
     const content = shown.window.getContentBounds();
     const placed = viewBounds(bounds, owner.getZoomFactor(), content);
@@ -161,20 +207,101 @@ export class ArtifactViews {
     shown.view.setVisible(true);
   }
 
-  /** Takes `owner`'s view away and ends its renderer. */
-  hide(ownerId: number): void {
-    this.asked.set(ownerId, (this.asked.get(ownerId) ?? 0) + 1);
-    const shown = this.shown.get(ownerId);
-    if (shown === undefined) return;
-    this.shown.delete(ownerId);
-    shown.detach();
-    if (!shown.window.isDestroyed()) shown.window.contentView.removeChildView(shown.view);
-    if (!shown.view.webContents.isDestroyed()) shown.view.webContents.close();
+  /** Takes `owner`'s view in `slot` away (all of its views without one) and ends its renderer. */
+  hide(ownerId: number, slot?: ViewSlot): void {
+    for (const one of slot === undefined ? SLOTS : [slot]) {
+      const at = key(ownerId, one);
+      this.asked.set(at, (this.asked.get(at) ?? 0) + 1);
+      const shown = this.shown.get(at);
+      if (shown === undefined) continue;
+      this.shown.delete(at);
+      shown.stopPick?.();
+      shown.detach();
+      if (!shown.window.isDestroyed()) shown.window.contentView.removeChildView(shown.view);
+      if (!shown.view.webContents.isDestroyed()) shown.view.webContents.close();
+    }
   }
 
   /** How many views are open: for the probe and for a check that none stays behind. */
   get size(): number {
     return this.shown.size;
+  }
+
+  /** The viewer's own view of `owner`, when it is there and loaded far enough to run code in. */
+  private own(owner: WebContents): Shown | null {
+    const shown = this.shown.get(key(owner.id, "main"));
+    return shown === undefined || shown.view.webContents.isDestroyed() ? null : shown;
+  }
+
+  /** Runs `code` in the tools world of a view; a page that went or a renderer that failed gives null. */
+  private run(shown: Shown, code: string): Promise<unknown> {
+    return shown.view.webContents.executeJavaScriptInIsolatedWorld(TOOLS_WORLD_ID, [{ code }]).catch(() => null);
+  }
+
+  /**
+   * Comment mode: waits for the board member to click an element in `owner`'s view, and gives it
+   * as checked by checkPick. Null when the mode was stopped, the view went, or the result is not a
+   * pick. A new pick ends one that is still waiting.
+   */
+  async pick(owner: WebContents): Promise<ArtifactPick | null> {
+    const shown = this.own(owner);
+    if (shown === null) return null;
+    shown.stopPick?.();
+    const stopped = new Promise<null>((resolve) => {
+      shown.stopPick = () => resolve(null);
+    });
+    const picked = this.run(
+      shown,
+      worldCall(pickInWorld, { selectorMax: PICK_SELECTOR_MAX, textMax: PICK_TEXT_MAX }, selectorOf),
+    );
+    const raw = await Promise.race([picked, stopped]);
+    return checkPick(raw);
+  }
+
+  /** Ends comment mode in `owner`'s view: the outline goes, and a waiting pick gives null. */
+  async stopPick(owner: WebContents): Promise<void> {
+    const shown = this.own(owner);
+    if (shown === null) return;
+    shown.stopPick?.();
+    shown.stopPick = null;
+    await this.run(shown, worldCall(stopPickInWorld));
+  }
+
+  /** The tweaks the artifact in `owner`'s view declares, checked, each with its computed value. */
+  async tweaks(owner: WebContents): Promise<ShownTweak[]> {
+    const shown = this.own(owner);
+    if (shown === null) return [];
+    const tweaks = parseTweaks(await this.run(shown, worldCall(readTweaksInWorld, TWEAKS_ELEMENT_ID, TWEAKS_JSON_MAX)));
+    shown.tweaks = tweaks;
+    if (tweaks.length === 0) return [];
+    const values = await this.run(
+      shown,
+      worldCall(
+        valuesInWorld,
+        tweaks.map((t) => t.var),
+      ),
+    );
+    return tweaks.map((t, i) => ({ ...t, value: currentValue(Array.isArray(values) ? values[i] : null) }));
+  }
+
+  /**
+   * Sets one tweak in `owner`'s view: only a variable main read from it, with a value tweakValue
+   * takes. Gives the value set, or null when it was refused.
+   */
+  async tweak(owner: WebContents, name: unknown, value: unknown): Promise<string | null> {
+    const shown = this.own(owner);
+    const tweak = shown?.tweaks.find((t) => t.var === name);
+    if (shown === null || tweak === undefined) return null;
+    const checked = tweakValue(tweak, value);
+    if (checked === null) return null;
+    await this.run(shown, worldCall(setTweaksInWorld, [[tweak.var, checked]]));
+    return checked;
+  }
+
+  /** Puts back what the tweaks set in `owner`'s view. */
+  async resetTweaks(owner: WebContents): Promise<void> {
+    const shown = this.own(owner);
+    if (shown !== null) await this.run(shown, worldCall(resetTweaksInWorld));
   }
 }
 

@@ -44,7 +44,7 @@ import {
   exportName,
   exportWidth,
 } from "./artifact";
-import { ArtifactViews, artifactSession, pageHeight, renderArtifact } from "./artifact-session";
+import { ArtifactViews, artifactSession, pageHeight, renderArtifact, viewSlot } from "./artifact-session";
 import { connectOrStart, daemonProgram, installDir, startDaemon } from "./daemon";
 import { appendLinkLog, linkLine, PageWatch } from "./link-life";
 import { linkInArguments, linkOf } from "./links";
@@ -157,12 +157,22 @@ function serveArtifacts(): void {
     if (typeof url === "string") artifacts.release(sender.id, url);
   });
   // The viewer: a view over the page's stage, which the page keeps up to date with its bounds.
-  handle("artifact:show", (sender, url: unknown, bounds: unknown) => {
+  handle("artifact:show", (sender, url: unknown, bounds: unknown, slot: unknown) => {
     if (typeof url !== "string") throw new Error("Not an artifact.");
-    return views.show(sender, url, bounds);
+    return views.show(sender, url, bounds, viewSlot(slot));
   });
-  handle("artifact:bounds", (sender, bounds: unknown) => views.place(sender, bounds));
-  handle("artifact:hide", (sender) => views.hide(sender.id));
+  handle("artifact:bounds", (sender, bounds: unknown, slot: unknown) => views.place(sender, bounds, viewSlot(slot)));
+  // Without a slot: every view of the page (as before compare existed).
+  handle("artifact:hide", (sender, slot: unknown) =>
+    views.hide(sender.id, slot === undefined ? undefined : viewSlot(slot)),
+  );
+  // Comments and tweaks: main runs its own code in an isolated world of the view and checks what
+  // comes back (artifact-world.ts, artifact-tweaks.ts). The artifact itself gets no channel.
+  handle("artifact:pick", (sender) => views.pick(sender));
+  handle("artifact:pick-stop", (sender) => views.stopPick(sender));
+  handle("artifact:tweaks", (sender) => views.tweaks(sender));
+  handle("artifact:tweak", (sender, name: unknown, value: unknown) => views.tweak(sender, name, value));
+  handle("artifact:tweaks-reset", (sender) => views.resetTweaks(sender));
   handle("artifact:export", async (sender, url: unknown, kind: unknown, name: unknown, width: unknown) => {
     // Only an artifact this window holds: another window's is not its to export.
     if (typeof url !== "string" || !artifacts.owns(sender.id, url))
