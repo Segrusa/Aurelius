@@ -13,6 +13,14 @@ export interface ServerChoices {
   servers: { hostId: string; hostName: string; url: string; lastUsedMs: number }[];
 }
 
+/** Where the artifact view lies, in the page's CSS pixels from the top left of the window. */
+export interface ArtifactBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface Platform {
   kind: "electron" | "web";
   openLink: OpenLink;
@@ -65,6 +73,25 @@ export interface Platform {
   /** The project this window was opened for, if it isn't the main window. */
   windowProject: string | null;
   openProjectWindow: ((id: string, name: string) => Promise<void>) | null;
+  /**
+   * Design artifacts (kept HTML files) run here, in a view of their own without network that the
+   * desktop lays over the page. Null where there is no safe place to run them, a browser: there an
+   * HTML file is saved, like any other file.
+   */
+  artifacts: {
+    /** Hands the HTML over and gives its URL; `release` lets go of it. */
+    serve(html: string): Promise<string>;
+    release(url: string): Promise<void>;
+    /**
+     * Shows a served artifact over the page, at `bounds` (the stage, in the page's CSS pixels);
+     * `place` follows the stage, null hides it for now; `hide` takes the view away.
+     */
+    show(url: string, bounds: ArtifactBounds | null): Promise<void>;
+    place(bounds: ArtifactBounds | null): Promise<void>;
+    hide(): Promise<void>;
+    /** Asks where to save and makes the file; null: cancelled. */
+    export(url: string, kind: "pdf" | "png", name: string, width: number): Promise<string | null>;
+  } | null;
   /** Ends the app; the service keeps running. Null: a browser tab can't close itself. */
   quit: (() => void) | null;
 }

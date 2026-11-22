@@ -1564,7 +1564,7 @@ export const MessageRow = memo(function MessageRow({
         scope={conversationId ? { kind: "conversation", conversation_id: conversationId } : null}
       />
       <FileChips files={m.uploads} />
-      <KeptFiles files={m.files ?? []} />
+      <KeptFiles files={m.files ?? []} messages={messages} />
       {m.run_id && m.role === "assistant" ? <TraceLink run={m.run_id} /> : null}
       {m.status === "interrupted" ? <Meta>Stopped; text up to that point is kept.</Meta> : null}
       {m.status === "failed" ? (

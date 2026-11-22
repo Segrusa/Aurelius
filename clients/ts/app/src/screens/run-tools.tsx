@@ -16,8 +16,11 @@ import { useConnection, useLinkState } from "../connection";
 import { useKeyed } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
+import { saveBlob } from "../ui/download";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
+import { isArtifact, versionOf, versionsFor } from "./artifact-logic";
+import { ArtifactViewer } from "./artifact-viewer";
 import { FormDialog, Hint, Loading, Problem } from "./org-kit";
 import { markdownPaths, screenshotId, traceSessionText, usageLine, waitingText } from "./run-logic";
 import { costText, tokensShort } from "./usage-logic";
@@ -78,6 +81,8 @@ const styles = stylex.create({
     color: "var(--color-text-primary)",
   },
   kept: { borderRadius: 7, paddingInline: 10, paddingBlock: 6, fontSize: 12.5, gap: 8 },
+  artifactCard: { minWidth: 240, paddingBlock: 8, gap: 10, textAlign: "start" },
+  artifactText: { display: "flex", flexDirection: "column", flexGrow: 1, gap: 2 },
   accent: { color: "var(--color-text-accent)" },
   size: { fontSize: 11, color: "var(--precision-text3)" },
   thumbButton: { cursor: "pointer", borderWidth: 0, backgroundColor: "transparent", padding: 0 },
@@ -419,20 +424,21 @@ export function MarkdownChips({ text, scope }: { text: string; scope: FileScope 
 const sizeText = (size: number) =>
   size >= 1_048_576 ? `${(size / 1_048_576).toFixed(1)} MB` : `${Math.ceil(size / 1024)} KB`;
 
-function saveBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = name;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
-
-/** Files an answer kept with its message: an image shows here, anything else is saved. */
-export function KeptFiles({ files }: { files: FileRef[] }) {
+/**
+ * Files an answer kept with its message: an image shows here, an HTML file opens as an artifact
+ * where the app can run one safely (`messages`: the conversation, for its versions), anything
+ * else is saved.
+ */
+export function KeptFiles({ files, messages = [] }: { files: FileRef[]; messages?: readonly MessageView[] }) {
   const connection = useConnection();
+  const { artifacts } = usePlatform();
   const [shown, setShown] = useState<{ name: string; url: string } | null>(null);
+  const [artifact, setArtifact] = useState<FileRef | null>(null);
   const open = async (file: FileRef) => {
+    if (artifacts && isArtifact(file)) {
+      setArtifact(file);
+      return;
+    }
     try {
       const got = expectBody(await connection.call("file.get", { id: file.id }), "file").value;
       const bytes = Uint8Array.from(atob(got.data_base64), (c) => c.charCodeAt(0));
@@ -449,13 +455,41 @@ export function KeptFiles({ files }: { files: FileRef[] }) {
   if (files.length === 0) return null;
   return (
     <div {...stylex.props(styles.chips, styles.keptChips)}>
-      {files.map((f) => (
-        <button key={f.id} type="button" onClick={() => void open(f)} {...stylex.props(styles.chip, styles.kept)}>
-          <span {...stylex.props(styles.accent)}>{f.media_type.startsWith("image/") ? "▣" : "▤"}</span>
-          {f.name}
-          <span {...stylex.props(styles.size)}>{sizeText(f.size)}</span>
-        </button>
-      ))}
+      {files.map((f) =>
+        artifacts && isArtifact(f) ? (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => void open(f)}
+            {...stylex.props(styles.chip, styles.kept, styles.artifactCard)}
+          >
+            <span {...stylex.props(styles.accent)}>◧</span>
+            <span {...stylex.props(styles.artifactText)}>
+              <span>{f.name}</span>
+              <span {...stylex.props(styles.size)}>
+                {["Artifact", versionOf(versionsFor(messages, f, 0), f.id), sizeText(f.size)]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </span>
+            <span {...stylex.props(styles.accent)}>Open</span>
+          </button>
+        ) : (
+          <button key={f.id} type="button" onClick={() => void open(f)} {...stylex.props(styles.chip, styles.kept)}>
+            <span {...stylex.props(styles.accent)}>{f.media_type.startsWith("image/") ? "▣" : "▤"}</span>
+            {f.name}
+            <span {...stylex.props(styles.size)}>{sizeText(f.size)}</span>
+          </button>
+        ),
+      )}
+      {artifact && artifacts ? (
+        <ArtifactViewer
+          versions={versionsFor(messages, artifact, Date.now())}
+          openId={artifact.id}
+          artifacts={artifacts}
+          onClose={() => setArtifact(null)}
+        />
+      ) : null}
       {shown ? (
         <ImageDialog
           title={shown.name}

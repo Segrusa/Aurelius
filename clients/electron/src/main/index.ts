@@ -34,6 +34,17 @@ import {
   shell,
   type WebContents,
 } from "electron";
+import {
+  ARTIFACT_SCHEME,
+  type ArtifactExport,
+  ArtifactStore,
+  captureHeight,
+  EXPORT_HEIGHT_DEFAULT,
+  exportFailure,
+  exportName,
+  exportWidth,
+} from "./artifact";
+import { ArtifactViews, artifactSession, pageHeight, renderArtifact } from "./artifact-session";
 import { connectOrStart, daemonProgram, installDir, startDaemon } from "./daemon";
 import { appendLinkLog, linkLine, PageWatch } from "./link-life";
 import { linkInArguments, linkOf } from "./links";
@@ -68,6 +79,10 @@ const ENVIRONMENT =
 /** One second process per environment gives its link to the first and ends. */
 if (!app.requestSingleInstanceLock()) app.exit(0);
 
+// No DNS prefetch anywhere: CSP has no directive for `<link rel="dns-prefetch">`, so an artifact
+// could leak data in a host name it has resolved. The app itself never needs it. Before ready.
+app.commandLine.appendSwitch("blink-settings", "dnsPrefetchingEnabled=false");
+
 const ROOT = dataDir(process.env, ENVIRONMENT);
 const INSTALL = installDir(process.execPath, app.isPackaged);
 const PROGRAM = daemonProgram(process.env, INSTALL);
@@ -98,7 +113,12 @@ const remoteFetch: typeof fetch = (input, init) => net.fetch(input instanceof UR
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  // No fetch, no CORS, no service workers: an artifact only ever loads as a document.
+  { scheme: ARTIFACT_SCHEME, privileges: { standard: true, secure: true } },
 ]);
+
+/** The artifacts the pages handed over, in memory only (artifact.ts). */
+const artifacts = new ArtifactStore();
 
 function serveSite(): void {
   protocol.handle("app", async (request) => {
@@ -111,6 +131,74 @@ function serveSite(): void {
     headers.set("Content-Security-Policy", CSP);
     headers.set("X-Content-Type-Options", "nosniff");
     return new Response(response.body, { status: response.status, headers });
+  });
+}
+
+/** The artifact session and the viewers in it; artifacts never load in the app's own session. */
+function serveArtifacts(): void {
+  const ready = artifactSession(artifacts);
+  const views = new ArtifactViews(artifacts, ready);
+  const watched = new Set<number>();
+  handle("artifact:serve", (sender, html: unknown) => {
+    if (typeof html !== "string") throw new Error("Not an artifact.");
+    // A window that closes or reloads lets go of all it asked for.
+    if (!watched.has(sender.id)) {
+      watched.add(sender.id);
+      const id = sender.id;
+      sender.on("did-navigate", () => artifacts.releaseAll(id));
+      sender.once("destroyed", () => {
+        artifacts.releaseAll(id);
+        watched.delete(id);
+      });
+    }
+    return artifacts.serve(sender.id, html);
+  });
+  handle("artifact:release", (sender, url: unknown) => {
+    if (typeof url === "string") artifacts.release(sender.id, url);
+  });
+  // The viewer: a view over the page's stage, which the page keeps up to date with its bounds.
+  handle("artifact:show", (sender, url: unknown, bounds: unknown) => {
+    if (typeof url !== "string") throw new Error("Not an artifact.");
+    return views.show(sender, url, bounds);
+  });
+  handle("artifact:bounds", (sender, bounds: unknown) => views.place(sender, bounds));
+  handle("artifact:hide", (sender) => views.hide(sender.id));
+  handle("artifact:export", async (sender, url: unknown, kind: unknown, name: unknown, width: unknown) => {
+    // Only an artifact this window holds: another window's is not its to export.
+    if (typeof url !== "string" || !artifacts.owns(sender.id, url))
+      throw new Error("This artifact is not open any more.");
+    if (kind !== "pdf" && kind !== "png") throw new Error("Unknown format.");
+    const format: ArtifactExport = kind;
+    const window = BrowserWindow.fromWebContents(sender);
+    const options = {
+      defaultPath: join(app.getPath("downloads"), exportName(typeof name === "string" ? name : "", format)),
+      filters: [format === "pdf" ? { name: "PDF", extensions: ["pdf"] } : { name: "PNG image", extensions: ["png"] }],
+    };
+    const chosen = await (window ? dialog.showSaveDialog(window, options) : dialog.showSaveDialog(options));
+    if (chosen.canceled || !chosen.filePath) return null;
+    const wide = exportWidth(width);
+    try {
+      const bytes = await renderArtifact(ready, url, wide, async (hidden) => {
+        if (format === "pdf") return hidden.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true });
+        // The whole page, not only the first screen. The number comes from the artifact: checked.
+        // The width is the one asked for: a window nobody sees does not always report its own.
+        const scale = screen.getDisplayMatching(hidden.getBounds()).scaleFactor;
+        const tall = captureHeight(await pageHeight(hidden.webContents), EXPORT_HEIGHT_DEFAULT, wide, scale);
+        hidden.setContentSize(wide, tall);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return (await hidden.webContents.capturePage({ x: 0, y: 0, width: wide, height: tall })).toPNG();
+      });
+      writeFileSync(chosen.filePath, bytes);
+      return chosen.filePath;
+    } catch (error) {
+      // The page gets a clear sentence; Chromium's or the file system's own text goes to the log.
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      appendLinkLog(
+        join(app.getPath("logs"), "artifacts.log"),
+        `${new Date().toISOString()} export failed format=${format} width=${wide} error=${JSON.stringify(detail)}`,
+      );
+      throw new Error(exportFailure(error));
+    }
   });
 }
 
@@ -558,6 +646,7 @@ function makeWindow(extra: Electron.BrowserWindowConstructorOptions, path: strin
   });
   window.once("ready-to-show", () => window.show());
   // A link in a report or a message opens in the browser; only a web address leaves the app.
+  // Artifacts never reach this: they run in views of their own, whose handler denies everything.
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
     return { action: "deny" };
@@ -666,6 +755,7 @@ void app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   recordVersion();
   serveSite();
+  serveArtifacts();
   serveLinks();
   serveOsLinks();
   serveSessions();

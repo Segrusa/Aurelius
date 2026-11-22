@@ -39,6 +39,53 @@ async function readHashes(): Promise<string[]> {
   return [hash(slideRulesCss()), hash(css)];
 }
 
+describe("the desktop app's Content-Security-Policy", () => {
+  const source = readFileSync(resolve(repo, "clients/electron/src/main/index.ts"), "utf8");
+  const policy = /const CSP =\s*"([^"]+)"/.exec(source)?.[1] ?? "";
+  const directives = policy.split(";").map((d) => d.trim());
+
+  // Artifacts are not framed in the app's page any more: they run in a view of their own.
+  it("does not let the page frame artifacts, and gained nothing for them", () => {
+    expect(directives.map((d) => d.split(" ")[0])).toEqual([
+      "default-src",
+      "style-src",
+      "img-src",
+      "object-src",
+      "base-uri",
+      "frame-ancestors",
+      "form-action",
+    ]);
+    expect(policy).not.toContain("artifact");
+    expect(directives).toContain("default-src 'self'");
+    expect(directives).toContain("img-src 'self' data: blob:");
+    expect(directives).toContain("frame-ancestors 'none'");
+    expect(directives).toContain("form-action 'none'");
+  });
+});
+
+describe("the desktop app's switches", () => {
+  const source = readFileSync(resolve(repo, "clients/electron/src/main/index.ts"), "utf8");
+
+  it("turns DNS prefetch off before the app is ready", () => {
+    const at = source.indexOf('app.commandLine.appendSwitch("blink-settings", "dnsPrefetchingEnabled=false");');
+    expect(at).toBeGreaterThan(-1);
+    expect(at).toBeLessThan(source.indexOf("app.whenReady()"));
+  });
+
+  it("gives the page a clear sentence for a failed export and logs the details", () => {
+    const start = source.indexOf('handle("artifact:export"');
+    const handler = source.slice(start, source.indexOf("\n  });", start));
+    expect(start).toBeGreaterThan(-1);
+    const caught = handler.slice(handler.indexOf("} catch (error) {"));
+    expect(caught).toContain('"artifacts.log"');
+    expect(caught).toContain("throw new Error(exportFailure(error));");
+    expect(caught.match(/throw /g)).toHaveLength(1);
+    // Rendering and writing the file are both inside the try.
+    expect(handler.indexOf("try {")).toBeLessThan(handler.indexOf("renderArtifact("));
+    expect(handler.indexOf("writeFileSync(")).toBeLessThan(handler.indexOf("} catch (error) {"));
+  });
+});
+
 describe("the style hashes in the Content-Security-Policy", () => {
   for (const file of ["clients/electron/src/main/index.ts", "crates/remote-gateway/src/web.rs"]) {
     it(`match what the installed Astryx writes: ${file}`, async () => {

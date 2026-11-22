@@ -1,5 +1,6 @@
 import {
   App,
+  type ArtifactBounds,
   adoptDesktopPrefs,
   type DesktopPrefs,
   guardStrayDrops,
@@ -49,6 +50,12 @@ interface Bridge {
   storeFile(name: string, bytes: ArrayBuffer): Promise<{ path: string; name: string }>;
   pickFolder(title: string): Promise<string | null>;
   openFolder(path: string): Promise<void>;
+  serveArtifact(html: string): Promise<string>;
+  releaseArtifact(url: string): Promise<void>;
+  showArtifact(url: string, bounds: ArtifactBounds | null): Promise<void>;
+  placeArtifact(bounds: ArtifactBounds | null): Promise<void>;
+  hideArtifact(): Promise<void>;
+  exportArtifact(url: string, kind: "pdf" | "png", name: string, width: number): Promise<string | null>;
 }
 
 const bridge = (window as unknown as { aurelius: Bridge }).aurelius;
@@ -135,6 +142,14 @@ const platform: Platform = {
   startup: canStart ? { get: () => bridge.getStartup(), set: (on) => bridge.setStartup(on) } : null,
   windowProject: info.windowProject,
   openProjectWindow: (id, name) => bridge.openProjectWindow(id, name),
+  artifacts: {
+    serve: (html) => bridge.serveArtifact(html),
+    release: (url) => bridge.releaseArtifact(url),
+    show: (url, bounds) => bridge.showArtifact(url, bounds),
+    place: (bounds) => bridge.placeArtifact(bounds),
+    hide: () => bridge.hideArtifact(),
+    export: (url, kind, name, width) => bridge.exportArtifact(url, kind, name, width),
+  },
   quit: () => void bridge.quit(),
 };
 

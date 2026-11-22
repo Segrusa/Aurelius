@@ -12,7 +12,11 @@ export default defineConfig({
   main: { build: { externalizeDeps: { exclude: own }, rollupOptions: { input: "src/main/index.ts" } } },
   preload: {
     build: {
-      rollupOptions: { input: "src/preload/index.ts", output: { format: "cjs", entryFileNames: "[name].cjs" } },
+      // The app's preload, and the artifact's (which only takes WebRTC out of every frame).
+      rollupOptions: {
+        input: { index: "src/preload/index.ts", artifact: "src/preload/artifact.ts" },
+        output: { format: "cjs", entryFileNames: "[name].cjs" },
+      },
     },
   },
   renderer: {
