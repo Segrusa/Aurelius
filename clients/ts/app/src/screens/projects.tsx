@@ -1,10 +1,7 @@
-import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
-import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import type { ProjectSummary, TaskView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
@@ -12,15 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import {
-  useCompany,
-  useEffectiveSets,
-  useEmployees,
-  useGuidelines,
-  useIdeas,
-  useOpenTasks,
-  useProjects,
-} from "../data";
+import { useEmployees, useOpenTasks, useProjects } from "../data";
 import { type Feature, hidden, shown } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
@@ -29,47 +18,24 @@ import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { BoardScreen } from "./board";
-import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { canPin, pinnedFirst, togglePin } from "./employee-logic";
 import { pinKey, usePins } from "./employees";
 import { IdeasBody } from "./ideas";
-import { splitIdeas } from "./knowledge-logic";
-import {
-  Confirm,
-  DialogSelector,
-  Empty,
-  Eyebrow,
-  FormDialog,
-  failureOf,
-  Hint,
-  KnowledgeTabs,
-  Loading,
-  Page,
-  PageHead,
-  Problem,
-} from "./org-kit";
-import { overlays } from "./overlays-store";
+import { Confirm, Empty, FormDialog, failureOf, Hint, KnowledgeTabs, Page, PageHead, Problem } from "./org-kit";
 import { useFolderChooser } from "./run-tools";
 import { ScheduleDialog } from "./settings-advanced";
-import { openWeb } from "./settings-kit";
+import { focusField } from "./settings-kit";
 import { TasksScreen } from "./tasks";
-import { taskStateLine } from "./tasks-logic";
 import { VaultBody } from "./vault";
+import { WorkspaceSettingsBody } from "./workspace-settings";
 
 // Selector takes no empty value, so "the company's default dispatcher" needs a word of its own.
-const COMPANY_DEFAULT = "company-default";
+const _COMPANY_DEFAULT = "company-default";
 
 const styles = stylex.create({
-  section: { display: "flex", flexDirection: "column", gap: 4 },
   withAction: { display: "flex", alignItems: "flex-end", gap: 8 },
   grow: { minWidth: 0, flex: 1 },
   mono: { fontFamily: "var(--font-family-code)" },
-  buttons: { display: "flex", gap: 8 },
-  start: { alignSelf: "flex-start" },
-  label: { fontSize: 12, color: "var(--precision-text3)" },
-  folder: { fontFamily: "var(--font-family-code)", color: "var(--color-text-secondary)" },
-  tooLong: { fontSize: 12, color: "var(--color-text-error)" },
-  warning: { margin: 0, fontSize: 12, color: "var(--color-text-warning)" },
   scroll: { minHeight: 0, flex: 1, overflow: "auto" },
   table: { minWidth: 760 },
   headCell: { fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
@@ -115,95 +81,9 @@ const styles = stylex.create({
     opacity: { default: 0, ":focus-visible": 1, [stylex.when.ancestor(":hover")]: 1 },
   },
   pinned: { color: "var(--color-text-accent)", opacity: 1 },
-  overview: {
-    display: "grid",
-    minHeight: 0,
-    flex: 1,
-    gridAutoRows: "min-content",
-    gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-    gap: 16,
-    overflowY: "auto",
-    padding: 22,
-  },
-  wide: { gridColumn: "1 / -1" },
-  card: { display: "flex", minWidth: 0, flexDirection: "column", overflow: "hidden" },
-  cardHead: {
-    display: "flex",
-    height: 40,
-    flexShrink: 0,
-    alignItems: "center",
-    gap: 8,
-    borderBlockEndWidth: 1,
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: "var(--precision-line2)",
-    paddingInline: 14,
-  },
-  cardTitle: { minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
-  cardRight: {
-    display: "flex",
-    flexShrink: 0,
-    alignItems: "center",
-    gap: 8,
-    marginInlineStart: "auto",
-    fontSize: 12,
-    whiteSpace: "nowrap",
-  },
-  cardBody: { display: "flex", flexDirection: "column" },
-  rowLink: {
-    display: "flex",
-    minHeight: 42,
-    alignItems: "center",
-    gap: 10,
-    borderBlockEndWidth: { default: 1, ":last-child": 0 },
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: "var(--precision-line2)",
-    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
-    paddingInline: 14,
-    color: "var(--color-text-primary)",
-    textDecoration: "none",
-  },
-  rowText: { minWidth: 0, flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
-  note: { margin: 0, padding: 14, color: "var(--precision-text3)" },
-  ticket: { marginInlineEnd: 8, fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--precision-text3)" },
-  rowSide: { flexShrink: 0, fontSize: 12 },
-  rowDim: { flexShrink: 0, fontSize: 12, color: "var(--precision-text3)" },
-  rowMono: { fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--precision-text3)" },
-  dim: { color: "var(--precision-text3)" },
-  link: { color: "var(--color-text-accent)", textDecoration: "none" },
-  cardFoot: { padding: 10 },
-  added: {
-    margin: 0,
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: "var(--precision-line2)",
-    padding: 14,
-    fontSize: 12,
-    color: "var(--precision-text3)",
-  },
   missing: { margin: 0, padding: 24, color: "var(--color-text-secondary)" },
   back: { color: "var(--color-text-secondary)", textDecoration: "none" },
-  path: {
-    maxWidth: 260,
-    overflow: "hidden",
-    fontFamily: "var(--font-family-code)",
-    fontSize: 12,
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-    color: "var(--precision-text3)",
-  },
   fill: { display: "flex", minHeight: 0, flex: 1 },
-  settingRow: {
-    display: "flex",
-    minHeight: 42,
-    alignItems: "center",
-    gap: 10,
-    borderBlockEndWidth: { default: 1, ":last-child": 0 },
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: "var(--precision-line2)",
-    paddingInline: 14,
-  },
-  settingName: { width: 90, flexShrink: 0, color: "var(--precision-text3)" },
-  settingValue: { minWidth: 0, flex: 1, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
 });
 
 const COUNT_WORDS = ["", "One", "Two", "Three"];
@@ -296,162 +176,6 @@ function NewProject({ onClose }: { onClose: () => void }) {
       </div>
       {folders.dialog}
       {error ? <Problem>{error}</Problem> : null}
-    </FormDialog>
-  );
-}
-
-function ProjectSettings({ project, onClose }: { project: ProjectSummary; onClose: () => void }) {
-  const connection = useConnection();
-  const client = useQueryClient();
-  const platform = usePlatform();
-  const folders = useFolderChooser();
-  const { features } = useLinkState();
-  const employees = useEmployees();
-  const company = useCompany();
-  const [name, setName] = useState(project.name);
-  const [description, setDescription] = useState(project.description ?? "");
-  const [problem, setProblem] = useState<string | null>(null);
-  const refresh = () =>
-    client
-      .invalidateQueries({ queryKey: ["employees"] })
-      .then(() => client.invalidateQueries({ queryKey: ["projects"] }));
-  const run = async (write: () => Promise<unknown>, done?: string) => {
-    setProblem(null);
-    try {
-      await write();
-      await refresh();
-      if (done) toast(done);
-    } catch (e) {
-      setProblem(failureOf(e));
-    }
-  };
-  const canDescribe = features.includes("project_description");
-  const tooLong = description.length > 2000;
-  const dispatcher = project.dispatcher_employee_id ?? "";
-  const defaultId = company.data?.company.dispatcher_employee_id;
-  const defaultName = employees.data?.find((e) => e.id === defaultId)?.name ?? "none";
-  const chosen = employees.data?.find((e) => e.id === (dispatcher || defaultId));
-  const warning = !(dispatcher || defaultId)
-    ? "◆ No dispatcher. Started tickets wait in Todo until you choose an owner."
-    : chosen && chosen.status !== "active"
-      ? `◆ ${chosen.name} is ${chosen.status}. Started tickets wait for you to choose an owner.`
-      : null;
-  return (
-    <FormDialog
-      title={`Edit project · ${project.name}`}
-      width={720}
-      top
-      onClose={onClose}
-      footer={<Button label="Close" onClick={onClose} />}
-    >
-      <Eyebrow>GENERAL</Eyebrow>
-      <div {...stylex.props(styles.withAction)}>
-        <span {...stylex.props(styles.grow)}>
-          <TextInput
-            width="100%"
-            hasAutoFocus
-            label="Name"
-            placeholder="Project name"
-            value={name}
-            onChange={setName}
-          />
-        </span>
-        <Button
-          label="Save"
-          isDisabled={name.trim() === "" || name.trim() === project.name}
-          onClick={() =>
-            void run(() =>
-              connection.write(
-                "project.rename",
-                { project_id: project.id, name: name.trim() },
-                { retry: false, expectedVersion: project.version },
-              ),
-            )
-          }
-        />
-      </div>
-      {canDescribe ? (
-        <div {...stylex.props(styles.section)}>
-          <TextArea
-            label="Description"
-            rows={3}
-            placeholder="What this project is about"
-            value={description}
-            onChange={setDescription}
-          />
-          <span {...stylex.props(tooLong ? styles.tooLong : styles.label)}>
-            {tooLong ? `Too long: ${description.length} of at most 2000 characters.` : `${description.length} / 2000`}
-          </span>
-          <div>
-            <Button
-              label="Save"
-              isDisabled={tooLong || description.trim() === (project.description ?? "")}
-              onClick={() =>
-                void run(() =>
-                  connection.write(
-                    "project.set_description",
-                    { project_id: project.id, description: description.trim() },
-                    { retry: false, expectedVersion: project.version },
-                  ),
-                )
-              }
-            />
-          </div>
-        </div>
-      ) : (
-        <Hint>This server is too old to edit the description; update it to change it here.</Hint>
-      )}
-      <div {...stylex.props(styles.section)}>
-        <span {...stylex.props(styles.label)}>Folder</span>
-        <code {...stylex.props(styles.folder)}>{project.folder ?? "No folder"}</code>
-        <span {...stylex.props(styles.buttons)}>
-          {platform.openFolder && project.folder ? (
-            <Button label="Open folder" onClick={() => void platform.openFolder?.(project.folder as string)} />
-          ) : null}
-          <Button
-            label="Choose another folder…"
-            onClick={() =>
-              folders.choose("Choose another folder", (path) => {
-                void run(() =>
-                  connection.write("project.set_folder", { project_id: project.id, path }, { retry: false }),
-                );
-              })
-            }
-          />
-        </span>
-        {folders.dialog}
-      </div>
-      <Eyebrow>BOARD</Eyebrow>
-      <div {...stylex.props(styles.section)}>
-        <DialogSelector
-          label="Dispatcher"
-          description="Chooses an owner when a ticket of this project starts without one."
-          value={dispatcher || COMPANY_DEFAULT}
-          options={[
-            { value: COMPANY_DEFAULT, label: `Company default (${defaultName})` },
-            ...(employees.data ?? [])
-              .filter((e) => e.status === "active" || e.id === dispatcher)
-              .map((e) => ({ value: e.id, label: e.name })),
-          ]}
-          onChange={(picked) => {
-            const id = picked === COMPANY_DEFAULT ? "" : picked;
-            const who = employees.data?.find((x) => x.id === id)?.name;
-            void run(
-              () =>
-                connection.write(
-                  "project.update",
-                  { project_id: project.id, dispatcher: { employee_id: id || null } },
-                  { retry: false },
-                ),
-              id
-                ? `${who} chooses the owners of this project's tickets.`
-                : "This project uses the company's dispatcher again.",
-            );
-          }}
-        />
-        {warning ? <p {...stylex.props(styles.warning)}>{warning}</p> : null}
-      </div>
-      {problem ? <Problem>{problem}</Problem> : null}
     </FormDialog>
   );
 }
@@ -654,7 +378,6 @@ export function ProjectsScreen() {
   const tasks = useOpenTasks();
   const [pins, setPins] = useProjectPins();
   const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<ProjectSummary | null>(null);
   const [selected, setSelected] = useState(0);
   const list = useMemo(
     () =>
@@ -715,7 +438,7 @@ export function ProjectsScreen() {
                   waiting={waitingOf(p.id)}
                   selected={i === selected}
                   pinned={pins.includes(p.id)}
-                  onEdit={() => setEditing(p)}
+                  onEdit={() => void navigate({ to: "/projects/$id", params: { id: p.id } })}
                   onPin={() => {
                     if (!canPin(pins, p.id)) return toast("Only 5 projects can be pinned. Unpin one first.");
                     setPins(togglePin(pins, p.id));
@@ -727,14 +450,13 @@ export function ProjectsScreen() {
         ) : null}
       </div>
       {adding ? <NewProject onClose={() => setAdding(false)} /> : null}
-      {editing ? <ProjectSettings project={editing} onClose={() => setEditing(null)} /> : null}
     </Page>
   );
 }
 
 type ProjectTab = "overview" | "board" | "tasks" | "ideas" | "vault";
 const TABS: { key: ProjectTab; label: string; feature?: Feature }[] = shown([
-  { key: "overview", label: "Overview" },
+  { key: "overview", label: "Settings" },
   { key: "board", label: "Board" },
   { key: "tasks", label: "Tasks" },
   { key: "ideas", label: "Ideas", feature: "Ideas" },
@@ -749,282 +471,18 @@ export const projectTabShown = (tab: string): boolean => TABS.some((t) => t.key 
 const SIDEBAR_SCREENS: ProjectTab[] = ["board", "tasks"];
 const tabsOf = (hasSidebar: boolean) => TABS.filter((t) => !hasSidebar || !SIDEBAR_SCREENS.includes(t.key));
 
-function Panel({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <Card padding={0} xstyle={styles.card}>
-      <header {...stylex.props(styles.cardHead)}>
-        <span {...stylex.props(styles.cardTitle)}>
-          <Eyebrow title={title}>{title}</Eyebrow>
-        </span>
-        <span {...stylex.props(styles.cardRight)}>{right}</span>
-      </header>
-      <div {...stylex.props(styles.cardBody)}>{children}</div>
-    </Card>
-  );
-}
-
-function Setting({ name, children }: { name: string; children: React.ReactNode }) {
-  return (
-    <div {...stylex.props(styles.settingRow)}>
-      <span {...stylex.props(styles.settingName)}>{name}</span>
-      {children}
-    </div>
-  );
-}
-
-/** The workspace's styleguide: a link field; Open only for a saved link. */
-function StyleguideRow({ project }: { project: ProjectSummary }) {
-  const connection = useConnection();
-  const client = useQueryClient();
-  const saved = project.styleguide_url ?? "";
-  const [draft, setDraft] = useState(saved);
-  const [problem, setProblem] = useState<string | null>(null);
-  useEffect(() => setDraft(saved), [saved]);
-  const dirty = draft.trim() !== saved;
-  const save = async () => {
-    const wrong = artifactProblem(draft);
-    setProblem(wrong);
-    if (wrong) return;
-    try {
-      await connection.write(
-        "project.update",
-        { project_id: project.id, styleguide_url: draft.trim() },
-        { retry: false },
-      );
-      await client.invalidateQueries({ queryKey: ["projects"] });
-    } catch (e) {
-      setProblem(failureOf(e));
-    }
-  };
-  return (
-    <>
-      <Setting name="Styleguide">
-        <span {...stylex.props(styles.settingValue)}>
-          <TextInput
-            label="Styleguide link"
-            isLabelHidden
-            size="sm"
-            width="100%"
-            placeholder={ARTIFACT_PLACEHOLDER}
-            value={draft}
-            onChange={setDraft}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && dirty) void save();
-            }}
-          />
-        </span>
-        {dirty ? <Button size="sm" variant="primary" label="Save" onClick={() => void save()} /> : null}
-        {saved && !dirty ? <Button size="sm" label="Open" onClick={() => openWeb(saved)} /> : null}
-      </Setting>
-      <Setting name="">
-        <span {...stylex.props(styles.dim)}>{problem ?? ARTIFACT_HINT}</span>
-      </Setting>
-    </>
-  );
-}
-
-function WorkspaceSettings({
-  project,
-  dispatcher,
-  onEdit,
-  pick,
-}: {
-  project: ProjectSummary;
-  dispatcher: string;
-  onEdit: () => void;
-  pick: (key: string) => void;
-}) {
-  const platform = usePlatform();
-  const { features } = useLinkState();
-  return (
-    <Panel title="WORKSPACE SETTINGS" right={<Button size="sm" label="Edit…" onClick={onEdit} />}>
-      {features.includes(DESIGN_FEATURE) ? <StyleguideRow project={project} /> : null}
-      <Setting name="Folder">
-        <code title={project.folder ?? undefined} {...stylex.props(styles.settingValue, styles.mono)}>
-          {project.folder ?? "No folder"}
-        </code>
-        {platform.openFolder && project.folder ? (
-          <Button size="sm" label="Open" onClick={() => pick("folder")} />
-        ) : null}
-      </Setting>
-      <Setting name="Dispatcher">
-        <span {...stylex.props(styles.settingValue)}>{dispatcher}</span>
-      </Setting>
-      <Setting name="Status">
-        <span {...stylex.props(styles.settingValue)}>{project.status === "paused" ? "Paused" : "Active"}</span>
-        <Button size="sm" label={project.status === "paused" ? "Resume" : "Pause"} onClick={() => pick("pause")} />
-      </Setting>
-      <Setting name="Export">
-        <span {...stylex.props(styles.settingValue, styles.dim)}>Markdown + JSON, into its folder</span>
-        <Button size="sm" label="Export" onClick={() => pick("export")} />
-      </Setting>
-      <Setting name="Archive">
-        <span {...stylex.props(styles.settingValue, styles.dim)}>Nothing is deleted; the history is kept</span>
-        <Button size="sm" variant="destructive" label="Archive…" onClick={() => pick("archive")} />
-      </Setting>
-    </Panel>
-  );
-}
-
-function Overview({
-  project,
-  onEdit,
-  pick,
-}: {
-  project: ProjectSummary;
-  onEdit: () => void;
-  pick: (key: string) => void;
-}) {
-  const connection = useConnection();
-  const client = useQueryClient();
-  const employees = useEmployees();
-  const tasks = useOpenTasks();
-  const ideas = useIdeas(project.id);
-  const guidelines = useGuidelines();
-  const team = (employees.data ?? []).filter((e) => e.projects_active.includes(project.id) && e.status !== "archived");
-  const open = (tasks.data ?? []).filter((t) => t.project_id === project.id && isActive(t));
-  const openIdeas = (ideas.data ?? []).filter((i) => i.status === "open");
-  const split = splitIdeas(openIdeas);
-  const linked = (guidelines.data ?? []).filter((g) =>
-    g.links.some((l) => l.kind === "project" && l.id === project.id),
-  );
-  const pairs = useMemo(() => team.map((e): [string, string] => [e.id, project.id]), [team, project.id]);
-  const sets = useEffectiveSets(pairs);
-  const sizes = [...(sets.data?.values() ?? [])];
-  const largest = sizes.sort((a, b) => b.total_chars - a.total_chars)[0];
-  const largestName = team.find((e) => e.id === largest?.employee_id)?.name;
-  const added = linked.reduce((n, g) => n + g.chars, 0);
-  const row = stylex.props(styles.rowLink);
-  const { windowProject } = usePlatform();
-  const workspace = useWorkspace();
-  const dispatcher =
-    employees.data?.find((e) => e.id === project.dispatcher_employee_id)?.name ?? "The company's dispatcher";
-  return (
-    <div {...stylex.props(styles.overview)}>
-      {project.status === "paused" ? (
-        <div {...stylex.props(styles.wide)}>
-          <Banner
-            status="warning"
-            title="This project is paused. No new automatic work starts."
-            endContent={
-              <Button
-                size="sm"
-                label="Resume"
-                onClick={() =>
-                  void connection
-                    .write("project.set_status", { project_id: project.id, status: "active" }, { retry: false })
-                    .then(() => client.invalidateQueries({ queryKey: ["employees"] }))
-                    .then(() => toast("Project resumed."))
-                }
-              />
-            }
-          />
-        </div>
-      ) : null}
-      <Panel
-        title={`TASKS · ${open.length} OPEN`}
-        right={
-          windowProject === null ? (
-            <Link to="/tasks" onClick={() => workspace.choose(project.id)} {...stylex.props(styles.link)}>
-              All →
-            </Link>
-          ) : (
-            <Link
-              to="/projects/$id"
-              params={{ id: project.id }}
-              search={{ tab: "tasks" }}
-              {...stylex.props(styles.link)}
-            >
-              All →
-            </Link>
-          )
-        }
-      >
-        {open.length === 0 ? <p {...stylex.props(styles.note)}>No open tasks.</p> : null}
-        {open.slice(0, 6).map((t) => {
-          const line = taskStateLine(t);
-          return (
-            <Link key={t.id} to="/tasks/$taskId" params={{ taskId: t.id }} {...row}>
-              <span {...stylex.props(styles.rowText)}>
-                {t.ticket_number ? <span {...stylex.props(styles.ticket)}>#{t.ticket_number}</span> : null}
-                {t.title}
-              </span>
-              <span {...stylex.props(styles.rowSide)} style={{ color: line.color }}>
-                {line.text}
-              </span>
-            </Link>
-          );
-        })}
-        <div {...stylex.props(styles.cardFoot)}>
-          <Button
-            size="sm"
-            label="New ticket"
-            onClick={() => overlays.open("ticket", { title: "", description: "", projectId: project.id })}
-          />
-        </div>
-      </Panel>
-      {hidden("Ideas") ? null : (
-        <Panel
-          title={`IDEAS · ${openIdeas.length} OPEN`}
-          right={
-            <span {...stylex.props(styles.dim)}>
-              FROM YOU · {split.yours.length} · FROM EMPLOYEES · {split.employees.length}
-            </span>
-          }
-        >
-          {ideas.isPending ? <Loading rows={2} /> : null}
-          {ideas.data && openIdeas.length === 0 ? (
-            <p {...stylex.props(styles.note)}>No open ideas. Note one in the Ideas tab with Ctrl+N.</p>
-          ) : null}
-          {openIdeas.slice(0, 5).map((i) => (
-            <Link key={i.id} to="/projects/$id" params={{ id: project.id }} search={{ tab: "ideas" }} {...row}>
-              <span {...stylex.props(styles.rowText)}>{i.title}</span>
-              <span {...stylex.props(styles.rowDim)}>{i.author}</span>
-            </Link>
-          ))}
-        </Panel>
-      )}
-      <Panel
-        title={`GUIDELINES FOR EVERYONE IN ${project.name.toUpperCase()}`}
-        right={
-          <Link to="/knowledge/$tab" params={{ tab: "guidelines" }} {...stylex.props(styles.link)}>
-            Manage links…
-          </Link>
-        }
-      >
-        {linked.length === 0 ? (
-          <p {...stylex.props(styles.note)}>None: runs here get only their employee's guidelines.</p>
-        ) : null}
-        {linked.map((g) => (
-          <Link key={g.id} to="/knowledge/guidelines/$id" params={{ id: g.id }} {...row}>
-            <span {...stylex.props(styles.rowText)}>{g.title}</span>
-            <span {...stylex.props(styles.rowMono)}>{g.chars}</span>
-          </Link>
-        ))}
-        {linked.length > 0 ? (
-          <p {...stylex.props(styles.added)}>
-            Added to each run here: {added} characters
-            {largest && largestName ? ` · largest block: ${largestName} ${largest.total_chars}` : ""}
-          </p>
-        ) : null}
-      </Panel>
-      <WorkspaceSettings project={project} dispatcher={dispatcher} onEdit={onEdit} pick={pick} />
-    </div>
-  );
-}
-
 export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab }) {
   const navigate = useNavigate();
   const { windowProject } = usePlatform();
-  const workspace = useWorkspace();
   const tabs = tabsOf(windowProject === null);
   const tab = tabs.some((t) => t.key === asked) ? asked : "overview";
   const projects = useProjects();
   const project = projects.data?.find((p) => p.id === id) ?? null;
-  const [editing, setEditing] = useState(false);
-  const { options, pick, confirm } = useProjectActions(
+  const [changingFolder, setChangingFolder] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const { pick, confirm } = useProjectActions(
     project,
-    () => setEditing(true),
+    () => focusField("Name"),
     () =>
       void navigate({
         to: "/knowledge/$tab",
@@ -1032,6 +490,10 @@ export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab })
         search: project ? { project: project.id } : {},
       }),
   );
+  const settings = () => {
+    if (tab === "overview") focusField("Name");
+    else void navigate({ to: "/projects/$id", params: { id } });
+  };
   const go = (delta: number) => {
     const at = tabs.findIndex((t) => t.key === tab);
     const next = tabs[(at + delta + tabs.length) % tabs.length];
@@ -1040,12 +502,12 @@ export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab })
   useAction("NextTab", () => go(1));
   useAction("PrevTab", () => go(-1));
   useAction("Back", () => void navigate({ to: "/projects" }));
-  useAction("OpenProjectSettings", () => setEditing(true), project !== null);
-  useAction("EditItem", () => setEditing(true), project !== null);
-  useAction("ChangeProjectFolder", () => setEditing(true), project !== null);
+  useAction("OpenProjectSettings", settings, project !== null);
+  useAction("EditItem", settings, project !== null);
+  useAction("ChangeProjectFolder", () => setChangingFolder(true), project !== null && tab === "overview");
   useAction("ExportProject", () => pick("export"), project !== null);
   useAction("TogglePause", () => pick("pause"), project !== null);
-  useAction("ArchiveItem", () => pick("archive"), project !== null);
+  useAction("ArchiveItem", () => setArchiving(true), project !== null && tab === "overview");
   useAction("OpenMemory", () => pick("memory"), project !== null);
   useAction("OpenProjectFolder", () => pick("folder"), project !== null);
   useEffect(() => {
@@ -1067,42 +529,28 @@ export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab })
   }
   return (
     <Page>
-      <PageHead
-        title="Workspace settings"
-        {...(tabs.length > 1
-          ? {
-              tabs: (
-                <TabList aria-label="Project" size="sm" value={tab} onChange={() => {}}>
-                  {tabs.map((t) => (
-                    <Tab key={t.key} value={t.key} label={t.label} href={`/projects/${id}?tab=${t.key}`} />
-                  ))}
-                </TabList>
-              ),
-            }
-          : {})}
-      >
-        {project.folder ? (
-          <code title={project.folder} {...stylex.props(styles.path)}>
-            {project.folder}
-          </code>
-        ) : null}
-        {workspace.available && !workspace.locked && workspace.id !== project.id ? (
-          <Button
-            size="sm"
-            variant="primary"
-            label="Switch to this workspace"
-            onClick={() => workspace.choose(project.id)}
-          />
-        ) : null}
-        <Button size="sm" label="Edit project" onClick={() => setEditing(true)} />
-        <Menu
-          label={`More for ${project.name}`}
-          options={options}
-          onPick={pick}
-          trigger={<IconButton size="sm" label={`More for ${project.name}`} icon="⋯" />}
+      {/* A project window has no sidebar: its board and tasks stay tabs above the settings. */}
+      {tabs.length > 1 ? (
+        <PageHead
+          title={project.name}
+          tabs={
+            <TabList aria-label="Project" size="sm" value={tab} onChange={() => {}}>
+              {tabs.map((t) => (
+                <Tab key={t.key} value={t.key} label={t.label} href={`/projects/${id}?tab=${t.key}`} />
+              ))}
+            </TabList>
+          }
         />
-      </PageHead>
-      {tab === "overview" ? <Overview project={project} onEdit={() => setEditing(true)} pick={pick} /> : null}
+      ) : null}
+      {tab === "overview" ? (
+        <WorkspaceSettingsBody
+          project={project}
+          changingFolder={changingFolder}
+          onChangingFolder={setChangingFolder}
+          archiving={archiving}
+          onArchiving={setArchiving}
+        />
+      ) : null}
       {tab === "board" ? <BoardScreen projectId={project.id} /> : null}
       {tab === "tasks" ? <TasksScreen projectId={project.id} /> : null}
       {tab === "ideas" ? <IdeasBody projectId={project.id} chrome={false} /> : null}
@@ -1111,7 +559,6 @@ export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab })
           <VaultBody projectId={project.id} scopeName={project.name} />
         </div>
       ) : null}
-      {editing ? <ProjectSettings project={project} onClose={() => setEditing(false)} /> : null}
       {confirm}
     </Page>
   );
