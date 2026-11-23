@@ -14,6 +14,7 @@ import {
   railPins,
   railProjects,
   resolveWorkspace,
+  startPath,
   storedWorkspace,
   targetOf,
   workspaceAfterOpening,
@@ -190,5 +191,23 @@ describe("switching under an open screen", () => {
   it("stays on a screen that has no opened item", () => {
     expect(pathAfterSwitch("/inbox", "atlas")).toBeNull();
     expect(pathAfterSwitch("/tasks", "atlas")).toBeNull();
+  });
+
+  it("opens the list of workspaces on All workspaces, which has no panel to leave a workspace's screen", () => {
+    expect(pathAfterSwitch("/board", null)).toBe("/overview");
+    expect(pathAfterSwitch("/new", null)).toBe("/overview");
+    expect(pathAfterSwitch("/ticket/70", null)).toBe("/overview");
+    // Settings have their own sidebar, so they stay.
+    expect(pathAfterSwitch("/settings/account", null)).toBeNull();
+    expect(pathAfterSwitch("/projects", null)).toBeNull();
+  });
+});
+
+describe("where the app starts", () => {
+  it("starts on the list of workspaces under All workspaces, otherwise on New session", () => {
+    expect(startPath(true, null)).toBe("/overview");
+    expect(startPath(true, "atlas")).toBe("/new");
+    // A server without workspaces has no list: New session, as before.
+    expect(startPath(false, null)).toBe("/new");
   });
 });

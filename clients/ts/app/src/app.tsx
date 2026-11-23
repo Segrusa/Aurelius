@@ -4,7 +4,15 @@ import { LayerProvider } from "@astryxdesign/core/Layer";
 import { LinkProvider } from "@astryxdesign/core/Link";
 import { Theme } from "@astryxdesign/core/theme";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createRootRoute, createRoute, createRouter, Outlet, RouterProvider, redirect } from "@tanstack/react-router";
+import {
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Navigate,
+  Outlet,
+  RouterProvider,
+  redirect,
+} from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   type Appearance,
@@ -44,6 +52,7 @@ import { TasksScreen } from "./screens/tasks";
 import { TicketRedirect, TicketSessionScreen } from "./screens/ticket-session";
 import { UsageScreen } from "./screens/usage";
 import { VaultScreen } from "./screens/vault";
+import { startPath } from "./screens/workspace-logic";
 import { precisionTheme } from "./theme/precision/precision";
 import { RouterLink } from "./ui/router-link";
 import { useWorkspace, WorkspaceProvider } from "./workspace";
@@ -64,11 +73,15 @@ const root = createRootRoute({
 const index = createRoute({
   getParentRoute: () => root,
   path: "/",
-  // The app starts on New session; the Inbox is the bell in every screen's head.
-  beforeLoad: () => {
-    throw redirect({ to: "/new" });
-  },
+  // The app starts on New session, or on the list of workspaces under All workspaces (it has no panel).
+  // The Inbox is the bell in every screen's head. The Gate renders the router only after the server
+  // answered, so its features are known here.
+  component: StartRedirect,
 });
+function StartRedirect() {
+  const { id, available } = useWorkspace();
+  return <Navigate to={startPath(available, id)} replace />;
+}
 // The Inbox page is gone: an old link to it starts on New session too.
 const inbox = createRoute({
   getParentRoute: () => root,

@@ -68,8 +68,9 @@ test.describe("against a real daemon", () => {
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
-    await expect(page).toHaveURL(/\/new$/);
+    // A new device is on All workspaces, so it starts on the list of workspaces.
+    await expect(page.getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
+    await expect(page).toHaveURL(/\/overview$/);
     await expect(workspaceTile(page, "Northwind API")).toBeVisible();
     await expect(page.getByRole("button", { name: "Inbox" }).first()).toBeVisible();
 

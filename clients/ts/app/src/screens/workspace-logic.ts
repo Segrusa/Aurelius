@@ -8,6 +8,7 @@ import type {
   ProjectSummary,
   RailPinsView,
 } from "@aurelius/protocol";
+import { inSettingsArea } from "./settings-logic";
 
 export type Workspace = string | null;
 
@@ -142,9 +143,16 @@ export function workspaceAfterOpening(current: Workspace, owner: string | null, 
 
 /** Where to go when the workspace changes under a screen that shows one thing of the old one. */
 export function pathAfterSwitch(pathname: string, next: Workspace): string | null {
+  if (/^\/projects\/[^/]+$/.test(pathname)) return next === null ? "/projects" : `/projects/${next}`;
+  // All workspaces has no panel, so a workspace's screen would leave no way on: its list instead.
+  if (next === null && !inSettingsArea(pathname)) return "/overview";
   if (pathname === "/board") return pathname;
   if (/^\/tasks\/[^/]+$/.test(pathname)) return "/tasks";
   if (/^\/ticket\/[^/]+$/.test(pathname)) return "/board";
-  if (/^\/projects\/[^/]+$/.test(pathname)) return next === null ? "/projects" : `/projects/${next}`;
   return null;
+}
+
+/** Where the app opens: the list of workspaces under All workspaces, otherwise New session. */
+export function startPath(available: boolean, workspace: Workspace): string {
+  return available && workspace === null ? "/overview" : "/new";
 }

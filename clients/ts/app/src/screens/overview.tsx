@@ -6,6 +6,7 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
 import type { ProjectSummary, TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
@@ -128,6 +129,7 @@ const styles = stylex.create({
     filter: { default: null, ":hover": "brightness(1.08)" },
   },
   small: { height: 24, paddingInline: 10, fontSize: 12, flexShrink: 0 },
+  square: { width: 30, paddingInline: 0, justifyContent: "center" },
   pill: {
     display: "inline-flex",
     alignItems: "center",
@@ -954,6 +956,17 @@ function AllOverview({ projects }: { projects: ProjectSummary[] }) {
           </p>
         </div>
         <div {...stylex.props(styles.actions)}>
+          {/* All workspaces has no panel, whose head held this button. */}
+          <Tooltip content="All workspaces settings" delay={400} hasHoverIndication={false}>
+            <button
+              type="button"
+              aria-label="All workspaces settings"
+              onClick={() => void navigate({ to: "/projects" })}
+              {...stylex.props(styles.btn, styles.square)}
+            >
+              <Icon name="settings" size={15} />
+            </button>
+          </Tooltip>
           <button type="button" onClick={() => keys.run("NewProject")} {...stylex.props(styles.btn, styles.primary)}>
             <PlusIcon size={14} />
             New workspace

@@ -222,10 +222,10 @@ test("switching narrows the board and the inbox, and All workspaces shows everyt
     await page.reload();
     await expectWorkspace(page, "Zephyr");
 
+    // Back to All workspaces: its list of workspaces, without a panel to reach a workspace's Board.
     await choose(page, "All workspaces");
-    await openBoard(page);
-    await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
-    await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
   } finally {
     site.close();
   }
@@ -414,11 +414,14 @@ test("a workspace tile opens its Overview, with its facts, needs, board and what
   }
 });
 
-test("All workspaces lists every workspace by name, and a row opens it", async ({ page }) => {
+test("All workspaces lists every workspace by name, has no panel, and a row opens it", async ({ page }) => {
   const site = await openOverview(page, "/overview");
   try {
     const main = page.getByRole("main");
     await expect(main.getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
+    // The sidebar panel belongs to one workspace: All workspaces keeps only the rail.
+    await expect(page.getByRole("navigation", { name: "Workspaces" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
     await expect(main.getByText("2 workspaces · 2 pinned to your rail")).toBeVisible();
     const list = main.getByRole("region", { name: "Workspaces" });
     await expect(list.getByRole("listitem")).toHaveCount(2);
@@ -429,6 +432,46 @@ test("All workspaces lists every workspace by name, and a row opens it", async (
     await list.getByRole("button", { name: "Open Zephyr" }).click();
     await expectWorkspace(page, "Zephyr");
     await expect(main.getByRole("heading", { level: 1, name: /Zephyr/ })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
+  } finally {
+    site.close();
+  }
+});
+
+test("the app starts on the list under All workspaces, and the palette's All workspaces opens it", async ({ page }) => {
+  const site = await openOverview(page, "/");
+  try {
+    await expect(page).toHaveURL(/\/overview$/);
+    await expect(page.getByRole("main").getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
+
+    await page.getByRole("region", { name: "Workspaces" }).getByRole("button", { name: "Open Zephyr" }).click();
+    await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Board" }).click();
+    await expect(page).toHaveURL(/\/board/);
+    await page.keyboard.press("Control+k");
+    await page.getByRole("combobox", { name: "Command palette" }).fill("All workspaces");
+    await page.getByRole("option", { name: /All workspaces.*Switch workspace/ }).click();
+    await expect(page).toHaveURL(/\/overview$/);
+    await expect(page.getByRole("main").getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
+  } finally {
+    site.close();
+  }
+});
+
+test("All workspaces reaches its settings from the list, without a panel", async ({ page }) => {
+  const site = await openOverview(page, "/overview");
+  try {
+    await page.getByRole("main").getByRole("button", { name: "All workspaces settings" }).click();
+    await expect(page).toHaveURL(/\/projects$/);
+  } finally {
+    site.close();
+  }
+});
+
+test("a workspace still starts on New session", async ({ page }) => {
+  const site = await openOverview(page, "/", ZEPHYR);
+  try {
+    await expect(page).toHaveURL(/\/new$/);
+    await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
   } finally {
     site.close();
   }

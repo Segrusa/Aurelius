@@ -288,6 +288,21 @@ const styles = stylex.create({
   dotDone: { backgroundColor: "var(--precision-dot-orange)" },
   empty: { margin: 0, paddingInline: 10, fontSize: 12, color: "var(--precision-text3)" },
   reconnect: { margin: 0, paddingInline: 8, fontSize: 12, color: "var(--color-text-warning)" },
+  railReconnect: { margin: 0, display: "flex", justifyContent: "center", width: RAIL_WIDTH, flexShrink: 0 },
+  railReconnectDot: {
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    backgroundColor: "var(--color-text-warning)",
+  },
+  srOnly: {
+    position: "absolute",
+    width: 1,
+    height: 1,
+    overflow: "hidden",
+    clipPath: "inset(50%)",
+    whiteSpace: "nowrap",
+  },
 });
 
 const ALL_NAME = "All workspaces";
@@ -684,7 +699,17 @@ function RailTile({
   );
 }
 
-function Rail({ projects, pins, needs }: { projects: ProjectSummary[]; pins: string[]; needs: Map<string, number> }) {
+function Rail({
+  projects,
+  pins,
+  needs,
+  reconnecting,
+}: {
+  projects: ProjectSummary[];
+  pins: string[];
+  needs: Map<string, number>;
+  reconnecting: boolean;
+}) {
   const { id, available, locked, choose } = useWorkspace();
   const { user } = useLinkState();
   const keys = useKeys();
@@ -732,6 +757,15 @@ function Rail({ projects, pins, needs }: { projects: ProjectSummary[]; pins: str
         </>
       ) : null}
       <span {...stylex.props(styles.grow)} />
+      {reconnecting ? (
+        // Without a panel (All workspaces) its footer is not there to say the link dropped.
+        <Tooltip content="Reconnecting…" placement="end" delay={300} hasHoverIndication={false}>
+          <p role="status" {...stylex.props(styles.railReconnect)}>
+            <span aria-hidden {...stylex.props(styles.railReconnectDot)} />
+            <span {...stylex.props(styles.srOnly)}>Reconnecting…</span>
+          </p>
+        </Tooltip>
+      ) : null}
       <InboxBell />
       {user ? (
         <UserMenu collapsed />
@@ -833,21 +867,24 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
   );
 }
 
-/** The rail, and beside it the panel. */
+/** The rail, and beside it the panel of the chosen workspace (none under All workspaces). */
 export function Sidebar() {
   const projects = useProjects();
   const { pins } = useRailPins();
-  const { id } = useWorkspace();
+  const { id, available } = useWorkspace();
   const items = useSidebarItems();
   const open = useMemo(() => openProjects(projects.data ?? []), [projects.data]);
   // The panel groups every workspace, the rail shows only what this board member pinned.
   const list = useMemo(() => pinnedFirst(open, pins), [open, pins]);
   const tiles = useMemo(() => railProjects(pins, open, id), [pins, open, id]);
   const needs = useMemo(() => needsPerProject(items), [items]);
+  const { status } = useLinkState();
+  // The panel belongs to one workspace; All workspaces is only the list page beside the rail.
+  const panel = !(available && id === null);
   return (
     <div data-sidebar {...stylex.props(styles.side)}>
-      <Rail projects={tiles} pins={pins} needs={needs} />
-      <Panel items={items} projects={list} />
+      <Rail projects={tiles} pins={pins} needs={needs} reconnecting={!panel && status !== "online"} />
+      {panel ? <Panel items={items} projects={list} /> : null}
     </div>
   );
 }
