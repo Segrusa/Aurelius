@@ -65,6 +65,7 @@ import {
   planTitle,
   prefill,
   QUICK_REACTIONS,
+  queuedLine,
   REACTIONS,
   reactionOn,
   reactionTip,
@@ -1230,7 +1231,7 @@ function Queued({ m }: { m: MessageView }) {
   const { conversationId } = useFeedIds();
   return (
     <div {...stylex.props(styles.queued)}>
-      Waiting · sends after the current answer
+      {queuedLine(m)}
       {conversationId ? (
         <>
           <button
