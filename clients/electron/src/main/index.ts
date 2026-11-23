@@ -17,7 +17,7 @@ import {
   writeSync,
 } from "node:fs";
 import { hostname } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { type Link, LinkError } from "@aurelius/client";
 import {
@@ -48,6 +48,7 @@ import { ArtifactViews, artifactSession, pageHeight, renderArtifact, viewSlot } 
 import { connectOrStart, daemonProgram, installDir, startDaemon } from "./daemon";
 import { appendLinkLog, linkLine, PageWatch } from "./link-life";
 import { linkInArguments, linkOf } from "./links";
+import { runnable } from "./open-file";
 import { daemonEndpoint, dataDir, openPipe } from "./pipe";
 import { type Box, MIN_HEIGHT, MIN_WIDTH, placement } from "./placement";
 import { openRemote, openSession, requestPairing, uploadFile } from "./remote";
@@ -426,6 +427,20 @@ function serveDesktop(): void {
     if (typeof path !== "string" || !statSync(path).isDirectory()) throw new Error("Not a folder.");
     const failure = await shell.openPath(path);
     if (failure) throw new Error(failure);
+  });
+  // A file a run wrote opens in its own app; one that could run is only shown in its folder.
+  handle("file:open", async (_sender, path: unknown): Promise<"opened" | "shown"> => {
+    if (typeof path !== "string" || !isAbsolute(path)) throw new Error("Not a file.");
+    const info = statSync(path, { throwIfNoEntry: false });
+    if (info === undefined) throw new Error("That file is no longer there.");
+    if (!info.isFile()) throw new Error("Not a file.");
+    if (runnable(path, info.mode, process.platform)) {
+      shell.showItemInFolder(path);
+      return "shown";
+    }
+    const failure = await shell.openPath(path);
+    if (failure) throw new Error(failure);
+    return "opened";
   });
 }
 

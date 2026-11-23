@@ -244,7 +244,7 @@ test.describe("a ticket's session", () => {
     // What the runs wrote is on the Files tab (ticket #74).
     await aside.getByRole("tab", { name: /Files/ }).click();
     await aside.getByRole("button", { name: /Files written/ }).click();
-    await expect(aside.getByText("screens/ticket-session-logic.ts")).toBeVisible();
+    await expect(aside.getByText("ticket-session-logic.ts", { exact: true })).toBeVisible();
   });
 
   test("3. Review → Accept → the session is read-only", async ({ page }) => {

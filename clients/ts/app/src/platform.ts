@@ -62,6 +62,11 @@ export interface Platform {
   pickFolder: ((title: string) => Promise<string | null>) | null;
   /** Opens a folder of this machine; null where a folder cannot be opened. */
   openFolder: ((path: string) => Promise<void>) | null;
+  /**
+   * Opens a file of this machine in its own app; one that could run a program is only shown in its
+   * folder (`shown`). Null where a file cannot be opened.
+   */
+  openFile: ((path: string) => Promise<"opened" | "shown">) | null;
   /** The paired server this page must find on the other side; null: its own service or origin. */
   target: { hostId: string; environment: string } | null;
   /** Null: this page belongs to one server. */

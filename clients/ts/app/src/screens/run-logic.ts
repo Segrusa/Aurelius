@@ -175,3 +175,33 @@ export function usageTotals(messages: { usage?: TokenUsage | null }[]): UsageTot
 export function lastRunOf(messages: { run_id?: string | null }[]): string | null {
   return [...messages].reverse().find((m) => m.run_id)?.run_id ?? null;
 }
+
+/** The last part of a path, on any platform's separator. */
+export function fileName(path: string): string {
+  const parts = path.split(/[\\/]/).filter((p) => p !== "");
+  return parts.at(-1) ?? path;
+}
+
+/** Whether a path is absolute on Unix (`/…`) or Windows (`C:\…`, `\\server\…`): only those can be opened. */
+export function isAbsolutePath(path: string): boolean {
+  return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+/** A written file as the list shows it: its name, and its folder only where another file has the same name. */
+export interface FileRow {
+  path: string;
+  name: string;
+  folder: string | null;
+}
+
+export function fileRows(paths: readonly string[]): FileRow[] {
+  const names = paths.map(fileName);
+  const seen = new Map<string, number>();
+  for (const n of names) seen.set(n, (seen.get(n) ?? 0) + 1);
+  return paths.map((path, i) => {
+    const name = names[i] ?? path;
+    if ((seen.get(name) ?? 0) < 2) return { path, name, folder: null };
+    const parts = path.split(/[\\/]/).filter((p) => p !== "");
+    return { path, name, folder: parts.at(-2) ?? null };
+  });
+}

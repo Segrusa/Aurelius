@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld("aurelius", {
   storeFile: (name: string, bytes: ArrayBuffer) => invoke("files:store", name, bytes),
   pickFolder: (title: string) => invoke("folder:pick", title),
   openFolder: (path: string) => invoke("folder:open", path),
+  openFile: (path: string) => invoke("file:open", path),
   serveArtifact: (html: string) => invoke("artifact:serve", html),
   releaseArtifact: (url: string) => invoke("artifact:release", url),
   showArtifact: (url: string, bounds: ArtifactBounds | null, slot?: ArtifactSlot) =>

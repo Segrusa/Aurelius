@@ -12,7 +12,8 @@ import { type ReactNode, useState, useSyncExternalStore } from "react";
 import { useRunGuidelines } from "../data";
 import { usePlatform } from "../platform";
 import { Icon } from "../ui/icons";
-import type { UsageTotals } from "./run-logic";
+import { toast } from "../ui/toast";
+import { fileName, fileRows, isAbsolutePath, type UsageTotals } from "./run-logic";
 import { tokensShort } from "./usage-logic";
 
 /** Remembered for every screen with a properties panel: who hides it once wants it hidden everywhere. */
@@ -82,14 +83,35 @@ const styles = stylex.create({
   row: { display: "grid", minHeight: 30, gridTemplateColumns: "100px minmax(0,1fr)", alignItems: "center" },
   rowName: { color: "var(--precision-text3)" },
   rowValue: { minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
+  // A file is a row like a guideline: its name, and its folder in grey only when the name repeats.
   file: {
+    display: "flex",
+    width: "calc(100% + 12px)",
+    boxSizing: "border-box",
+    alignItems: "baseline",
+    gap: 8,
+    marginInline: -6,
+    borderRadius: 6,
+    paddingBlock: 4,
+    paddingInline: 6,
+    fontSize: 13,
+    color: "var(--color-text-primary)",
+  },
+  fileButton: {
+    cursor: "pointer",
+    borderWidth: 0,
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    textAlign: "left",
+    fontFamily: "inherit",
+  },
+  fileFolder: {
+    flexShrink: 1,
+    minWidth: 24,
     overflow: "hidden",
     whiteSpace: "nowrap",
     textOverflow: "ellipsis",
-    paddingBlock: 4,
-    fontFamily: "var(--font-family-code)",
     fontSize: 12,
-    color: "var(--color-text-secondary)",
+    color: "var(--precision-text3)",
   },
   guideline: { display: "flex", justifyContent: "space-between", gap: 8, paddingBlock: 4 },
   truncate: { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
@@ -247,15 +269,45 @@ export function FoldedSection({ title, count, children }: { title: string; count
   );
 }
 
+/** Each file by its name; the folder only where two files share a name. A click opens it. */
 export function FilesWritten({ files }: { files: string[] }) {
+  const platform = usePlatform();
   if (files.length === 0) return null;
+  const rows = fileRows(files);
+  const open = (path: string) => {
+    platform.openFile?.(path).then(
+      (how) =>
+        how === "shown" ? toast("This file could run a program, so its folder was opened instead.") : undefined,
+      (e: unknown) => toast(`Couldn't open ${fileName(path)}: ${e instanceof Error ? e.message : String(e)}`),
+    );
+  };
   return (
     <FoldedSection title="Files written" count={files.length}>
-      {files.map((f) => (
-        <div key={f} title={f} {...stylex.props(styles.file)}>
-          {f}
-        </div>
-      ))}
+      {rows.map(({ path, name, folder }) => {
+        const label = (
+          <>
+            <span {...stylex.props(styles.truncate)}>{name}</span>
+            {folder ? <span {...stylex.props(styles.fileFolder)}>{folder}</span> : null}
+          </>
+        );
+        // A relative path or another machine's file cannot be opened from here: then it is only shown.
+        return platform.openFile && isAbsolutePath(path) ? (
+          <button
+            key={path}
+            type="button"
+            title={path}
+            aria-label={`Open ${name}`}
+            onClick={() => open(path)}
+            {...stylex.props(styles.file, styles.fileButton)}
+          >
+            {label}
+          </button>
+        ) : (
+          <div key={path} title={path} {...stylex.props(styles.file)}>
+            {label}
+          </div>
+        );
+      })}
     </FoldedSection>
   );
 }

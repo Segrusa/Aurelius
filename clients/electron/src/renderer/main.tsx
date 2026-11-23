@@ -52,6 +52,7 @@ interface Bridge {
   storeFile(name: string, bytes: ArrayBuffer): Promise<{ path: string; name: string }>;
   pickFolder(title: string): Promise<string | null>;
   openFolder(path: string): Promise<void>;
+  openFile(path: string): Promise<"opened" | "shown">;
   serveArtifact(html: string): Promise<string>;
   releaseArtifact(url: string): Promise<void>;
   showArtifact(url: string, bounds: ArtifactBounds | null, slot?: ArtifactSlot): Promise<void>;
@@ -131,6 +132,7 @@ const platform: Platform = {
   // A folder of this computer means nothing to a server elsewhere: there the server's own browser.
   pickFolder: remote ? null : (title) => bridge.pickFolder(title),
   openFolder: remote ? null : (path) => bridge.openFolder(path),
+  openFile: remote ? null : (path) => bridge.openFile(path),
   target: info.target,
   servers: {
     list: () => bridge.listServers(),

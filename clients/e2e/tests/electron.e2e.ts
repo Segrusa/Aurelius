@@ -57,6 +57,7 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
       "listServers",
       "listenLink",
       "listenLinks",
+      "openFile",
       "openFolder",
       "openLink",
       "openProjectWindow",

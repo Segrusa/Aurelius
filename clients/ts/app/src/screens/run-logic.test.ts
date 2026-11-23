@@ -4,6 +4,9 @@ import {
   boardOnlyReason,
   composePlanFeedback,
   elapsedText,
+  fileName,
+  fileRows,
+  isAbsolutePath,
   lastFailure,
   lastRunOf,
   lastSummaryFailed,
@@ -169,5 +172,28 @@ describe("lastRunOf", () => {
   it("is the latest message that came from a run", () => {
     expect(lastRunOf([{ run_id: "r1" }, { run_id: null }, { run_id: "r2" }, {}])).toBe("r2");
     expect(lastRunOf([{}, { run_id: null }])).toBeNull();
+  });
+});
+
+describe("written files", () => {
+  it("shows a file by its name, on either separator", () => {
+    expect(fileName("/home/x/target/wt/crates/daemon/tests/artifact_drafts.rs")).toBe("artifact_drafts.rs");
+    expect(fileName("C:\\w\\src\\main.ts")).toBe("main.ts");
+    expect(fileName("src/api.rs")).toBe("api.rs");
+  });
+
+  it("adds the folder only where two files share a name", () => {
+    expect(fileRows(["/w/a/mod.rs", "/w/b/mod.rs", "/w/b/lib.rs"])).toEqual([
+      { path: "/w/a/mod.rs", name: "mod.rs", folder: "a" },
+      { path: "/w/b/mod.rs", name: "mod.rs", folder: "b" },
+      { path: "/w/b/lib.rs", name: "lib.rs", folder: null },
+    ]);
+  });
+
+  it("opens only absolute paths", () => {
+    expect(isAbsolutePath("/w/a.rs")).toBe(true);
+    expect(isAbsolutePath("C:\\w\\a.rs")).toBe(true);
+    expect(isAbsolutePath("\\\\server\\share\\a.rs")).toBe(true);
+    expect(isAbsolutePath("src/a.rs")).toBe(false);
   });
 });

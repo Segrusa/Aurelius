@@ -83,6 +83,7 @@ const platform: Platform = {
   keepFiles: uploadFiles,
   pickFolder: null,
   openFolder: null,
+  openFile: null,
   target: null,
   servers: null,
   osLinks: null,

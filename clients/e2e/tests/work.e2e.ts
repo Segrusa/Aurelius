@@ -566,7 +566,7 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(page.getByRole("button", { name: "Ran 1 command · 1 failed" })).toBeVisible();
     const properties = page.getByRole("complementary", { name: "Run properties" });
     await properties.getByRole("button", { name: /Files written/ }).click();
-    await expect(properties.getByText("src/api.rs")).toBeVisible();
+    await expect(properties.getByText("api.rs", { exact: true })).toBeVisible();
     await properties.getByRole("button", { name: "Usage" }).hover();
     await expect(page.getByRole("tooltip")).toContainText("6.4k out");
     await expect(page.getByRole("tooltip")).toContainText("$0.43");
@@ -649,7 +649,7 @@ test.describe("states a test daemon cannot produce", () => {
     // The files and guidelines start folded; their headings say how many.
     const files = properties.getByRole("button", { name: /Files written/ });
     await expect(files).toHaveAttribute("aria-expanded", "false");
-    await expect(properties.getByText("src/login.tsx")).toHaveCount(0);
+    await expect(properties.getByText("login.tsx", { exact: true })).toHaveCount(0);
     // What the runs used is behind the info icon of the Properties heading.
     await expect(properties.getByText(/2\.1k out/)).toBeHidden();
     await properties.getByRole("button", { name: "Usage" }).hover();
@@ -657,7 +657,7 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(page.getByText("The login page works again.")).toBeVisible();
     await page.screenshot({ path: `${REPO}/target/session-details/session-panel.png` });
     await files.click();
-    await expect(properties.getByText("src/login.tsx")).toBeVisible();
+    await expect(properties.getByText("login.tsx", { exact: true })).toBeVisible();
     await properties.getByRole("button", { name: /Guidelines in this run/ }).click();
     await expect(properties.getByText("Rust style")).toBeVisible();
     await expect(properties.getByText("v3")).toBeVisible();
