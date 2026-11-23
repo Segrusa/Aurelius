@@ -260,11 +260,10 @@ pub(crate) async fn prepare_run(shared: &Arc<Shared>, conversation: Option<aurel
         Some(Ok(Some((session, folder)))) => {
             let Some((worktree, branch)) = session.worktree else { return Ok(()) };
             let worktree = std::path::PathBuf::from(worktree);
-            if worktree.join(".git").exists() {
-                return Ok(());
-            }
-            if session.own_branch {
-                return own_branch_before_run(shared, conversation, session.project, worktree, branch).await;
+            match session_folder_step(session.own_branch, &worktree) {
+                SessionFolderStep::Ready => return Ok(()),
+                SessionFolderStep::OwnBranch => return own_branch_before_run(shared, conversation, session.project, worktree, branch).await,
+                SessionFolderStep::MakeWorktree => {}
             }
             let Some(folder) = folder else { return Err("Aurelius could not make this session's worktree: the project has no folder".into()) };
             let made = blocking(move || ensure_worktree(Path::new(&folder), &branch, &worktree)).await.unwrap_or_else(|| Err("the git work stopped".into()));
@@ -289,6 +288,29 @@ pub(crate) async fn prepare_run(shared: &Arc<Shared>, conversation: Option<aurel
             Err(format!("Aurelius could not make the quick task's worktree: {e}"))
         }
         None => Err("Aurelius could not make the quick task's worktree: the git work stopped".into()),
+    }
+}
+
+/// What a work session's folder needs before a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionFolderStep {
+    /// Its worktree is there.
+    Ready,
+    /// Its worktree must be made.
+    MakeWorktree,
+    /// The project's folder must be on the session's own branch.
+    OwnBranch,
+}
+
+/// An own-branch session's stored worktree is the project's folder, which always has
+/// `.git`: its branch is checked out before every run, not skipped as an existing worktree.
+fn session_folder_step(own_branch: bool, worktree: &Path) -> SessionFolderStep {
+    if own_branch {
+        SessionFolderStep::OwnBranch
+    } else if worktree.join(".git").exists() {
+        SessionFolderStep::Ready
+    } else {
+        SessionFolderStep::MakeWorktree
     }
 }
 
