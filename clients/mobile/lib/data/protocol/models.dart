@@ -6113,6 +6113,7 @@ final class DesignPageView {
 final class DesignView {
   const DesignView({
     required this.conversationId,
+    this.design,
     required this.kind,
     required this.lastAtMs,
     required this.pages,
@@ -6123,6 +6124,8 @@ final class DesignView {
   });
 
   final String conversationId;
+  /// A design session (feature `design_sessions`): listed from its start, also before its first page.
+  final bool? design;
   /// `session`, `ticket`, `task` or `project`: where a client opens the conversation.
   final String kind;
   /// When its newest page was kept.
@@ -6139,6 +6142,7 @@ final class DesignView {
 
   factory DesignView.fromJson(Map<String, dynamic> json) => DesignView(
     conversationId: (json['conversation_id'] as String),
+    design: (json['design'] == null ? null : (json['design'] as bool)),
     kind: (json['kind'] as String),
     lastAtMs: (json['last_at_ms'] as num).toInt(),
     pages: (json['pages'] as List<dynamic>).map((x0) => DesignPageView.fromJson(x0 as Map<String, dynamic>)).toList(),
@@ -6150,6 +6154,7 @@ final class DesignView {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     'conversation_id': conversationId,
+    if (design != null) 'design': design,
     'kind': kind,
     'last_at_ms': lastAtMs,
     'pages': pages.map((x0) => x0.toJson()).toList(),
@@ -6298,6 +6303,7 @@ final class DiscussionAudience {
 final class DispatchWorkSession {
   const DispatchWorkSession({
     this.confirmSecret,
+    this.design,
     this.files = const [],
     this.images = const [],
     required this.projectId,
@@ -6308,6 +6314,8 @@ final class DispatchWorkSession {
 
   /// See `StartWorkSession::confirm_secret`.
   final bool? confirmSecret;
+  /// See `StartWorkSession::design`.
+  final bool? design;
   /// See `StartWorkSession::files`.
   final List<String> files;
   /// See `StartWorkSession::images`.
@@ -6321,6 +6329,7 @@ final class DispatchWorkSession {
 
   factory DispatchWorkSession.fromJson(Map<String, dynamic> json) => DispatchWorkSession(
     confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
+    design: (json['design'] == null ? null : (json['design'] as bool)),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     projectId: (json['project_id'] as String),
@@ -6331,6 +6340,7 @@ final class DispatchWorkSession {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (confirmSecret != null) 'confirm_secret': confirmSecret,
+    if (design != null) 'design': design,
     'files': files,
     'images': images,
     'project_id': projectId,
@@ -18173,6 +18183,7 @@ final class StartProjectConversation {
 final class StartWorkSession {
   const StartWorkSession({
     this.confirmSecret,
+    this.design,
     required this.employeeId,
     this.files = const [],
     this.images = const [],
@@ -18185,6 +18196,9 @@ final class StartWorkSession {
   /// A board member confirmed that the text may hold a vault secret's value
   /// (after `looks_like_secret`, B10): it is stored with the value redacted.
   final bool? confirmSecret;
+  /// A design session (feature `design_sessions`): the employee makes HTML pages,
+  /// and the app opens the session with its preview.
+  final bool? design;
   final String employeeId;
   /// Files that belong to the first message (feature `chat_files`, see
   /// `SendChatMessage::files`). Not with `worktree`: that folder does not exist yet.
@@ -18201,6 +18215,7 @@ final class StartWorkSession {
 
   factory StartWorkSession.fromJson(Map<String, dynamic> json) => StartWorkSession(
     confirmSecret: (json['confirm_secret'] == null ? null : (json['confirm_secret'] as bool)),
+    design: (json['design'] == null ? null : (json['design'] as bool)),
     employeeId: (json['employee_id'] as String),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
@@ -18212,6 +18227,7 @@ final class StartWorkSession {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
     if (confirmSecret != null) 'confirm_secret': confirmSecret,
+    if (design != null) 'design': design,
     'employee_id': employeeId,
     'files': files,
     'images': images,
@@ -21062,6 +21078,7 @@ final class WorkSessionView {
     this.branch,
     required this.conversationId,
     required this.createdAtMs,
+    this.design,
     this.dispatch,
     required this.employeeId,
     required this.employeeName,
@@ -21077,6 +21094,8 @@ final class WorkSessionView {
   final String? branch;
   final String conversationId;
   final int createdAtMs;
+  /// A design session (feature `design_sessions`); older servers leave it out.
+  final bool? design;
   /// The dispatcher still chooses who takes it, or chose nobody (feature
   /// `session_dispatch`); none: `employee_id` works in it. While it chooses,
   /// `employee_id` is the dispatcher.
@@ -21102,6 +21121,7 @@ final class WorkSessionView {
     branch: (json['branch'] == null ? null : (json['branch'] as String)),
     conversationId: (json['conversation_id'] as String),
     createdAtMs: (json['created_at_ms'] as num).toInt(),
+    design: (json['design'] == null ? null : (json['design'] as bool)),
     dispatch: (json['dispatch'] == null ? null : SessionDispatch.fromJson(json['dispatch'] as String)),
     employeeId: (json['employee_id'] as String),
     employeeName: (json['employee_name'] as String),
@@ -21118,6 +21138,7 @@ final class WorkSessionView {
     if (branch != null) 'branch': branch,
     'conversation_id': conversationId,
     'created_at_ms': createdAtMs,
+    if (design != null) 'design': design,
     if (dispatch != null) 'dispatch': dispatch?.toJson(),
     'employee_id': employeeId,
     'employee_name': employeeName,

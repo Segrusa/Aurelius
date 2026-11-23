@@ -1719,6 +1719,10 @@ export interface DesignPageView {
 export interface DesignView {
   conversation_id: string;
   /**
+   * A design session (feature `design_sessions`): listed from its start, also before its first page.
+   */
+  design?: boolean;
+  /**
    * `session`, `ticket`, `task` or `project`: where a client opens the conversation.
    */
   kind: string;
@@ -1829,6 +1833,10 @@ export interface DispatchWorkSession {
    * See `StartWorkSession::confirm_secret`.
    */
   confirm_secret?: boolean;
+  /**
+   * See `StartWorkSession::design`.
+   */
+  design?: boolean;
   /**
    * See `StartWorkSession::files`.
    */
@@ -5901,6 +5909,11 @@ export interface StartWorkSession {
    * (after `looks_like_secret`, B10): it is stored with the value redacted.
    */
   confirm_secret?: boolean;
+  /**
+   * A design session (feature `design_sessions`): the employee makes HTML pages,
+   * and the app opens the session with its preview.
+   */
+  design?: boolean;
   employee_id: string;
   /**
    * Files that belong to the first message (feature `chat_files`, see
@@ -7350,6 +7363,10 @@ export interface WorkSessionView {
   branch?: string | null;
   conversation_id: string;
   created_at_ms: number;
+  /**
+   * A design session (feature `design_sessions`); older servers leave it out.
+   */
+  design?: boolean;
   /**
    * The dispatcher still chooses who takes it, or chose nobody (feature
    * `session_dispatch`); none: `employee_id` works in it. While it chooses,
