@@ -74,6 +74,7 @@ export function DesignViewer({
   conversationId,
   send,
   docked = false,
+  notice = null,
   onClose,
 }: {
   design: WrittenDesign;
@@ -82,6 +83,8 @@ export function DesignViewer({
   conversationId: string | null;
   send: ArtifactSend | null;
   docked?: boolean;
+  /** Shown in the docked head before Close. */
+  notice?: React.ReactNode;
   onClose: () => void;
 }) {
   const { artifacts } = usePlatform();
@@ -100,6 +103,7 @@ export function DesignViewer({
       conversationId={conversationId}
       send={send}
       docked={docked}
+      notice={notice}
       live={{
         name: design.name,
         html,

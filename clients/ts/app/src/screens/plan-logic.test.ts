@@ -143,6 +143,7 @@ describe("a plan link", () => {
   it("opens the plan the link names when the feed holds it", () => {
     const list = [plan("p1"), msg({ id: "x" })];
     expect(planFromSearch("?plan=p1", list)).toBe("p1");
+    expect(planFromSearch("?plan=a-p1", list)).toBe("p1");
     expect(planFromSearch("?plan=x", list)).toBeNull();
     expect(planFromSearch("", list)).toBeNull();
   });

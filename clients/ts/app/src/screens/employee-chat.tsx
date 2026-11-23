@@ -19,6 +19,7 @@ import { Composer } from "./chat";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import { before, localDay, quickReplies, streamTo } from "./chat-logic";
 import { type ChatContext, ChatProvider, DayLine, FeedIdsProvider, LiveRow, MessageRow } from "./chat-message";
+import { usePlanDock } from "./plan-dock";
 import { approvalsFor } from "./run-card-logic";
 import { ThreadWaiting } from "./scheduled";
 
@@ -172,6 +173,7 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
     [approvals.data, conversationId, taskId],
   );
   const approvalMap = useMemo(() => new Map(pending.map((a) => [a.id, a])), [pending]);
+  usePlanDock(dock, list, approvalMap);
   const onCard = useMemo(() => new Set(list.flatMap((m) => m.approval_id ?? [])), [list]);
   const inList = useMemo(() => new Set(list.map((m) => m.id)), [list]);
   const rows = useMemo<Row[]>(() => {
@@ -218,6 +220,7 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
       flash: null,
       artifactSend,
       openArtifact: dock.open,
+      dockTarget: dock.target,
     }),
     [
       store,
@@ -231,6 +234,7 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
       conversationId,
       artifactSend,
       dock.open,
+      dock.target,
     ],
   );
 

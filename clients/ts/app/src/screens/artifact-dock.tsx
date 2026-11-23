@@ -1,22 +1,36 @@
-// The artifact viewer docked at the right of a conversation, as Claude Desktop shows one: a kept
-// HTML file, or a design an answer writes (live while it streams). The conversation's frame holds
-// what is open, so the panel stays while its message scrolls out of the feed.
+// The dock at the right of a conversation, as Claude Desktop shows an artifact: a kept HTML file,
+// a design an answer writes (live while it streams), or a plan waiting for a decision. The
+// conversation's frame holds what is open, so the panel stays while its message scrolls out of
+// the feed. One thing at a time: opening one replaces the other.
 
+import { Button } from "@astryxdesign/core/Button";
 import type { FileRef, MessageView } from "@aurelius/protocol";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlatform } from "../platform";
 import { DesignViewer } from "./artifact-live";
 import { designFile, designPages, designsOf, keptDesign } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 import { useLive } from "./chat-live";
 import type { ChatContext } from "./chat-message";
+import { PlanDock } from "./plan-dock";
+import { latestPlan, newPlanWaiting } from "./plan-logic";
 
-/** What the dock shows: a kept file, or the design at `path` that message `messageId` writes. */
-export type ArtifactTarget = { kind: "file"; file: FileRef } | { kind: "design"; messageId: string; path: string };
+/**
+ * What the dock shows: a kept file, the design at `path` that message `messageId` writes, or the
+ * plan of plan message `messageId` (`focus`: the board member opened it, so focus goes to it).
+ */
+export type ArtifactTarget =
+  | { kind: "file"; file: FileRef }
+  | { kind: "design"; messageId: string; path: string }
+  | { kind: "plan"; messageId: string; focus?: boolean };
 
 /** One key per target: a new one shows in a fresh viewer. */
 export const targetKey = (t: ArtifactTarget) =>
-  t.kind === "file" ? `file:${t.file.id}` : `design:${t.messageId}:${t.path}`;
+  t.kind === "file"
+    ? `file:${t.file.id}`
+    : t.kind === "design"
+      ? `design:${t.messageId}:${t.path}`
+      : `plan:${t.messageId}`;
 
 /** The dock's state for a conversation's frame: what is open, and opening or closing it. */
 export function useArtifactDock() {
@@ -47,11 +61,13 @@ function DockedDesign({
   ctx,
   messageId,
   path,
+  notice,
   onClose,
 }: {
   ctx: ChatContext;
   messageId: string;
   path: string;
+  notice: ReactNode;
   onClose: () => void;
 }) {
   const { artifacts } = usePlatform();
@@ -71,6 +87,7 @@ function DockedDesign({
         conversationId={ctx.conversationId}
         send={ctx.artifactSend ?? null}
         docked
+        notice={notice}
         onClose={onClose}
       />
     );
@@ -83,12 +100,16 @@ function DockedDesign({
       conversationId={ctx.conversationId}
       send={ctx.artifactSend ?? null}
       docked
+      notice={notice}
       onClose={onClose}
     />
   );
 }
 
-/** The open artifact in its panel; nothing where the app cannot show one (the web). */
+/**
+ * The open artifact in its panel. A plan is Markdown and shows everywhere; a file or a design
+ * needs the app's sandbox, so it shows nothing where there is none (the web).
+ */
 export function DockedArtifact({
   target,
   ctx,
@@ -99,9 +120,32 @@ export function DockedArtifact({
   onClose: () => void;
 }) {
   const { artifacts } = usePlatform();
+  const waiting = useMemo(
+    () => newPlanWaiting(target, latestPlan(ctx.messages, new Set(ctx.approvals.keys()))),
+    [target, ctx.messages, ctx.approvals],
+  );
+  const notice = waiting ? (
+    <Button
+      size="sm"
+      variant="secondary"
+      label="New plan waiting"
+      onClick={() => ctx.openArtifact?.({ kind: "plan", messageId: waiting })}
+    />
+  ) : null;
+  if (target.kind === "plan")
+    return (
+      <PlanDock
+        key={target.messageId}
+        ctx={ctx}
+        messageId={target.messageId}
+        focus={target.focus ?? false}
+        notice={notice}
+        onClose={onClose}
+      />
+    );
   if (!artifacts) return null;
   if (target.kind === "design")
-    return <DockedDesign ctx={ctx} messageId={target.messageId} path={target.path} onClose={onClose} />;
+    return <DockedDesign ctx={ctx} messageId={target.messageId} path={target.path} notice={notice} onClose={onClose} />;
   return (
     <ArtifactViewer
       pages={designPages(ctx.messages, target.file, Date.now())}
@@ -111,6 +155,7 @@ export function DockedArtifact({
       conversationId={ctx.conversationId}
       send={ctx.artifactSend ?? null}
       docked
+      notice={notice}
       onClose={onClose}
     />
   );

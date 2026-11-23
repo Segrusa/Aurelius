@@ -35,7 +35,8 @@ export function shouldAutoOpenPlan(
   plan: PlanRef | null,
   handled: ReadonlySet<string>,
 ): boolean {
-  return plan !== null && plan.pending && target === null && !handled.has(plan.id);
+  if (!plan?.pending) return false;
+  return target === null && !handled.has(plan.id);
 }
 
 /** The "New plan waiting" pill: a waiting plan while the dock shows something else. */
@@ -140,8 +141,12 @@ export function findQuote(text: string, quote: string): [number, number] | null 
   return [first, last + 1];
 }
 
-/** The plan to open from `?plan=<messageId>`, when the feed holds it. */
+/**
+ * The plan message to open from `?plan=<id>`, when the feed holds it. The id is the plan
+ * message's or its approval's: the Inbox knows only the approval.
+ */
 export function planFromSearch(search: string, messages: readonly MessageView[]): string | null {
   const id = new URLSearchParams(search).get("plan");
-  return id && messages.some((m) => m.id === id && isPlanMessage(m)) ? id : null;
+  if (!id) return null;
+  return messages.find((m) => isPlanMessage(m) && (m.id === id || m.approval_id === id))?.id ?? null;
 }

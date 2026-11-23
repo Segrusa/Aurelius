@@ -119,9 +119,14 @@ const myTickets = createRoute({
     throw redirect({ to: "/board", search });
   },
 });
-/** `?design=<file id>`: a conversation's screen opens with that kept design beside it (the Designs page). */
-const designSearch = (search: Record<string, unknown>): { design?: string } =>
-  typeof search.design === "string" ? { design: search.design } : {};
+/**
+ * `?design=<file id>`: a conversation's screen opens with that kept design beside it (the Designs
+ * page). `?plan=<message or approval id>`: it opens with that plan in the dock (the Inbox).
+ */
+const designSearch = (search: Record<string, unknown>): { design?: string; plan?: string } => ({
+  ...(typeof search.design === "string" ? { design: search.design } : {}),
+  ...(typeof search.plan === "string" ? { plan: search.plan } : {}),
+});
 
 const tasks = createRoute({ getParentRoute: () => root, path: "/tasks", component: () => <TasksScreen /> });
 const taskRun = createRoute({
@@ -138,7 +143,9 @@ const taskRun = createRoute({
 const ticketSession = createRoute({
   getParentRoute: () => root,
   path: "/ticket/$number",
-  validateSearch: (search: Record<string, unknown>): { message?: string; thread?: string; design?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { message?: string; thread?: string; design?: string; plan?: string } => ({
     ...(typeof search.message === "string" ? { message: search.message } : {}),
     ...(typeof search.thread === "string" ? { thread: search.thread } : {}),
     ...designSearch(search),

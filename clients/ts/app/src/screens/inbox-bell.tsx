@@ -15,7 +15,7 @@ import { useConnection, useLinkState } from "../connection";
 import { useNotifications, useWorkSessions } from "../data";
 import { Icon, StatusGlyph } from "../ui/icons";
 import { toast } from "../ui/toast";
-import { ApprovalCard } from "./approval-card";
+import { ApprovalCard, PLAN_TOOL } from "./approval-card";
 import { INBOX_TONES, useInbox } from "./inbox-data";
 import { age, type InboxRow, needsYouCount, rowPlace } from "./inbox-logic";
 import { useFollowLink } from "./links";
@@ -159,6 +159,9 @@ export function InboxBell() {
       void write("notification.mark_read", { id: source.notification.id });
     }
     const place = rowPlace(row, Boolean(hostId && follow && features.includes("message_locate")));
+    // A plan opens in the dock of the conversation it waits in.
+    const plan = source.kind === "approval" && source.approval.tool === PLAN_TOOL ? source.approval.id : null;
+    const planSearch = plan ? { plan } : {};
     switch (place.kind) {
       case "here":
         // An approval is decided right here; an update without a place is only read.
@@ -166,16 +169,19 @@ export function InboxBell() {
         return;
       case "ticket":
         void navigate(
-          ticketPlace({ id: place.id, number: place.number }, place.message ? { message: place.message } : undefined),
+          ticketPlace(
+            { id: place.id, number: place.number },
+            place.message || plan ? { ...(place.message ? { message: place.message } : {}), ...planSearch } : undefined,
+          ),
         );
         break;
       case "task":
-        void navigate({ to: "/tasks/$taskId", params: { taskId: place.id } });
+        void navigate({ to: "/tasks/$taskId", params: { taskId: place.id }, search: planSearch });
         break;
       case "conversation":
         // Only a work session is still a place of its own: the Team chat is gone.
         if (sessions.some((s) => s.conversation_id === place.id)) {
-          void navigate({ to: "/session/$conversationId", params: { conversationId: place.id } });
+          void navigate({ to: "/session/$conversationId", params: { conversationId: place.id }, search: planSearch });
         }
         break;
       case "message":
