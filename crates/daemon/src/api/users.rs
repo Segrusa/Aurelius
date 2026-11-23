@@ -689,6 +689,8 @@ pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: Co
                 extra: serde_json::json!({ "disabled_user_id": user_id, "subject": row.username }),
             };
             let (s, id) = (shared.clone(), row.id.clone());
+            // Their paired devices go with them: nobody else can see or revoke them (`own_devices`).
+            let devices: Vec<aurelius_domain::ClientId> = shared.remote.devices(&row.id).await.into_iter().map(|d| d.id).collect();
             let committed = app_task(move || {
                 s.service.account_write(&ctx, key, account, Box::new(move |tx| {
                     let target = aurelius_storage::users::get(tx, &id)?;
@@ -701,6 +703,7 @@ pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: Co
                     aurelius_storage::users::disable(tx, &id, aurelius_storage::now_ms())?;
                     // Their Claude login goes too (its folder with the Claude login runtime, F2).
                     aurelius_storage::claude_logins::delete(tx, &id)?;
+                    aurelius_storage::remote::revoke_paired_by(tx, &id)?;
                     let view = aurelius_storage::users::get(tx, &id)?.and_then(|u| u.view());
                     Ok(Ok(serde_json::to_value(view.map(aurelius_protocol::HostResult::User)).unwrap_or_default()))
                 }))
@@ -712,6 +715,10 @@ pub(super) async fn session_write(shared: &Arc<Shared>, peer: &mut Peer, ctx: Co
                     tracing::warn!(user = %user_id, error = %e.message, "the disabled board member's Claude login could not be removed");
                 }
                 shared.sessions.end_user(user_id, None, SignOutReason::Disabled, (user_id == me).then_some(peer.conn));
+                for device in devices {
+                    shared.remote.disconnect(device);
+                    shared.sessions.end_client(device, SignOutReason::Revoked);
+                }
                 if user_id == me {
                     peer.user = None;
                     peer.session = None;

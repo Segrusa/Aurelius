@@ -117,6 +117,12 @@ class AureliusRepository {
   /// End [sessionId]; that device falls back to its sign-in screen (MU3-04 AC2).
   Future<void> revokeSession(String sessionId) => _host(sessionRevoke(sessionId: sessionId));
 
+  /// The devices this phone's board member paired (feature `own_devices`), newest first.
+  Future<List<RemoteClientView>> devices() async => (await _ask<ResponseBodyDevices>(deviceList())).value.devices;
+
+  /// Remove one of the board member's own devices; everyone on it is signed out.
+  Future<void> revokeDevice(String clientId) => _host(deviceRevoke(clientId: clientId));
+
   /// The own Claude login (`claude_login.status`).
   Future<ClaudeLoginView?> claudeLogin() => connection.refreshClaudeLogin();
 

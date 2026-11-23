@@ -472,6 +472,12 @@ pub mod feature {
     /// branch out before each run, never while another run works in the folder or the
     /// folder has uncommitted changes. A client without this feature does not offer it.
     pub const SESSION_OWN_BRANCH: &str = "session_own_branch";
+    /// A paired device belongs to the board member who paired it (protocol 5, additive):
+    /// `device.list` and `device.revoke` for the session's own devices,
+    /// `RemoteClientView::paired_by`, and `remote.get_status` shows only the reader's
+    /// own devices and those of nobody. A client without this feature keeps its
+    /// device list in the Remote access settings.
+    pub const OWN_DEVICES: &str = "own_devices";
 }
 
 /// Every feature this build has.
@@ -535,6 +541,7 @@ pub const FEATURES: &[&str] = &[
     feature::DESIGNS,
     feature::DESIGN_SESSIONS,
     feature::SESSION_OWN_BRANCH,
+    feature::OWN_DEVICES,
 ];
 
 /// The answer of `command.applied`.
@@ -749,6 +756,8 @@ pub enum ResponseBody {
     Notifications(NotificationsSnapshot),
     Subscribed { replayed_through_seq: u64 },
     Remote(RemoteStatus),
+    /// `device.list`.
+    Devices(crate::remote::DevicesSnapshot),
     DirListing(DirListing),
     /// `None`: Claude Code was not found on the server.
     RuntimeDetected { claude_code: Option<String> },

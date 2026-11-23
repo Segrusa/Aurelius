@@ -290,7 +290,11 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
                 .map(ResponseBody::Activity)
                 .ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "This tool call is no longer kept."))
         }
-        Method::RemoteGetStatus => Ok(ResponseBody::Remote(crate::remote::status(shared).await)),
+        Method::RemoteGetStatus => Ok(ResponseBody::Remote(crate::remote::status(shared, reader.map(|u| u.to_string()).as_deref()).await)),
+        Method::DeviceList => match reader {
+            Some(user) => Ok(ResponseBody::Devices(crate::remote::devices(shared, &user.to_string()).await)),
+            None => Err(super::users::unauthenticated()),
+        },
         Method::FsListDir { path } => crate::browse::list(shared, path).await.map(ResponseBody::DirListing),
         Method::ProviderDetectRuntime => Ok(ResponseBody::RuntimeDetected {
             claude_code: tokio::task::spawn_blocking(aurelius_runtime::claude_code::locate).await.ok().flatten().map(|p| p.display().to_string()),

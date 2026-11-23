@@ -18,6 +18,8 @@ pub struct RemoteClient {
     pub revoked: bool,
     /// The board member who last logged in on it (migration 21).
     pub user_id: Option<String>,
+    /// The board member who paired it, the device's owner (migration 50).
+    pub paired_by: Option<String>,
 }
 
 /// The platform that has push: `push_registrations.platform` of an iPhone.
@@ -56,11 +58,12 @@ fn client_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RemoteClient> {
         last_seen_ms: r.get(6)?,
         revoked: r.get::<_, Option<i64>>(7)?.is_some(),
         user_id: r.get(8)?,
+        paired_by: r.get(9)?,
     })
 }
 
 const SELECT: &str =
-    "SELECT id, name, platform, credential_verifier, capabilities_json, created_at_ms, last_seen_ms, revoked_at_ms, user_id FROM remote_clients";
+    "SELECT id, name, platform, credential_verifier, capabilities_json, created_at_ms, last_seen_ms, revoked_at_ms, user_id, paired_by FROM remote_clients";
 
 pub fn create_client(
     tx: &Transaction<'_>,
@@ -84,13 +87,36 @@ pub fn find_client(conn: &Connection, id: ClientId) -> Result<Option<RemoteClien
     Ok(conn.query_row(&format!("{SELECT} WHERE id = ?1"), [id.to_string()], client_row).optional()?)
 }
 
-/// Active (not revoked) devices, newest first, as the desktop shows them.
+/// Who a device list is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Devices<'a> {
+    /// Every active device (tests and the CLI on the server itself).
+    All,
+    /// The devices this board member paired (Settings → Account, `device.list`).
+    PairedBy(&'a str),
+    /// What this board member may see in the server's Remote access settings: their own
+    /// devices and the devices of nobody. Never another board member's.
+    VisibleTo(Option<&'a str>),
+}
+
+/// Active (not revoked) devices, newest first, as the clients show them.
 /// `connected` is filled in by the gateway.
 pub fn list_clients(conn: &Connection) -> Result<Vec<RemoteClientView>, StorageError> {
+    list_devices(conn, Devices::All)
+}
+
+/// Active devices of `which`, newest first.
+pub fn list_devices(conn: &Connection, which: Devices<'_>) -> Result<Vec<RemoteClientView>, StorageError> {
+    let (filter, user) = match which {
+        // Bound to NULL: always true.
+        Devices::All => ("?1 IS NULL", None),
+        Devices::PairedBy(user) => ("paired_by = ?1", Some(user)),
+        Devices::VisibleTo(user) => ("(paired_by IS NULL OR paired_by = ?1)", user),
+    };
     let mut stmt = conn.prepare(&format!(
-        "{SELECT} WHERE revoked_at_ms IS NULL ORDER BY created_at_ms DESC"
+        "{SELECT} WHERE revoked_at_ms IS NULL AND {filter} ORDER BY created_at_ms DESC"
     ))?;
-    let clients = stmt.query_map([], client_row)?.collect::<Result<Vec<_>, _>>()?;
+    let clients = stmt.query_map([user], client_row)?.collect::<Result<Vec<_>, _>>()?;
     let mut push = conn.prepare("SELECT 1 FROM push_registrations WHERE client_id = ?1")?;
     clients
         .into_iter()
@@ -104,9 +130,29 @@ pub fn list_clients(conn: &Connection) -> Result<Vec<RemoteClientView>, StorageE
                 created_at_ms: c.created_at_ms,
                 last_seen_ms: c.last_seen_ms,
                 connected: false,
+                paired_by: c.paired_by.as_deref().and_then(|u| aurelius_domain::UserId::parse(u).ok()),
             })
         })
         .collect()
+}
+
+/// Record who paired a device: from now on it is theirs.
+pub fn set_paired_by(tx: &Transaction<'_>, id: ClientId, user: &str) -> Result<(), StorageError> {
+    tx.execute("UPDATE remote_clients SET paired_by = ?2 WHERE id = ?1", params![id.to_string(), user])?;
+    Ok(())
+}
+
+/// Revoke every active device a board member paired (they were disabled), like
+/// `revoke_client` one by one. Returns the revoked ids, so their connections can close.
+pub fn revoke_paired_by(tx: &Transaction<'_>, user: &str) -> Result<Vec<ClientId>, StorageError> {
+    let ids: Vec<ClientId> = {
+        let mut stmt = tx.prepare("SELECT id FROM remote_clients WHERE paired_by = ?1 AND revoked_at_ms IS NULL")?;
+        stmt.query_map([user], |r| parse_id(r.get(0)?, 0))?.collect::<Result<Vec<_>, _>>()?
+    };
+    for id in &ids {
+        revoke_client(tx, *id)?;
+    }
+    Ok(ids)
 }
 
 /// Revoke a device: its sessions end and its push registration is removed.
@@ -140,7 +186,7 @@ pub fn create_session(tx: &Transaction<'_>, id: &str, client_id: ClientId, token
 pub fn session_client(conn: &Connection, token_verifier: &str, now_ms: i64) -> Result<Option<RemoteClient>, StorageError> {
     Ok(conn
         .query_row(
-            "SELECT c.id, c.name, c.platform, c.credential_verifier, c.capabilities_json, c.created_at_ms, c.last_seen_ms, c.revoked_at_ms, c.user_id
+            "SELECT c.id, c.name, c.platform, c.credential_verifier, c.capabilities_json, c.created_at_ms, c.last_seen_ms, c.revoked_at_ms, c.user_id, c.paired_by
              FROM remote_sessions s JOIN remote_clients c ON c.id = s.client_id
              WHERE s.token_verifier = ?1 AND s.revoked_at_ms IS NULL AND s.expires_at_ms > ?2 AND c.revoked_at_ms IS NULL",
             params![token_verifier, now_ms],
@@ -256,5 +302,67 @@ mod tests {
         assert!(orphan.is_err(), "the session still needs a paired device");
         let tablet = store.write(|tx| create_client(tx, ClientId::new(), PrincipalId::new(), "x", "tablet-os", "v", &[]));
         assert!(tablet.is_err(), "unknown platforms stay out");
+    }
+
+    /// Two board members, each with a phone, and an old phone of nobody.
+    fn two_owners(store: &Store) -> (String, String, ClientId, ClientId, ClientId) {
+        let (alex, bea) = (aurelius_domain::UserId::new().to_string(), aurelius_domain::UserId::new().to_string());
+        let (a_phone, b_phone, old) = (ClientId::new(), ClientId::new(), ClientId::new());
+        let (a, b) = (alex.clone(), bea.clone());
+        store
+            .write(move |tx| {
+                for (id, name) in [(&a, "alex"), (&b, "bea")] {
+                    crate::users::insert(tx, &crate::users::NewUser { id, username: name, created_by_user: None, now_ms: 1 }, "$argon2id$x")?;
+                }
+                create_client(tx, a_phone, PrincipalId::new(), "Alex's iPhone", "ios", "v1", &Capability::DEVICE_DEFAULT)?;
+                create_client(tx, b_phone, PrincipalId::new(), "Bea's Pixel", "android", "v2", &Capability::DEVICE_DEFAULT)?;
+                create_client(tx, old, PrincipalId::new(), "Old tablet", "android", "v3", &Capability::DEVICE_DEFAULT)?;
+                set_paired_by(tx, a_phone, &a)?;
+                set_paired_by(tx, b_phone, &b)
+            })
+            .unwrap();
+        (alex, bea, a_phone, b_phone, old)
+    }
+
+    fn ids(list: Vec<RemoteClientView>) -> Vec<ClientId> {
+        let mut ids: Vec<ClientId> = list.into_iter().map(|c| c.id).collect();
+        ids.sort();
+        ids
+    }
+
+    #[test]
+    fn a_board_member_lists_only_the_devices_they_paired() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let (alex, bea, a_phone, b_phone, _) = two_owners(&store);
+        let mine = store.read(|c| list_devices(c, Devices::PairedBy(&alex))).unwrap();
+        assert_eq!(ids(mine.clone()), [a_phone]);
+        assert_eq!(mine[0].paired_by.map(|u| u.to_string()), Some(alex));
+        assert_eq!(ids(store.read(|c| list_devices(c, Devices::PairedBy(&bea))).unwrap()), [b_phone]);
+    }
+
+    #[test]
+    fn the_remote_access_settings_show_own_devices_and_those_of_nobody_never_another_board_members() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let (alex, _, a_phone, _, old) = two_owners(&store);
+        let mut expected = vec![a_phone, old];
+        expected.sort();
+        assert_eq!(ids(store.read(|c| list_devices(c, Devices::VisibleTo(Some(&alex)))).unwrap()), expected);
+        assert_eq!(ids(store.read(|c| list_devices(c, Devices::VisibleTo(None))).unwrap()), [old]);
+        assert_eq!(store.read(list_clients).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn revoking_a_board_members_devices_leaves_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let (alex, bea, a_phone, b_phone, _) = two_owners(&store);
+        store.write(move |tx| create_session(tx, "s1", a_phone, "tok", now_ms() + 60_000)).unwrap();
+        let a = alex.clone();
+        assert_eq!(store.write(move |tx| revoke_paired_by(tx, &a)).unwrap(), [a_phone]);
+        assert!(store.read(|c| list_devices(c, Devices::PairedBy(&alex))).unwrap().is_empty());
+        assert!(store.read(|c| session_client(c, "tok", now_ms())).unwrap().is_none(), "its session ended");
+        assert_eq!(ids(store.read(|c| list_devices(c, Devices::PairedBy(&bea))).unwrap()), [b_phone]);
     }
 }

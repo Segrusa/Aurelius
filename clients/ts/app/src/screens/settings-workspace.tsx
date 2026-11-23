@@ -10,9 +10,9 @@ import { type FormEvent, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/marks";
-import { QrCode } from "./qr-code";
 import { ServerChoicesPanel } from "./servers";
 import { MemberAccess, passwordProblem } from "./settings-accounts";
+import { PairDevice, PendingPairings } from "./settings-devices";
 import {
   ConfirmButton,
   Group,
@@ -31,6 +31,7 @@ import {
   useSetting,
   when,
 } from "./settings-kit";
+import { deviceHint, OWN_DEVICES, remoteAccessDevices } from "./settings-logic";
 
 const styles = stylex.create({
   form: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
@@ -61,7 +62,6 @@ const styles = stylex.create({
   value: { fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--color-text-secondary)" },
   status: { fontSize: 12, color: "var(--color-text-secondary)" },
   notes: { whiteSpace: "pre-wrap" },
-  code: { fontFamily: "var(--font-family-code)", fontSize: 15, fontWeight: 500, letterSpacing: "0.08em" },
 });
 
 function BoardMembers() {
@@ -718,13 +718,16 @@ function PushKey({ clients, status }: { clients: { id: string; name: string }[];
 export function RemoteSection() {
   const platform = usePlatform();
   const connection = useConnection();
+  const { features } = useLinkState();
   const { busy, error, run } = useChange();
-  const [code, setCode] = useState<{ code: string; expires: number; text: string; qr: string } | null>(null);
   const status = useSetting(
     "remote",
     async () => expectBody(await connection.call("remote.get_status"), "remote").value,
   );
   const data = status.data;
+  // Each board member's devices are in Account (`own_devices`); here only what is the server's.
+  const own = features.includes(OWN_DEVICES);
+  const shown = remoteAccessDevices(data?.clients ?? [], own);
   if (platform.kind === "web") {
     return (
       <Group>
@@ -735,18 +738,6 @@ export function RemoteSection() {
       </Group>
     );
   }
-  const startPairing = () =>
-    run(async () => {
-      const receipt = await connection.write("remote.start_pairing", undefined, { retry: false });
-      const { result } = receipt;
-      if (result.kind === "host" && result.value.type === "pairing_code")
-        setCode({
-          code: result.value.code,
-          expires: result.value.expires_at_ms,
-          text: result.value.pairing_text,
-          qr: result.value.qr,
-        });
-    });
   return (
     <>
       <Group>
@@ -771,103 +762,20 @@ export function RemoteSection() {
             />
           </Keyed>
         </Row>
-        {data?.enabled ? (
-          <Row
-            title="Pair a device"
-            hint={code ? `Valid until ${when(code.expires)}.` : "Shows a one-time code to enter on the other device."}
-          >
-            {code ? <span {...stylex.props(styles.code)}>{code.code}</span> : null}
-            <Keyed action="SettingsNew" chord="N">
-              <SmallButton disabled={busy} onClick={() => void startPairing()}>
-                {code ? "New code" : "Show code"}
-              </SmallButton>
-            </Keyed>
-          </Row>
-        ) : null}
-        {data?.enabled && code ? (
-          <Row
-            title="On a phone: scan this"
-            hint={code.text ? "Another computer: copy the pairing text and paste it there." : undefined}
-          >
-            {code.text ? (
-              <Keyed action="SettingsCopyPairing" chord="Y">
-                <SmallButton onClick={() => void platform.copy(code.text)}>Copy pairing text</SmallButton>
-              </Keyed>
-            ) : null}
-            {code.qr ? <QrCode payload={code.qr} label="Pairing code for a phone" /> : null}
-          </Row>
+        {own ? (
+          <Row title="Your devices" hint="Pair and revoke your own phones and computers under Account." />
+        ) : data?.enabled ? (
+          <PairDevice title="Pair a device" />
         ) : null}
       </Group>
-      {data && data.pending.length > 0 ? (
-        <Group title="Waiting for your answer">
-          {data.pending.map((p) => (
-            <Row
-              key={p.pairing_id}
-              title={p.device_name}
-              hint={`${p.platform} · asked ${when(p.requested_at_ms)}${p.owner ? ". It asks for full access: it can do everything this app does here, including API keys, folders on this PC, backups and updates." : ""}`}
-            >
-              <Keyed action="SettingsUse" chord="Enter">
-                <SmallButton
-                  kind="primary"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(() =>
-                      connection.write(
-                        "remote.decide_pairing",
-                        { pairing_id: p.pairing_id, approve: true, owner: false },
-                        { retry: false },
-                      ),
-                    )
-                  }
-                >
-                  Allow
-                </SmallButton>
-              </Keyed>
-              {p.owner ? (
-                <SmallButton
-                  disabled={busy}
-                  onClick={() =>
-                    void run(() =>
-                      connection.write(
-                        "remote.decide_pairing",
-                        { pairing_id: p.pairing_id, approve: true, owner: true },
-                        { retry: false },
-                      ),
-                    )
-                  }
-                >
-                  Allow as owner
-                </SmallButton>
-              ) : null}
-              <Keyed action="SettingsRefusePairing" chord="X">
-                <SmallButton
-                  kind="danger"
-                  disabled={busy}
-                  onClick={() =>
-                    void run(() =>
-                      connection.write(
-                        "remote.decide_pairing",
-                        { pairing_id: p.pairing_id, approve: false, owner: false },
-                        { retry: false },
-                      ),
-                    )
-                  }
-                >
-                  Refuse
-                </SmallButton>
-              </Keyed>
-            </Row>
-          ))}
-        </Group>
-      ) : null}
-      {data && data.clients.length > 0 ? (
-        <Group title="Paired devices">
-          {data.clients.map((c) => (
-            <Row
-              key={c.id}
-              title={c.name}
-              hint={`${c.platform} · ${c.connected ? "Connected now" : `Last seen ${when(c.last_seen_ms)}`}`}
-            >
+      {data && !own ? <PendingPairings pending={data.pending} /> : null}
+      {shown.length > 0 ? (
+        <Group title={own ? "Devices without an owner" : "Paired devices"}>
+          {own ? (
+            <Muted>Paired before devices belonged to a board member, and nobody signed in on them since.</Muted>
+          ) : null}
+          {shown.map((c) => (
+            <Row key={c.id} title={c.name} hint={deviceHint(c, when)}>
               <Keyed action="SettingsRemove" chord="Del">
                 <ConfirmButton
                   label="Revoke"

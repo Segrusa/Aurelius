@@ -6186,6 +6186,23 @@ final class DesignsSnapshot {
   };
 }
 
+/// `device.list`: the session's own paired devices, newest first.
+final class DevicesSnapshot {
+  const DevicesSnapshot({
+    required this.devices,
+  });
+
+  final List<RemoteClientView> devices;
+
+  factory DevicesSnapshot.fromJson(Map<String, dynamic> json) => DevicesSnapshot(
+    devices: (json['devices'] as List<dynamic>).map((x0) => RemoteClientView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'devices': devices.map((x0) => x0.toJson()).toList(),
+  };
+}
+
 final class DirEntryView {
   const DirEntryView({
     required this.name,
@@ -8551,6 +8568,13 @@ sealed class HostWrite {
           thresholdTokens: (src['threshold_tokens'] as num).toInt(),
         );
         }
+      case 'device.revoke':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return HostWriteDeviceRevoke(
+          clientId: (src['client_id'] as String),
+        );
+        }
       case 'fs.create_dir':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -8988,6 +9012,25 @@ final class HostWriteCompactionSetThreshold extends HostWrite {
       'method': 'compaction.set_threshold',
       'params': <String, dynamic>{
       'threshold_tokens': thresholdTokens,
+    },
+    };
+}
+
+/// Remove one of the session's own paired devices (feature `own_devices`): its
+/// sessions end and its connections close. Another board member's device is
+/// `not_found`. Answers `Done`.
+final class HostWriteDeviceRevoke extends HostWrite {
+  const HostWriteDeviceRevoke({
+    required this.clientId,
+  });
+
+  final String clientId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'device.revoke',
+      'params': <String, dynamic>{
+      'client_id': clientId,
     },
     };
 }
@@ -11363,6 +11406,8 @@ sealed class Method {
           projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
         );
         }
+      case 'device.list':
+        return const MethodDeviceList();
       case 'discussion.audience':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -12136,6 +12181,17 @@ final class MethodDesignList extends Method {
       'params': <String, dynamic>{
       if (projectId != null) 'project_id': projectId,
     },
+    };
+}
+
+/// The devices the session's board member paired, newest first (feature
+/// `own_devices`). Never another board member's. A session method.
+final class MethodDeviceList extends Method {
+  const MethodDeviceList();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'device.list',
     };
 }
 
@@ -14588,6 +14644,7 @@ final class RemoteClientView {
     required this.id,
     this.lastSeenMs,
     required this.name,
+    this.pairedBy,
     required this.platform,
     required this.push,
   });
@@ -14598,6 +14655,10 @@ final class RemoteClientView {
   final String id;
   final int? lastSeenMs;
   final String name;
+  /// The board member who paired it (feature `own_devices`); none: a device paired
+  /// before devices had an owner and never signed in on, which only the server's
+  /// Remote access settings show.
+  final String? pairedBy;
   /// ios | android | windows | macos | linux
   final String platform;
   /// The device registered for push notifications.
@@ -14610,6 +14671,7 @@ final class RemoteClientView {
     id: (json['id'] as String),
     lastSeenMs: (json['last_seen_ms'] == null ? null : (json['last_seen_ms'] as num).toInt()),
     name: (json['name'] as String),
+    pairedBy: (json['paired_by'] == null ? null : (json['paired_by'] as String)),
     platform: (json['platform'] as String),
     push: (json['push'] as bool),
   );
@@ -14621,6 +14683,7 @@ final class RemoteClientView {
     'id': id,
     if (lastSeenMs != null) 'last_seen_ms': lastSeenMs,
     'name': name,
+    if (pairedBy != null) 'paired_by': pairedBy,
     'platform': platform,
     'push': push,
   };
@@ -14768,6 +14831,8 @@ sealed class ResponseBody {
         return ResponseBodyContext(value: ContextView.fromJson(json['value'] as Map<String, dynamic>));
       case 'designs':
         return ResponseBodyDesigns(value: DesignsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
+      case 'devices':
+        return ResponseBodyDevices(value: DevicesSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'dir_listing':
         return ResponseBodyDirListing(value: DirListing.fromJson(json['value'] as Map<String, dynamic>));
       case 'discussion_audience':
@@ -15208,6 +15273,21 @@ final class ResponseBodyDesigns extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'designs',
+      'value': value.toJson(),
+    };
+}
+
+/// `device.list`.
+final class ResponseBodyDevices extends ResponseBody {
+  const ResponseBodyDevices({
+    required this.value,
+  });
+
+  final DevicesSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'devices',
       'value': value.toJson(),
     };
 }

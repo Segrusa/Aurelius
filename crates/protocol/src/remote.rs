@@ -145,6 +145,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::UserLogin(_)
         | Method::UserLogout
         | Method::SessionList { .. }
+        // The board member's own devices, from any device they signed in on.
+        | Method::DeviceList
         // A board member's own Claude login, from any of their devices (the phone opens the link).
         | Method::ClaudeLoginStatus
         | Method::ClaudeLoginInput(_) => Needs::Cap(Read),
@@ -192,6 +194,8 @@ fn host_needs(host: &HostWrite) -> Needs {
         // One role: every board member manages sessions, passwords and board members,
         // from any device they signed in on (the session decides, MU3-04/05).
         HostWrite::SessionRevoke { .. } | HostWrite::UserSetPassword(_) | HostWrite::UserDisable { .. } => Needs::Cap(Read),
+        // Only the board member's own devices (the session decides), like their sessions.
+        HostWrite::DeviceRevoke { .. } => Needs::Cap(Read),
         HostWrite::ClaudeLoginLink | HostWrite::ClaudeLoginCancel { .. } | HostWrite::ClaudeLoginUnlink => Needs::Cap(Read),
         // The inbox is the user's own: reading, dismissing.
         HostWrite::NotificationMarkAllRead | HostWrite::NotificationMarkRead { .. } | HostWrite::NotificationDismiss { .. } | HostWrite::NotificationDismissAll => Needs::Cap(Read),
@@ -365,6 +369,12 @@ fn command_needs(command: &Command) -> Needs {
         // The server's name is a host setting, like the other settings of the server (A-04).
         Command::SetServerName(_) => Needs::Owner,
     }
+}
+
+/// `device.list`: the session's own paired devices, newest first.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DevicesSnapshot {
+    pub devices: Vec<RemoteClientView>,
 }
 
 /// Settings → Remote access.

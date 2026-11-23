@@ -53,4 +53,9 @@ pub struct RemoteClientView {
     pub connected: bool,
     /// The device registered for push notifications.
     pub push: bool,
+    /// The board member who paired it (feature `own_devices`); none: a device paired
+    /// before devices had an owner and never signed in on, which only the server's
+    /// Remote access settings show.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paired_by: Option<crate::UserId>,
 }

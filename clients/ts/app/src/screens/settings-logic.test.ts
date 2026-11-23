@@ -1,9 +1,10 @@
-import type { EmployeeRunLine } from "@aurelius/protocol";
+import type { EmployeeRunLine, RemoteClientView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
   compactFieldOf,
   compactThresholdOf,
   defaultEffortLabel,
+  deviceHint,
   effortOptions,
   employeeRunHint,
   inSettingsArea,
@@ -11,6 +12,7 @@ import {
   recurrenceForm,
   recurrenceOf,
   recurrenceText,
+  remoteAccessDevices,
   screenUseRows,
 } from "./settings-logic";
 
@@ -128,5 +130,33 @@ describe("settings area", () => {
     for (const path of ["/inbox", "/board", "/projects/p-1", "/talk/c-1", "/employeesx", "/settingsx"]) {
       expect(inSettingsArea(path), path).toBe(false);
     }
+  });
+});
+
+describe("paired devices", () => {
+  const device = (name: string, paired_by?: string): RemoteClientView => ({
+    id: name,
+    name,
+    platform: "ios",
+    capabilities: ["read"],
+    created_at_ms: 1,
+    last_seen_ms: 5,
+    connected: false,
+    push: false,
+    ...(paired_by ? { paired_by } : {}),
+  });
+
+  it("says where a device stands", () => {
+    const seen = (ms: number | null | undefined) => `t${ms}`;
+    expect(deviceHint(device("a"), seen)).toBe("ios · Last seen t5");
+    expect(deviceHint({ ...device("a"), connected: true, push: true }, seen)).toBe(
+      "ios · Connected now · Notifications on",
+    );
+  });
+
+  it("leaves a board member's devices to Account when the server has own_devices", () => {
+    const clients = [device("mine", "u1"), device("old")];
+    expect(remoteAccessDevices(clients, true).map((c) => c.name)).toEqual(["old"]);
+    expect(remoteAccessDevices(clients, false).map((c) => c.name)).toEqual(["mine", "old"]);
   });
 });

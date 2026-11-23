@@ -74,7 +74,7 @@ impl Hub {
     /// a WebSocket upgrade and on every request that changes something.
     pub(crate) async fn allows_origin(&self, headers: &HeaderMap) -> bool {
         let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else { return false };
-        let status = self.status().await;
+        let status = self.status(None).await;
         if status.url.as_deref().is_some_and(|url| same_origin(origin, url)) {
             return true;
         }
