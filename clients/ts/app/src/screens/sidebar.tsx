@@ -9,7 +9,7 @@ import { SideNav, SideNavItem } from "@astryxdesign/core/SideNav";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import type { ProjectSummary, TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { useLinkState } from "../connection";
 import { useProjects, useTickets, useWorkSessions } from "../data";
@@ -153,6 +153,28 @@ const styles = stylex.create({
     borderWidth: 0,
   },
   headButton: { width: 28, height: 28, borderRadius: 8 },
+  // New session is the panel's main action: a filled green button above the nav rows.
+  newSession: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    height: 32,
+    marginBottom: 6,
+    paddingInline: 10,
+    borderRadius: 8,
+    fontSize: 13,
+    fontWeight: 600,
+    textDecoration: "none",
+    color: "var(--color-on-success)",
+    backgroundColor: {
+      default: "var(--color-success)",
+      ":hover": "color-mix(in srgb, var(--color-success) 88%, black)",
+    },
+    outline: { default: "none", ":focus-visible": "2px solid var(--color-border-success)" },
+    outlineOffset: 2,
+  },
+  newSessionOn: { boxShadow: "inset 0 0 0 1px rgb(255 255 255 / 0.35)" },
+  newSessionLabel: { flex: 1, minWidth: 0 },
   headButtonOn: { color: "var(--color-text-primary)", backgroundColor: "var(--color-overlay-hover)" },
   newTile: { borderWidth: 1, borderStyle: "dashed", borderColor: "var(--color-border-emphasized)" },
   grow: { flexGrow: 1 },
@@ -313,6 +335,23 @@ function NavRow({ to, label, icon, end }: { to: string; label: string; icon: Ico
   // A ticket's session counts as the Board, where it came from (ticket #70).
   const on = isOpenAt(to, path) || (to === "/board" && path.startsWith("/ticket/"));
   return <SideNavItem label={label} href={to} icon={icon} size="sm" isSelected={on} endContent={end} />;
+}
+
+/** The panel's main action, green and on top so a new session is always one obvious click away. */
+function NewSessionButton({ hint }: { hint?: string }) {
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  const on = isOpenAt("/new", path);
+  return (
+    <Link
+      to="/new"
+      aria-current={on ? "page" : undefined}
+      {...stylex.props(styles.newSession, on && styles.newSessionOn)}
+    >
+      <NewIcon />
+      <span {...stylex.props(styles.newSessionLabel)}>New session</span>
+      {hint ? <KeyHint onAccent>{hint}</KeyHint> : null}
+    </Link>
+  );
 }
 
 const SIGNAL_DOTS = {
@@ -765,13 +804,8 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
       }
       topContent={
         <>
+          <NewSessionButton hint={newKey ? showChord(newKey, isMac) : undefined} />
           <NavRow to="/overview" label="Overview" icon={NAV_ICONS.home} />
-          <NavRow
-            to="/new"
-            label="New session"
-            icon={NewIcon}
-            end={newKey ? <KeyHint>{showChord(newKey, isMac)}</KeyHint> : undefined}
-          />
           {offered(shown(NAV), features).map((n) => (
             <NavRow
               key={n.to}
