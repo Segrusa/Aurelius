@@ -142,15 +142,28 @@ pub fn has_work(conn: &Connection) -> Result<bool, StorageError> {
     )?)
 }
 
+/// Background jobs that start a model process of their own (titles, summaries,
+/// memory) and do not start anyone's work. While the machine's load holds new runs
+/// they wait too: their processes would keep the load up and the runs held longer.
+pub const BACKGROUND_MODEL_JOB_KINDS: [&str; 6] = ["memory.extract", "memory.summarize", "memory.consolidate", "session.summarize", "session.title", "ticket.title"];
+
 /// Claim the oldest due job at `now`: set leased, bump the epoch (fencing token).
 /// Run jobs (chat answers and task starts) respect the global run limit
 /// (0 holds them all back), at most one active run per conversation, and one per
 /// thread of an employee. An employee works on several threads at once.
 pub fn claim_due_job(tx: &Transaction<'_>, owner: &str, now: i64, lease_ms: i64, global_runs: u32) -> Result<Option<JobRow>, StorageError> {
+    claim_due_job_with(tx, owner, now, lease_ms, global_runs, true)
+}
+
+/// `claim_due_job`, where `background` false also holds the background model jobs
+/// (`BACKGROUND_MODEL_JOB_KINDS`): the machine's load holds new runs now.
+pub fn claim_due_job_with(tx: &Transaction<'_>, owner: &str, now: i64, lease_ms: i64, global_runs: u32, background: bool) -> Result<Option<JobRow>, StorageError> {
+    let kinds = BACKGROUND_MODEL_JOB_KINDS.iter().map(|k| format!("'{k}'")).collect::<Vec<_>>().join(", ");
     let job = tx
         .query_row(
             &format!(
                 "SELECT {JOB_COLUMNS} FROM jobs j WHERE j.state = 'ready' AND j.not_before_ms <= ?1 AND NOT {PAUSED_JOB}
+                 AND (?3 OR j.kind NOT IN ({kinds}))
                  AND (j.kind NOT IN ('run.chat', 'task.run') OR (
                      (SELECT COUNT(*) FROM jobs a WHERE a.kind IN ('run.chat', 'task.run') AND a.state = 'leased') < ?2
                      AND (j.kind <> 'run.chat' OR (NOT EXISTS (SELECT 1 FROM jobs o WHERE o.kind = 'run.chat' AND o.state = 'leased'
@@ -162,7 +175,7 @@ pub fn claim_due_job(tx: &Transaction<'_>, owner: &str, now: i64, lease_ms: i64,
                          AND json_extract(o.payload_json, '$.thread_key') = json_extract(j.payload_json, '$.thread_key')))))))
                  ORDER BY j.priority DESC, j.not_before_ms, j.id LIMIT 1"
             ),
-            params![now, global_runs],
+            params![now, global_runs, background],
             job_from_row,
         )
         .optional()?;

@@ -418,6 +418,9 @@ pub struct ProjectConversationsSnapshot {
 /// How many of a thread's repliers its root names (`MessageView::thread_repliers`).
 pub const THREAD_REPLIERS_MAX: usize = 3;
 
+/// `MessageView::queued_for` of a message held back by the machine's load.
+pub const QUEUED_FOR_MACHINE: &str = "machine";
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MessageView {
     pub id: MessageId,
@@ -452,6 +455,11 @@ pub struct MessageView {
     /// answer running in its conversation. Such a message can be deleted
     /// (`DeleteQueuedMessage`) or sent now (`SendQueuedNow`). Left out when false.
     pub queued: bool,
+    /// Why a queued message waits when it is not for the answer before it:
+    /// `machine` (the machine's load holds new runs; `QUEUED_FOR_MACHINE`). Left
+    /// out otherwise and by older servers, which read as "after the current answer".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued_for: Option<String>,
     /// The tokens the answer's run used, once its runtime reported them (feature
     /// `run_usage`). Left out for user messages and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]

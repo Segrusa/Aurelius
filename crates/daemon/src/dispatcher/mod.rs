@@ -65,6 +65,9 @@ pub async fn run(shared: Arc<Shared>) {
             Err(_) => shared.store().read(|c| queries::held_runs(c, aurelius_storage::now_ms())).unwrap_or(0),
         };
         crate::load::observe(&shared, verdict, running, held);
+        // Held by the machine's load (not by a run limit of 0 the user set): the
+        // background model jobs wait too, so their processes do not keep the load up.
+        let background = !matches!(verdict, Err(crate::load::Hold::Cpu | crate::load::Hold::Memory));
         let limit = match verdict {
             Ok(()) => limits.max_runs,
             Err(hold) => {
@@ -94,7 +97,7 @@ pub async fn run(shared: Arc<Shared>) {
         let s = shared.clone();
         let owner2 = owner.clone();
         // A worker's item first (it becomes a run with a leased job), else a due job.
-        let claimed = tokio::task::spawn_blocking(move || s.service.claim_next_work(&owner2, LEASE_MS, limit)).await.map(|r| {
+        let claimed = tokio::task::spawn_blocking(move || s.service.claim_next_work_with(&owner2, LEASE_MS, limit, background)).await.map(|r| {
             r.map(|work| {
                 work.map(|(job, notices)| {
                     shared.publish(notices);

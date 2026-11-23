@@ -259,6 +259,10 @@ fn promote(tx: &Tx<'_>, items: &[&Item], lease: Option<(&str, i64, i64)>) -> Res
     }
     events::insert_job(tx, &run.to_string(), CHAT_RUN_KIND, last.source_event, &format!("run:{run}"), &payload)?;
     let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
+    if let Some((_, now, _)) = lease {
+        let waited_ms = store::queued_since(tx, &ids)?.map(|at| (now - at).max(0));
+        tracing::info!(%run, %conversation, kind = %last.kind, items = ids.len(), ?waited_ms, "mailbox item claimed");
+    }
     store::claim(tx, &ids, run)?;
     store::unpark(tx, &last.employee, &last.thread_key)?;
     let job = match lease {
@@ -315,6 +319,12 @@ fn quota_until(tx: &Tx<'_>, conversation: ConversationId, login: &str, now: i64)
 impl CommandService {
     /// What the dispatcher starts next: the first item a worker may take, else the first due job.
     pub fn claim_next_work(&self, owner: &str, lease_ms: i64, limit: u32) -> Result<Option<(JobRow, Vec<EventNotice>)>, AppError> {
+        self.claim_next_work_with(owner, lease_ms, limit, true)
+    }
+
+    /// `claim_next_work`; `background` false: the machine's load holds new runs, and the
+    /// background model jobs (titles, summaries, memory) wait with them.
+    pub fn claim_next_work_with(&self, owner: &str, lease_ms: i64, limit: u32, background: bool) -> Result<Option<(JobRow, Vec<EventNotice>)>, AppError> {
         let owner = owner.to_owned();
         self.store
             .write(move |tx| {
@@ -322,7 +332,7 @@ impl CommandService {
                 if let Some(work) = claim_next(tx, &owner, now, lease_ms, limit)? {
                     return Ok(Some(work));
                 }
-                Ok(queries::claim_due_job(tx, &owner, now, lease_ms, limit)?.map(|job| (job, Vec::new())))
+                Ok(queries::claim_due_job_with(tx, &owner, now, lease_ms, limit, background)?.map(|job| (job, Vec::new())))
             })
             .map_err(storage_error)
     }

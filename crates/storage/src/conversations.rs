@@ -548,6 +548,7 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
             files: files.and_then(|f| serde_json::from_str(&f).ok()).unwrap_or_default(),
             uploads,
             queued: false,
+            queued_for: None,
             usage: None,
             mode: mode.and_then(|m| serde_json::from_value(serde_json::Value::String(m)).ok()),
             author_user: None,
@@ -578,8 +579,12 @@ fn messages_of(conn: &Connection, conversation: ConversationId, thread: Option<M
         }
     }
     let waiting = queued_messages(conn, conversation)?;
+    let held = if waiting.is_empty() { std::collections::HashSet::new() } else { held_by_machine(conn, conversation)? };
     for message in out.iter_mut() {
         message.queued = message.role == MessageRole::User && waiting.contains(&message.id);
+        if message.queued && held.contains(&message.id) {
+            message.queued_for = Some(aurelius_domain::views::QUEUED_FOR_MACHINE.to_owned());
+        }
         // A post stands for its run in the run card, which reads the rest apart.
         if let (Some(run), false) = (message.run_id, is_post(message)) {
             message.sources = crate::files::sources_for_run(conn, run)?;
@@ -1121,6 +1126,21 @@ fn queued_runs(conn: &Connection, conversation: ConversationId) -> Result<Vec<(R
 /// User messages of the conversation whose answer has not started yet.
 pub fn queued_messages(conn: &Connection, conversation: ConversationId) -> Result<std::collections::HashSet<MessageId>, StorageError> {
     Ok(queued_runs(conn, conversation)?.into_iter().map(|(_, m)| m).collect())
+}
+
+/// User messages of the conversation whose answer waits for the machine: the
+/// dispatcher marked their run or mailbox item as held by the load (`load:*`).
+pub fn held_by_machine(conn: &Connection, conversation: ConversationId) -> Result<std::collections::HashSet<MessageId>, StorageError> {
+    let mut out = std::collections::HashSet::new();
+    let mut stmt = conn.prepare(
+        "SELECT json_extract(j.payload_json, '$.reply_to') FROM runs r JOIN jobs j ON j.id = r.id
+         WHERE r.conversation_id = ?1 AND r.status = 'created' AND j.kind = 'run.chat' AND j.state = 'ready' AND j.last_error_code LIKE 'load:%'",
+    )?;
+    for message in stmt.query_map([conversation.to_string()], |r| r.get::<_, Option<String>>(0))? {
+        out.extend(message?.as_deref().and_then(|m| MessageId::parse(m).ok()));
+    }
+    out.extend(crate::inbox::held_by_machine_in(conn, conversation)?.iter().filter_map(|m| MessageId::parse(m).ok()));
+    Ok(out)
 }
 
 /// Where the answer to `message` stands; `None` when it is not a user message of the conversation.

@@ -184,3 +184,38 @@ fn a_conversation_without_an_employee_is_not_in_the_mailbox() {
     let job = claim(&s).expect("from jobs, as before");
     assert_eq!(job.id, run_id.to_string());
 }
+
+#[test]
+fn the_background_model_jobs_held_by_load_are_exactly_the_title_summary_and_memory_jobs() {
+    use crate::conversation::{session_history::SESSION_SUMMARY_JOB_KIND, session_title::SESSION_TITLE_JOB_KIND};
+    use crate::memory::{CONSOLIDATE_JOB_KIND, EXTRACT_JOB_KIND, SUMMARY_JOB_KIND};
+    use crate::ticket::title::TICKET_TITLE_JOB_KIND;
+    let mut kinds = aurelius_storage::queries::BACKGROUND_MODEL_JOB_KINDS.to_vec();
+    kinds.sort_unstable();
+    let mut expected = vec![EXTRACT_JOB_KIND, SUMMARY_JOB_KIND, CONSOLIDATE_JOB_KIND, SESSION_SUMMARY_JOB_KIND, SESSION_TITLE_JOB_KIND, TICKET_TITLE_JOB_KIND];
+    expected.sort_unstable();
+    assert_eq!(kinds, expected);
+}
+
+fn queued_for(s: &Setup, message: MessageId) -> (bool, Option<String>) {
+    let store = s.service.store().clone();
+    let chat = s.chat;
+    let list = s.service.store().read(move |c| aurelius_storage::conversations::list_messages(c, chat, &|k| store.blobs().read(k).ok().and_then(|b| String::from_utf8(b).ok()))).unwrap();
+    let m = list.into_iter().find(|m| m.id == message).expect("the message is listed");
+    (m.queued, m.queued_for)
+}
+
+#[test]
+fn a_message_held_by_the_machine_says_so_and_one_behind_an_answer_does_not() {
+    let s = setup();
+    let (first, _) = say(&s, "first");
+    // Nothing runs yet and the load holds new runs: it waits for the machine.
+    assert!(!s.service.note_held_runs("load:cpu").unwrap().is_empty(), "the hold is noted");
+    assert_eq!(queued_for(&s, first), (true, Some("machine".to_owned())));
+
+    // Started: the next message waits for that answer, not for the machine.
+    assert!(claim(&s).is_some());
+    let (second, _) = say(&s, "second");
+    s.service.note_held_runs("load:cpu").unwrap();
+    assert_eq!(queued_for(&s, second), (true, None));
+}
