@@ -2,11 +2,11 @@
 // HTML file, or a design an answer writes (live while it streams). The conversation's frame holds
 // what is open, so the panel stays while its message scrolls out of the feed.
 
-import type { FileRef } from "@aurelius/protocol";
-import { useCallback, useState } from "react";
+import type { FileRef, MessageView } from "@aurelius/protocol";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlatform } from "../platform";
 import { DesignViewer } from "./artifact-live";
-import { designsOf, versionsFor } from "./artifact-logic";
+import { designFile, designPages, designsOf, keptDesign } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 import { useLive } from "./chat-live";
 import type { ChatContext } from "./chat-message";
@@ -25,6 +25,24 @@ export function useArtifactDock() {
   return { target, open: setTarget, close };
 }
 
+/**
+ * Opens the kept design file `fileId` in the dock once, as soon as the conversation's messages
+ * hold it: a design opened from the Designs page shows beside its conversation at once.
+ */
+export function useOpenDesign(
+  open: (target: ArtifactTarget) => void,
+  messages: readonly MessageView[],
+  fileId: string | null,
+) {
+  const done = useRef(false);
+  const file = fileId ? designFile(messages, fileId) : null;
+  useEffect(() => {
+    if (file === null || done.current) return;
+    done.current = true;
+    open({ kind: "file", file });
+  }, [file, open]);
+}
+
 function DockedDesign({
   ctx,
   messageId,
@@ -36,9 +54,26 @@ function DockedDesign({
   path: string;
   onClose: () => void;
 }) {
+  const { artifacts } = usePlatform();
   const update = useLive(ctx.store, messageId);
-  const activity = update?.activity ?? ctx.messages.find((m) => m.id === messageId)?.activity ?? [];
+  const message = ctx.messages.find((m) => m.id === messageId);
+  const activity = update?.activity ?? message?.activity ?? [];
   const design = designsOf(activity, update?.draft ?? null).find((d) => d.path === path) ?? null;
+  // Once the answer kept the page, the panel shows the design's kept pages (with comments).
+  const kept = message ? keptDesign(message, path) : null;
+  if (kept && artifacts)
+    return (
+      <ArtifactViewer
+        pages={designPages(ctx.messages, kept, Date.now())}
+        openName={kept.name}
+        artifacts={artifacts}
+        messages={ctx.messages}
+        conversationId={ctx.conversationId}
+        send={ctx.artifactSend ?? null}
+        docked
+        onClose={onClose}
+      />
+    );
   if (!design) return null;
   return (
     <DesignViewer
@@ -69,8 +104,8 @@ export function DockedArtifact({
     return <DockedDesign ctx={ctx} messageId={target.messageId} path={target.path} onClose={onClose} />;
   return (
     <ArtifactViewer
-      versions={versionsFor(ctx.messages, target.file, Date.now())}
-      openId={target.file.id}
+      pages={designPages(ctx.messages, target.file, Date.now())}
+      openName={target.file.name}
       artifacts={artifacts}
       messages={ctx.messages}
       conversationId={ctx.conversationId}

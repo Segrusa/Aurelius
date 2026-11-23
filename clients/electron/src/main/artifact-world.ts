@@ -1,4 +1,4 @@
-// The code main runs in an isolated world of an artifact's view, for comments and tweaks. That
+// The code main runs in an isolated world of an artifact's view, for comments and live designs. That
 // world shares the page's DOM but not its JavaScript: the artifact cannot reach its globals or
 // change its prototypes (an `EventTarget.prototype.addEventListener` the page replaced is the
 // page's own). Main sends each function as source with JSON arguments and only reads the promise's
@@ -151,47 +151,75 @@ export function stopPickInWorld(): boolean {
   return on;
 }
 
-/**
- * The tweaks the author declared: the text of `<script type="application/json" id=…>`, at most
- * `max` + 1 characters (main refuses more). Null when there is no such element.
- */
-export function readTweaksInWorld(id: string, max: number): string | null {
-  const element = document.getElementById(id);
-  if (!(element instanceof HTMLScriptElement)) return null;
-  if (element.type.trim().toLowerCase() !== "application/json") return null;
-  return (element.textContent ?? "").slice(0, max + 1);
+/** The parts of a DOM node morphChildren reads and changes, so it can be tested without a DOM. */
+export interface MorphNode {
+  nodeType: number;
+  nodeName: string;
+  nodeValue: string | null;
+  childNodes: ArrayLike<MorphNode>;
+  attributes?: ArrayLike<{ name: string; value: string }>;
+  getAttribute?(name: string): string | null;
+  setAttribute?(name: string, value: string): void;
+  removeAttribute?(name: string): void;
+  isEqualNode(other: MorphNode): boolean;
+  appendChild(node: MorphNode): unknown;
+  replaceWith(node: MorphNode): void;
+  remove(): void;
 }
 
-/** The computed value of each custom property on the document element. */
-export function valuesInWorld(names: string[]): string[] {
-  const style = getComputedStyle(document.documentElement);
-  return names.map((name) => style.getPropertyValue(name));
+/**
+ * Makes the children of `into` the same as those of `from` (a newer copy of the same document),
+ * changing as little as it can: an equal node stays, a text gets its new text, an element of the
+ * same tag gets its attributes and its children the same way, anything else is replaced. So a
+ * design that grows keeps the part already drawn (and the scroll), and only the part being
+ * written changes. A script is always replaced, never changed in place.
+ */
+export function morphChildren(into: MorphNode, from: MorphNode): void {
+  const now = Array.from(into.childNodes);
+  const next = Array.from(from.childNodes);
+  next.forEach((n, i) => {
+    const o = now[i];
+    if (o === undefined) {
+      into.appendChild(n);
+      return;
+    }
+    if (o.isEqualNode(n)) return;
+    if (o.nodeType === 3 && n.nodeType === 3) {
+      o.nodeValue = n.nodeValue;
+      return;
+    }
+    if (o.nodeType === 1 && o.nodeName === n.nodeName && o.nodeName !== "SCRIPT") {
+      const wanted = Array.from(n.attributes ?? []);
+      for (const a of Array.from(o.attributes ?? []))
+        if (!wanted.some((w) => w.name === a.name)) o.removeAttribute?.(a.name);
+      for (const w of wanted) if (o.getAttribute?.(w.name) !== w.value) o.setAttribute?.(w.name, w.value);
+      morphChildren(o, n);
+      return;
+    }
+    o.replaceWith(n);
+  });
+  for (const o of now.slice(next.length)) o.remove();
 }
 
 /**
- * Sets custom properties on the document element; the first time a property is set, its own inline
- * value is kept, for a reset. True once they are set, so main can tell a call that never ended.
+ * Shows `html`, a newer copy of the document in the view, in the same document: head and body are
+ * morphed, so the view is not loaded again (no flash, the scroll stays). A script in it does not
+ * run (a parsed script is inert, and the page's CSP wants a nonce); the viewer loads the finished
+ * design once more when it holds scripts.
  */
-export function setTweaksInWorld(values: [string, string][]): boolean {
-  const scope = globalThis as unknown as { __aureliusTweaks?: Map<string, string> };
-  scope.__aureliusTweaks ??= new Map();
-  const style = document.documentElement.style;
-  for (const [name, value] of values) {
-    if (!scope.__aureliusTweaks.has(name)) scope.__aureliusTweaks.set(name, style.getPropertyValue(name));
-    style.setProperty(name, value);
+export function morphInWorld(html: string, morph: typeof morphChildren): boolean {
+  const next = new DOMParser().parseFromString(html, "text/html");
+  morph(document.head as unknown as MorphNode, next.head as unknown as MorphNode);
+  morph(document.body as unknown as MorphNode, next.body as unknown as MorphNode);
+  for (const [now, wanted] of [
+    [document.documentElement, next.documentElement],
+    [document.body, next.body],
+  ] as const) {
+    for (const a of Array.from(now.attributes)) if (!wanted.hasAttribute(a.name)) now.removeAttribute(a.name);
+    for (const a of Array.from(wanted.attributes))
+      if (now.getAttribute(a.name) !== a.value) now.setAttribute(a.name, a.value);
   }
   return true;
-}
-
-/** Puts back what every tweak set: the inline value the document element had, or none. */
-export function resetTweaksInWorld(): void {
-  const scope = globalThis as unknown as { __aureliusTweaks?: Map<string, string> };
-  const style = document.documentElement.style;
-  for (const [name, before] of scope.__aureliusTweaks ?? []) {
-    if (before === "") style.removeProperty(name);
-    else style.setProperty(name, before);
-  }
-  scope.__aureliusTweaks?.clear();
 }
 
 /**

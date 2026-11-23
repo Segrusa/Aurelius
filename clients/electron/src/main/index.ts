@@ -166,13 +166,12 @@ function serveArtifacts(): void {
   handle("artifact:hide", (sender, slot: unknown) =>
     views.hide(sender.id, slot === undefined ? undefined : viewSlot(slot)),
   );
-  // Comments and tweaks: main runs its own code in an isolated world of the view and checks what
-  // comes back (artifact-world.ts, artifact-tweaks.ts). The artifact itself gets no channel.
+  // Comments: main runs its own code in an isolated world of the view and checks what comes back
+  // (artifact-world.ts, artifact-pick.ts). The artifact itself gets no channel.
+  // A design being written: its newer HTML, shown in the same document (no new view).
+  handle("artifact:update", (sender, html: unknown) => views.update(sender, html));
   handle("artifact:pick", (sender) => views.pick(sender));
   handle("artifact:pick-stop", (sender) => views.stopPick(sender));
-  handle("artifact:tweaks", (sender) => views.tweaks(sender));
-  handle("artifact:tweak", (sender, name: unknown, value: unknown) => views.tweak(sender, name, value));
-  handle("artifact:tweaks-reset", (sender) => views.resetTweaks(sender));
   handle("artifact:export", async (sender, url: unknown, kind: unknown, name: unknown, width: unknown) => {
     // Only an artifact this window holds: another window's is not its to export.
     if (typeof url !== "string" || !artifacts.owns(sender.id, url))

@@ -59,6 +59,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         }
         Method::EmployeeChats => employee_chats(shared).await,
         Method::WorkSessionList { project_id } => work_sessions(shared, reader, project_id).await,
+        Method::DesignList { project_id } => designs(shared, project_id).await,
         Method::ScheduledMessageList { project_id } => scheduled_messages(shared, reader, project_id).await,
         Method::ThreadWaiting { ticket_id, conversation_id } => thread_waiting(shared, reader, ticket_id, conversation_id).await,
         Method::EmployeeScratchpad { employee_id } => employee_scratchpad(shared, employee_id).await,
@@ -372,6 +373,13 @@ async fn employee_chats(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolEr
     let store = shared.store().clone();
     let as_of_seq = storage_task(move || store.read(queries::last_seq)).await?;
     Ok(ResponseBody::EmployeeChats(aurelius_domain::views::EmployeeChatsSnapshot { as_of_seq, chats: Vec::new() }))
+}
+
+/// The designs of a project, or of all (`design.list`).
+async fn designs(shared: &Arc<Shared>, project: Option<ProjectId>) -> Result<ResponseBody, ProtocolError> {
+    let store = shared.store().clone();
+    let (as_of_seq, designs) = storage_task(move || store.read(|c| Ok((queries::last_seq(c)?, aurelius_storage::designs::list(c, project)?)))).await?;
+    Ok(ResponseBody::Designs(aurelius_domain::views::DesignsSnapshot { as_of_seq, designs }))
 }
 
 /// The reader's work sessions (none before a board member is chosen).

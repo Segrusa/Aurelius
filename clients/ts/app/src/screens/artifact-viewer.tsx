@@ -4,10 +4,10 @@
 // the stage is. The view lies above the page, so it steps aside while a menu, a toast or a later
 // dialog lies over the stage.
 //
-// Phase B: the board member comments on elements (the desktop picks them in an isolated world of
-// the view), tries the tweaks the artifact declares, compares two versions side by side and asks
-// for a PowerPoint. All of it goes back to the employee as one ordinary message in the
-// conversation the artifact came from (artifact-feedback.ts).
+// A design has pages (its HTML files, each at its newest). The board member comments on elements
+// (the desktop picks them in an isolated world of the view) and asks for a PowerPoint. Both go
+// back to the employee as one ordinary message in the conversation the design came from
+// (artifact-feedback.ts).
 
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -17,7 +17,6 @@ import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
 import { percent, pixel } from "@astryxdesign/core/Resizable/utils";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Slider } from "@astryxdesign/core/Slider";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { arrived, expectBody } from "@aurelius/client";
@@ -28,7 +27,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useConnection } from "../connection";
 import { useKeyed } from "../data";
-import type { ArtifactPick, ArtifactSlot, ArtifactTweak, Platform } from "../platform";
+import type { ArtifactPick, ArtifactSlot, Platform } from "../platform";
 import { saveBlob } from "../ui/download";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
@@ -37,29 +36,26 @@ import {
   artifactComments,
   artifactPath,
   CommentStore,
-  changedTweaks,
   commentsMessage,
   elementLabel,
-  hexColor,
-  numberOf,
   pptxMessage,
-  tweakInput,
-  tweaksMessage,
 } from "./artifact-feedback";
 import {
-  type ArtifactVersion,
+  type DesignPage,
   DIALOG_SELECTOR,
+  designTicket,
   htmlOf,
+  liveStep,
   OVERLAY_SELECTOR,
   overlaysOver,
   stageBounds,
   VIEWPORTS,
   type Viewport,
-  versionLabel,
   viewportWidth,
   withDrag,
 } from "./artifact-logic";
 import { FormDialog, Hint, Loading } from "./org-kit";
+import { overlays } from "./overlays-store";
 
 const styles = stylex.create({
   bar: { display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 8 },
@@ -132,8 +128,6 @@ const styles = stylex.create({
   itemText: { display: "flex", flexDirection: "column", gap: 2, flexGrow: 1, minWidth: 0, overflowWrap: "anywhere" },
   keep: { flexShrink: 0 },
   actions: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: "auto" },
-  colorRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 13 },
-  color: { width: 44, height: 28, padding: 0, borderWidth: 0, backgroundColor: "transparent", cursor: "pointer" },
   footerStart: { marginInlineEnd: "auto" },
   // The viewer docked beside the conversation, as Claude Desktop shows an artifact.
   dock: {
@@ -196,7 +190,7 @@ type Artifacts = NonNullable<Platform["artifacts"]>;
 
 /**
  * A design shown as it is written, not a kept file: its HTML so far (null while it loads), and
- * whether it is still being written. It has no versions; its tools wait until it is written.
+ * whether it is still being written. It has no pages; its tools wait until it is written.
  */
 export interface LiveDesign {
   name: string;
@@ -205,25 +199,7 @@ export interface LiveDesign {
   error: string | null;
 }
 
-/** While a design grows, the view shows it again at most this often (each time is a new view). */
-const LIVE_REDRAW_MS = 1000;
-
-/** `value`, changed at most every `everyMs` (always the latest); at once when `everyMs` is 0. */
-function useSteady<T>(value: T, everyMs: number): T {
-  const [shown, setShown] = useState(value);
-  const last = useRef(0);
-  useEffect(() => {
-    const wait = everyMs === 0 ? 0 : Math.max(0, last.current + everyMs - Date.now());
-    const timer = setTimeout(() => {
-      last.current = Date.now();
-      setShown(value);
-    }, wait);
-    return () => clearTimeout(timer);
-  }, [value, everyMs]);
-  return everyMs === 0 ? value : shown;
-}
-
-/** The HTML of one version, handed to main for as long as it is shown. */
+/** The HTML of one page, handed to main for as long as it is shown. */
 function useServed(artifacts: Artifacts, html: string | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -247,7 +223,7 @@ function useServed(artifacts: Artifacts, html: string | undefined): string | nul
   return url;
 }
 
-/** One kept version's HTML, from the server. */
+/** One kept page's HTML, from the server. */
 function useArtifactFile(id: string | null) {
   const connection = useConnection();
   return useKeyed(
@@ -281,7 +257,7 @@ const overlaysOf = (stage: Element, before: ReadonlySet<Element>) =>
 /**
  * Shows the served artifact in the desktop's view (in `slot`) over `frame`, and keeps the view on
  * it: every animation frame the bounds are measured, and sent when they changed (resize, scroll,
- * the width toggle, the dialog moving). The view goes when the viewer closes, or a new version or
+ * the width toggle, the dialog moving). The view goes when the viewer closes, or another page or
  * reload shows a new one. `ready`: the view of this url and reload is there, so the tools may
  * run in it.
  */
@@ -380,24 +356,6 @@ function Stage({
   );
 }
 
-/** The older version beside the current one, in a view of its own with the same guards. */
-function CompareStage({
-  artifacts,
-  id,
-  name,
-  width,
-}: {
-  artifacts: Artifacts;
-  id: string;
-  name: string;
-  width: number;
-}) {
-  const file = useArtifactFile(id);
-  const url = useServed(artifacts, file.data?.html);
-  const { frame, stage } = useArtifactView(artifacts, url, 0, "compare");
-  return <Stage stage={stage} frame={frame} url={url} name={name} width={width} error={file.error?.message ?? null} />;
-}
-
 /** Sends one message with the viewer's send; true once the server has it. */
 function usePost(send: ArtifactSend | null) {
   const client = useQueryClient();
@@ -431,21 +389,18 @@ const NO_SEND = "Feedback goes back from the employee's own chat, session or tas
 
 /**
  * Comment mode: the desktop outlines the element under the pointer in the view and gives the one
- * clicked; the board member types a comment on it. The comments of a version stay in the page
- * until they are sent.
+ * clicked; the board member types a comment on it. The comments of a page stay until they are sent.
  */
 function CommentPanel({
   artifacts,
   ready,
   storeKey,
-  version,
   path,
   send,
 }: {
   artifacts: Artifacts;
   ready: boolean;
   storeKey: string;
-  version: number;
   path: string;
   send: ArtifactSend | null;
 }) {
@@ -455,6 +410,11 @@ function CommentPanel({
   );
   const [target, setTarget] = useState<ArtifactPick | null>(null);
   const [draft, setDraft] = useState("");
+  // A picked element: its comment is typed at once.
+  const field = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (target !== null) field.current?.focus();
+  }, [target]);
   const { post, sending } = usePost(send);
 
   useEffect(() => {
@@ -479,16 +439,13 @@ function CommentPanel({
   const add = () => {
     if (target === null) return;
     const made = artifactComments.add(storeKey, {
-      version,
       label: elementLabel(target),
       selector: target.selector,
       text: draft,
     });
     if (made === null) {
       toast(
-        draft.trim() === ""
-          ? "Type a comment first."
-          : "This version holds as many comments as it can; send them first.",
+        draft.trim() === "" ? "Type a comment first." : "This page holds as many comments as it can; send them first.",
       );
       return;
     }
@@ -498,7 +455,7 @@ function CommentPanel({
 
   return (
     <aside aria-label="Comments" {...stylex.props(styles.panel)}>
-      <p {...stylex.props(styles.panelTitle)}>{`Comments on v${version}`}</p>
+      <p {...stylex.props(styles.panelTitle)}>Comments</p>
       {target ? (
         <>
           <div {...stylex.props(styles.target)}>
@@ -506,6 +463,7 @@ function CommentPanel({
             <span {...stylex.props(styles.code)}>{target.selector}</span>
           </div>
           <TextArea
+            ref={field}
             label="Comment"
             rows={3}
             value={draft}
@@ -553,7 +511,7 @@ function CommentPanel({
           size="sm"
           isDisabled={send === null || comments.length === 0 || sending}
           onClick={() =>
-            void post(commentsMessage(path, version, comments)).then((ok) => {
+            void post(commentsMessage(path, comments)).then((ok) => {
               if (ok) artifactComments.clear(storeKey);
             })
           }
@@ -564,152 +522,9 @@ function CommentPanel({
   );
 }
 
-/** One control of a tweak, with the value it shows now. */
-function TweakControl({
-  tweak,
-  value,
-  onChange,
-}: {
-  tweak: ArtifactTweak;
-  value: string | undefined;
-  onChange: (input: string | number) => void;
-}) {
-  const now = value ?? tweak.value;
-  switch (tweak.type) {
-    case "color":
-      return (
-        <label {...stylex.props(styles.colorRow)}>
-          <span>{tweak.label}</span>
-          <input
-            type="color"
-            aria-label={tweak.label}
-            value={hexColor(now) ?? "#000000"}
-            onChange={(event) => onChange(event.target.value)}
-            {...stylex.props(styles.color)}
-          />
-        </label>
-      );
-    case "length":
-    case "number": {
-      const unit = tweak.type === "length" ? tweak.unit : "";
-      const current = numberOf(now, unit) ?? tweak.min ?? 0;
-      const min = tweak.min ?? Math.min(0, current);
-      const max = tweak.max ?? Math.max(current * 2, min + 1);
-      return (
-        <Slider
-          label={tweak.label}
-          min={min}
-          max={max}
-          step={tweak.step ?? (tweak.type === "length" ? 1 : 0.1)}
-          value={Math.min(max, Math.max(min, current))}
-          valueDisplay="text"
-          formatValue={(n) => `${n}${unit}`}
-          onChange={(n: number) => onChange(n)}
-        />
-      );
-    }
-    case "choice":
-      return (
-        <Selector
-          label={tweak.label}
-          size="sm"
-          value={tweak.options.includes(now) ? now : (tweak.options[0] ?? "")}
-          onChange={(v) => onChange(v)}
-          options={tweak.options.map((o) => ({ value: o, label: o }))}
-        />
-      );
-  }
-}
-
-/** The tweaks the artifact declares: each changes a CSS variable live; Send asks for new defaults. */
-function TweaksPanel({
-  artifacts,
-  ready,
-  version,
-  path,
-  send,
-}: {
-  artifacts: Artifacts;
-  ready: boolean;
-  version: number;
-  path: string;
-  send: ArtifactSend | null;
-}) {
-  const [tweaks, setTweaks] = useState<ArtifactTweak[] | null>(null);
-  const [values, setValues] = useState<ReadonlyMap<string, string>>(new Map());
-  const { post, sending } = usePost(send);
-
-  useEffect(() => {
-    setValues(new Map());
-    if (!ready) {
-      setTweaks(null);
-      return;
-    }
-    let gone = false;
-    artifacts
-      .tweaks()
-      .then((got) => {
-        if (!gone) setTweaks(got);
-      })
-      .catch(() => {
-        if (!gone) setTweaks([]);
-      });
-    return () => {
-      gone = true;
-    };
-  }, [artifacts, ready]);
-
-  const change = (tweak: ArtifactTweak, input: string | number) => {
-    const value = tweakInput(tweak, input);
-    setValues((before) => new Map(before).set(tweak.var, value));
-    void artifacts.tweak(tweak.var, value).then((set) => {
-      if (set === null) toast(`${tweak.label}: ${value} is not a value it takes.`);
-    });
-  };
-  const changed = tweaks ? changedTweaks(tweaks, values) : [];
-
-  return (
-    <aside aria-label="Tweaks" {...stylex.props(styles.panel)}>
-      <p {...stylex.props(styles.panelTitle)}>{`Tweaks for v${version}`}</p>
-      {tweaks === null ? (
-        <Loading />
-      ) : tweaks.length === 0 ? (
-        <p {...stylex.props(styles.quiet)}>
-          This design declares no tweaks. An employee adds them with an aurelius-tweaks block (see the authoring guide).
-        </p>
-      ) : (
-        tweaks.map((t) => (
-          <TweakControl key={t.var} tweak={t} value={values.get(t.var)} onChange={(input) => change(t, input)} />
-        ))
-      )}
-      <div {...stylex.props(styles.actions)}>
-        <Button
-          label="Reset"
-          size="sm"
-          isDisabled={values.size === 0}
-          onClick={() => {
-            setValues(new Map());
-            void artifacts.resetTweaks();
-          }}
-        />
-        <Button
-          label={sending ? "Sending…" : `Send to ${send?.to ?? "the employee"}`}
-          variant="primary"
-          size="sm"
-          isDisabled={send === null || changed.length === 0 || sending}
-          onClick={() => void post(tweaksMessage(path, version, changed))}
-        />
-        {send === null ? <p {...stylex.props(styles.quiet)}>{NO_SEND}</p> : null}
-      </div>
-    </aside>
-  );
-}
-
-type Tool = "comment" | "tweaks";
-
 export function ArtifactViewer({
-  versions,
-  openId,
+  pages,
+  openName,
   artifacts,
   messages = [],
   conversationId = null,
@@ -718,32 +533,37 @@ export function ArtifactViewer({
   docked = false,
   onClose,
 }: {
-  /** Newest first, as `artifactVersions` gives them. */
-  versions: ArtifactVersion[];
-  openId: string;
+  /** The design's pages, as `designPages` gives them; empty for a design being written. */
+  pages: DesignPage[];
+  /** The page shown first. */
+  openName: string;
   artifacts: Artifacts;
-  /** The conversation's messages: the answer that kept a version names its path. */
+  /** The conversation's messages: the answer that kept a page names its path. */
   messages?: readonly MessageView[];
   conversationId?: string | null;
-  /** Where comments, tweaks and the PowerPoint request go; null: nowhere (no Send). */
+  /** Where comments and the PowerPoint request go; null: nowhere (no Send). */
   send?: ArtifactSend | null;
-  /** A design being written instead of kept versions (then `versions` is empty). */
+  /** A design being written instead of kept pages (then `pages` is empty). */
   live?: LiveDesign | null;
   /** In a panel beside the conversation instead of a dialog over it. */
   docked?: boolean;
   onClose: () => void;
 }) {
-  const [id, setId] = useState(openId);
+  const [pageName, setPageName] = useState(openName);
   const [viewport, setViewport] = useState<Viewport>("desktop");
   const [reloads, setReloads] = useState(0);
   const [exporting, setExporting] = useState<"pdf" | "png" | null>(null);
-  const [tool, setTool] = useState<Tool | null>(null);
-  const [compare, setCompare] = useState(false);
-  const [compareId, setCompareId] = useState<string | null>(null);
-  const current = versions.find((v) => v.file.id === id) ?? versions[0];
-  const file = useArtifactFile(live ? null : id);
-  const html = useSteady(live ? (live.html ?? undefined) : file.data?.html, live?.writing ? LIVE_REDRAW_MS : 0);
-  const url = useServed(artifacts, html);
+  const [commenting, setCommenting] = useState(false);
+  const current = pages.find((p) => p.name === pageName) ?? pages[0];
+  const file = useArtifactFile(live ? null : (current?.file.id ?? null));
+  const html = live ? (live.html ?? undefined) : file.data?.html;
+  const writing = live?.writing === true;
+  // A design being written loads once and then grows in that same view (liveStep): a new view
+  // per draft flashed and jumped back to the top.
+  const [liveServed, setLiveServed] = useState<string | undefined>(undefined);
+  const step = live ? liveStep(liveServed, html, writing) : "none";
+  if (step === "serve") setLiveServed(html);
+  const url = useServed(artifacts, live ? liveServed : html);
   // The dock's width: dragged at its left edge, remembered. While it is dragged the view steps
   // aside, because the pointer over the view would go to the artifact's page, not to the handle.
   const resizing = useRef(false);
@@ -760,7 +580,10 @@ export function ArtifactViewer({
     resizing.current = on;
   });
   const { frame, stage, ready } = useArtifactView(artifacts, url, reloads, "main", resizing);
-  const writing = live?.writing === true;
+  const growing = ready && step === "update" ? html : undefined;
+  useEffect(() => {
+    if (growing !== undefined) void artifacts.update(growing);
+  }, [artifacts, growing]);
   const loadError = live ? live.error : (file.error?.message ?? null);
   const { post } = usePost(send);
   // Another screen: the viewer closes with it (main takes the view away as well).
@@ -770,15 +593,9 @@ export function ArtifactViewer({
     if (path !== openedAt.current) onClose();
   }, [path, onClose]);
   const name = live?.name ?? current?.file.name ?? file.data?.name ?? "Artifact";
-  const version = current?.version ?? 1;
   const answer = messages.find((m) => m.id === current?.messageId)?.text ?? "";
   const artifactName = artifactPath(answer, name);
   const width = viewportWidth(viewport);
-  const now = Date.now();
-  // Beside it: the chosen version, else the one before the current (N-1), else any other.
-  const others = versions.filter((v) => v.file.id !== current?.file.id);
-  const left =
-    others.find((v) => v.file.id === compareId) ?? others.find((v) => v.version < version) ?? others[0] ?? null;
 
   const exportAs = async (kind: "pdf" | "png") => {
     if (url === null) return;
@@ -802,7 +619,7 @@ export function ArtifactViewer({
           {
             key: "pptx" as const,
             label: "Ask for PPTX",
-            description: `${send.to} makes a PowerPoint of v${version}`,
+            description: `${send.to} makes a PowerPoint of this page`,
             dividerBefore: true,
           },
         ]
@@ -811,60 +628,38 @@ export function ArtifactViewer({
   const exportPick = (key: ExportKey) => {
     if (key === "html") {
       if (html !== undefined) saveBlob(new Blob([html], { type: "text/html" }), name);
-    } else if (key === "pptx") void post(pptxMessage(artifactName, version));
+    } else if (key === "pptx") void post(pptxMessage(artifactName));
     else if (url !== null && exporting === null) void exportAs(key);
   };
-  const chooseTool = (next: Tool) => {
-    setTool((now) => (now === next ? null : next));
-    setCompare(false);
+
+  // A ticket to build this page, with the page as its file.
+  const ticket = () => {
+    if (html === undefined) return;
+    overlays.open("ticket", {
+      ...designTicket(name, artifactName),
+      files: [new File([html], name, { type: "text/html" })],
+    });
   };
 
   const title = writing ? `${name} · Writing…` : name;
   const tools = (
     <div {...stylex.props(styles.bar)}>
-      {compare && left ? (
+      {pages.length > 1 ? (
         <Selector
-          label="Compare with"
+          label="Page"
           size="sm"
-          value={left.file.id}
-          onChange={(v) => setCompareId(v)}
-          options={others.map((v) => ({ value: v.file.id, label: versionLabel(v, now) }))}
+          value={current?.name ?? pageName}
+          onChange={(v) => setPageName(v)}
+          options={pages.map((p) => ({ value: p.name, label: p.name }))}
         />
       ) : null}
-      {live ? null : (
-        <Selector
-          label="Version"
-          size="sm"
-          value={current?.file.id ?? id}
-          onChange={(v) => setId(v)}
-          options={versions.map((v) => ({ value: v.file.id, label: versionLabel(v, now) }))}
-        />
-      )}
       <span {...stylex.props(styles.grow)} />
       <ToggleButton
         size="sm"
         label="Comment"
-        isPressed={tool === "comment"}
+        isPressed={commenting}
         isDisabled={url === null || writing}
-        onPressedChange={() => chooseTool("comment")}
-      />
-      <ToggleButton
-        size="sm"
-        label="Tweaks"
-        isPressed={tool === "tweaks"}
-        isDisabled={url === null || writing}
-        onPressedChange={() => chooseTool("tweaks")}
-      />
-      <ToggleButton
-        size="sm"
-        label="Compare"
-        isPressed={compare}
-        isDisabled={others.length === 0}
-        tooltip={others.length === 0 ? "There is only one version." : "Show another version beside this one"}
-        onPressedChange={() => {
-          setCompare((now) => !now);
-          setTool(null);
-        }}
+        onPressedChange={() => setCommenting((now) => !now)}
       />
       <SegmentedControl label="Width" size="sm" value={viewport} onChange={(v) => setViewport(v as Viewport)}>
         {VIEWPORTS.map((v) => (
@@ -880,10 +675,12 @@ export function ArtifactViewer({
           label="Reload"
           onClick={() => {
             setReloads((n) => n + 1);
-            if (!live) void file.refetch();
+            if (live) setLiveServed(html);
+            else void file.refetch();
           }}
         />
       </span>
+      <Button label="Create ticket" isDisabled={html === undefined || writing} onClick={ticket} />
       <Menu
         label="Export"
         options={exportOptions}
@@ -894,32 +691,13 @@ export function ArtifactViewer({
   );
   const view = (extra: stylex.StyleXStyles | null) => (
     <div {...stylex.props(styles.row, extra)}>
-      {compare && left ? (
-        <CompareStage
-          key={left.file.id}
-          artifacts={artifacts}
-          id={left.file.id}
-          name={`${name} v${left.version}`}
-          width={width}
-        />
-      ) : null}
       <Stage stage={stage} frame={frame} url={url} name={name} width={width} error={loadError} />
-      {tool === "comment" && !writing ? (
+      {commenting && !writing ? (
         <CommentPanel
           key={`${current?.file.id}#${reloads}`}
           artifacts={artifacts}
           ready={ready}
-          storeKey={CommentStore.key(conversationId, name, version)}
-          version={version}
-          path={artifactName}
-          send={send}
-        />
-      ) : tool === "tweaks" && !writing ? (
-        <TweaksPanel
-          key={`${current?.file.id}#${reloads}`}
-          artifacts={artifacts}
-          ready={ready}
-          version={version}
+          storeKey={CommentStore.key(conversationId, name, current?.file.id ?? "")}
           path={artifactName}
           send={send}
         />

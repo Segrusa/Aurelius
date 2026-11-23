@@ -93,8 +93,8 @@ export function DesignViewer({
   if (!artifacts) return null;
   return (
     <ArtifactViewer
-      versions={[]}
-      openId=""
+      pages={[]}
+      openName={design.name}
       artifacts={artifacts}
       messages={messages}
       conversationId={conversationId}

@@ -25,7 +25,7 @@ import { PromptBox, PromptTextarea } from "../ui/prompt-box";
 import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
-import { DockedArtifact, targetKey, useArtifactDock } from "./artifact-dock";
+import { DockedArtifact, targetKey, useArtifactDock, useOpenDesign } from "./artifact-dock";
 import { foldUpdates } from "./board-logic";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import {
@@ -815,6 +815,8 @@ export interface SessionSlots {
   chips?: ReactNode;
   /** The right panel while no thread is open. */
   aside?: ReactNode;
+  /** A kept design file (by id) that opens in the design panel at once. */
+  design?: string | null;
   /** The ticket decides, so leaving Done makes it writable before the channel's read catches up. */
   readOnly: boolean;
   readOnlyText: string;
@@ -883,6 +885,7 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
   const dock = useArtifactDock();
   const live = useLiveAll(store);
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
+  useOpenDesign(dock.open, list, session?.design ?? null);
   // What runs and what is still open stays beside the talk, never as posts in it.
   const progress = useTicketProgress(isTicket ? (ticketId ?? c?.ticket_id ?? null) : null, isTicket ? live : []);
   const { storage } = usePlatform();

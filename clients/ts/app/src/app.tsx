@@ -21,6 +21,7 @@ import { type Platform, PlatformProvider } from "./platform";
 import { activityFilters } from "./screens/activity-logic";
 import { BoardScreen } from "./screens/board";
 import { CodeScreen } from "./screens/code";
+import { DesignsScreen } from "./screens/designs";
 import { type EmployeeTab, isEmployeeTab } from "./screens/employee-logic";
 import { EmployeePage } from "./screens/employee-page";
 import { EmployeesScreen, OrgChartScreen } from "./screens/employees";
@@ -118,33 +119,48 @@ const myTickets = createRoute({
     throw redirect({ to: "/board", search });
   },
 });
+/** `?design=<file id>`: a conversation's screen opens with that kept design beside it (the Designs page). */
+const designSearch = (search: Record<string, unknown>): { design?: string } =>
+  typeof search.design === "string" ? { design: search.design } : {};
+
 const tasks = createRoute({ getParentRoute: () => root, path: "/tasks", component: () => <TasksScreen /> });
 const taskRun = createRoute({
   getParentRoute: () => root,
   path: "/tasks/$taskId",
+  validateSearch: designSearch,
   component: function TaskRunRoute() {
     const { taskId } = taskRun.useParams();
-    return <TaskRunScreen key={taskId} taskId={taskId} />;
+    const { design } = taskRun.useSearch();
+    return <TaskRunScreen key={taskId} taskId={taskId} design={design ?? null} />;
   },
 });
 // A ticket opens as its own session (ticket #70); the number is the one people see on the card.
 const ticketSession = createRoute({
   getParentRoute: () => root,
   path: "/ticket/$number",
-  validateSearch: (search: Record<string, unknown>): { message?: string; thread?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { message?: string; thread?: string; design?: string } => ({
     ...(typeof search.message === "string" ? { message: search.message } : {}),
     ...(typeof search.thread === "string" ? { thread: search.thread } : {}),
+    ...designSearch(search),
   }),
   component: function TicketSessionRoute() {
     const { number } = ticketSession.useParams();
-    const { message, thread } = ticketSession.useSearch();
+    const { message, thread, design } = ticketSession.useSearch();
     const n = Number(number);
     if (!Number.isInteger(n) || n <= 0) {
       return (
         <EmptyState title={`Ticket #${number} not found.`} actions={<Button label="Open the Board" href="/board" />} />
       );
     }
-    return <TicketSessionScreen key={n} number={n} message={message ?? null} thread={thread ?? null} />;
+    return (
+      <TicketSessionScreen
+        key={n}
+        number={n}
+        message={message ?? null}
+        thread={thread ?? null}
+        design={design ?? null}
+      />
+    );
   },
 });
 const employees = createRoute({ getParentRoute: () => root, path: "/employees", component: EmployeesScreen });
@@ -163,9 +179,11 @@ const employee = createRoute({
 const workSession = createRoute({
   getParentRoute: () => root,
   path: "/session/$conversationId",
+  validateSearch: designSearch,
   component: function SessionRoute() {
     const { conversationId } = workSession.useParams();
-    return <SessionScreen key={conversationId} conversationId={conversationId} />;
+    const { design } = workSession.useSearch();
+    return <SessionScreen key={conversationId} conversationId={conversationId} design={design ?? null} />;
   },
 });
 const knowledgeIndex = createRoute({
@@ -237,6 +255,8 @@ const history = createRoute({
 const code = createRoute({ getParentRoute: () => root, path: "/code", component: CodeScreen });
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
 const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
+// The workspace's designs; the screen says so when the server lacks them.
+const designs = createRoute({ getParentRoute: () => root, path: "/designs", component: DesignsScreen });
 // The log lives in Settings now; an old link keeps what it narrowed on.
 const activity = createRoute({
   getParentRoute: () => root,
@@ -291,6 +311,7 @@ const router = createRouter({
     settings,
     usage,
     scheduled,
+    designs,
     activity,
     orgChart,
     employee,

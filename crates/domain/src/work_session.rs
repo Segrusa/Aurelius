@@ -34,6 +34,10 @@ pub struct StartWorkSession {
     /// (after `looks_like_secret`, B10): it is stored with the value redacted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub confirm_secret: bool,
+    /// A design session (feature `design_sessions`): the employee makes HTML pages,
+    /// and the app opens the session with its preview.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub design: bool,
 }
 
 /// Start a work session and let the dispatcher choose who takes it (feature
@@ -59,6 +63,9 @@ pub struct DispatchWorkSession {
     /// See `StartWorkSession::confirm_secret`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub confirm_secret: bool,
+    /// See `StartWorkSession::design`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub design: bool,
 }
 
 /// The board member who started a session chooses who takes it, while the
@@ -144,6 +151,9 @@ pub struct WorkSessionView {
     /// servers leave it out, and a client then shows no mark.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub unseen: bool,
+    /// A design session (feature `design_sessions`); older servers leave it out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub design: bool,
 }
 
 /// `work_session.list`: the reader's sessions, the latest activity first.

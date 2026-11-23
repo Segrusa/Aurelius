@@ -67,6 +67,7 @@ export const METHODS = {
   "conversation.set_browser_allowed": "command",
   "conversation.set_run": "command",
   "conversation.set_screen_allowed": "command",
+  "design.list": "read",
   "discussion.audience": "read",
   "employee.chat": "read",
   "employee.chats": "read",
@@ -452,6 +453,11 @@ export interface MethodParams {
   "conversation.set_browser_allowed": M.SetBrowserAllowed;
   "conversation.set_run": M.SetConversationRun;
   "conversation.set_screen_allowed": M.SetScreenAllowed;
+  /**
+   * The designs of a project, or of all without one: the kept HTML pages of each
+   * conversation, the latest first (feature `designs`).
+   */
+  "design.list": { project_id?: string | null };
   /**
    * Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
    * answered with `DiscussionAudience`, for the reader's own message (the

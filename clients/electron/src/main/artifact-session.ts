@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, type Session, session, type WebContents, WebContentsView } from "electron";
 import {
+  ARTIFACT_BYTES_MAX,
   ARTIFACT_CSP,
   ARTIFACT_PARTITION,
   ARTIFACT_PROXY,
@@ -26,27 +27,14 @@ import {
   WORLD_CALL_MS,
   withinTime,
 } from "./artifact";
+import { type ArtifactPick, checkPick, PICK_SELECTOR_MAX, PICK_TEXT_MAX } from "./artifact-pick";
 import {
-  type ArtifactPick,
-  type ArtifactTweak,
-  checkPick,
-  currentValue,
-  PICK_SELECTOR_MAX,
-  PICK_TEXT_MAX,
-  parseTweaks,
-  TWEAKS_ELEMENT_ID,
-  TWEAKS_JSON_MAX,
-  tweakValue,
-} from "./artifact-tweaks";
-import {
+  morphChildren,
+  morphInWorld,
   pickInWorld,
-  readTweaksInWorld,
-  resetTweaksInWorld,
   selectorOf,
-  setTweaksInWorld,
   stopPickInWorld,
   TOOLS_WORLD_ID,
-  valuesInWorld,
   worldCall,
 } from "./artifact-world";
 
@@ -119,8 +107,8 @@ export function guardArtifact(contents: WebContents, own: string): void {
 }
 
 /**
- * Which of a page's views: the viewer's own, and the older version beside it while it compares.
- * Comments and tweaks work only in the viewer's own.
+ * Which of a page's views: the viewer's own, and a second one beside it. Comments work only in the
+ * viewer's own.
  */
 export type ViewSlot = "main" | "compare";
 
@@ -129,17 +117,12 @@ export function viewSlot(raw: unknown): ViewSlot {
   return raw === "compare" ? "compare" : "main";
 }
 
-/** A tweak as the page gets it: what main checked, with its value now. */
-export type ShownTweak = ArtifactTweak & { value: string };
-
 interface Shown {
   view: WebContentsView;
   window: BrowserWindow;
   detach: () => void;
   /** Ends a pick that is waiting, with null. */
   stopPick: (() => void) | null;
-  /** The tweaks main read from this view's artifact: the only variables it sets in it. */
-  tweaks: ArtifactTweak[];
 }
 
 const key = (ownerId: number, slot: ViewSlot) => `${ownerId}/${slot}`;
@@ -189,7 +172,7 @@ export class ArtifactViews {
       owner.off("destroyed", gone);
       window.off("closed", gone);
     };
-    this.shown.set(at, { view, window, detach, stopPick: null, tweaks: [] });
+    this.shown.set(at, { view, window, detach, stopPick: null });
     window.contentView.addChildView(view);
     this.place(owner, bounds, slot);
     view.webContents.loadURL(url).catch(() => undefined);
@@ -274,7 +257,22 @@ export class ArtifactViews {
       false,
     );
     const raw = await Promise.race([picked, stopped]);
-    return checkPick(raw);
+    const pick = checkPick(raw);
+    // The click went to the view, which keeps the keyboard; the comment is typed in the page.
+    if (pick !== null && !owner.isDestroyed()) owner.focus();
+    return pick;
+  }
+
+  /**
+   * Shows `html` in `owner`'s view in place of what it shows, in the same document (morphInWorld):
+   * a design that is still being written grows without a new view. False when there is no view,
+   * the HTML is not a string within ARTIFACT_BYTES_MAX, or the world call failed.
+   */
+  async update(owner: WebContents, html: unknown): Promise<boolean> {
+    if (typeof html !== "string" || html.length > ARTIFACT_BYTES_MAX) return false;
+    const shown = this.own(owner);
+    if (shown === null) return false;
+    return (await this.run(shown, worldCall(morphInWorld, html, morphChildren))) === true;
   }
 
   /** Ends comment mode in `owner`'s view: the outline goes, and a waiting pick gives null. */
@@ -284,43 +282,6 @@ export class ArtifactViews {
     shown.stopPick?.();
     shown.stopPick = null;
     await this.run(shown, worldCall(stopPickInWorld));
-  }
-
-  /** The tweaks the artifact in `owner`'s view declares, checked, each with its computed value. */
-  async tweaks(owner: WebContents): Promise<ShownTweak[]> {
-    const shown = this.own(owner);
-    if (shown === null) return [];
-    const tweaks = parseTweaks(await this.run(shown, worldCall(readTweaksInWorld, TWEAKS_ELEMENT_ID, TWEAKS_JSON_MAX)));
-    shown.tweaks = tweaks;
-    if (tweaks.length === 0) return [];
-    const values = await this.run(
-      shown,
-      worldCall(
-        valuesInWorld,
-        tweaks.map((t) => t.var),
-      ),
-    );
-    return tweaks.map((t, i) => ({ ...t, value: currentValue(Array.isArray(values) ? values[i] : null) }));
-  }
-
-  /**
-   * Sets one tweak in `owner`'s view: only a variable main read from it, with a value tweakValue
-   * takes. Gives the value set, or null when it was refused or the world did not set it in time.
-   */
-  async tweak(owner: WebContents, name: unknown, value: unknown): Promise<string | null> {
-    const shown = this.own(owner);
-    const tweak = shown?.tweaks.find((t) => t.var === name);
-    if (shown === null || tweak === undefined) return null;
-    const checked = tweakValue(tweak, value);
-    if (checked === null) return null;
-    const set = await this.run(shown, worldCall(setTweaksInWorld, [[tweak.var, checked]]));
-    return set === true ? checked : null;
-  }
-
-  /** Puts back what the tweaks set in `owner`'s view. */
-  async resetTweaks(owner: WebContents): Promise<void> {
-    const shown = this.own(owner);
-    if (shown !== null) await this.run(shown, worldCall(resetTweaksInWorld));
   }
 }
 

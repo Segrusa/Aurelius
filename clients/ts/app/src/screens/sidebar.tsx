@@ -274,6 +274,7 @@ const NAV: { to: string; label: string; icon: NavIcon; feature?: Feature; server
   { to: "/board", label: "Board", icon: "board" },
   { to: "/code", label: "Code", icon: "code", server: CODE_VIEW },
   { to: "/history", label: "History", icon: "history", server: "ticket_history" },
+  { to: "/designs", label: "Designs", icon: "design", server: "designs" },
   { to: "/tasks", label: "Tasks", icon: "tasks", feature: "TasksInSidebar" },
   { to: "/scheduled", label: "Scheduled", icon: "clock", feature: "ScheduledInSidebar" },
   { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
@@ -363,6 +364,7 @@ function useSidebarItems(): SidebarItem[] {
       projectId: s.project_id ?? null,
       signal: sessionSignal(s),
       at: s.last_activity_ms,
+      ...(s.design ? { design: true } : {}),
     }));
     // Open and Done tickets alike (ticket #75); Earlier caps how many old ones show.
     const fromTickets: SidebarItem[] = (tickets ?? []).filter(inTicketsSection).map((t) => ({
@@ -414,7 +416,7 @@ function Rows({ items, sub }: { items: SidebarItem[]; sub?: boolean }) {
           key={i.key}
           to={i.to}
           label={i.label}
-          icon={markIcon(initial(i.who), markColor(i.whoId))}
+          icon={i.design ? NAV_ICONS.design : markIcon(initial(i.who), markColor(i.whoId))}
           end={i.done && i.signal === null ? <DoneMark /> : <SignalDot signal={i.signal} />}
         />
       ))}

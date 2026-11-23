@@ -1,6 +1,6 @@
 import type { WebContents } from "electron";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resultWithin, WORLD_CALL_MS } from "./artifact";
+import { ARTIFACT_BYTES_MAX, resultWithin, WORLD_CALL_MS } from "./artifact";
 import { ArtifactViews } from "./artifact-session";
 
 // ArtifactViews only reaches Electron's classes in show(); the world calls below need none of them.
@@ -22,7 +22,6 @@ function hungViews() {
   inner.shown.set("1/main", {
     view: { webContents: contents },
     stopPick: null,
-    tweaks: [{ var: "--space", label: "Spacing", type: "length", unit: "px" }],
   });
   return { views, owner: { id: 1 } as unknown as WebContents, calls };
 }
@@ -57,21 +56,24 @@ describe("a world call", () => {
     expect(raced).toEqual({ done: true, value: null });
   });
 
-  it("in a hung view gives null once the limit is up: tweaks, a tweak, reset and stop", async () => {
+  it("in a hung view gives up once the limit is up: an update of a live design and a stop", async () => {
     vi.useFakeTimers();
     const { views, owner, calls } = hungViews();
-    const tweaks = watch(views.tweaks(owner));
-    const tweak = watch(views.tweak(owner, "--space", "20px"));
-    const reset = watch(views.resetTweaks(owner));
+    const update = watch(views.update(owner, "<p>grown</p>"));
     const stop = watch(views.stopPick(owner));
     await vi.advanceTimersByTimeAsync(WORLD_CALL_MS - 1);
-    expect([tweaks.done, tweak.done, reset.done, stop.done]).toEqual([false, false, false, false]);
+    expect([update.done, stop.done]).toEqual([false, false]);
     await vi.advanceTimersByTimeAsync(1);
-    expect(tweaks).toEqual({ done: true, value: [] });
-    expect(tweak).toEqual({ done: true, value: null });
-    expect(reset.done).toBe(true);
+    expect(update).toEqual({ done: true, value: false });
     expect(stop.done).toBe(true);
-    expect(calls.count).toBe(4);
+    expect(calls.count).toBe(2);
+  });
+
+  it("refuses an update that is not HTML text within the limit, without a world call", async () => {
+    const { views, owner, calls } = hungViews();
+    await expect(views.update(owner, 42)).resolves.toBe(false);
+    await expect(views.update(owner, "x".repeat(ARTIFACT_BYTES_MAX + 1))).resolves.toBe(false);
+    expect(calls.count).toBe(0);
   });
 
   it("but a pick waits for the board member, until it is stopped", async () => {

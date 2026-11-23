@@ -255,6 +255,11 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const [labels, setLabels] = useState(seed?.labels ?? "");
   const [deadline, setDeadline] = useState("");
   const attach = useAttachments();
+  // A ticket made from a design brings the design along.
+  const takeFiles = attach.take;
+  useEffect(() => {
+    if (seed?.files && seed.files.length > 0) takeFiles(seed.files);
+  }, [seed, takeFiles]);
   const { storage } = usePlatform();
   const quickOn = quickCreatable(features);
   const [kind, setKind] = useState<"ticket" | "quick">(seed?.quick && quickOn ? "quick" : "ticket");

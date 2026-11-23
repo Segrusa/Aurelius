@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 
 export type OverlayName = "palette" | "ticket" | "give";
 
-/** What a new ticket starts with, when it comes from a message. */
+/** What a new ticket starts with, when it comes from a message or a design. */
 export interface TicketPrefill {
   title: string;
   description: string;
@@ -13,6 +13,8 @@ export interface TicketPrefill {
   labels?: string;
   projectId?: string;
   employeeId?: string;
+  /** Files that go along, as if they were dropped on the dialog (a design's page). */
+  files?: File[];
   /** Opens New ticket as a quick task (feature `quick_task`). */
   quick?: boolean;
 }

@@ -20,7 +20,7 @@ import { saveBlob } from "../ui/download";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
 import type { ArtifactSend } from "./artifact-feedback";
-import { isArtifact, versionOf, versionsFor } from "./artifact-logic";
+import { designPages, isArtifact } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 import { FormDialog, Hint, Loading, Problem } from "./org-kit";
 import { markdownPaths, screenshotId, traceSessionText, usageLine, waitingText } from "./run-logic";
@@ -427,7 +427,7 @@ const sizeText = (size: number) =>
 
 /**
  * Files an answer kept with its message: an image shows here, an HTML file opens as an artifact
- * where the app can run one safely (`messages`: the conversation, for its versions), anything
+ * where the app can run one safely (`messages`: the conversation, for its pages), anything
  * else is saved.
  */
 export function KeptFiles({
@@ -440,7 +440,7 @@ export function KeptFiles({
   files: FileRef[];
   messages?: readonly MessageView[];
   conversationId?: string | null;
-  /** Where the artifact viewer sends comments, tweaks and requests (ChatContext.artifactSend). */
+  /** Where the artifact viewer sends comments and requests (ChatContext.artifactSend). */
   send?: ArtifactSend | null;
   /** Opens an artifact in the conversation's panel; none: in a dialog here. */
   onArtifact?: ((file: FileRef) => void) | null;
@@ -482,11 +482,7 @@ export function KeptFiles({
             <span {...stylex.props(styles.accent)}>◧</span>
             <span {...stylex.props(styles.artifactText)}>
               <span>{f.name}</span>
-              <span {...stylex.props(styles.size)}>
-                {["Artifact", versionOf(versionsFor(messages, f, 0), f.id), sizeText(f.size)]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
+              <span {...stylex.props(styles.size)}>{`Design · ${sizeText(f.size)}`}</span>
             </span>
             <span {...stylex.props(styles.accent)}>Open</span>
           </button>
@@ -500,8 +496,8 @@ export function KeptFiles({
       )}
       {artifact && artifacts ? (
         <ArtifactViewer
-          versions={versionsFor(messages, artifact, Date.now())}
-          openId={artifact.id}
+          pages={designPages(messages, artifact, Date.now())}
+          openName={artifact.name}
           artifacts={artifacts}
           messages={messages}
           conversationId={conversationId}

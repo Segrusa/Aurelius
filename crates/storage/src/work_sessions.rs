@@ -18,6 +18,8 @@ pub struct Session {
     pub worktree: Option<(String, String)>,
     /// The dispatcher still chooses who takes it, or chose nobody (`migrations/0044`).
     pub dispatch: Option<SessionDispatch>,
+    /// A design session (`migrations/0048`).
+    pub design: bool,
 }
 
 /// Make the session's conversation and its row. `employee`: who works in it, or
@@ -32,6 +34,7 @@ pub fn insert(
     started_by: UserId,
     worktree: Option<(&str, &str)>,
     dispatch: Option<SessionDispatch>,
+    design: bool,
 ) -> Result<(), StorageError> {
     let now = now_ms();
     tx.execute(
@@ -39,31 +42,32 @@ pub fn insert(
         params![id.to_string(), project.to_string(), employee.to_string(), title, now],
     )?;
     tx.execute(
-        "INSERT INTO work_sessions(conversation_id, started_by, worktree, branch, created_at_ms, dispatch) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id.to_string(), started_by.to_string(), worktree.map(|w| w.0), worktree.map(|w| w.1), now, dispatch.map(SessionDispatch::as_str)],
+        "INSERT INTO work_sessions(conversation_id, started_by, worktree, branch, created_at_ms, dispatch, design) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id.to_string(), started_by.to_string(), worktree.map(|w| w.0), worktree.map(|w| w.1), now, dispatch.map(SessionDispatch::as_str), design],
     )?;
     Ok(())
 }
 
-/// project, started_by, worktree, branch, dispatch.
-type SessionRow = (String, String, Option<String>, Option<String>, Option<String>);
+/// project, started_by, worktree, branch, dispatch, design.
+type SessionRow = (String, String, Option<String>, Option<String>, Option<String>, bool);
 
 /// The session a conversation is, if it is one.
 pub fn of_conversation(conn: &Connection, conversation: ConversationId) -> Result<Option<Session>, StorageError> {
     let row: Option<SessionRow> = conn
         .query_row(
-            "SELECT c.project_id, s.started_by, s.worktree, s.branch, s.dispatch FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
+            "SELECT c.project_id, s.started_by, s.worktree, s.branch, s.dispatch, s.design FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
              WHERE s.conversation_id = ?1 AND c.kind = 'session'",
             [conversation.to_string()],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
         )
         .optional()?;
-    let Some((project, started_by, worktree, branch, dispatch)) = row else { return Ok(None) };
+    let Some((project, started_by, worktree, branch, dispatch, design)) = row else { return Ok(None) };
     Ok(Some(Session {
         project: ProjectId::parse(&project).map_err(bad)?,
         started_by: UserId::parse(&started_by).map_err(bad)?,
         worktree: worktree.zip(branch),
         dispatch: dispatch.as_deref().and_then(SessionDispatch::parse),
+        design,
     }))
 }
 
@@ -84,7 +88,8 @@ pub fn list(conn: &Connection, user: UserId, project: Option<ProjectId>) -> Resu
                 EXISTS(SELECT 1 FROM runs r WHERE r.conversation_id = c.id AND r.status IN ('created','starting','running','waiting','cancelling')),
                 s.dispatch,
                 EXISTS(SELECT 1 FROM discussion_reads dr JOIN runs r ON r.conversation_id = dr.conversation_id
-                       WHERE dr.user_id = ?1 AND dr.conversation_id = c.id AND r.status IN ('succeeded','failed') AND r.ended_at_ms > dr.read_at_ms)
+                       WHERE dr.user_id = ?1 AND dr.conversation_id = c.id AND r.status IN ('succeeded','failed') AND r.ended_at_ms > dr.read_at_ms),
+                s.design
          FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
          JOIN projects p ON p.id = c.project_id JOIN employees e ON e.id = c.employee_id
          WHERE s.started_by = ?1 AND c.kind = 'session' AND c.archived_at_ms IS NULL AND (?2 IS NULL OR c.project_id = ?2)
@@ -105,10 +110,11 @@ pub fn list(conn: &Connection, user: UserId, project: Option<ProjectId>) -> Resu
             r.get::<_, bool>(10)?,
             r.get::<_, Option<String>>(11)?,
             r.get::<_, bool>(12)?,
+            r.get::<_, bool>(13)?,
         ))
     })?;
     rows.map(|row| {
-        let (conversation, project, project_name, employee, employee_name, title, worktree, branch, created_at_ms, last_activity_ms, running, dispatch, ended_unseen) = row?;
+        let (conversation, project, project_name, employee, employee_name, title, worktree, branch, created_at_ms, last_activity_ms, running, dispatch, ended_unseen, design) = row?;
         let dispatch = dispatch.as_deref().and_then(SessionDispatch::parse);
         // A dispatcher that still chooses is working on it too.
         let running = running || dispatch == Some(SessionDispatch::Choosing);
@@ -126,6 +132,7 @@ pub fn list(conn: &Connection, user: UserId, project: Option<ProjectId>) -> Resu
             running,
             dispatch,
             unseen: ended_unseen && !running,
+            design,
         })
     })
     .collect()

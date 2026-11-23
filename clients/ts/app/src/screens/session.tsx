@@ -5,6 +5,7 @@
 // panel (shown or hidden from the head) with the session's properties and what its runs used.
 
 import { Button } from "@astryxdesign/core/Button";
+import { Heading } from "@astryxdesign/core/Heading";
 import type { AgentMode, MessagesSnapshot, WorkSessionView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
@@ -52,9 +53,29 @@ const styles = stylex.create({
     color: "var(--color-text-secondary)",
   },
   chooserText: { flexGrow: 1, margin: 0 },
+  head: { display: "flex", minWidth: 0, alignItems: "center", gap: 8 },
+  title: {
+    margin: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 13,
+    fontWeight: 600,
+  },
+  // What kind of session this is: a design.
+  kindMark: {
+    flexShrink: 0,
+    borderRadius: 999,
+    paddingInline: 8,
+    paddingBlock: 1,
+    fontSize: 11,
+    fontWeight: 600,
+    color: "var(--color-text-accent)",
+    backgroundColor: "var(--color-background-accent-subtle, var(--precision-sunk))",
+  },
 });
 
-export function SessionScreen({ conversationId }: { conversationId: string }) {
+export function SessionScreen({ conversationId, design = null }: { conversationId: string; design?: string | null }) {
   useKeyContext("TeamChat");
   const mine = useWorkSessions();
   const session = mine.data?.find((s) => s.conversation_id === conversationId) ?? null;
@@ -69,6 +90,20 @@ export function SessionScreen({ conversationId }: { conversationId: string }) {
         conversationId={conversationId}
         frame={{
           ...(session ? { title: session.title || "Session" } : {}),
+          ...(session?.design
+            ? {
+                head: (
+                  <span {...stylex.props(styles.head)}>
+                    <Heading level={1} xstyle={styles.title}>
+                      {session.title || "Design"}
+                    </Heading>
+                    <span {...stylex.props(styles.kindMark)}>Design</span>
+                  </span>
+                ),
+                // A design opens with its newest page beside it.
+                designSession: true,
+              }
+            : {}),
           empty: {
             title: "This session is starting.",
             description: "The first answer appears here. Talk with the employee as in a chat; there is no ticket.",
@@ -78,6 +113,7 @@ export function SessionScreen({ conversationId }: { conversationId: string }) {
           ...(othersSession ? { instead: <p {...stylex.props(styles.chooser)}>{OTHERS_SESSION}</p> } : {}),
           actions: <PropertiesToggle dock={dock} label="Session properties" />,
           aside: <SessionDetails dock={dock} conversationId={conversationId} session={session} />,
+          design,
         }}
       />
     </div>

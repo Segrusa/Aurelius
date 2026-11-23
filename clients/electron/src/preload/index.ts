@@ -69,11 +69,9 @@ contextBridge.exposeInMainWorld("aurelius", {
     invoke("artifact:show", url, bounds, slot),
   placeArtifact: (bounds: ArtifactBounds | null, slot?: ArtifactSlot) => invoke("artifact:bounds", bounds, slot),
   hideArtifact: (slot?: ArtifactSlot) => invoke("artifact:hide", slot),
+  updateArtifact: (html: string) => invoke("artifact:update", html),
   pickInArtifact: () => invoke("artifact:pick"),
   stopArtifactPick: () => invoke("artifact:pick-stop"),
-  artifactTweaks: () => invoke("artifact:tweaks"),
-  tweakArtifact: (name: string, value: string) => invoke("artifact:tweak", name, value),
-  resetArtifactTweaks: () => invoke("artifact:tweaks-reset"),
   exportArtifact: (url: string, kind: "pdf" | "png", name: string, width: number) =>
     invoke("artifact:export", url, kind, name, width),
 });

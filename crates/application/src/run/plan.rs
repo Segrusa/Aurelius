@@ -177,15 +177,21 @@ pub fn quick_task_guidance(number: u32, worktree: &std::path::Path) -> String {
     )
 }
 
+/// What an employee is told in a design session (feature `design_sessions`), after the
+/// work session's section: how to make the pages so the app keeps and shows them.
+pub const DESIGN_SESSION_GUIDANCE: &str = "\n\n## This is a design session\nThe board member asked for a design: make it as HTML pages and show them, not as a description. Each page is one self-contained HTML file in design/<kebab-name>.html in your work folder: <!doctype html>, all CSS in <style> and all JS in inline <script>, nothing loaded from the internet (images as data: URIs or inline SVG, system fonts). One file per page; to change a page, overwrite the same file and keep its name. Name the full path of every page you made or changed in your answer: Aurelius keeps it with your answer and the board member sees it beside the conversation. Follow the project's design system, make it responsive, and use realistic content.";
+
 /// The section of a work session (feature `work_sessions`): no ticket, the board member
-/// directly, in the project's folder or the session's own worktree.
-pub fn work_session_guidance(worktree: Option<(&str, &str)>) -> String {
+/// directly, in the project's folder or the session's own worktree. A design session
+/// (`design`) also gets `DESIGN_SESSION_GUIDANCE`.
+pub fn work_session_guidance(worktree: Option<(&str, &str)>, design: bool) -> String {
     let place = match worktree {
         Some((folder, branch)) => format!("You work only in your own worktree {folder} on the branch {branch}: commit your changes there yourself; never touch the project's main branch or its folder, never merge and never push unless the board member asks."),
         None => "You work in the project's folder itself, on whatever branch it has checked out; commit only when the board member asks.".to_owned(),
     };
+    let design = if design { DESIGN_SESSION_GUIDANCE } else { "" };
     format!(
-        "\n\n## This is a work session\nThe board member talks with you directly here, as in a chat: there is no ticket, no reviewer and no task to report on. Answer here; do the work yourself (delegate_task only when the board member asks for it). {place}"
+        "\n\n## This is a work session\nThe board member talks with you directly here, as in a chat: there is no ticket, no reviewer and no task to report on. Answer here; do the work yourself (delegate_task only when the board member asks for it). {place}{design}"
     )
 }
 
@@ -580,7 +586,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                     None => match aurelius_storage::work_sessions::of_conversation(conn, conversation_id)? {
                         Some(session) => {
                             let worktree = session.worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str()));
-                            Some(format!("{}{}", system.unwrap_or_default(), work_session_guidance(worktree)).trim().to_string())
+                            Some(format!("{}{}", system.unwrap_or_default(), work_session_guidance(worktree, session.design)).trim().to_string())
                         }
                         None => system,
                     },

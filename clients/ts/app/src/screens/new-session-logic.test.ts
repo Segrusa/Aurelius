@@ -9,6 +9,7 @@ import {
   continueTickets,
   createDrafts,
   DISPATCHER,
+  defaultDesign,
   defaultKind,
   defaultProject,
   defaultWho,
@@ -427,5 +428,35 @@ describe("a session the dispatcher gives to someone (session_dispatch)", () => {
     });
     const receipt = { result: { kind: "command", value: { type: "work_session_dispatching", conversation_id: "c" } } };
     expect(startedSession(receipt as unknown as Receipt)).toBe("c");
+  });
+});
+
+describe("a design", () => {
+  const first = {
+    projectId: "p1",
+    employeeId: "e1",
+    text: "A pricing page",
+    model: "default",
+    effort: "default",
+    mode: "default",
+  };
+
+  it("is a session that asks for a design, and leaves the flag out otherwise", () => {
+    expect(sessionStartParams({ ...first, design: true }, false, false).design).toBe(true);
+    expect("design" in sessionStartParams(first, false, false)).toBe(false);
+    expect(sessionDispatchParams({ ...first, design: true }, false, false).design).toBe(true);
+  });
+
+  it("is chosen again next time, as a session, only where the server has designs", () => {
+    expect(defaultKind("design", true, true)).toBe("session");
+    expect(defaultDesign("design", true)).toBe(true);
+    expect(defaultDesign("design", false)).toBe(false);
+    expect(defaultDesign("session", true)).toBe(false);
+  });
+
+  it("is remembered as a design, and asks what it should look like", () => {
+    const writes = remembered("h1", { kind: "session", design: true, projectId: "p1", who: "e1" }, []);
+    expect(writes).toContainEqual(["new_session.kind:h1", "design"]);
+    expect(placeholderOf("session", true)).toMatch(/look like/);
   });
 });

@@ -998,6 +998,50 @@ pub struct ScheduledMessagesSnapshot {
     pub messages: Vec<ScheduledMessageView>,
 }
 
+/// The most designs `design.list` gives, the latest first.
+pub const DESIGNS_MAX: usize = 200;
+
+/// One page of a design: the newest kept HTML file with its name in the conversation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesignPageView {
+    pub file: FileRef,
+    /// The message the file was kept with (`file.get` reads it by `file.id`).
+    pub message_id: MessageId,
+    pub at_ms: i64,
+}
+
+/// One design in `design.list`: the kept HTML pages of one conversation of a project
+/// (a work session, a ticket's discussion, a task), and where it was made.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesignView {
+    pub conversation_id: ConversationId,
+    /// `session`, `ticket`, `task` or `project`: where a client opens the conversation.
+    pub kind: String,
+    pub project_id: ProjectId,
+    /// The conversation's title (a session's, a ticket's or a task's).
+    pub title: String,
+    /// The ticket of a ticket's discussion, by number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_number: Option<i64>,
+    /// The task of a task's conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
+    /// A design session (feature `design_sessions`): listed from its start, also before its first page.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub design: bool,
+    /// One per file name, in the order the pages first came.
+    pub pages: Vec<DesignPageView>,
+    /// When its newest page was kept.
+    pub last_at_ms: i64,
+}
+
+/// `design.list`: the designs of one project or of all, the latest first (at most `DESIGNS_MAX`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DesignsSnapshot {
+    pub as_of_seq: u64,
+    pub designs: Vec<DesignView>,
+}
+
 /// An employee that waits to pick up a thread (U3).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ThreadWaiter {

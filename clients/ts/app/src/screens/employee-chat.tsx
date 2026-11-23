@@ -12,8 +12,9 @@ import { useApprovals, useEmployees, useMessages } from "../data";
 import { CHAT_FILES_FEATURE } from "../ui/attach-logic";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
-import { DockedArtifact, targetKey, useArtifactDock } from "./artifact-dock";
+import { DockedArtifact, targetKey, useArtifactDock, useOpenDesign } from "./artifact-dock";
 import type { ArtifactSend } from "./artifact-feedback";
+import { newestDesignFile } from "./artifact-logic";
 import { Composer } from "./chat";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import { before, localDay, quickReplies, streamTo } from "./chat-logic";
@@ -122,6 +123,10 @@ export interface ChatFrame {
   actions?: ReactNode;
   /** Beside the conversation, below the head: a session's properties panel. */
   aside?: ReactNode;
+  /** A kept design file (by id) that opens in the design panel at once. */
+  design?: string | null;
+  /** A design session: without `design`, its newest page opens in the design panel at once. */
+  designSession?: boolean;
 }
 
 /**
@@ -153,6 +158,8 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
 
   // An artifact opens in a panel at the right, in place of the session's properties.
   const dock = useArtifactDock();
+  const opening = frame?.design ?? (frame?.designSession ? (newestDesignFile(list)?.id ?? null) : null);
+  useOpenDesign(dock.open, list, opening);
 
   // A finished message ends its stream.
   useEffect(() => {
