@@ -320,10 +320,13 @@ export function TicketSessionScreen({
   number,
   message = null,
   thread = null,
+  design = null,
 }: {
   number: number;
   message?: string | null;
   thread?: string | null;
+  /** A kept design file (by id) that opens in the design panel at once. */
+  design?: string | null;
 }) {
   useKeyContext("TicketSession");
   const navigate = useNavigate();
@@ -385,7 +388,7 @@ export function TicketSessionScreen({
       </section>
     );
   }
-  return <Session key={t.id} detail={detail.data} t={t} message={message} thread={thread} />;
+  return <Session key={t.id} detail={detail.data} t={t} message={message} thread={thread} design={design} />;
 }
 
 function Session({
@@ -393,11 +396,13 @@ function Session({
   t,
   message,
   thread,
+  design,
 }: {
   detail: TicketDetail;
   t: TicketView;
   message: string | null;
   thread: string | null;
+  design: string | null;
 }) {
   const navigate = useNavigate();
   const { features } = useLinkState();
@@ -416,6 +421,7 @@ function Session({
     </PropertiesPanel>
   );
   const slots: SessionSlots = {
+    design,
     head: null,
     top,
     work,

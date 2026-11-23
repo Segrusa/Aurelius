@@ -1,18 +1,20 @@
 // The Designs page of a workspace: every design its employees made (`design.list`), the latest
-// first, each with its pages. A page opens in the design viewer at the right, as in a session.
+// first, each with its pages. A design opens its conversation with the page beside it, as a
+// session does; one without a screen of its own (a project chat) opens beside the list.
 
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Link } from "@astryxdesign/core/Link";
 import { expectBody } from "@aurelius/client";
 import type { DesignView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useKeyed, useProjects } from "../data";
 import { usePlatform } from "../platform";
 import { useWorkspace } from "../workspace";
 import { ArtifactViewer } from "./artifact-viewer";
-import { designPlace, pagesOf } from "./designs-logic";
+import { designLink, designPlace, pagesOf } from "./designs-logic";
 import { failureOf, Hint, Loading, Page, PageHead, Problem } from "./org-kit";
 
 const styles = stylex.create({
@@ -38,6 +40,16 @@ const styles = stylex.create({
   },
   open: { borderColor: "var(--color-border-emphasized)" },
   title: { margin: 0, fontSize: 13.5, fontWeight: 600, overflowWrap: "anywhere" },
+  titleButton: {
+    padding: 0,
+    borderWidth: 0,
+    cursor: "pointer",
+    backgroundColor: "transparent",
+    font: "inherit",
+    color: "inherit",
+    textAlign: "start",
+    textDecoration: { default: "none", ":hover": "underline" },
+  },
   meta: { display: "flex", flexWrap: "wrap", gap: 6, fontSize: 12, color: "var(--precision-text3)" },
   pages: { display: "flex", flexWrap: "wrap", gap: 6 },
   page: {
@@ -82,12 +94,21 @@ function DesignCard({
   design: DesignView;
   project: string | null;
   openPage: string | null;
-  onOpen: (page: string) => void;
+  onOpen: (page: string, fileId: string) => void;
 }) {
   const place = designPlace(design);
+  const newest = design.pages.reduce((best, p) => (p.at_ms > best.at_ms ? p : best));
   return (
     <article aria-label={`Design ${design.title}`} {...stylex.props(styles.card, openPage !== null && styles.open)}>
-      <h2 {...stylex.props(styles.title)}>{design.title}</h2>
+      <h2 {...stylex.props(styles.title)}>
+        <button
+          type="button"
+          onClick={() => onOpen(newest.file.name, newest.file.id)}
+          {...stylex.props(styles.titleButton)}
+        >
+          {design.title}
+        </button>
+      </h2>
       <div {...stylex.props(styles.meta)}>
         {project ? <span>{project}</span> : null}
         {place.to ? <Link href={place.to}>{place.label}</Link> : <span>{place.label}</span>}
@@ -100,7 +121,7 @@ function DesignCard({
             type="button"
             aria-label={`Open the page ${p.file.name} of ${design.title}`}
             aria-pressed={openPage === p.file.name}
-            onClick={() => onOpen(p.file.name)}
+            onClick={() => onOpen(p.file.name, p.file.id)}
             {...stylex.props(styles.page)}
           >
             <span {...stylex.props(styles.accent)}>◧</span>
@@ -119,6 +140,7 @@ export function DesignsScreen() {
   const workspace = useWorkspace().id;
   const designs = useDesigns(workspace, supported);
   const projects = useProjects();
+  const navigate = useNavigate();
   const [open, setOpen] = useState<{ conversation: string; page: string } | null>(null);
   const opened = designs.data?.find((d) => d.conversation_id === open?.conversation) ?? null;
   const projectName = (id: string) => (workspace ? null : (projects.data?.find((p) => p.id === id)?.name ?? null));
@@ -153,7 +175,12 @@ export function DesignsScreen() {
                   design={d}
                   project={projectName(d.project_id)}
                   openPage={open?.conversation === d.conversation_id ? open.page : null}
-                  onOpen={(page) => setOpen({ conversation: d.conversation_id, page })}
+                  onOpen={(page, fileId) => {
+                    // A design opens with its conversation, as a session does.
+                    const link = designLink(d, fileId);
+                    if (link) void navigate({ href: link });
+                    else setOpen({ conversation: d.conversation_id, page });
+                  }}
                 />
               ))}
             </div>

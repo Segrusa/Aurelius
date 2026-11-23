@@ -54,7 +54,7 @@ const styles = stylex.create({
   chooserText: { flexGrow: 1, margin: 0 },
 });
 
-export function SessionScreen({ conversationId }: { conversationId: string }) {
+export function SessionScreen({ conversationId, design = null }: { conversationId: string; design?: string | null }) {
   useKeyContext("TeamChat");
   const mine = useWorkSessions();
   const session = mine.data?.find((s) => s.conversation_id === conversationId) ?? null;
@@ -78,6 +78,7 @@ export function SessionScreen({ conversationId }: { conversationId: string }) {
           ...(othersSession ? { instead: <p {...stylex.props(styles.chooser)}>{OTHERS_SESSION}</p> } : {}),
           actions: <PropertiesToggle dock={dock} label="Session properties" />,
           aside: <SessionDetails dock={dock} conversationId={conversationId} session={session} />,
+          design,
         }}
       />
     </div>

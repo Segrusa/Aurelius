@@ -4,6 +4,7 @@ import {
   applyEdit,
   baseName,
   DIALOG_SELECTOR,
+  designFile,
   designPages,
   designsOf,
   designTicket,
@@ -316,5 +317,19 @@ describe("keptDesign", () => {
   it("is nothing while the answer is written, or when it kept another file", () => {
     expect(keptDesign(msg("a", 1, [landing], { status: "partial" }), "/work/site/landing.html")).toBeNull();
     expect(keptDesign(msg("a", 1, [html("p", "pricing.html")]), "/work/site/landing.html")).toBeNull();
+  });
+});
+
+describe("designFile", () => {
+  it("finds a kept HTML file of the conversation by its id", () => {
+    const messages = [msg("a", 1, [html("f1")]), msg("b", 2, [html("f2", "pricing.html")])];
+    expect(designFile(messages, "f2")).toEqual(html("f2", "pricing.html"));
+  });
+  it("is nothing for an unknown file, a file that is no HTML, or one of a deleted message", () => {
+    const png = { id: "p", name: "shot.png", media_type: "image/png", size: 1 };
+    const messages = [msg("a", 1, [png]), msg("b", 2, [html("gone")], { deleted_at_ms: 5 })];
+    expect(designFile(messages, "nope")).toBeNull();
+    expect(designFile(messages, "p")).toBeNull();
+    expect(designFile(messages, "gone")).toBeNull();
   });
 });

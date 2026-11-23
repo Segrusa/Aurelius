@@ -123,7 +123,7 @@ export function useTaskCancel() {
   };
 }
 
-export function TaskRunScreen({ taskId }: { taskId: string }) {
+export function TaskRunScreen({ taskId, design = null }: { taskId: string; design?: string | null }) {
   useKeyContext("TaskRun");
   const navigate = useNavigate();
   const tasks = useAllTasks();
@@ -159,10 +159,18 @@ export function TaskRunScreen({ taskId }: { taskId: string }) {
       </Page>
     );
   }
-  return <TaskConversation task={task} conversationId={task.conversation_id} />;
+  return <TaskConversation task={task} conversationId={task.conversation_id} design={design} />;
 }
 
-function TaskConversation({ task, conversationId }: { task: TaskView; conversationId: string }) {
+function TaskConversation({
+  task,
+  conversationId,
+  design,
+}: {
+  task: TaskView;
+  conversationId: string;
+  design: string | null;
+}) {
   const connection = useConnection();
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -228,6 +236,7 @@ function TaskConversation({ task, conversationId }: { task: TaskView; conversati
           ),
           noun: "task",
           taskId: task.id,
+          design,
           activeRun: live ? (lastRun ?? null) : null,
           send,
           empty: { title: task.title, description: task.goal },

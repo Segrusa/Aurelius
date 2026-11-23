@@ -1,6 +1,6 @@
 import type { DesignView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import { designPlace, pagesOf } from "./designs-logic";
+import { designLink, designPlace, pagesOf } from "./designs-logic";
 
 const design = (over: Partial<DesignView> = {}): DesignView => ({
   conversation_id: "c1",
@@ -44,5 +44,22 @@ describe("pagesOf", () => {
         atMs: 100,
       },
     ]);
+  });
+});
+
+describe("designLink", () => {
+  const two = design({
+    pages: [
+      { file: { id: "f1", name: "landing.html", media_type: "text/html", size: 10 }, message_id: "m1", at_ms: 100 },
+      { file: { id: "f2", name: "pricing.html", media_type: "text/html", size: 10 }, message_id: "m2", at_ms: 200 },
+    ],
+  });
+  it("opens the conversation with the newest page beside it, or the page that was clicked", () => {
+    expect(designLink(two)).toBe("/session/c1?design=f2");
+    expect(designLink(two, "f1")).toBe("/session/c1?design=f1");
+    expect(designLink(design({ kind: "ticket", ticket_number: 4 }))).toBe("/ticket/4?design=f1");
+  });
+  it("is nothing for a conversation without a screen", () => {
+    expect(designLink(design({ kind: "project" }))).toBeNull();
   });
 });

@@ -274,6 +274,16 @@ export function liveStep(
   return "update";
 }
 
+/** The kept HTML file `id` of the conversation, to open it as a design; null when it is not there. */
+export function designFile(messages: readonly MessageView[], id: string): FileRef | null {
+  for (const m of messages) {
+    if (m.deleted_at_ms) continue;
+    const found = (m.files ?? []).find((f) => f.id === id && isArtifact(f));
+    if (found) return found;
+  }
+  return null;
+}
+
 /**
  * The file a finished answer kept of the design it wrote at `path` (same file name), or null
  * while it is still being written or when the answer did not keep it.

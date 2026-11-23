@@ -2,11 +2,11 @@
 // HTML file, or a design an answer writes (live while it streams). The conversation's frame holds
 // what is open, so the panel stays while its message scrolls out of the feed.
 
-import type { FileRef } from "@aurelius/protocol";
-import { useCallback, useState } from "react";
+import type { FileRef, MessageView } from "@aurelius/protocol";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePlatform } from "../platform";
 import { DesignViewer } from "./artifact-live";
-import { designPages, designsOf, keptDesign } from "./artifact-logic";
+import { designFile, designPages, designsOf, keptDesign } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 import { useLive } from "./chat-live";
 import type { ChatContext } from "./chat-message";
@@ -23,6 +23,24 @@ export function useArtifactDock() {
   const [target, setTarget] = useState<ArtifactTarget | null>(null);
   const close = useCallback(() => setTarget(null), []);
   return { target, open: setTarget, close };
+}
+
+/**
+ * Opens the kept design file `fileId` in the dock once, as soon as the conversation's messages
+ * hold it: a design opened from the Designs page shows beside its conversation at once.
+ */
+export function useOpenDesign(
+  open: (target: ArtifactTarget) => void,
+  messages: readonly MessageView[],
+  fileId: string | null,
+) {
+  const done = useRef(false);
+  const file = fileId ? designFile(messages, fileId) : null;
+  useEffect(() => {
+    if (file === null || done.current) return;
+    done.current = true;
+    open({ kind: "file", file });
+  }, [file, open]);
 }
 
 function DockedDesign({
