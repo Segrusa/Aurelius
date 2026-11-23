@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plan panel — mockup (Pixel)</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --body: #08090a; --surface: #0f1012; --card: #16171a; --muted-bg: #0f1012;
+    --text: #edeef0; --text2: #a0a4ab; --text3: #7d828a;
+    --line: rgb(255 255 255 / 0.07); --line2: rgb(255 255 255 / 0.05); --line-em: rgb(255 255 255 / 0.09);
+    --accent: #1f7a4c; --accent-text: #5fcb95;
+    --warning: #e8a84a; --warning-muted: rgb(229 162 58 / 0.1);
+    --success: #5fcb95; --success-muted: rgb(95 203 149 / 0.12);
+    --error: #f08a8a; --error-muted: rgb(240 138 138 / 0.12);
+    --info: #7ea6f8; --info-muted: rgb(126 166 248 / 0.12);
+    --neutral: rgb(255 255 255 / 0.06);
+  }
+  :root.light {
+    color-scheme: light;
+    --body: #f3f3f2; --surface: #ffffff; --card: #ffffff; --muted-bg: #f8f8f7;
+    --text: #1b1c1e; --text2: #55595f; --text3: #696d74;
+    --line: rgb(0 0 0 / 0.08); --line2: rgb(0 0 0 / 0.06); --line-em: rgb(0 0 0 / 0.12);
+    --accent: #17603f; --accent-text: #17603f;
+    --warning: #9a5800; --warning-muted: rgb(196 122 0 / 0.08);
+    --success: #17603f; --success-muted: rgb(23 96 63 / 0.08);
+    --error: #c2281c; --error-muted: rgb(194 40 28 / 0.08);
+    --info: #2d5bd0; --info-muted: rgb(45 91 208 / 0.08);
+    --neutral: rgb(0 0 0 / 0.05);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--body); color: var(--text); font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; }
+
+  .demo { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: #2a2140; color: #fff; font-size: 12px; flex-wrap: wrap; }
+  .demo b { margin-right: 4px; }
+  .demo button { font: inherit; background: rgb(255 255 255 / .12); color: #fff; border: 1px solid rgb(255 255 255 / .2); border-radius: 6px; padding: 3px 9px; cursor: pointer; }
+  .demo button[aria-pressed="true"] { background: #fff; color: #2a2140; }
+
+  .app { flex: 1; display: flex; min-height: 0; }
+  .rail { width: 220px; flex-shrink: 0; border-right: 1px solid var(--line); padding: 12px; color: var(--text2); }
+  .rail .item { padding: 6px 8px; border-radius: 6px; }
+  .rail .item.on { background: var(--neutral); color: var(--text); }
+
+  .chat { flex: 1; min-width: 420px; display: flex; flex-direction: column; }
+  .chat-head { height: 44px; display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid var(--line2); font-weight: 600; }
+  .feed { flex: 1; overflow: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 680px; }
+  .msg .who { font-weight: 600; font-size: 12px; margin-bottom: 2px; }
+  .msg.user { align-self: flex-end; background: var(--card); border: 1px solid var(--line); padding: 8px 12px; border-radius: 10px; }
+  .composer { margin: 0 24px 18px; border: 1px solid var(--line-em); border-radius: 10px; padding: 12px; color: var(--text3); background: var(--card); }
+
+  .update { max-width: 680px; border: 1px solid var(--line); border-left: 3px solid var(--line-em); border-radius: 8px; padding: 10px 12px; background: var(--card); display: flex; flex-direction: column; gap: 4px; }
+  .update.urgent { border-left-color: var(--warning); }
+  .update-top { display: flex; gap: 8px; align-items: center; }
+  .label { font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--text2); }
+  .urgent .label { color: var(--warning); }
+  .author { color: var(--text3); font-size: 12px; flex: 1; }
+  .ptitle { font-weight: 600; }
+  .size { color: var(--text3); font-size: 12px; }
+
+  .btn { font: inherit; font-size: 12.5px; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line-em); background: var(--card); color: var(--text); cursor: pointer; white-space: nowrap; }
+  .btn:hover { background: var(--neutral); }
+  .btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+  .btn.danger { color: var(--error); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn:focus-visible, .icon:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
+  .icon { font: inherit; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--text2); cursor: pointer; }
+  .icon:hover { background: var(--neutral); }
+
+  .handle { width: 5px; cursor: col-resize; border-left: 1px solid var(--line); flex-shrink: 0; }
+  .handle:hover { background: var(--accent); }
+  aside { width: 46%; min-width: 360px; max-width: 70%; background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+  aside[hidden] { display: none; }
+  .dock-head { height: 44px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--line2); }
+  .dock-head h2 { margin: 0; font-size: 13px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .chip.waiting { background: var(--warning-muted); color: var(--warning); }
+  .chip.approved { background: var(--success-muted); color: var(--success); }
+  .chip.changes { background: var(--info-muted); color: var(--info); }
+  .chip.rejected { background: var(--error-muted); color: var(--error); }
+  .meta { height: 34px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 14px; color: var(--text3); font-size: 12px; border-bottom: 1px solid var(--line2); }
+  .meta .sp { flex: 1; }
+
+  .body { flex: 1; overflow: auto; padding: 18px 20px 28px; position: relative; }
+  .md { max-width: 72ch; line-height: 1.6; font-size: 13.5px; }
+  .md h1 { font-size: 17px; margin: 0 0 8px; }
+  .md h2 { font-size: 14px; margin: 20px 0 6px; }
+  .md code { background: var(--neutral); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .md ol, .md ul { padding-left: 22px; margin: 6px 0; }
+  .md li { margin: 3px 0; }
+  mark { background: var(--warning-muted); color: inherit; text-decoration: underline dotted var(--warning); text-underline-offset: 3px; cursor: pointer; border-radius: 2px; }
+  mark sup { color: var(--warning); font-weight: 700; margin-left: 1px; }
+
+  .floating { position: absolute; left: 300px; top: 200px; display: flex; gap: 4px; background: var(--card); border: 1px solid var(--line-em); border-radius: 8px; padding: 3px; box-shadow: 0 6px 18px rgb(0 0 0 / .35); }
+  .comment-box { margin: 8px 0 4px; border: 1px solid var(--line-em); border-radius: 8px; padding: 8px; background: var(--card); display: flex; flex-direction: column; gap: 6px; max-width: 72ch; }
+  .comment-box .q { color: var(--text3); font-size: 12px; }
+  .input { font: inherit; width: 100%; min-height: 30px; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line-em); background: var(--surface); color: var(--text); resize: none; }
+  .row { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+
+  .comments { flex-shrink: 0; max-height: 30%; overflow: auto; border-top: 1px solid var(--line2); padding: 8px 14px; }
+  .comments h3 { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; color: var(--text2); }
+  .c { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; }
+  .c .n { color: var(--warning); font-weight: 700; width: 14px; }
+  .c .t { flex: 1; min-width: 0; }
+  .c .qq { display: block; color: var(--text3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .foot { flex-shrink: 0; border-top: 1px solid var(--line2); padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+  .decide { display: flex; gap: 6px; flex-wrap: wrap; }
+  .done-line { color: var(--text2); font-size: 12.5px; display: flex; align-items: center; gap: 8px; }
+  .done-line::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .pill { margin-left: 4px; font-size: 11.5px; color: var(--warning); border: 1px solid var(--warning); border-radius: 999px; padding: 1px 8px; background: transparent; cursor: pointer; }
+  .note { font-size: 11.5px; color: var(--text3); }
+</style>
+</head>
+<body>
+<div class="demo" role="toolbar" aria-label="Mockup state">
+  <b>Mockup:</b>
+  <button data-state="waiting" aria-pressed="true">1 · Waiting for you</button>
+  <button data-state="comment">2 · Commenting</button>
+  <button data-state="approved">3 · Approved</button>
+  <button data-state="closed">4 · Panel closed</button>
+  <span style="flex:1"></span>
+  <button id="theme">Light / dark</button>
+</div>
+
+<div class="app">
+  <nav class="rail"><div class="item">Inbox</div><div class="item">Board</div><div class="item on">Titan · plan panel</div><div class="item">Designs</div></nav>
+
+  <main class="chat">
+    <div class="chat-head">Titan</div>
+    <div class="feed">
+      <div class="msg user">Can you plan the plan panel at the right, like designs?</div>
+      <div class="msg"><div class="who">Titan</div>I looked at how designs dock and how a plan is decided now. Here is the plan.</div>
+
+      <div class="update urgent" id="card">
+        <div class="update-top">
+          <span class="label" id="card-label">PLAN · WAITING FOR YOU</span>
+          <span class="author">Titan</span>
+          <button class="btn primary" id="open-btn">Open plan</button>
+        </div>
+        <span class="ptitle">Show a plan in the conversation's right panel</span>
+        <span class="size" id="card-size">6 steps · 4 files</span>
+      </div>
+    </div>
+    <div class="composer">Message Titan…</div>
+  </main>
+
+  <div class="handle" role="separator" aria-label="Resize plan panel" id="handle"></div>
+  <aside id="dock" aria-label="Plan: Show a plan in the conversation's right panel">
+    <div class="dock-head">
+      <h2>Show a plan in the conversation's right panel</h2>
+      <span class="chip waiting" id="chip">Waiting for you</span>
+      <button class="icon" aria-label="Close plan" id="close">✕</button>
+    </div>
+    <div class="meta">
+      <span>Titan · 14:32 · 6 steps · 4 files</span>
+    </div>
+
+    <div class="body" id="body">
+      <div class="md">
+        <h1>Show a plan in the conversation's right panel</h1>
+        <p>A plan opens in the same dock as a design. The feed keeps a short card; the panel is where the board member reads and decides.</p>
+        <h2>Steps</h2>
+        <ol>
+          <li>Add <code>{ kind: "plan" }</code> to <code>ArtifactTarget</code> in <code>artifact-dock.tsx</code>.</li>
+          <li>New <code>PlanDock</code> in <code>screens/plan-dock.tsx</code>, on the dock's shell, so it <mark id="m1">keeps the dock width<sup>1</sup></mark>.</li>
+          <li>Move comments and <code>decide</code> out of <code>PlanCard</code> into <code>usePlanDecision</code>.</li>
+          <li>Make the feed card compact: title, size, <em>Open plan</em>.</li>
+          <li>Open a new plan by itself only when the panel is empty; else show a <em>New plan waiting</em> pill.</li>
+        </ol>
+        <div class="comment-box" id="cbox" hidden>
+          <span class="q">Comment on: “usePlanDecision”</span>
+          <textarea class="input" rows="1">Keep the toasts exactly as they are now.</textarea>
+          <div class="row"><button class="btn">Cancel</button><button class="btn primary">Add comment</button></div>
+        </div>
+        <h2>Files</h2>
+        <ul>
+          <li><code>clients/ts/app/src/screens/artifact-dock.tsx</code></li>
+          <li><code>clients/ts/app/src/screens/plan-dock.tsx</code> (new)</li>
+          <li><code>clients/ts/app/src/screens/approval-card.tsx</code></li>
+          <li><code>clients/ts/app/src/screens/chat-message.tsx</code></li>
+        </ul>
+        <h2>Tests</h2>
+        <p><code>planSummary</code> and <code>shouldAutoOpenPlan</code> get unit tests; the decision still calls <code>approval.decide_plan</code>.</p>
+      </div>
+      <div class="floating" id="floating" hidden><button class="btn">💬 Comment</button></div>
+    </div>
+
+    <div class="comments" id="comments">
+      <h3>Your comments</h3>
+      <div class="c"><span class="n">1</span><span class="t"><span class="qq">“keeps the dock width”</span>Yes, same width as a design, please.</span><button class="icon" aria-label="Remove comment">✕</button></div>
+    </div>
+
+    <div class="foot" id="foot">
+      <textarea class="input" rows="1" placeholder="What should change?" aria-label="What should change?"></textarea>
+      <div class="decide" role="group" aria-label="Decide on the plan">
+        <button class="btn primary">Approve + Auto</button>
+        <button class="btn">Approve, edits</button>
+        <button class="btn">Request changes</button>
+        <button class="btn danger">Reject</button>
+      </div>
+    </div>
+    <div class="foot" id="foot-done" hidden>
+      <span class="done-line">You approved this plan at 14:40 · auto mode</span>
+      <span class="note">▸ What you sent (1 comment)</span>
+    </div>
+  </aside>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  function show(state) {
+    document.querySelectorAll(".demo [data-state]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.state === state)));
+    const closed = state === "closed", approved = state === "approved";
+    $("dock").hidden = closed; $("handle").hidden = closed;
+    $("floating").hidden = state !== "comment";
+    $("cbox").hidden = state !== "comment";
+    $("foot").hidden = approved; $("foot-done").hidden = !approved;
+    $("comments").hidden = approved;
+    const chip = $("chip");
+    chip.className = "chip " + (approved ? "approved" : "waiting");
+    chip.textContent = approved ? "Approved · auto" : "Waiting for you";
+    $("card").classList.toggle("urgent", !approved);
+    $("card-label").textContent = approved ? "PLAN · APPROVED" : "PLAN · WAITING FOR YOU";
+    const open = $("open-btn");
+    open.disabled = !closed; open.textContent = closed ? "Open plan" : "Showing";
+    open.className = "btn" + (approved ? "" : " primary");
+  }
+  document.querySelectorAll(".demo [data-state]").forEach((b) => b.addEventListener("click", () => show(b.dataset.state)));
+  $("open-btn").addEventListener("click", () => show("waiting"));
+  $("close").addEventListener("click", () => show("closed"));
+  $("theme").addEventListener("click", () => document.documentElement.classList.toggle("light"));
+  show("waiting");
+</script>
+</body>
+</html>
