@@ -39,7 +39,9 @@ import { TypingDots } from "../ui/typing";
 import { useDelayed } from "../ui/use-delayed";
 import { answerParts, stepsLabel } from "./answer-steps-logic";
 import { ApprovalCard, ReplyCard } from "./approval-card";
+import type { ArtifactTarget } from "./artifact-dock";
 import type { ArtifactSend } from "./artifact-feedback";
+import { WrittenDesigns } from "./artifact-live";
 import type { LiveStore } from "./chat-live";
 import { useLive } from "./chat-live";
 import {
@@ -584,6 +586,8 @@ export interface ChatContext {
    * its composer's send. None in a channel.
    */
   artifactSend?: ArtifactSend | null;
+  /** Shows an artifact in the panel at the right of the conversation; none: in a dialog. */
+  openArtifact?: ((target: ArtifactTarget) => void) | null;
 }
 
 const Context = createContext<ChatContext | null>(null);
@@ -926,6 +930,27 @@ function EditedLink({ id }: { id: string }) {
         </Dialog>
       ) : null}
     </>
+  );
+}
+
+/**
+ * The designs an answer writes, live while it streams and after: outside the answer's body, so
+ * an open design stays open when the answer completes.
+ */
+function MessageDesigns({ m }: { m: MessageView }) {
+  const { store, messages, conversationId, artifactSend, openArtifact } = useChat();
+  const update = useLive(store, m.id);
+  return (
+    <WrittenDesigns
+      messageId={m.id}
+      activity={update?.activity ?? m.activity}
+      draft={update?.draft ?? null}
+      files={m.files ?? []}
+      messages={messages}
+      conversationId={conversationId ?? null}
+      send={artifactSend ?? null}
+      dock={openArtifact ?? null}
+    />
   );
 }
 
@@ -1545,6 +1570,7 @@ export const MessageRow = memo(function MessageRow({
     retryTarget,
     speaker,
     artifactSend,
+    openArtifact,
   } = useChat();
   const made = useMemo(() => ticketFrom(messages, m.id), [messages, m.id]);
   const { flash } = useChat();
@@ -1586,6 +1612,7 @@ export const MessageRow = memo(function MessageRow({
         messages={messages}
         conversationId={conversationId}
         send={artifactSend ?? null}
+        onArtifact={openArtifact ? (file) => openArtifact({ kind: "file", file }) : null}
       />
       {m.run_id && m.role === "assistant" ? <TraceLink run={m.run_id} /> : null}
       {m.status === "interrupted" ? <Meta>Stopped; text up to that point is kept.</Meta> : null}
@@ -1659,6 +1686,7 @@ export const MessageRow = memo(function MessageRow({
           </Header>
         )}
         {body}
+        {m.role === "assistant" && !m.deleted_at_ms && !editing ? <MessageDesigns m={m} /> : null}
         {m.queued ? <Queued m={m} /> : null}
         <RunNote m={m} />
         {!caps.readOnly && waitsOnReply(m, [...approvals.values()]) ? (

@@ -25,6 +25,7 @@ import { PromptBox, PromptTextarea } from "../ui/prompt-box";
 import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
+import { DockedArtifact, targetKey, useArtifactDock } from "./artifact-dock";
 import { foldUpdates } from "./board-logic";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import {
@@ -878,6 +879,8 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
   const everyone = features.includes("everyone_mention") && user !== null && user !== undefined;
   const names = useMemo(() => [...people.map((p) => p.name), ...(everyone ? [EVERYONE] : [])], [people, everyone]);
   const store = useLiveStore(feed.data?.conversation_id);
+  // An artifact opens in the right panel, in place of a thread or the ticket's panel.
+  const dock = useArtifactDock();
   const live = useLiveAll(store);
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
   // What runs and what is still open stays beside the talk, never as posts in it.
@@ -1010,8 +1013,13 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
       conversationId: feed.data?.conversation_id ?? null,
       channel,
       flash,
+      openArtifact: (target) => {
+        onThread(null);
+        dock.open(target);
+      },
     }),
     [
+      dock.open,
       channel,
       flash,
       store,
@@ -1030,6 +1038,11 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
       feed.data?.conversation_id,
     ],
   );
+
+  // A thread that opens takes the right panel from an open artifact.
+  useEffect(() => {
+    if (thread) dock.close();
+  }, [thread, dock.close]);
 
   const running =
     [...list2].reverse().find((m) => m.status === "partial" && m.run_id)?.run_id ?? live.at(-1)?.run_id ?? null;
@@ -1283,7 +1296,9 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
           )}
         </ChatProvider>
       </div>
-      {thread ? (
+      {dock.target ? (
+        <DockedArtifact key={targetKey(dock.target)} target={dock.target} ctx={ctx} onClose={dock.close} />
+      ) : thread ? (
         <ChatProvider value={ctx}>
           <ThreadPanel
             key={thread}

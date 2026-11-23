@@ -435,12 +435,15 @@ export function KeptFiles({
   messages = [],
   conversationId = null,
   send = null,
+  onArtifact = null,
 }: {
   files: FileRef[];
   messages?: readonly MessageView[];
   conversationId?: string | null;
   /** Where the artifact viewer sends comments, tweaks and requests (ChatContext.artifactSend). */
   send?: ArtifactSend | null;
+  /** Opens an artifact in the conversation's panel; none: in a dialog here. */
+  onArtifact?: ((file: FileRef) => void) | null;
 }) {
   const connection = useConnection();
   const { artifacts } = usePlatform();
@@ -448,7 +451,8 @@ export function KeptFiles({
   const [artifact, setArtifact] = useState<FileRef | null>(null);
   const open = async (file: FileRef) => {
     if (artifacts && isArtifact(file)) {
-      setArtifact(file);
+      if (onArtifact) onArtifact(file);
+      else setArtifact(file);
       return;
     }
     try {

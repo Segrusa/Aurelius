@@ -10,6 +10,9 @@
 // conversation the artifact came from (artifact-feedback.ts).
 
 import { Button } from "@astryxdesign/core/Button";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Icon } from "@astryxdesign/core/Icon";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Slider } from "@astryxdesign/core/Slider";
@@ -64,8 +67,9 @@ const styles = stylex.create({
     flexGrow: 1,
     flexBasis: 0,
     minWidth: 0,
-    height: "calc(100vh - 260px)",
-    minHeight: 320,
+    // The dialog gives the stage a height; the dock lets it fill what is left (DOCK_FILL).
+    height: "var(--artifact-h, calc(100vh - 260px))",
+    minHeight: "var(--artifact-min-h, 320px)",
     justifyContent: "center",
     overflow: "auto",
     borderRadius: 8,
@@ -88,8 +92,8 @@ const styles = stylex.create({
     gap: 10,
     width: 320,
     flexShrink: 0,
-    height: "calc(100vh - 260px)",
-    minHeight: 320,
+    height: "var(--artifact-h, calc(100vh - 260px))",
+    minHeight: "var(--artifact-min-h, 320px)",
     overflowY: "auto",
     padding: 12,
     borderRadius: 8,
@@ -128,9 +132,88 @@ const styles = stylex.create({
   colorRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontSize: 13 },
   color: { width: 44, height: 28, padding: 0, borderWidth: 0, backgroundColor: "transparent", cursor: "pointer" },
   footerStart: { marginInlineEnd: "auto" },
+  // The viewer docked beside the conversation, as Claude Desktop shows an artifact.
+  dock: {
+    display: "flex",
+    flexDirection: "column",
+    width: "clamp(380px, 52%, 1100px)",
+    flexShrink: 0,
+    minHeight: 0,
+    borderLeftWidth: 1,
+    borderLeftStyle: "solid",
+    borderLeftColor: "var(--color-border)",
+    backgroundColor: "var(--color-background-surface)",
+  },
+  dockTop: {
+    display: "flex",
+    height: 44,
+    flexShrink: 0,
+    alignItems: "center",
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomStyle: "solid",
+    borderBottomColor: "var(--precision-line2)",
+    paddingInlineStart: 14,
+    paddingInlineEnd: 8,
+  },
+  dockTitle: {
+    margin: 0,
+    minWidth: 0,
+    flexGrow: 1,
+    flexBasis: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontSize: 13,
+    fontWeight: 600,
+  },
+  dockBody: { display: "flex", flexDirection: "column", gap: 10, flexGrow: 1, minHeight: 0, padding: 12 },
+  dockRow: { flexGrow: 1, minHeight: 0 },
+  dockFoot: {
+    display: "flex",
+    flexShrink: 0,
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: "var(--precision-line2)",
+    paddingBlock: 8,
+    paddingInline: 12,
+  },
 });
 
+/** In the dock the stage and the tool panels stretch to the row instead of a set height. */
+const DOCK_FILL = { "--artifact-h": "auto", "--artifact-min-h": "0px" } as React.CSSProperties;
+
 type Artifacts = NonNullable<Platform["artifacts"]>;
+
+/**
+ * A design shown as it is written, not a kept file: its HTML so far (null while it loads), and
+ * whether it is still being written. It has no versions; its tools wait until it is written.
+ */
+export interface LiveDesign {
+  name: string;
+  html: string | null;
+  writing: boolean;
+  error: string | null;
+}
+
+/** While a design grows, the view shows it again at most this often (each time is a new view). */
+const LIVE_REDRAW_MS = 1000;
+
+/** `value`, changed at most every `everyMs` (always the latest); at once when `everyMs` is 0. */
+function useSteady<T>(value: T, everyMs: number): T {
+  const [shown, setShown] = useState(value);
+  const last = useRef(0);
+  useEffect(() => {
+    const wait = everyMs === 0 ? 0 : Math.max(0, last.current + everyMs - Date.now());
+    const timer = setTimeout(() => {
+      last.current = Date.now();
+      setShown(value);
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [value, everyMs]);
+  return everyMs === 0 ? value : shown;
+}
 
 /** The HTML of one version, handed to main for as long as it is shown. */
 function useServed(artifacts: Artifacts, html: string | undefined): string | null {
@@ -612,6 +695,8 @@ export function ArtifactViewer({
   messages = [],
   conversationId = null,
   send = null,
+  live = null,
+  docked = false,
   onClose,
 }: {
   /** Newest first, as `artifactVersions` gives them. */
@@ -623,6 +708,10 @@ export function ArtifactViewer({
   conversationId?: string | null;
   /** Where comments, tweaks and the PowerPoint request go; null: nowhere (no Send). */
   send?: ArtifactSend | null;
+  /** A design being written instead of kept versions (then `versions` is empty). */
+  live?: LiveDesign | null;
+  /** In a panel beside the conversation instead of a dialog over it. */
+  docked?: boolean;
   onClose: () => void;
 }) {
   const [id, setId] = useState(openId);
@@ -633,9 +722,12 @@ export function ArtifactViewer({
   const [compare, setCompare] = useState(false);
   const [compareId, setCompareId] = useState<string | null>(null);
   const current = versions.find((v) => v.file.id === id) ?? versions[0];
-  const file = useArtifactFile(id);
-  const url = useServed(artifacts, file.data?.html);
+  const file = useArtifactFile(live ? null : id);
+  const html = useSteady(live ? (live.html ?? undefined) : file.data?.html, live?.writing ? LIVE_REDRAW_MS : 0);
+  const url = useServed(artifacts, html);
   const { frame, stage, ready } = useArtifactView(artifacts, url, reloads, "main");
+  const writing = live?.writing === true;
+  const loadError = live ? live.error : (file.error?.message ?? null);
   const { post } = usePost(send);
   // Another screen: the viewer closes with it (main takes the view away as well).
   const path = useRouterState({ select: (s) => s.location.href });
@@ -643,7 +735,7 @@ export function ArtifactViewer({
   useEffect(() => {
     if (path !== openedAt.current) onClose();
   }, [path, onClose]);
-  const name = current?.file.name ?? file.data?.name ?? "Artifact";
+  const name = live?.name ?? current?.file.name ?? file.data?.name ?? "Artifact";
   const version = current?.version ?? 1;
   const answer = messages.find((m) => m.id === current?.messageId)?.text ?? "";
   const artifactName = artifactPath(answer, name);
@@ -684,7 +776,7 @@ export function ArtifactViewer({
   ];
   const exportPick = (key: ExportKey) => {
     if (key === "html") {
-      if (file.data) saveBlob(new Blob([file.data.html], { type: "text/html" }), name);
+      if (html !== undefined) saveBlob(new Blob([html], { type: "text/html" }), name);
     } else if (key === "pptx") void post(pptxMessage(artifactName, version));
     else if (url !== null && exporting === null) void exportAs(key);
   };
@@ -693,42 +785,19 @@ export function ArtifactViewer({
     setCompare(false);
   };
 
-  return (
-    <FormDialog
-      title={name}
-      width={1340}
-      onClose={onClose}
-      footer={
-        <>
-          <span {...stylex.props(styles.footerStart)}>
-            <Button
-              label="Reload"
-              onClick={() => {
-                setReloads((n) => n + 1);
-                void file.refetch();
-              }}
-            />
-          </span>
-          <Menu
-            label="Export"
-            options={exportOptions}
-            onPick={exportPick}
-            trigger={<Button label={exporting ? "Exporting…" : "Export"} isDisabled={exporting !== null} />}
-          />
-          <Button label="Close" variant="primary" onClick={onClose} />
-        </>
-      }
-    >
-      <div {...stylex.props(styles.bar)}>
-        {compare && left ? (
-          <Selector
-            label="Compare with"
-            size="sm"
-            value={left.file.id}
-            onChange={(v) => setCompareId(v)}
-            options={others.map((v) => ({ value: v.file.id, label: versionLabel(v, now) }))}
-          />
-        ) : null}
+  const title = writing ? `${name} · Writing…` : name;
+  const tools = (
+    <div {...stylex.props(styles.bar)}>
+      {compare && left ? (
+        <Selector
+          label="Compare with"
+          size="sm"
+          value={left.file.id}
+          onChange={(v) => setCompareId(v)}
+          options={others.map((v) => ({ value: v.file.id, label: versionLabel(v, now) }))}
+        />
+      ) : null}
+      {live ? null : (
         <Selector
           label="Version"
           size="sm"
@@ -736,70 +805,124 @@ export function ArtifactViewer({
           onChange={(v) => setId(v)}
           options={versions.map((v) => ({ value: v.file.id, label: versionLabel(v, now) }))}
         />
-        <span {...stylex.props(styles.grow)} />
-        <ToggleButton
-          size="sm"
-          label="Comment"
-          isPressed={tool === "comment"}
-          isDisabled={url === null}
-          onPressedChange={() => chooseTool("comment")}
-        />
-        <ToggleButton
-          size="sm"
-          label="Tweaks"
-          isPressed={tool === "tweaks"}
-          isDisabled={url === null}
-          onPressedChange={() => chooseTool("tweaks")}
-        />
-        <ToggleButton
-          size="sm"
-          label="Compare"
-          isPressed={compare}
-          isDisabled={others.length === 0}
-          tooltip={others.length === 0 ? "There is only one version." : "Show another version beside this one"}
-          onPressedChange={() => {
-            setCompare((now) => !now);
-            setTool(null);
+      )}
+      <span {...stylex.props(styles.grow)} />
+      <ToggleButton
+        size="sm"
+        label="Comment"
+        isPressed={tool === "comment"}
+        isDisabled={url === null || writing}
+        onPressedChange={() => chooseTool("comment")}
+      />
+      <ToggleButton
+        size="sm"
+        label="Tweaks"
+        isPressed={tool === "tweaks"}
+        isDisabled={url === null || writing}
+        onPressedChange={() => chooseTool("tweaks")}
+      />
+      <ToggleButton
+        size="sm"
+        label="Compare"
+        isPressed={compare}
+        isDisabled={others.length === 0}
+        tooltip={others.length === 0 ? "There is only one version." : "Show another version beside this one"}
+        onPressedChange={() => {
+          setCompare((now) => !now);
+          setTool(null);
+        }}
+      />
+      <SegmentedControl label="Width" size="sm" value={viewport} onChange={(v) => setViewport(v as Viewport)}>
+        {VIEWPORTS.map((v) => (
+          <SegmentedControlItem key={v.value} value={v.value} label={v.label} />
+        ))}
+      </SegmentedControl>
+    </div>
+  );
+  const actions = (
+    <>
+      <span {...stylex.props(styles.footerStart)}>
+        <Button
+          label="Reload"
+          onClick={() => {
+            setReloads((n) => n + 1);
+            if (!live) void file.refetch();
           }}
         />
-        <SegmentedControl label="Width" size="sm" value={viewport} onChange={(v) => setViewport(v as Viewport)}>
-          {VIEWPORTS.map((v) => (
-            <SegmentedControlItem key={v.value} value={v.value} label={v.label} />
-          ))}
-        </SegmentedControl>
-      </div>
-      <div {...stylex.props(styles.row)}>
-        {compare && left ? (
-          <CompareStage
-            key={left.file.id}
-            artifacts={artifacts}
-            id={left.file.id}
-            name={`${name} v${left.version}`}
-            width={width}
-          />
-        ) : null}
-        <Stage stage={stage} frame={frame} url={url} name={name} width={width} error={file.error?.message ?? null} />
-        {tool === "comment" ? (
-          <CommentPanel
-            key={`${current?.file.id}#${reloads}`}
-            artifacts={artifacts}
-            ready={ready}
-            storeKey={CommentStore.key(conversationId, name, version)}
-            version={version}
-            path={artifactName}
-            send={send}
-          />
-        ) : tool === "tweaks" ? (
-          <TweaksPanel
-            key={`${current?.file.id}#${reloads}`}
-            artifacts={artifacts}
-            ready={ready}
-            version={version}
-            path={artifactName}
-            send={send}
-          />
-        ) : null}
-      </div>
+      </span>
+      <Menu
+        label="Export"
+        options={exportOptions}
+        onPick={exportPick}
+        trigger={<Button label={exporting ? "Exporting…" : "Export"} isDisabled={exporting !== null || writing} />}
+      />
+    </>
+  );
+  const view = (extra: stylex.StyleXStyles | null) => (
+    <div {...stylex.props(styles.row, extra)}>
+      {compare && left ? (
+        <CompareStage
+          key={left.file.id}
+          artifacts={artifacts}
+          id={left.file.id}
+          name={`${name} v${left.version}`}
+          width={width}
+        />
+      ) : null}
+      <Stage stage={stage} frame={frame} url={url} name={name} width={width} error={loadError} />
+      {tool === "comment" && !writing ? (
+        <CommentPanel
+          key={`${current?.file.id}#${reloads}`}
+          artifacts={artifacts}
+          ready={ready}
+          storeKey={CommentStore.key(conversationId, name, version)}
+          version={version}
+          path={artifactName}
+          send={send}
+        />
+      ) : tool === "tweaks" && !writing ? (
+        <TweaksPanel
+          key={`${current?.file.id}#${reloads}`}
+          artifacts={artifacts}
+          ready={ready}
+          version={version}
+          path={artifactName}
+          send={send}
+        />
+      ) : null}
+    </div>
+  );
+
+  if (docked)
+    return (
+      <aside aria-label={`Design ${name}`} {...stylex.props(styles.dock)} style={DOCK_FILL}>
+        <div {...stylex.props(styles.dockTop)}>
+          <Heading level={2} xstyle={styles.dockTitle}>
+            {title}
+          </Heading>
+          <IconButton size="sm" variant="ghost" label="Close design" icon={<Icon icon="close" />} onClick={onClose} />
+        </div>
+        <div {...stylex.props(styles.dockBody)}>
+          {tools}
+          {view(styles.dockRow)}
+        </div>
+        <div {...stylex.props(styles.dockFoot)}>{actions}</div>
+      </aside>
+    );
+  return (
+    <FormDialog
+      title={title}
+      width={1340}
+      onClose={onClose}
+      footer={
+        <>
+          {actions}
+          <Button label="Close" variant="primary" onClick={onClose} />
+        </>
+      }
+    >
+      {tools}
+      {view(null)}
     </FormDialog>
   );
 }
