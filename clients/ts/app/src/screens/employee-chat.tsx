@@ -143,6 +143,7 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
   const live = useLiveAll(store);
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
   const handle = useRef<VirtuosoHandle>(null);
+  const atBottom = useRef(true);
   const employee = employees.data?.find((e) => e.id === feed.data?.employee_id);
   const name = employee?.name ?? "Employee";
   // An artifact's viewer sends with this chat's own send (below): one ordinary message, as typed.
@@ -326,7 +327,15 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
                     increaseViewportBy={600}
                     initialTopMostItemIndex={{ index: "LAST", align: "end" }}
                     atBottomThreshold={120}
+                    atBottomStateChange={(b) => {
+                      atBottom.current = b;
+                    }}
                     followOutput={(bottom) => (bottom ? "auto" : false)}
+                    // followOutput only follows new rows; an answer that grows while it
+                    // streams keeps its end in view too, unless the reader scrolled up.
+                    totalListHeightChanged={() => {
+                      if (atBottom.current) handle.current?.scrollToIndex({ index: "LAST", align: "end" });
+                    }}
                     computeItemKey={(_, row) => (row.kind === "message" ? row.m.id : row.id)}
                     components={FEED_PARTS}
                     itemContent={(_, row) => (
