@@ -603,7 +603,7 @@ export const SHORTCUTS: Shortcut[] = [
     keys: ["alt-shift-p"],
     context: "Aurelius",
     navKeys: [],
-    label: "Fold / unfold the latest plan in this conversation",
+    label: "Open / close the latest plan",
     section: "General",
     inPalette: true,
     action: "TogglePlanFold",
@@ -656,6 +656,7 @@ export const CONTEXT_BINDINGS: { key: string; action: string; context: string }[
   { key: "t", action: "QuestionOwnAnswer", context: "Decision" },
   { key: "x", action: "RejectApproval", context: "Decision" },
   { key: "secondary-backspace", action: "RejectApproval", context: "Decision" },
+  { key: "secondary-alt-m", action: "CommentOnSelection", context: "PlanPanel" },
   { key: "up", action: "SelectPrev", context: "Settings" },
   { key: "k", action: "SelectPrev", context: "Settings" },
   { key: "down", action: "SelectNext", context: "Settings" },
@@ -792,7 +793,11 @@ export interface KeyState {
 }
 
 /** A chord that means something in a text field stays out of the shortcuts, unless it has a modifier. */
+// Ctrl+Backspace deletes a word in a text field; it must never reject a plan or a pairing there.
+const TEXT_EDIT_CHORDS = new Set(["secondary-backspace"]);
+
 function safeWhileTyping(chord: string): boolean {
+  if (TEXT_EDIT_CHORDS.has(chord)) return false;
   return (
     chord.startsWith("secondary") ||
     chord.startsWith("alt") ||

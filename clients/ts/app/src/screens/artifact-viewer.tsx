@@ -176,13 +176,13 @@ const styles = stylex.create({
 
 /** In the dock the stage and the tool panels stretch to the row instead of a set height. */
 /** The dock's width at first, as a share of the row beside the conversation, never below its minimum. */
-const DOCK_DEFAULT_PERCENT = 50;
+export const DOCK_DEFAULT_PERCENT = 50;
 /** The narrowest the dock gets; the artifact's own tools still fit. */
-const DOCK_MIN_PX = 360;
+export const DOCK_MIN_PX = 360;
 /** The widest the dock gets, so the conversation stays readable beside it. */
-const DOCK_MAX_PERCENT = 70;
+export const DOCK_MAX_PERCENT = 70;
 /** Where the dock's width is remembered (one width for every conversation). */
-const DOCK_SAVE_ID = "artifact-dock";
+export const DOCK_SAVE_ID = "artifact-dock";
 
 const DOCK_FILL = { "--artifact-h": "auto", "--artifact-min-h": "0px" } as React.CSSProperties;
 
@@ -531,6 +531,7 @@ export function ArtifactViewer({
   send = null,
   live = null,
   docked = false,
+  notice = null,
   onClose,
 }: {
   /** The design's pages, as `designPages` gives them; empty for a design being written. */
@@ -547,6 +548,8 @@ export function ArtifactViewer({
   live?: LiveDesign | null;
   /** In a panel beside the conversation instead of a dialog over it. */
   docked?: boolean;
+  /** Shown in the docked head before Close, e.g. the "New plan waiting" pill. */
+  notice?: React.ReactNode;
   onClose: () => void;
 }) {
   const [pageName, setPageName] = useState(openName);
@@ -721,6 +724,7 @@ export function ArtifactViewer({
             <Heading level={2} xstyle={styles.dockTitle}>
               {title}
             </Heading>
+            {notice}
             <IconButton size="sm" variant="ghost" label="Close design" icon={<Icon icon="close" />} onClick={onClose} />
           </div>
           <div {...stylex.props(styles.dockBody)}>

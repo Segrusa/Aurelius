@@ -58,6 +58,15 @@ const styles = stylex.create({
     paddingBlock: 10,
   },
   muted: { color: "var(--color-text-secondary)" },
+  splitButtons: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: 8,
+    margin: 0,
+    borderWidth: 0,
+    padding: 0,
+  },
   selected: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--precision-text3)" },
   selectedText: {
     minWidth: 0,
@@ -318,45 +327,132 @@ function QuestionCard({ approval, keyed }: { approval: ApprovalView; keyed: bool
   );
 }
 
-function RejectKey({ onReject }: { onReject: () => void }) {
+/** The `x` / Ctrl+Backspace reject key while a decision is on screen. */
+export function RejectKey({ onReject }: { onReject: () => void }) {
   useKeyContext("Decision");
   useAction("RejectApproval", onReject);
   return null;
 }
 
-function PlanCard({ approval, keyed }: { approval: ApprovalView; keyed: boolean }) {
+/** A decision on a plan, as `approval.decide_plan` takes it. */
+export type PlanChoice = "approve" | "approve_edits" | "revise" | "reject";
+
+/** The four decisions in their order, with the toast each one leaves. */
+export const PLAN_DECISIONS: {
+  choice: PlanChoice;
+  label: string;
+  done: string;
+  variant?: "primary" | "destructive";
+}[] = [
+  {
+    choice: "approve",
+    label: "Approve + Auto",
+    done: "Plan approved. The agent goes on in auto mode.",
+    variant: "primary",
+  },
+  {
+    choice: "approve_edits",
+    label: "Approve, edits",
+    done: "Plan approved. Edits go through; the agent asks for the rest.",
+  },
+  { choice: "revise", label: "Request changes", done: "Changes requested. The agent revises the plan." },
+  { choice: "reject", label: "Reject", done: "Plan rejected. The agent stops.", variant: "destructive" },
+];
+
+interface PlanDraft {
+  feedback: string;
+  comments: PlanComment[];
+}
+
+// A plan's comments and feedback outlive its panel: closing it to read the feed loses nothing.
+const drafts = new Map<string, PlanDraft>();
+
+/**
+ * The comments, the feedback and the decision of one plan approval, shared by the card, the
+ * plan panel and its dialog. What is sent is `composePlanFeedback` of both, as always.
+ */
+export function usePlanDecision(approval: ApprovalView) {
   const { busy, run } = useApprovalWrite();
-  const [feedback, setFeedback] = useState("");
+  const [draft, setDraft] = useState<PlanDraft>(() => drafts.get(approval.id) ?? { feedback: "", comments: [] });
   const [missing, setMissing] = useState(false);
+  const change = (next: PlanDraft) => {
+    drafts.set(approval.id, next);
+    setDraft(next);
+    setMissing(false);
+  };
+  const decide = (choice: PlanChoice) => {
+    const text = composePlanFeedback(draft.comments, draft.feedback);
+    if (choice === "revise" && text === "") return setMissing(true);
+    const done = PLAN_DECISIONS.find((d) => d.choice === choice)?.done;
+    void run(async (c) => {
+      await c.write(
+        "approval.decide_plan",
+        { approval_id: approval.id, decision: choice, feedback: text || null },
+        { retry: false },
+      );
+      drafts.delete(approval.id);
+    }, done);
+  };
+  return {
+    busy,
+    missing,
+    feedback: draft.feedback,
+    comments: draft.comments,
+    setFeedback: (feedback: string) => change({ ...draft, feedback }),
+    addComment: (quote: string, text: string) => {
+      if (text.trim() === "") return;
+      change({ ...draft, comments: [...draft.comments, { quote, text: text.trim() }] });
+    },
+    removeComment: (at: number) => change({ ...draft, comments: draft.comments.filter((_, i) => i !== at) }),
+    decide,
+  };
+}
+
+/** What `usePlanDecision` gives. */
+export type PlanDecisionState = ReturnType<typeof usePlanDecision>;
+
+/**
+ * The four plan decisions, in their group. `split`: in a narrow panel, the two approvals on one
+ * row and Request changes + Reject under them.
+ */
+export function PlanButtons({ plan, split = false }: { plan: PlanDecisionState; split?: boolean }) {
+  const button = (d: (typeof PLAN_DECISIONS)[number]) => (
+    <Button
+      key={d.choice}
+      {...(d.variant ? { variant: d.variant } : {})}
+      label={d.label}
+      isDisabled={plan.busy}
+      onClick={() => plan.decide(d.choice)}
+    />
+  );
+  if (!split) return <ButtonGroup label="Decide on the plan">{PLAN_DECISIONS.map(button)}</ButtonGroup>;
+  return (
+    <fieldset aria-label="Decide on the plan" {...stylex.props(styles.splitButtons)}>
+      <ButtonGroup label="Approve">{PLAN_DECISIONS.slice(0, 2).map(button)}</ButtonGroup>
+      <ButtonGroup label="Change or reject">{PLAN_DECISIONS.slice(2).map(button)}</ButtonGroup>
+    </fieldset>
+  );
+}
+
+export const PLAN_MISSING = "Say what should change, then ask for changes.";
+
+function PlanCard({ approval, keyed }: { approval: ApprovalView; keyed: boolean }) {
+  const decision = usePlanDecision(approval);
+  const { feedback, comments, missing } = decision;
   const [selected, setSelected] = useState("");
   const [quote, setQuote] = useState<string | null>(null);
   const [comment, setComment] = useState("");
-  const [comments, setComments] = useState<PlanComment[]>([]);
   const plan = (approval.arguments as { plan?: string } | null)?.plan ?? "";
   const addComment = () => {
     if (quote === null || comment.trim() === "") return;
-    setComments([...comments, { quote, text: comment.trim() }]);
+    decision.addComment(quote, comment);
     setQuote(null);
     setComment("");
     setSelected("");
-    setMissing(false);
-  };
-  const decide = (decision: "approve" | "approve_edits" | "revise" | "reject", done: string) => {
-    const text = composePlanFeedback(comments, feedback);
-    if (decision === "revise" && text === "") return setMissing(true);
-    void run(
-      (c) =>
-        c.write(
-          "approval.decide_plan",
-          { approval_id: approval.id, decision, feedback: text || null },
-          { retry: false },
-        ),
-      done,
-    );
   };
   return (
     <Shell title="Plan · waiting for you">
-      {keyed ? <RejectKey onReject={() => decide("reject", "Plan rejected. The agent stops.")} /> : null}
+      {keyed ? <RejectKey onReject={() => decision.decide("reject")} /> : null}
       <div {...stylex.props(styles.body)}>
         {/* biome-ignore lint/a11y/noStaticElementInteractions: a selection, not a control. */}
         <div onMouseUp={() => setSelected(window.getSelection()?.toString().trim() ?? "")}>
@@ -400,7 +496,7 @@ function PlanCard({ approval, keyed }: { approval: ApprovalView; keyed: boolean 
               size="sm"
               label="Remove comment"
               icon={<Icon icon="close" />}
-              onClick={() => setComments(comments.filter((_, at) => at !== i))}
+              onClick={() => decision.removeComment(i)}
             />
           </div>
         ))}
@@ -409,38 +505,12 @@ function PlanCard({ approval, keyed }: { approval: ApprovalView; keyed: boolean 
           isLabelHidden
           placeholder="What should change?"
           value={feedback}
-          onChange={(value) => {
-            setFeedback(value);
-            setMissing(false);
-          }}
+          onChange={decision.setFeedback}
         />
-        {missing ? <span {...stylex.props(styles.problem)}>Say what should change, then ask for changes.</span> : null}
+        {missing ? <span {...stylex.props(styles.problem)}>{PLAN_MISSING}</span> : null}
       </div>
       <div {...stylex.props(styles.footer)}>
-        <ButtonGroup label="Decide on the plan">
-          <Button
-            variant="primary"
-            label="Approve + Auto"
-            isDisabled={busy}
-            onClick={() => decide("approve", "Plan approved. The agent goes on in auto mode.")}
-          />
-          <Button
-            label="Approve, edits"
-            isDisabled={busy}
-            onClick={() => decide("approve_edits", "Plan approved. Edits go through; the agent asks for the rest.")}
-          />
-          <Button
-            label="Request changes"
-            isDisabled={busy}
-            onClick={() => decide("revise", "Changes requested. The agent revises the plan.")}
-          />
-          <Button
-            variant="destructive"
-            label="Reject"
-            isDisabled={busy}
-            onClick={() => decide("reject", "Plan rejected. The agent stops.")}
-          />
-        </ButtonGroup>
+        <PlanButtons plan={decision} />
       </div>
     </Shell>
   );

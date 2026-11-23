@@ -125,13 +125,13 @@ export function latestRunAcross(
 }
 
 export type TicketPlace =
-  | { to: "/ticket/$number"; params: { number: string }; search?: { message?: string; thread?: string } }
+  | { to: "/ticket/$number"; params: { number: string }; search?: { message?: string; thread?: string; plan?: string } }
   | { to: "/board"; search: { ticket: string } };
 
 /** Where "Open ticket" goes: the session by number; with only an id, the Board's redirect resolves it. */
 export function ticketPlace(
   t: { id: string; number?: number | null },
-  search?: { message?: string; thread?: string },
+  search?: { message?: string; thread?: string; plan?: string },
 ): TicketPlace {
   if (t.number === null || t.number === undefined) return { to: "/board", search: { ticket: t.id } };
   return {

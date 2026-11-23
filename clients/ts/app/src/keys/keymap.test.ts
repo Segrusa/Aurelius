@@ -70,6 +70,18 @@ describe("what a chord means", () => {
     expect(actionsFor("escape", typing)).toEqual(["Back"]);
   });
 
+  it("leaves Ctrl+Backspace to a text field, so it never rejects a plan while typing", () => {
+    const decision = { ...base, stack: [...base.stack, { name: "Decision", modal: false }] };
+    expect(actionsFor("secondary-backspace", decision)).toEqual(["RejectApproval"]);
+    expect(actionsFor("secondary-backspace", { ...decision, typing: true })).toEqual([]);
+  });
+
+  it("comments on a selection in the plan panel", () => {
+    const panel = { ...base, stack: [...base.stack, { name: "PlanPanel", modal: false }] };
+    expect(actionsFor("secondary-alt-m", panel)).toEqual(["CommentOnSelection"]);
+    expect(actionsFor("secondary-alt-m", base)).toEqual([]);
+  });
+
   it("leaves Enter on a focused button to the button", () => {
     expect(actionsFor("enter", { ...base, onControl: true })).toEqual([]);
     expect(actionsFor("enter", base)).toEqual(["OpenSelected"]);

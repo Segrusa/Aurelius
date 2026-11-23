@@ -65,3 +65,15 @@
 [data-hints] [data-key] > kbd {
   display: inline;
 }
+
+/* A commented quote in a plan (plan-dock.tsx): the CSS Highlight API marks it without touching
+   the Markdown's DOM. A dotted underline and a numbered button beside it, so not colour alone. */
+::highlight(plan-comment) {
+  background-color: var(--color-warning-muted);
+  text-decoration: underline dotted var(--color-warning);
+  text-decoration-thickness: 2px;
+}
+
+[data-plan-text] h2 {
+  scroll-margin-top: 12px;
+}

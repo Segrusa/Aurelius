@@ -424,6 +424,60 @@ export function planTitle(text: string): string {
   return "Plan";
 }
 
+/** How big a plan is, for its card and its panel: steps (or sections) and the files it names. */
+export interface PlanSize {
+  /** Top-level list items under the first "steps"/"plan" heading that has any. */
+  steps: number;
+  /** `##` sections, counted when there are no steps. */
+  sections: number;
+  /** Distinct paths in backticks. */
+  files: number;
+  /** "6 steps · 4 files"; empty when there is nothing to count. */
+  line: string;
+}
+
+const HEADING = /^(#{1,6})\s+(.*)$/;
+const STEPS_HEADINGS = [/\bsteps?\b/i, /\bplan\b/i];
+const TOP_ITEM = /^(?:[-*+]|\d+[.)])\s+\S/;
+const FENCE_BLOCK = /^(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\1[ \t]*$/gm;
+const INLINE_CODE = /`([^`\n]+)`/g;
+const LOOKS_LIKE_PATH = /^[\w.@~-]+(?:\/[\w.@-]+)*(?:\.[a-z0-9]{1,8})?(?::\d+(?:-\d+)?)?$/i;
+
+/** A backticked span that names a file: a slash or an extension, no spaces; `:line` dropped. */
+function pathOf(code: string): string | null {
+  const s = code.trim();
+  if (!LOOKS_LIKE_PATH.test(s)) return null;
+  const bare = s.replace(/:\d+(?:-\d+)?$/, "");
+  if (!bare.includes("/") && !/\.[a-z][a-z0-9]{0,7}$/i.test(bare)) return null;
+  return bare;
+}
+
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+export function planSummary(text: string): PlanSize {
+  const prose = text.replace(FENCE_BLOCK, "");
+  const lines = prose.split("\n");
+  // A "Steps" heading wins over a "Plan" one (often the title); a list ends at the next heading.
+  let steps = 0;
+  for (const wanted of STEPS_HEADINGS) {
+    for (let i = 0; i < lines.length && steps === 0; i++) {
+      const h = HEADING.exec(lines[i]?.trim() ?? "");
+      if (!h || !wanted.test(h[2] ?? "")) continue;
+      for (let j = i + 1; j < lines.length && !HEADING.test(lines[j]?.trim() ?? ""); j++) {
+        if (TOP_ITEM.test(lines[j] ?? "")) steps++;
+      }
+    }
+    if (steps > 0) break;
+  }
+  const sections = steps > 0 ? 0 : lines.filter((l) => /^##\s+\S/.test(l)).length;
+  const files = new Set([...prose.matchAll(INLINE_CODE)].flatMap((m) => pathOf(m[1] ?? "") ?? [])).size;
+  const parts = [
+    ...(steps > 0 ? [count(steps, "step", "steps")] : sections > 0 ? [count(sections, "section", "sections")] : []),
+    ...(files > 0 ? [count(files, "file", "files")] : []),
+  ];
+  return { steps, sections, files, line: parts.join(" · ") };
+}
+
 export function webSearchSummary(output: string): string {
   const start = output.indexOf("Links: [");
   if (start < 0) return output;

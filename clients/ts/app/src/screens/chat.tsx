@@ -25,7 +25,7 @@ import { PromptBox, PromptTextarea } from "../ui/prompt-box";
 import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
-import { DockedArtifact, targetKey, useArtifactDock, useOpenDesign } from "./artifact-dock";
+import { type ArtifactTarget, DockedArtifact, targetKey, useArtifactDock, useOpenDesign } from "./artifact-dock";
 import { foldUpdates } from "./board-logic";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import {
@@ -61,6 +61,7 @@ import {
   NewLine,
 } from "./chat-message";
 import { Held } from "./dialogs";
+import { usePlanDock } from "./plan-dock";
 import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
@@ -1020,9 +1021,11 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
         onThread(null);
         dock.open(target);
       },
+      dockTarget: dock.target,
     }),
     [
       dock.open,
+      dock.target,
       channel,
       flash,
       store,
@@ -1046,6 +1049,20 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
   useEffect(() => {
     if (thread) dock.close();
   }, [thread, dock.close]);
+  // A waiting plan opens in an empty dock, never over an open thread; opened on purpose, it
+  // takes the panel from the thread like any artifact.
+  const planDock = useMemo(
+    () => ({
+      target: dock.target,
+      open: (target: ArtifactTarget) => {
+        onThread(null);
+        dock.open(target);
+      },
+      close: dock.close,
+    }),
+    [dock.target, dock.open, dock.close, onThread],
+  );
+  usePlanDock(planDock, list, approvalMap, Boolean(thread));
 
   const running =
     [...list2].reverse().find((m) => m.status === "partial" && m.run_id)?.run_id ?? live.at(-1)?.run_id ?? null;

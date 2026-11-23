@@ -27,7 +27,6 @@ import {
 } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useRunGuidelines } from "../data";
-import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { DialogHead } from "../ui/dialog-head";
 import { Icon } from "../ui/icons";
@@ -62,6 +61,7 @@ import {
   localDay,
   markMentions,
   mentionsMe,
+  planSummary,
   planTitle,
   prefill,
   QUICK_REACTIONS,
@@ -81,6 +81,8 @@ import {
 } from "./chat-logic";
 import { messageLink } from "./links-logic";
 import { overlays } from "./overlays-store";
+import { PlanDock } from "./plan-dock";
+import { planDecision, planLabel, showsPlan } from "./plan-logic";
 import { RunNote } from "./run-card";
 import { waitsOnReply } from "./run-card-logic";
 import {
@@ -548,6 +550,7 @@ const styles = stylex.create({
   },
   liveName: { display: "flex", alignItems: "baseline", gap: 8 },
   footer: { display: "flex", justifyContent: "flex-end", gap: 8 },
+  planOpen: { marginInlineStart: "auto" },
   dialogFooter: { paddingInline: 16, paddingBlock: 12 },
 });
 
@@ -588,6 +591,8 @@ export interface ChatContext {
   artifactSend?: ArtifactSend | null;
   /** Shows an artifact in the panel at the right of the conversation; none: in a dialog. */
   openArtifact?: ((target: ArtifactTarget) => void) | null;
+  /** What that panel shows now, so a plan's card can say it is showing. */
+  dockTarget?: ArtifactTarget | null;
 }
 
 const Context = createContext<ChatContext | null>(null);
@@ -1136,13 +1141,47 @@ function DecisionCard({ m, d }: { m: MessageView; d: Decision }) {
   );
 }
 
+/**
+ * A plan in the feed: what it is about and how big, with Open plan. It is read and decided in the
+ * dock at the right (plan-dock.tsx); where there is no dock, in a dialog.
+ */
+function PlanUpdateCard({ m }: { m: MessageView }) {
+  const ctx = useChat();
+  const { approvals, messages, openArtifact, dockTarget } = ctx;
+  const pending = m.approval_id ? approvals.get(m.approval_id) : undefined;
+  const decided = useMemo(() => (pending ? null : planDecision(messages, m.id)), [pending, messages, m.id]);
+  const size = useMemo(() => planSummary(m.text).line, [m.text]);
+  const [inDialog, setInDialog] = useState(false);
+  const showing = showsPlan(dockTarget ?? null, m.id);
+  const open = () => (openArtifact ? openArtifact({ kind: "plan", messageId: m.id, focus: true }) : setInDialog(true));
+  return (
+    <div {...stylex.props(styles.update, pending ? styles.updateUrgent : styles.updateNormal)}>
+      <div {...stylex.props(styles.updateTop)}>
+        <span {...stylex.props(styles.updateLabel)}>{planLabel(Boolean(pending), decided?.decision ?? null)}</span>
+        <span {...stylex.props(styles.updateAuthor)}>{m.author ?? "Aurelius"}</span>
+        <span data-plan-card={m.id} {...stylex.props(styles.planOpen)}>
+          <Button
+            size="sm"
+            variant={pending ? "primary" : "secondary"}
+            label={showing ? "Showing" : "Open plan"}
+            isDisabled={showing}
+            onClick={open}
+          />
+        </span>
+      </div>
+      <span {...stylex.props(styles.truncate)}>{planTitle(m.text)}</span>
+      {size ? <Meta>{size}</Meta> : null}
+      {inDialog ? (
+        <PlanDock ctx={ctx} messageId={m.id} focus inDialog notice={null} onClose={() => setInDialog(false)} />
+      ) : null}
+    </div>
+  );
+}
+
 function UpdateCard({ m }: { m: MessageView }) {
   const { approvals } = useChat();
   const pending = m.approval_id ? approvals.get(m.approval_id) : undefined;
-  const isPlan = m.update === "plan";
-  const [choice, setChoice] = useState<boolean | null>(null);
-  const open = !isPlan || (choice ?? Boolean(pending));
-  useAction("TogglePlanFold", () => setChoice(!open), isPlan);
+  if (m.update === "plan") return <PlanUpdateCard m={m} />;
   const label = ((): [string, boolean] => {
     switch (m.update) {
       case "brief":
@@ -1153,8 +1192,6 @@ function UpdateCard({ m }: { m: MessageView }) {
         return ["NEEDS A DECISION", true];
       case "approval":
         return pending ? ["WAITING FOR YOU", true] : ["ASKED", false];
-      case "plan":
-        return pending ? ["PLAN · WAITING FOR YOU", true] : ["PLAN", false];
       case "message":
         return ["MESSAGE FROM", false];
       case "mode_chosen":
@@ -1172,22 +1209,8 @@ function UpdateCard({ m }: { m: MessageView }) {
       <div {...stylex.props(styles.updateTop)}>
         <span {...stylex.props(styles.updateLabel)}>{label[0]}</span>
         <span {...stylex.props(styles.updateAuthor)}>{m.author ?? "Aurelius"}</span>
-        {isPlan ? (
-          <button
-            type="button"
-            aria-expanded={open}
-            onClick={() => setChoice(!open)}
-            {...stylex.props(styles.plainButton, styles.linkPlain)}
-          >
-            {open ? "▾ Hide plan" : "▸ Show plan"}
-          </button>
-        ) : null}
       </div>
-      {open ? (
-        <Prose text={m.text} seenLive={false} />
-      ) : (
-        <span {...stylex.props(styles.truncate, styles.text2)}>{planTitle(m.text)}</span>
-      )}
+      <Prose text={m.text} seenLive={false} />
       {pending ? <ApprovalCard approval={pending} /> : null}
     </div>
   );
