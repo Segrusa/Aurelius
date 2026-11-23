@@ -142,6 +142,13 @@ abstract final class Methods {
   /// The designs of a project, or of all without one: the kept HTML pages of each
   /// conversation, the latest first (feature `designs`).
   static const String designList = 'design.list';
+  /// The devices the session's board member paired, newest first (feature
+  /// `own_devices`). Never another board member's. A session method.
+  static const String deviceList = 'device.list';
+  /// Remove one of the session's own paired devices (feature `own_devices`): its
+  /// sessions end and its connections close. Another board member's device is
+  /// `not_found`. Answers `Done`.
+  static const String deviceRevoke = 'device.revoke';
   /// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
   /// answered with `DiscussionAudience`, for the reader's own message (the
   /// reader is never counted). `channel`: a channel or a ticket's discussion
@@ -752,6 +759,12 @@ Map<String, dynamic> designList({String? projectId}) => <String, dynamic>{
   'params': <String, dynamic>{
     if (projectId != null) 'project_id': projectId,
   },
+};
+
+/// The devices the session's board member paired, newest first (feature
+/// `own_devices`). Never another board member's. A session method.
+Map<String, dynamic> deviceList() => <String, dynamic>{
+  'method': Methods.deviceList,
 };
 
 /// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
@@ -1541,6 +1554,16 @@ Map<String, dynamic> compactionSetThreshold({required int thresholdTokens}) => <
   'method': Methods.compactionSetThreshold,
   'params': <String, dynamic>{
     'threshold_tokens': thresholdTokens,
+  },
+};
+
+/// Remove one of the session's own paired devices (feature `own_devices`): its
+/// sessions end and its connections close. Another board member's device is
+/// `not_found`. Answers `Done`.
+Map<String, dynamic> deviceRevoke({required String clientId}) => <String, dynamic>{
+  'method': Methods.deviceRevoke,
+  'params': <String, dynamic>{
+    'client_id': clientId,
   },
 };
 
