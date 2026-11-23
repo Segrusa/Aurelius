@@ -15,16 +15,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import type { ApprovalView, MessageView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useRouterState } from "@tanstack/react-router";
-import {
-  type KeyboardEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAction, useKeyContext } from "../keys/provider";
 import { Markdown } from "../ui/markdown";
 import { PLAN_MISSING, PlanButtons, type PlanDecisionState, RejectKey, usePlanDecision } from "./approval-card";
@@ -197,6 +188,8 @@ const styles = stylex.create({
   decided: { fontSize: 12.5, color: "var(--color-text-secondary)" },
   sent: { fontSize: 12.5 },
   sentSummary: { cursor: "pointer", color: "var(--precision-text3)" },
+  // The dialog's footer row is right-aligned; the plan's footer takes its whole width.
+  dialogFooter: { flexGrow: 1, borderTopWidth: 0, paddingInline: 0 },
   dialogBody: { display: "flex", flexDirection: "column", gap: 0, minHeight: 0 },
   probe: { display: "none" },
   srOnly: {
@@ -393,8 +386,10 @@ function PlanText({
     window.getSelection()?.removeAllRanges();
   };
 
-  const onPick = () => {
+  const onPick = (e: React.SyntheticEvent) => {
     if (comments === null || composing) return;
+    // A press on the Comment button itself must not re-read (and lose) the selection.
+    if (e.target instanceof Element && e.target.closest("[data-plan-comment-button]")) return;
     setSelected(readSelection());
   };
 
@@ -413,7 +408,7 @@ function PlanText({
       data-plan-text
       onMouseUp={onPick}
       onKeyUp={(e) => {
-        if (e.shiftKey) onPick();
+        if (e.shiftKey) onPick(e);
       }}
       onClick={onClick}
       {...stylex.props(styles.text)}
@@ -432,7 +427,13 @@ function PlanText({
         </button>
       ))}
       {selected && !composing ? (
-        <span style={{ top: selected.top, left: selected.left }} {...stylex.props(styles.floating)}>
+        // biome-ignore lint/a11y/noStaticElementInteractions: keeps the selection while its button is pressed.
+        <span
+          data-plan-comment-button
+          onMouseDown={(e) => e.preventDefault()}
+          style={{ top: selected.top, left: selected.left }}
+          {...stylex.props(styles.floating)}
+        >
           <Button size="sm" variant="primary" label="Comment" onClick={() => startComment(selected)} />
         </span>
       ) : null}
@@ -721,12 +722,11 @@ function PlanFrame({
     onClose();
     focusPlanCard(m.id);
   };
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key !== "Escape" || e.defaultPrevented) return;
-    if (e.target instanceof Element && e.target.closest(TYPING)) return;
-    e.preventDefault();
+  // Esc closes it, as it closes a thread; not while a field in the panel is being typed in.
+  useAction("Back", () => {
+    if (document.activeElement?.closest("[data-plan-panel]") && document.activeElement.closest(TYPING)) return;
     close();
-  };
+  });
 
   const live = (
     <span role="status" {...stylex.props(styles.srOnly)}>
@@ -746,7 +746,7 @@ function PlanFrame({
           onClose={onClose}
           start={statusBadge}
           footer={
-            <div data-plan-panel ref={measurePanel} {...stylex.props(styles.footer)}>
+            <div data-plan-panel ref={measurePanel} {...stylex.props(styles.footer, styles.dialogFooter)}>
               {children.footer(split)}
             </div>
           }
@@ -772,7 +772,6 @@ function PlanFrame({
         }}
         data-plan-panel
         aria-label={`Plan: ${title}`}
-        onKeyDown={onKeyDown}
         style={{ width: dockSize.size }}
         {...stylex.props(styles.dock)}
       >
