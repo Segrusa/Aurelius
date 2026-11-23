@@ -2019,6 +2019,10 @@ sealed class Command {
         return CommandSetProjectFolder(value: SetProjectFolder.fromJson(json as Map<String, dynamic>));
       case 'set_project_status':
         return CommandSetProjectStatus(value: SetProjectStatus.fromJson(json as Map<String, dynamic>));
+      case 'set_rail_pins':
+        return CommandSetRailPins(
+          projectIds: (json['project_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+        );
       case 'set_run_defaults':
         return CommandSetRunDefaults(value: SetRunDefaults.fromJson(json as Map<String, dynamic>));
       case 'set_screen_allowed':
@@ -3314,6 +3318,24 @@ final class CommandSetProjectStatus extends Command {
     };
 }
 
+/// `user.set_rail_pins` (feature `rail_pins`): the workspaces the board member of
+/// the session pins to their rail, in rail order. Replaces the whole list, so
+/// reordering and unpinning are the same write; an empty list is a choice too
+/// ("none"). Answers `RailPinsSet`.
+final class CommandSetRailPins extends Command {
+  const CommandSetRailPins({
+    required this.projectIds,
+  });
+
+  final List<String> projectIds;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'set_rail_pins',
+      'project_ids': projectIds,
+    };
+}
+
 final class CommandSetRunDefaults extends Command {
   const CommandSetRunDefaults({
     required this.value,
@@ -3945,6 +3967,11 @@ sealed class CommandResult {
           conversationId: (json['conversation_id'] as String),
           messageId: (json['message_id'] as String),
           runId: (json['run_id'] as String),
+        );
+      case 'rail_pins_set':
+        return CommandResultRailPinsSet(
+          changed: (json['changed'] as bool),
+          projectIds: (json['project_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
         );
       case 'reply_retried':
         return CommandResultReplyRetried(
@@ -4864,6 +4891,25 @@ final class CommandResultQueuedMessageSentNow extends CommandResult {
       'conversation_id': conversationId,
       'message_id': messageId,
       'run_id': runId,
+    };
+}
+
+/// `user.set_rail_pins` (feature `rail_pins`): the rail as stored now.
+/// `changed` is false when it already was this list.
+final class CommandResultRailPinsSet extends CommandResult {
+  const CommandResultRailPinsSet({
+    required this.changed,
+    required this.projectIds,
+  });
+
+  final bool changed;
+  final List<String> projectIds;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'rail_pins_set',
+      'changed': changed,
+      'project_ids': projectIds,
     };
 }
 
@@ -7185,6 +7231,7 @@ enum EventKind {
   ticketUpdated('ticket.updated'),
   userCreated('user.created'),
   userDisabled('user.disabled'),
+  userRailPinsChanged('user.rail_pins_changed'),
   vaultItemArchived('vault.item_archived'),
   vaultItemCreated('vault.item_created'),
   vaultItemUpdated('vault.item_updated'),
@@ -11809,6 +11856,8 @@ sealed class Method {
         return MethodUserLogin(params: LoginParams.fromJson(json['params'] as Map<String, dynamic>));
       case 'user.logout':
         return const MethodUserLogout();
+      case 'user.rail_pins':
+        return const MethodUserRailPins();
       case 'user.whoami':
         return const MethodUserWhoami();
       case 'vault.audit':
@@ -13378,6 +13427,17 @@ final class MethodUserLogout extends Method {
     };
 }
 
+/// The workspaces the board member of the session pinned to their rail
+/// (feature `rail_pins`), never another's. Not for apps.
+final class MethodUserRailPins extends Method {
+  const MethodUserRailPins();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.rail_pins',
+    };
+}
+
 /// Whether the server has board members, and this connection's session's one.
 /// Works without a session.
 final class MethodUserWhoami extends Method {
@@ -14444,6 +14504,31 @@ final class QuestionAnswer {
   };
 }
 
+/// `user.rail_pins` (feature `rail_pins`): the workspaces the board member of
+/// the session pinned to their rail, in rail order. Archived ones stay listed;
+/// the client shows only open ones.
+final class RailPinsView {
+  const RailPinsView({
+    required this.chosen,
+    required this.projectIds,
+  });
+
+  /// False until the board member pins or unpins for the first time: the
+  /// client then pins every open workspace, so no rail starts empty.
+  final bool chosen;
+  final List<String> projectIds;
+
+  factory RailPinsView.fromJson(Map<String, dynamic> json) => RailPinsView(
+    chosen: (json['chosen'] as bool),
+    projectIds: (json['project_ids'] as List<dynamic>).map((x0) => (x0 as String)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'chosen': chosen,
+    'project_ids': projectIds,
+  };
+}
+
 /// A board member adds (`on`) or takes back their reaction with `emoji` on a
 /// message of a channel or a ticket's discussion that is not closed
 /// (`message.react`, feature `chat_reactions`). Idempotent: on twice is on once.
@@ -14923,6 +15008,8 @@ sealed class ResponseBody {
         return ResponseBodyProjects(value: ProjectsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'proposals':
         return ResponseBodyProposals(value: ProposalsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
+      case 'rail_pins':
+        return ResponseBodyRailPins(value: RailPinsView.fromJson(json['value'] as Map<String, dynamic>));
       case 'receipt':
         return ResponseBodyReceipt(value: Receipt.fromJson(json['value'] as Map<String, dynamic>));
       case 'remote':
@@ -15889,6 +15976,21 @@ final class ResponseBodyProposals extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'proposals',
+      'value': value.toJson(),
+    };
+}
+
+/// `user.rail_pins`.
+final class ResponseBodyRailPins extends ResponseBody {
+  const ResponseBodyRailPins({
+    required this.value,
+  });
+
+  final RailPinsView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'rail_pins',
       'value': value.toJson(),
     };
 }

@@ -244,7 +244,9 @@ export const METHODS = {
   "user.list": "read",
   "user.login": "read",
   "user.logout": "read",
+  "user.rail_pins": "read",
   "user.set_password": "host",
+  "user.set_rail_pins": "command",
   "user.whoami": "read",
   "vault.archive": "host",
   "vault.audit": "read",
@@ -1060,6 +1062,11 @@ export interface MethodParams {
    */
   "user.logout": undefined;
   /**
+   * The workspaces the board member of the session pinned to their rail
+   * (feature `rail_pins`), never another's. Not for apps.
+   */
+  "user.rail_pins": undefined;
+  /**
    * Change a password. Own (no `user_id`, or the session's): with the old
    * password; the other sessions end, this one stays. Another board member's
    * (B10): a temporary password, changed at their next sign-in
@@ -1067,6 +1074,13 @@ export interface MethodParams {
    * passwords are in no receipt, request hash, event or log. Answers `Done`.
    */
   "user.set_password": M.SetPasswordParams;
+  /**
+   * `user.set_rail_pins` (feature `rail_pins`): the workspaces the board member of
+   * the session pins to their rail, in rail order. Replaces the whole list, so
+   * reordering and unpinning are the same write; an empty list is a choice too
+   * ("none"). Answers `RailPinsSet`.
+   */
+  "user.set_rail_pins": { project_ids: string[] };
   /**
    * Whether the server has board members, and this connection's session's one.
    * Works without a session.

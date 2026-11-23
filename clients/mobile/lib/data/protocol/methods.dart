@@ -535,12 +535,20 @@ abstract final class Methods {
   /// End this connection's session (the device must sign in again); answers
   /// `WhoAmI` without a board member. A session method.
   static const String userLogout = 'user.logout';
+  /// The workspaces the board member of the session pinned to their rail
+  /// (feature `rail_pins`), never another's. Not for apps.
+  static const String userRailPins = 'user.rail_pins';
   /// Change a password. Own (no `user_id`, or the session's): with the old
   /// password; the other sessions end, this one stays. Another board member's
   /// (B10): a temporary password, changed at their next sign-in
   /// (`must_change_password`); all their sessions end. Like `user.create`, the
   /// passwords are in no receipt, request hash, event or log. Answers `Done`.
   static const String userSetPassword = 'user.set_password';
+  /// `user.set_rail_pins` (feature `rail_pins`): the workspaces the board member of
+  /// the session pins to their rail, in rail order. Replaces the whole list, so
+  /// reordering and unpinning are the same write; an empty list is a choice too
+  /// ("none"). Answers `RailPinsSet`.
+  static const String userSetRailPins = 'user.set_rail_pins';
   /// Whether the server has board members, and this connection's session's one.
   /// Works without a session.
   static const String userWhoami = 'user.whoami';
@@ -1342,6 +1350,12 @@ Map<String, dynamic> userLogin(LoginParams params) => <String, dynamic>{
 /// `WhoAmI` without a board member. A session method.
 Map<String, dynamic> userLogout() => <String, dynamic>{
   'method': Methods.userLogout,
+};
+
+/// The workspaces the board member of the session pinned to their rail
+/// (feature `rail_pins`), never another's. Not for apps.
+Map<String, dynamic> userRailPins() => <String, dynamic>{
+  'method': Methods.userRailPins,
 };
 
 /// Whether the server has board members, and this connection's session's one.
@@ -2466,6 +2480,17 @@ Map<String, dynamic> ticketUseMyLogin({required String ticketId}) => <String, dy
   'method': Methods.ticketUseMyLogin,
   'params': <String, dynamic>{
     'ticket_id': ticketId,
+  },
+};
+
+/// `user.set_rail_pins` (feature `rail_pins`): the workspaces the board member of
+/// the session pins to their rail, in rail order. Replaces the whole list, so
+/// reordering and unpinning are the same write; an empty list is a choice too
+/// ("none"). Answers `RailPinsSet`.
+Map<String, dynamic> userSetRailPins({required List<String> projectIds}) => <String, dynamic>{
+  'method': Methods.userSetRailPins,
+  'params': <String, dynamic>{
+    'project_ids': projectIds,
   },
 };
 

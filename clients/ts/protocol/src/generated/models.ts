@@ -1138,6 +1138,13 @@ export type Command =
   | ({ type: "set_project_description" } & SetProjectDescription)
   | ({ type: "set_project_folder" } & SetProjectFolder)
   | ({ type: "set_project_status" } & SetProjectStatus)
+  /**
+   * `user.set_rail_pins` (feature `rail_pins`): the workspaces the board member of
+   * the session pins to their rail, in rail order. Replaces the whole list, so
+   * reordering and unpinning are the same write; an empty list is a choice too
+   * ("none"). Answers `RailPinsSet`.
+   */
+  | ({ type: "set_rail_pins"; project_ids: string[] })
   | ({ type: "set_run_defaults" } & SetRunDefaults)
   | ({ type: "set_screen_allowed" } & SetScreenAllowed)
   /**
@@ -1300,6 +1307,11 @@ export type CommandResult =
    * A waiting message's run starts now; the answers ahead of it were stopped.
    */
   | ({ type: "queued_message_sent_now"; conversation_id: string; message_id: string; run_id: string })
+  /**
+   * `user.set_rail_pins` (feature `rail_pins`): the rail as stored now.
+   * `changed` is false when it already was this list.
+   */
+  | ({ type: "rail_pins_set"; changed: boolean; project_ids: string[] })
   | ({ type: "reply_retried"; run_id: string })
   | ({ type: "run_defaults_set" })
   | ({ type: "scheduled_message_cancelled"; message_id: string })
@@ -2397,6 +2409,7 @@ export type EventKind =
   | "ticket.updated"
   | "user.created"
   | "user.disabled"
+  | "user.rail_pins_changed"
   | "vault.item_archived"
   | "vault.item_created"
   | "vault.item_updated"
@@ -4310,6 +4323,11 @@ export type Method =
    */
   | ({ method: "user.logout" })
   /**
+   * The workspaces the board member of the session pinned to their rail
+   * (feature `rail_pins`), never another's. Not for apps.
+   */
+  | ({ method: "user.rail_pins" })
+  /**
    * Whether the server has board members, and this connection's session's one.
    * Works without a session.
    */
@@ -4771,6 +4789,20 @@ export interface QuestionAnswer {
 }
 
 /**
+ * `user.rail_pins` (feature `rail_pins`): the workspaces the board member of
+ * the session pinned to their rail, in rail order. Archived ones stay listed;
+ * the client shows only open ones.
+ */
+export interface RailPinsView {
+  /**
+   * False until the board member pins or unpins for the first time: the
+   * client then pins every open workspace, so no rail starts empty.
+   */
+  chosen: boolean;
+  project_ids: string[];
+}
+
+/**
  * A board member adds (`on`) or takes back their reaction with `emoji` on a
  * message of a channel or a ticket's discussion that is not closed
  * (`message.react`, feature `chat_reactions`). Idempotent: on twice is on once.
@@ -5020,6 +5052,10 @@ export type ResponseBody =
   | ({ type: "project_conversations"; value: ProjectConversationsSnapshot })
   | ({ type: "projects"; value: ProjectsSnapshot })
   | ({ type: "proposals"; value: ProposalsSnapshot })
+  /**
+   * `user.rail_pins`.
+   */
+  | ({ type: "rail_pins"; value: RailPinsView })
   /**
    * The answer to every write.
    */
