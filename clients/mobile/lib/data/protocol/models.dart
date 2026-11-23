@@ -7193,18 +7193,23 @@ final class FileRef {
     required this.mediaType,
     required this.name,
     required this.size,
+    this.title,
   });
 
   final String id;
   final String mediaType;
   final String name;
   final int size;
+  /// An HTML design's own `<title>`, so clients show a design by its title instead of its
+  /// file name. Absent on other files, on a page without a title and from older servers.
+  final String? title;
 
   factory FileRef.fromJson(Map<String, dynamic> json) => FileRef(
     id: (json['id'] as String),
     mediaType: (json['media_type'] as String),
     name: (json['name'] as String),
     size: (json['size'] as num).toInt(),
+    title: (json['title'] == null ? null : (json['title'] as String)),
   );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -7212,6 +7217,7 @@ final class FileRef {
     'media_type': mediaType,
     'name': name,
     'size': size,
+    if (title != null) 'title': title,
   };
 }
 
