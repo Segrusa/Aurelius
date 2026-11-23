@@ -1360,6 +1360,16 @@ impl Client {
         self.host_ok(HostWrite::PushTest { client_id }).await
     }
 
+    /// The devices the signed-in board member paired.
+    pub async fn devices(&self) -> Result<aurelius_protocol::remote::DevicesSnapshot, ClientError> {
+        self.read(Method::DeviceList, body!(Devices)).await
+    }
+
+    /// Remove one of the signed-in board member's own devices.
+    pub async fn revoke_device(&self, client_id: aurelius_domain::ClientId) -> Result<(), ClientError> {
+        self.host_ok(HostWrite::DeviceRevoke { client_id }).await
+    }
+
     // ---- secrets, server ----
 
     /// Store a connection's API key in the server's credential store.

@@ -176,6 +176,11 @@ pub enum HostWrite {
     PushConfigure(PushConfig),
     #[serde(rename = "push.test")]
     PushTest { client_id: ClientId },
+    /// Remove one of the session's own paired devices (feature `own_devices`): its
+    /// sessions end and its connections close. Another board member's device is
+    /// `not_found`. Answers `Done`.
+    #[serde(rename = "device.revoke")]
+    DeviceRevoke { client_id: ClientId },
     /// A new folder `name` in the folder `parent`.
     #[serde(rename = "fs.create_dir")]
     FsCreateDir { parent: String, name: String },
@@ -404,6 +409,7 @@ impl HostWrite {
         "remote.revoke",
         "push.configure",
         "push.test",
+        "device.revoke",
         "fs.create_dir",
         "user.create",
         "session.revoke",

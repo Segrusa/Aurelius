@@ -40,7 +40,7 @@ async fn listens_on_loopback_only_unless_set_explicitly() {
     let hub = Hub::new(store, HostId::new(), PrincipalId::new(), dir.path().to_path_buf(), "test");
 
     // Default, without Tailscale: loopback, reachable there and nowhere else.
-    let status = hub.enable().await.unwrap();
+    let status = hub.enable(None).await.unwrap();
     let addr = hub.local_addr().await.unwrap();
     assert_eq!(addr.ip(), IpAddr::from([127, 0, 0, 1]));
     assert_eq!(status.port, addr.port());
@@ -53,28 +53,28 @@ async fn listens_on_loopback_only_unless_set_explicitly() {
         }
         None => eprintln!("no default route: LAN probe skipped"),
     }
-    hub.disable().await.unwrap();
+    hub.disable(None).await.unwrap();
     assert!(hub.local_addr().await.is_none());
 
     // A setting that is no address: refused, nothing listens.
     set(aurelius_remote_gateway::bind::ENV, Some("everywhere"));
-    let refused = hub.enable().await.expect_err("a bad bind setting is refused");
+    let refused = hub.enable(None).await.expect_err("a bad bind setting is refused");
     assert!(refused.message.contains("AURELIUS_REMOTE_BIND"), "{}", refused.message);
     assert!(hub.local_addr().await.is_none());
 
     // Explicitly every interface: allowed (with a warning in the log), and
     // Tailscale Serve would still target loopback.
     set(aurelius_remote_gateway::bind::ENV, Some("0.0.0.0"));
-    hub.enable().await.unwrap();
+    hub.enable(None).await.unwrap();
     let addr = hub.local_addr().await.unwrap();
     assert!(addr.ip().is_unspecified());
     assert_eq!(aurelius_remote_gateway::bind::local_url(addr), format!("http://127.0.0.1:{}", addr.port()));
     assert!(health(addr).await);
-    hub.disable().await.unwrap();
+    hub.disable(None).await.unwrap();
 
     // Unset again: back to loopback.
     set(aurelius_remote_gateway::bind::ENV, None);
-    hub.enable().await.unwrap();
+    hub.enable(None).await.unwrap();
     assert!(hub.local_addr().await.unwrap().ip().is_loopback());
-    hub.disable().await.unwrap();
+    hub.disable(None).await.unwrap();
 }

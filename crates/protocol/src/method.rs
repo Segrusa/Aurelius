@@ -552,6 +552,10 @@ pub enum Method {
     ActivityGet { message_id: MessageId, call_id: String },
     #[serde(rename = "remote.get_status")]
     RemoteGetStatus,
+    /// The devices the session's board member paired, newest first (feature
+    /// `own_devices`). Never another board member's. A session method.
+    #[serde(rename = "device.list")]
+    DeviceList,
     /// Folders on the server: none lists the starting points.
     #[serde(rename = "fs.list_dir")]
     FsListDir { path: Option<String> },

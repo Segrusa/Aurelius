@@ -893,3 +893,63 @@ async fn the_pairing_and_its_poll_give_the_chosen_name_and_only_an_owner_renames
 
     stop(dir.path(), daemon).await;
 }
+
+/// Each board member sees and manages only the devices they paired (feature `own_devices`).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_board_member_never_sees_or_revokes_another_board_members_devices() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_remote(dir.path()).await;
+    let alex = connect(dir.path()).await;
+    let bea = connect_as(dir.path(), "bea").await;
+    let (alex_phone, _) = pair_device(&alex, "alex-iphone", "ios", None, false).await;
+    let alex_phone = ClientId::parse(&alex_phone.client_id).unwrap();
+
+    // Bea's code: Alex does not see the request, and cannot decide it.
+    let code = bea.pairing_start().await.unwrap();
+    let base = format!("http://127.0.0.1:{}", bea.remote_status().await.unwrap().port);
+    let asked: serde_json::Value = ask_pairing(&reqwest::Client::new(), &base, &code.code, "bea-pixel", "android", None).await.json().await.unwrap();
+    let pairing_id = asked["pairing_id"].as_str().unwrap().to_owned();
+    assert!(alex.remote_status().await.unwrap().pending.is_empty(), "Bea's request is not Alex's");
+    let refused = alex.remote(HostWrite::RemoteDecidePairing { pairing_id: pairing_id.clone(), approve: true, owner: false }).await;
+    assert!(refused.is_err(), "{refused:?}");
+    let status = bea.remote(HostWrite::RemoteDecidePairing { pairing_id, approve: true, owner: false }).await.unwrap();
+    let bea_phone = status.clients.iter().find(|c| c.name == "bea-pixel").unwrap().id;
+
+    // Each lists only their own, in Account and in Remote access.
+    let names = |list: &[aurelius_domain::remote::RemoteClientView]| list.iter().map(|d| d.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&alex.devices().await.unwrap().devices), ["alex-iphone"]);
+    assert_eq!(names(&bea.devices().await.unwrap().devices), ["bea-pixel"]);
+    assert_eq!(names(&alex.remote_status().await.unwrap().clients), ["alex-iphone"]);
+    assert_eq!(names(&bea.remote_status().await.unwrap().clients), ["bea-pixel"]);
+
+    // Alex cannot revoke or test Bea's phone, through either method.
+    assert!(alex.revoke_device(bea_phone).await.is_err());
+    assert!(alex.remote(HostWrite::RemoteRevoke { client_id: bea_phone }).await.is_err());
+    assert!(alex.push_test(bea_phone).await.is_err());
+    assert_eq!(names(&bea.devices().await.unwrap().devices), ["bea-pixel"], "still paired");
+
+    // Alex revokes their own phone from Account.
+    alex.revoke_device(alex_phone).await.unwrap();
+    assert!(alex.devices().await.unwrap().devices.is_empty());
+    stop(dir.path(), daemon).await;
+}
+
+/// A disabled board member's devices are revoked: nobody else could remove them.
+#[tokio::test(flavor = "multi_thread")]
+async fn disabling_a_board_member_revokes_the_devices_they_paired() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start_remote(dir.path()).await;
+    let alex = connect(dir.path()).await;
+    let bea = connect_as(dir.path(), "bea").await;
+    let (phone, _) = pair_device(&bea, "bea-pixel", "android", None, false).await;
+    let mut socket = phone.socket(&phone.session().await.unwrap()).await.unwrap();
+    let bea_id = bea.user_whoami().await.unwrap().user.unwrap().id;
+
+    alex.disable_user(bea_id).await.unwrap();
+    assert_eq!(closed_with(&mut socket).await, Some(4401), "the phone is disconnected");
+    let revoked: Option<i64> = db(dir.path()).query_row("SELECT revoked_at_ms FROM remote_clients WHERE id = ?1", [&phone.client_id], |r| r.get(0)).unwrap();
+    assert!(revoked.is_some());
+    assert!(phone.session().await.is_err(), "the device cannot open a session any more");
+    stop(dir.path(), daemon).await;
+}
+

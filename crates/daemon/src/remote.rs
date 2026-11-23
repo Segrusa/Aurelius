@@ -4,8 +4,8 @@
 use crate::Shared;
 use crate::api::{self, Peer};
 use aurelius_domain::ClientId;
-use aurelius_protocol::remote::{PairingCode, PushConfig, RemoteStatus};
-use aurelius_protocol::{ProtocolError, Request, ServerMessage};
+use aurelius_protocol::remote::{DevicesSnapshot, PairingCode, PushConfig, RemoteStatus};
+use aurelius_protocol::{ErrorCode, ProtocolError, Request, ServerMessage};
 use aurelius_remote_gateway::{Device, Dispatch};
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
@@ -36,34 +36,52 @@ pub async fn start(shared: &Arc<Shared>) {
     shared.remote.start_if_enabled().await;
 }
 
-pub async fn status(shared: &Arc<Shared>) -> RemoteStatus {
-    shared.remote.status().await
+// `viewer`: the board member of the connection. Remote access shows them only their own
+// devices and pairing requests and those of nobody (feature `own_devices`).
+
+pub async fn status(shared: &Arc<Shared>, viewer: Option<&str>) -> RemoteStatus {
+    shared.remote.status(viewer).await
 }
 
-pub async fn enable(shared: &Arc<Shared>) -> Result<RemoteStatus, ProtocolError> {
-    shared.remote.enable().await
+pub async fn enable(shared: &Arc<Shared>, viewer: Option<&str>) -> Result<RemoteStatus, ProtocolError> {
+    shared.remote.enable(viewer).await
 }
 
-pub async fn disable(shared: &Arc<Shared>) -> Result<RemoteStatus, ProtocolError> {
-    shared.remote.disable().await
+pub async fn disable(shared: &Arc<Shared>, viewer: Option<&str>) -> Result<RemoteStatus, ProtocolError> {
+    shared.remote.disable(viewer).await
 }
 
-pub async fn pairing_start(shared: &Arc<Shared>) -> Result<PairingCode, ProtocolError> {
-    shared.remote.pairing_start().await
+pub async fn pairing_start(shared: &Arc<Shared>, viewer: Option<&str>) -> Result<PairingCode, ProtocolError> {
+    shared.remote.pairing_start(viewer).await
 }
 
-pub async fn pairing_decide(shared: &Arc<Shared>, pairing_id: &str, approve: bool, owner: bool) -> Result<RemoteStatus, ProtocolError> {
-    shared.remote.pairing_decide(pairing_id, approve, owner).await
+pub async fn pairing_decide(shared: &Arc<Shared>, pairing_id: &str, approve: bool, owner: bool, viewer: Option<&str>) -> Result<RemoteStatus, ProtocolError> {
+    shared.remote.pairing_decide(pairing_id, approve, owner, viewer).await
 }
 
-pub async fn revoke(shared: &Arc<Shared>, client_id: ClientId) -> Result<RemoteStatus, ProtocolError> {
-    shared.remote.revoke(client_id).await
+pub async fn revoke(shared: &Arc<Shared>, client_id: ClientId, viewer: Option<&str>) -> Result<RemoteStatus, ProtocolError> {
+    shared.remote.revoke(client_id, viewer).await
 }
 
-pub async fn push_configure(shared: &Arc<Shared>, config: PushConfig) -> Result<RemoteStatus, ProtocolError> {
-    shared.remote.push_configure(config).await
+pub async fn push_configure(shared: &Arc<Shared>, config: PushConfig, viewer: Option<&str>) -> Result<RemoteStatus, ProtocolError> {
+    shared.remote.push_configure(config, viewer).await
 }
 
-pub async fn push_test(shared: &Arc<Shared>, client_id: ClientId) -> Result<(), ProtocolError> {
-    shared.remote.push_test(client_id).await
+pub async fn push_test(shared: &Arc<Shared>, client_id: ClientId, viewer: Option<&str>) -> Result<(), ProtocolError> {
+    shared.remote.push_test(client_id, viewer).await
+}
+
+/// `device.list`: the devices `user` paired.
+pub async fn devices(shared: &Arc<Shared>, user: &str) -> DevicesSnapshot {
+    DevicesSnapshot { devices: shared.remote.devices(user).await }
+}
+
+/// `device.revoke`: only one of `user`'s own devices; its sessions end and its connections close.
+pub async fn revoke_own(shared: &Arc<Shared>, client_id: ClientId, user: &str) -> Result<(), ProtocolError> {
+    if !shared.remote.devices(user).await.iter().any(|d| d.id == client_id) {
+        return Err(ProtocolError::new(ErrorCode::NotFound, "This device does not exist."));
+    }
+    shared.remote.revoke(client_id, Some(user)).await?;
+    shared.sessions.end_client(client_id, aurelius_domain::user::SignOutReason::Revoked);
+    Ok(())
 }

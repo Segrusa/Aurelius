@@ -52,6 +52,8 @@ struct ActiveCode {
     code: String,
     expires_at_ms: i64,
     failures: u32,
+    /// The board member who asked for the code; the device becomes theirs.
+    by: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,10 +70,19 @@ pub struct PairingRequest {
     pub platform: String,
     /// A computer asking for full access (owner).
     pub owner: bool,
+    /// The board member whose code the device entered: only they see and decide the request.
+    pub by: Option<String>,
     pub requested_at_ms: i64,
     pub expires_at_ms: i64,
     pub state: PairState,
     pub notify: Arc<Notify>,
+}
+
+impl PairingRequest {
+    /// Whether `viewer` may see and decide this request.
+    fn decided_by(&self, viewer: Option<&str>) -> bool {
+        self.by.is_none() || self.by.as_deref() == viewer
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -96,11 +107,11 @@ impl Pairings {
         self.requests.retain(|_, r| r.expires_at_ms > now);
     }
 
-    /// A new code replaces any earlier one.
-    pub fn new_code(&mut self) -> (String, i64) {
+    /// A new code replaces any earlier one. `by`: the board member who asked for it.
+    pub fn new_code(&mut self, by: Option<&str>) -> (String, i64) {
         let code = new_code_text();
         let expires_at_ms = now_ms() + CODE_MS;
-        self.code = Some(ActiveCode { code: code.clone(), expires_at_ms, failures: 0 });
+        self.code = Some(ActiveCode { code: code.clone(), expires_at_ms, failures: 0, by: by.map(str::to_owned) });
         (code, expires_at_ms)
     }
 
@@ -124,12 +135,13 @@ impl Pairings {
             }
             return Err(ClaimError::Invalid);
         }
-        self.code = None;
+        let by = self.code.take().and_then(|c| c.by);
         let request = PairingRequest {
             id: uuid::Uuid::now_v7().simple().to_string(),
             device_name: device_name.chars().take(64).collect(),
             platform: platform.into(),
             owner,
+            by,
             requested_at_ms: now,
             expires_at_ms: now + CODE_MS,
             state: PairState::Pending,
@@ -139,12 +151,13 @@ impl Pairings {
         Ok(request)
     }
 
-    pub fn pending(&mut self) -> Vec<PairingRequestView> {
+    /// The requests waiting for `viewer`: those of their own codes and of codes nobody asked for.
+    pub fn pending(&mut self, viewer: Option<&str>) -> Vec<PairingRequestView> {
         self.expire();
         let mut out: Vec<_> = self
             .requests
             .values()
-            .filter(|r| matches!(r.state, PairState::Pending))
+            .filter(|r| matches!(r.state, PairState::Pending) && r.decided_by(viewer))
             .map(|r| PairingRequestView {
                 pairing_id: r.id.clone(),
                 device_name: r.device_name.clone(),
@@ -157,9 +170,10 @@ impl Pairings {
         out
     }
 
-    pub fn pending_request(&mut self, id: &str) -> Option<PairingRequest> {
+    /// A waiting request `viewer` may decide; another board member's is not there for them.
+    pub fn pending_request(&mut self, id: &str, viewer: Option<&str>) -> Option<PairingRequest> {
         self.expire();
-        self.requests.get(id).filter(|r| matches!(r.state, PairState::Pending)).cloned()
+        self.requests.get(id).filter(|r| matches!(r.state, PairState::Pending) && r.decided_by(viewer)).cloned()
     }
 
     pub fn approve(&mut self, id: &str, client_id: ClientId, secret: String) {
@@ -196,13 +210,13 @@ mod tests {
     #[test]
     fn code_is_single_use_and_dies_after_five_wrong_guesses() {
         let mut p = Pairings::default();
-        let (code, _) = p.new_code();
+        let (code, _) = p.new_code(None);
         let pretty = format!("{}-{}", &code[..4], code[4..].to_lowercase());
         let request = p.claim(&pretty, "iphone", "ios", false).unwrap();
         assert_eq!(p.claim(&code, "other", "ios", false).err(), Some(ClaimError::Invalid), "used up");
-        assert_eq!(p.pending().len(), 1);
+        assert_eq!(p.pending(None).len(), 1);
 
-        let (code, _) = p.new_code();
+        let (code, _) = p.new_code(None);
         for _ in 0..MAX_FAILURES {
             assert_eq!(p.claim("WRONGWRO", "x", "ios", false).err(), Some(ClaimError::Invalid));
         }
@@ -216,10 +230,10 @@ mod tests {
     #[test]
     fn attempts_are_rate_limited() {
         let mut p = Pairings::default();
-        p.new_code();
+        p.new_code(None);
         let mut limited = false;
         for _ in 0..20 {
-            p.new_code();
+            p.new_code(None);
             if matches!(p.claim("AAAAAAAA", "x", "ios", false), Err(ClaimError::TooManyAttempts)) {
                 limited = true;
             }
@@ -234,5 +248,18 @@ mod tests {
         assert_ne!(verifier(&secret), secret);
         assert!(same(&secret, &secret.clone()));
         assert!(!same(&secret, "x"));
+    }
+
+    #[test]
+    fn a_request_is_seen_and_decided_only_by_whoever_asked_for_the_code() {
+        let mut p = Pairings::default();
+        let (code, _) = p.new_code(Some("alex"));
+        let request = p.claim(&code, "Alex's iPhone", "ios", false).unwrap();
+        assert_eq!(request.by.as_deref(), Some("alex"));
+        assert_eq!(p.pending(Some("alex")).len(), 1);
+        assert!(p.pending(Some("bea")).is_empty());
+        assert!(p.pending(None).is_empty());
+        assert!(p.pending_request(&request.id, Some("bea")).is_none());
+        assert!(p.pending_request(&request.id, Some("alex")).is_some());
     }
 }

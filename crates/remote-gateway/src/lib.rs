@@ -24,7 +24,7 @@ mod web;
 mod ws;
 
 use aurelius_domain::{ClientId, EventNotice, HostId, PrincipalId};
-use aurelius_protocol::remote::{Capability, PairingCode, PushConfig, PushStatus, RemoteStatus};
+use aurelius_protocol::remote::{Capability, PairingCode, PushConfig, PushStatus, RemoteClientView, RemoteStatus};
 use aurelius_protocol::{ErrorCode, ProtocolError, Request, ServerMessage};
 use aurelius_storage::Store;
 use serde::{Deserialize, Serialize};
@@ -250,20 +250,20 @@ impl Hub {
         self.stop_server().await;
     }
 
-    pub async fn enable(&self) -> Result<RemoteStatus, ProtocolError> {
+    pub async fn enable(&self, viewer: Option<&str>) -> Result<RemoteStatus, ProtocolError> {
         let addr = self.start_server().await?;
         self.inner.config.lock().unwrap().enabled = true;
         self.save_config()?;
         let (https, root) = (Self::https_port(), self.inner.root.clone());
         let serve = tokio::task::spawn_blocking(move || tailscale::serve_on(&root, https, addr)).await.map_err(internal)?;
-        let mut status = self.status().await;
+        let mut status = self.status(viewer).await;
         if let Err(err) = serve {
             status.error = Some(err);
         }
         Ok(status)
     }
 
-    pub async fn disable(&self) -> Result<RemoteStatus, ProtocolError> {
+    pub async fn disable(&self, viewer: Option<&str>) -> Result<RemoteStatus, ProtocolError> {
         self.inner.config.lock().unwrap().enabled = false;
         self.save_config()?;
         self.stop_server().await;
@@ -274,30 +274,21 @@ impl Hub {
             .map_err(internal)?;
         let (https, root) = (Self::https_port(), self.inner.root.clone());
         let serve = tokio::task::spawn_blocking(move || tailscale::serve_off(&root, https)).await.map_err(internal)?;
-        let mut status = self.status().await;
+        let mut status = self.status(viewer).await;
         if let Err(err) = serve {
             status.error = Some(err);
         }
         Ok(status)
     }
 
-    pub async fn status(&self) -> RemoteStatus {
+    /// Settings → Remote access as `viewer` (the board member of the connection) sees it:
+    /// their own devices and pairing requests and those of nobody, never another board member's.
+    pub async fn status(&self, viewer: Option<&str>) -> RemoteStatus {
         let target = self.target().await;
         let port = target.port();
         let (https, root) = (Self::https_port(), self.inner.root.clone());
         let tailscale = tokio::task::spawn_blocking(move || tailscale::status(&root, https, target)).await.unwrap_or_default();
-        let store = self.inner.store.clone();
-        let mut clients = tokio::task::spawn_blocking(move || store.read(aurelius_storage::remote::list_clients))
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .unwrap_or_default();
-        {
-            let live = self.inner.live.lock().unwrap();
-            for client in &mut clients {
-                client.connected = live.get(&client.id).is_some_and(|l| l.connections > 0);
-            }
-        }
+        let clients = self.list(viewer.map(str::to_owned), false).await;
         let url = tailscale.dns_name.as_ref().map(|dns| format!("https://{dns}:{https}"));
         RemoteStatus {
             enabled: self.enabled(),
@@ -305,16 +296,56 @@ impl Hub {
             url,
             tailscale,
             clients,
-            pending: self.inner.pairings.lock().unwrap().pending(),
+            pending: self.inner.pairings.lock().unwrap().pending(viewer),
             push: self.push_status(),
             error: None,
+        }
+    }
+
+    /// The devices `user` paired (`device.list`), newest first, with whether each is connected now.
+    pub async fn devices(&self, user: &str) -> Vec<RemoteClientView> {
+        self.list(Some(user.to_owned()), true).await
+    }
+
+    /// `own`: only `user`'s devices; else what the Remote access settings show `user`.
+    async fn list(&self, user: Option<String>, own: bool) -> Vec<RemoteClientView> {
+        use aurelius_storage::remote::{Devices, list_devices};
+        let store = self.inner.store.clone();
+        let mut clients = tokio::task::spawn_blocking(move || {
+            store.read(|c| match (&user, own) {
+                (Some(user), true) => list_devices(c, Devices::PairedBy(user)),
+                (_, true) => Ok(Vec::new()),
+                (user, false) => list_devices(c, Devices::VisibleTo(user.as_deref())),
+            })
+        })
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+        let live = self.inner.live.lock().unwrap();
+        for client in &mut clients {
+            client.connected = live.get(&client.id).is_some_and(|l| l.connections > 0);
+        }
+        clients
+    }
+
+    /// Whether `viewer` may manage this device: theirs, or a device of nobody.
+    async fn may_manage(&self, client_id: ClientId, viewer: Option<&str>) -> Result<(), ProtocolError> {
+        let store = self.inner.store.clone();
+        let found = tokio::task::spawn_blocking(move || store.read(|c| aurelius_storage::remote::find_client(c, client_id)))
+            .await
+            .map_err(internal)?
+            .map_err(internal)?;
+        match found {
+            Some(client) if !client.revoked && (client.paired_by.is_none() || client.paired_by.as_deref() == viewer) => Ok(()),
+            _ => Err(ProtocolError::new(ErrorCode::NotFound, "This device does not exist.")),
         }
     }
 
     /// Where a phone should connect: the tailnet URL, or in dev without
     /// Tailscale the Android emulator's view of this PC's loopback.
     async fn phone_url(&self) -> Result<String, ProtocolError> {
-        let status = self.status().await;
+        let status = self.status(None).await;
         if let Some(url) = status.url.filter(|_| status.tailscale.online) {
             return Ok(url);
         }
@@ -332,13 +363,14 @@ impl Hub {
         tokio::task::spawn_blocking(move || aurelius_host::server_name(&store).name).await.unwrap_or_else(|_| aurelius_host::host_name())
     }
 
-    pub async fn pairing_start(&self) -> Result<PairingCode, ProtocolError> {
+    /// A new pairing code for `viewer`: the device that enters it becomes theirs.
+    pub async fn pairing_start(&self, viewer: Option<&str>) -> Result<PairingCode, ProtocolError> {
         if !self.enabled() {
             return Err(validation("Turn on remote access first."));
         }
         let url = self.phone_url().await?;
         let host_name = self.server_name().await;
-        let (code, expires_at_ms) = self.inner.pairings.lock().unwrap().new_code();
+        let (code, expires_at_ms) = self.inner.pairings.lock().unwrap().new_code(viewer);
         let payload = aurelius_protocol::remote::PairingPayload {
             v: 1,
             url,
@@ -368,13 +400,15 @@ impl Hub {
     /// `owner`: the user confirmed full access for a computer that asked for
     /// it. A computer asking for it is refused without that confirmation; a
     /// phone never gets it.
-    pub async fn pairing_decide(&self, pairing_id: &str, approve: bool, owner: bool) -> Result<RemoteStatus, ProtocolError> {
+    /// Only `viewer`'s own requests (or those of a code nobody asked for); the device
+    /// belongs to whoever asked for the code, else to `viewer`.
+    pub async fn pairing_decide(&self, pairing_id: &str, approve: bool, owner: bool, viewer: Option<&str>) -> Result<RemoteStatus, ProtocolError> {
         let request = self
             .inner
             .pairings
             .lock()
             .unwrap()
-            .pending_request(pairing_id)
+            .pending_request(pairing_id, viewer)
             .ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "This pairing request expired. Start again."))?;
         if approve && request.owner && !owner {
             return Err(validation(format!(
@@ -391,9 +425,14 @@ impl Hub {
             let store = self.inner.store.clone();
             let principal = self.inner.principal_id;
             let (name, platform) = (request.device_name.clone(), request.platform.clone());
+            let paired_by = request.by.clone().or_else(|| viewer.map(str::to_owned));
             tokio::task::spawn_blocking(move || {
                 store.write(move |tx| {
-                    aurelius_storage::remote::create_client(tx, client_id, principal, &name, &platform, &verifier, &capabilities)
+                    aurelius_storage::remote::create_client(tx, client_id, principal, &name, &platform, &verifier, &capabilities)?;
+                    match &paired_by {
+                        Some(user) => aurelius_storage::remote::set_paired_by(tx, client_id, user),
+                        None => Ok(()),
+                    }
                 })
             })
             .await
@@ -404,20 +443,27 @@ impl Hub {
         } else {
             self.inner.pairings.lock().unwrap().reject(pairing_id);
         }
-        Ok(self.status().await)
+        Ok(self.status(viewer).await)
     }
 
-    pub async fn revoke(&self, client_id: ClientId) -> Result<RemoteStatus, ProtocolError> {
+    /// Revoke `viewer`'s own device or a device of nobody; another board member's is `not_found`.
+    pub async fn revoke(&self, client_id: ClientId, viewer: Option<&str>) -> Result<RemoteStatus, ProtocolError> {
+        self.may_manage(client_id, viewer).await?;
         let store = self.inner.store.clone();
         tokio::task::spawn_blocking(move || store.write(move |tx| aurelius_storage::remote::revoke_client(tx, client_id)))
             .await
             .map_err(internal)?
             .map_err(internal)?;
+        self.disconnect(client_id);
+        tracing::info!(%client_id, "remote device revoked");
+        Ok(self.status(viewer).await)
+    }
+
+    /// Close every open connection of a device that was revoked.
+    pub fn disconnect(&self, client_id: ClientId) {
         if let Some(live) = self.inner.live.lock().unwrap().get(&client_id) {
             let _ = live.kill.send(true);
         }
-        tracing::info!(%client_id, "remote device revoked");
-        Ok(self.status().await)
     }
 
     fn push_status(&self) -> PushStatus {
@@ -432,7 +478,7 @@ impl Hub {
         }
     }
 
-    pub async fn push_configure(&self, config: PushConfig) -> Result<RemoteStatus, ProtocolError> {
+    pub async fn push_configure(&self, config: PushConfig, viewer: Option<&str>) -> Result<RemoteStatus, ProtocolError> {
         let trimmed = |s: &str| Some(s.trim().to_owned()).filter(|s| !s.is_empty());
         if let Some(key) = config.key_p8.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
             push::parse_p8(key).map_err(validation)?;
@@ -447,10 +493,12 @@ impl Hub {
             };
         }
         self.save_config()?;
-        Ok(self.status().await)
+        Ok(self.status(viewer).await)
     }
 
-    pub async fn push_test(&self, client_id: ClientId) -> Result<(), ProtocolError> {
+    /// A test notification to `viewer`'s own device or a device of nobody.
+    pub async fn push_test(&self, client_id: ClientId, viewer: Option<&str>) -> Result<(), ProtocolError> {
+        self.may_manage(client_id, viewer).await?;
         let store = self.inner.store.clone();
         let target = tokio::task::spawn_blocking(move || store.read(aurelius_storage::remote::push_targets))
             .await

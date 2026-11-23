@@ -96,19 +96,24 @@ pub(super) async fn perform(shared: &Arc<Shared>, write: HostWrite, user: Option
         HostWrite::UpdateApply => HostResult::Update(crate::updates::apply(shared).await.map_err(|e| ProtocolError::new(ErrorCode::Validation, e))?),
         HostWrite::UpdatePrepareApp => HostResult::Update(crate::updates::prepare_app(shared).await),
         HostWrite::UpdateApplyApp => HostResult::Update(crate::updates::apply_app(shared).await.map_err(|e| ProtocolError::new(ErrorCode::Validation, e))?),
-        HostWrite::RemoteEnable => HostResult::Remote(crate::remote::enable(shared).await?),
-        HostWrite::RemoteDisable => HostResult::Remote(crate::remote::disable(shared).await?),
-        HostWrite::RemoteStartPairing => HostResult::PairingCode(crate::remote::pairing_start(shared).await?),
-        HostWrite::RemoteDecidePairing { pairing_id, approve, owner } => HostResult::Remote(crate::remote::pairing_decide(shared, &pairing_id, approve, owner).await?),
+        HostWrite::RemoteEnable => HostResult::Remote(crate::remote::enable(shared, user.as_deref()).await?),
+        HostWrite::RemoteDisable => HostResult::Remote(crate::remote::disable(shared, user.as_deref()).await?),
+        HostWrite::RemoteStartPairing => HostResult::PairingCode(crate::remote::pairing_start(shared, user.as_deref()).await?),
+        HostWrite::RemoteDecidePairing { pairing_id, approve, owner } => HostResult::Remote(crate::remote::pairing_decide(shared, &pairing_id, approve, owner, user.as_deref()).await?),
         HostWrite::RemoteRevoke { client_id } => {
-            let status = crate::remote::revoke(shared, client_id).await?;
+            let status = crate::remote::revoke(shared, client_id, user.as_deref()).await?;
             // Its board members' sessions ended with it (storage); their connections close now.
             shared.sessions.end_client(client_id, aurelius_domain::user::SignOutReason::Revoked);
             HostResult::Remote(status)
         }
-        HostWrite::PushConfigure(config) => HostResult::Remote(crate::remote::push_configure(shared, config).await?),
+        HostWrite::PushConfigure(config) => HostResult::Remote(crate::remote::push_configure(shared, config, user.as_deref()).await?),
         HostWrite::PushTest { client_id } => {
-            crate::remote::push_test(shared, client_id).await?;
+            crate::remote::push_test(shared, client_id, user.as_deref()).await?;
+            HostResult::Done
+        }
+        HostWrite::DeviceRevoke { client_id } => {
+            let Some(user) = user.as_deref() else { return Err(super::users::unauthenticated()) };
+            crate::remote::revoke_own(shared, client_id, user).await?;
             HostResult::Done
         }
         HostWrite::FsCreateDir { parent, name } => HostResult::DirListing(crate::browse::create(shared, parent, name).await?),
