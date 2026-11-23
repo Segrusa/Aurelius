@@ -10,6 +10,7 @@ import {
   designToOpen,
   htmlOf,
   isArtifact,
+  keptDesign,
   liveStep,
   OVERLAY_SELECTOR,
   type Overlay,
@@ -298,11 +299,22 @@ describe("liveStep", () => {
 });
 
 describe("designTicket", () => {
-  it("asks to build the page, names its path and says the design is attached", () => {
-    expect(designTicket("design/pricing.html")).toEqual({
-      title: "Build design/pricing.html",
+  it("asks to build the page by name, names its path and says the design is attached", () => {
+    expect(designTicket("pricing.html", "design/pricing.html")).toEqual({
+      title: "Build pricing.html",
       description:
         "Build this page as designed in design/pricing.html. The design is attached: follow its layout, colours and texts.",
     });
+  });
+});
+
+describe("keptDesign", () => {
+  const landing = html("f1");
+  it("is the file the finished answer kept with the design's name", () => {
+    expect(keptDesign(msg("a", 1, [landing]), "/work/site/landing.html")).toEqual(landing);
+  });
+  it("is nothing while the answer is written, or when it kept another file", () => {
+    expect(keptDesign(msg("a", 1, [landing], { status: "partial" }), "/work/site/landing.html")).toBeNull();
+    expect(keptDesign(msg("a", 1, [html("p", "pricing.html")]), "/work/site/landing.html")).toBeNull();
   });
 });

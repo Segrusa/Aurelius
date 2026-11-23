@@ -274,10 +274,23 @@ export function liveStep(
   return "update";
 }
 
-/** What a ticket made from a page of a design starts with; the page goes along as a file. */
-export function designTicket(path: string): { title: string; description: string } {
+/**
+ * The file a finished answer kept of the design it wrote at `path` (same file name), or null
+ * while it is still being written or when the answer did not keep it.
+ */
+export function keptDesign(message: Pick<MessageView, "status" | "files">, path: string): FileRef | null {
+  if (message.status !== "complete") return null;
+  const name = baseName(path);
+  return (message.files ?? []).find((f) => isArtifact(f) && f.name === name) ?? null;
+}
+
+/**
+ * What a ticket made from a page of a design starts with: the page's file name in the title, the
+ * path the employee named in the description. The page goes along as a file.
+ */
+export function designTicket(name: string, path: string): { title: string; description: string } {
   return {
-    title: `Build ${path}`,
+    title: `Build ${name}`,
     description: `Build this page as designed in ${path}. The design is attached: follow its layout, colours and texts.`,
   };
 }

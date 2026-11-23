@@ -6,7 +6,7 @@ import type { FileRef } from "@aurelius/protocol";
 import { useCallback, useState } from "react";
 import { usePlatform } from "../platform";
 import { DesignViewer } from "./artifact-live";
-import { designPages, designsOf } from "./artifact-logic";
+import { designPages, designsOf, keptDesign } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 import { useLive } from "./chat-live";
 import type { ChatContext } from "./chat-message";
@@ -36,9 +36,26 @@ function DockedDesign({
   path: string;
   onClose: () => void;
 }) {
+  const { artifacts } = usePlatform();
   const update = useLive(ctx.store, messageId);
-  const activity = update?.activity ?? ctx.messages.find((m) => m.id === messageId)?.activity ?? [];
+  const message = ctx.messages.find((m) => m.id === messageId);
+  const activity = update?.activity ?? message?.activity ?? [];
   const design = designsOf(activity, update?.draft ?? null).find((d) => d.path === path) ?? null;
+  // Once the answer kept the page, the panel shows the design's kept pages (with comments).
+  const kept = message ? keptDesign(message, path) : null;
+  if (kept && artifacts)
+    return (
+      <ArtifactViewer
+        pages={designPages(ctx.messages, kept, Date.now())}
+        openName={kept.name}
+        artifacts={artifacts}
+        messages={ctx.messages}
+        conversationId={ctx.conversationId}
+        send={ctx.artifactSend ?? null}
+        docked
+        onClose={onClose}
+      />
+    );
   if (!design) return null;
   return (
     <DesignViewer

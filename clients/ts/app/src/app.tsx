@@ -21,6 +21,7 @@ import { type Platform, PlatformProvider } from "./platform";
 import { activityFilters } from "./screens/activity-logic";
 import { BoardScreen } from "./screens/board";
 import { CodeScreen } from "./screens/code";
+import { DesignsScreen } from "./screens/designs";
 import { type EmployeeTab, isEmployeeTab } from "./screens/employee-logic";
 import { EmployeePage } from "./screens/employee-page";
 import { EmployeesScreen, OrgChartScreen } from "./screens/employees";
@@ -237,6 +238,8 @@ const history = createRoute({
 const code = createRoute({ getParentRoute: () => root, path: "/code", component: CodeScreen });
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
 const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
+// The workspace's designs; the screen says so when the server lacks them.
+const designs = createRoute({ getParentRoute: () => root, path: "/designs", component: DesignsScreen });
 // The log lives in Settings now; an old link keeps what it narrowed on.
 const activity = createRoute({
   getParentRoute: () => root,
@@ -291,6 +294,7 @@ const router = createRouter({
     settings,
     usage,
     scheduled,
+    designs,
     activity,
     orgChart,
     employee,

@@ -636,7 +636,7 @@ export function ArtifactViewer({
   const ticket = () => {
     if (html === undefined) return;
     overlays.open("ticket", {
-      ...designTicket(artifactName),
+      ...designTicket(name, artifactName),
       files: [new File([html], name, { type: "text/html" })],
     });
   };
