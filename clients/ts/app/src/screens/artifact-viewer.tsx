@@ -408,6 +408,11 @@ function CommentPanel({
   );
   const [target, setTarget] = useState<ArtifactPick | null>(null);
   const [draft, setDraft] = useState("");
+  // A picked element: its comment is typed at once.
+  const field = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (target !== null) field.current?.focus();
+  }, [target]);
   const { post, sending } = usePost(send);
 
   useEffect(() => {
@@ -456,6 +461,7 @@ function CommentPanel({
             <span {...stylex.props(styles.code)}>{target.selector}</span>
           </div>
           <TextArea
+            ref={field}
             label="Comment"
             rows={3}
             value={draft}

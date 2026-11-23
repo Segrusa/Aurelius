@@ -257,7 +257,10 @@ export class ArtifactViews {
       false,
     );
     const raw = await Promise.race([picked, stopped]);
-    return checkPick(raw);
+    const pick = checkPick(raw);
+    // The click went to the view, which keeps the keyboard; the comment is typed in the page.
+    if (pick !== null && !owner.isDestroyed()) owner.focus();
+    return pick;
   }
 
   /**
