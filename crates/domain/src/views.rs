@@ -1026,6 +1026,9 @@ pub struct DesignView {
     /// The task of a task's conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_id: Option<TaskId>,
+    /// A design session (feature `design_sessions`): listed from its start, also before its first page.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub design: bool,
     /// One per file name, in the order the pages first came.
     pub pages: Vec<DesignPageView>,
     /// When its newest page was kept.

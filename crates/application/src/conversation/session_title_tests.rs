@@ -47,7 +47,7 @@ fn setup() -> Setup {
 }
 
 fn session(s: &Setup) -> (ConversationId, aurelius_domain::RunId) {
-    let start = StartWorkSession { project_id: s.project, employee_id: s.orion, text: "kan je eens kijken waarom de export zo traag is".into(), images: vec![], files: vec![], worktree: false, run: RunSettings::default(), confirm_secret: false };
+    let start = StartWorkSession { project_id: s.project, employee_id: s.orion, text: "kan je eens kijken waarom de export zo traag is".into(), images: vec![], files: vec![], worktree: false, run: RunSettings::default(), confirm_secret: false, design: false };
     let result = exec(s, Command::StartWorkSession(start));
     let CommandResult::WorkSessionStarted { conversation_id, run_id, .. } = result else { panic!("{result:?}") };
     (conversation_id, run_id)

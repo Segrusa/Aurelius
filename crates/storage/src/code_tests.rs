@@ -93,7 +93,7 @@ fn run_in(f: &Fixture, conversation: ConversationId, status: &'static str) {
 
 fn session(f: &Fixture, employee: EmployeeId, worktree: &str, branch: &str) -> ConversationId {
     let (id, project, user, worktree, branch) = (ConversationId::new(), f.atlas, f.user, worktree.to_owned(), branch.to_owned());
-    f.store.write(move |tx| work_sessions::insert(tx, id, project, employee, "Session", user, Some((&worktree, &branch)), None)).unwrap();
+    f.store.write(move |tx| work_sessions::insert(tx, id, project, employee, "Session", user, Some((&worktree, &branch)), None, false)).unwrap();
     id
 }
 

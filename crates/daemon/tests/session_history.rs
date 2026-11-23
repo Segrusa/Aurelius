@@ -32,7 +32,7 @@ async fn session(root: &std::path::Path, grace: &Client) -> ConversationId {
     let CommandResult::ProjectCreated { project_id, .. } = made else { panic!("{made:?}") };
     let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Orion".into(), role: "Project Manager".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = grace.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
-    let start = StartWorkSession { project_id, employee_id, text: "Make the export faster.".into(), images: vec![], files: vec![], worktree: false, run: Default::default(), confirm_secret: false };
+    let start = StartWorkSession { project_id, employee_id, text: "Make the export faster.".into(), images: vec![], files: vec![], worktree: false, run: Default::default(), confirm_secret: false, design: false };
     let made = grace.execute(aurelius_client::envelope(Command::StartWorkSession(start), None)).await.unwrap().result;
     let CommandResult::WorkSessionStarted { conversation_id, .. } = made else { panic!("{made:?}") };
     for _ in 0..400 {

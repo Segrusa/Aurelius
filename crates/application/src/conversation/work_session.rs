@@ -78,17 +78,18 @@ struct Start<'a> {
     files: &'a [String],
     worktree: bool,
     run: &'a aurelius_domain::task::RunSettings,
+    design: bool,
 }
 
 impl CommandService {
     pub(crate) fn start_work_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &StartWorkSession) -> Result<Committed, AppError> {
-        let start = Start { project_id: cmd.project_id, employee: Some(cmd.employee_id), text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, run: &cmd.run };
+        let start = Start { project_id: cmd.project_id, employee: Some(cmd.employee_id), text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, run: &cmd.run, design: cmd.design };
         self.start_session(ctx, envelope, hash, start)
     }
 
     /// `work_session.dispatch`: as `work_session.start`, and the dispatcher chooses who takes it (`session_dispatch`).
     pub(crate) fn dispatch_work_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &DispatchWorkSession) -> Result<Committed, AppError> {
-        let start = Start { project_id: cmd.project_id, employee: None, text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, run: &cmd.run };
+        let start = Start { project_id: cmd.project_id, employee: None, text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, run: &cmd.run, design: cmd.design };
         self.start_session(ctx, envelope, hash, start)
     }
 
@@ -115,7 +116,7 @@ impl CommandService {
         };
         let uploads = uploaded.as_ref().map(|(_, u)| u.clone()).unwrap_or_default();
         let text_blob = self.store.blobs().put(text.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?;
-        let (project_id, asked, worktree) = (cmd.project_id, cmd.employee, cmd.worktree);
+        let (project_id, asked, worktree, design) = (cmd.project_id, cmd.employee, cmd.worktree, cmd.design);
         let conversation_id = ConversationId::new();
         let worktree_folder = worktree.then(|| worktree_path(self.store.root(), conversation_id));
         let message_id = MessageId::new();
@@ -157,7 +158,7 @@ impl CommandService {
                 }
             };
             let title = aurelius_domain::conversation::derive_title(&text);
-            aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str())), dispatch)?;
+            aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str())), dispatch, design)?;
             if let Some(mode) = run.mode {
                 conv::set_agent_mode(tx, conversation_id, mode)?;
             }

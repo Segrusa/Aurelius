@@ -10,61 +10,40 @@ use rusqlite::{Connection, params};
 const IS_HTML: &str = "(lower(json_extract(f.value, '$.media_type')) = 'text/html' OR lower(json_extract(f.value, '$.media_type')) LIKE 'text/html;%')";
 
 /// The designs of `project` (all projects without one), the one with the newest page
-/// first, at most `DESIGNS_MAX`. A deleted message no longer offers its files.
-pub fn list(
-    conn: &Connection,
-    project: Option<ProjectId>,
-) -> Result<Vec<DesignView>, StorageError> {
+/// first, at most `DESIGNS_MAX`. A deleted message no longer offers its files. A design
+/// session (`migrations/0048`) is a design from the start, also before its first page.
+pub fn list(conn: &Connection, project: Option<ProjectId>) -> Result<Vec<DesignView>, StorageError> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT c.id, c.kind, c.project_id, c.title, t.number, k.id, m.id, m.created_at_ms, f.value
+        "SELECT c.id, c.kind, c.project_id, c.title, t.number, k.id, COALESCE(w.design, 0), m.id, m.created_at_ms, f.value
          FROM messages m
          JOIN conversations c ON c.id = m.conversation_id
          JOIN json_each(m.meta_json, '$.files') f
          LEFT JOIN tickets t ON t.conversation_id = c.id
          LEFT JOIN tasks k ON k.conversation_id = c.id
+         LEFT JOIN work_sessions w ON w.conversation_id = c.id
          WHERE m.meta_json IS NOT NULL AND m.deleted_at_ms IS NULL AND c.project_id IS NOT NULL
            AND (?1 IS NULL OR c.project_id = ?1) AND {IS_HTML}
          ORDER BY c.id, m.ordinal, f.key"
     ))?;
     let rows = stmt.query_map(params![project.map(|p| p.to_string())], |r| {
         Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, String>(3)?,
-            r.get::<_, Option<i64>>(4)?,
-            r.get::<_, Option<String>>(5)?,
-            r.get::<_, String>(6)?,
-            r.get::<_, i64>(7)?,
-            r.get::<_, String>(8)?,
+            (r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?),
+            (r.get::<_, Option<i64>>(4)?, r.get::<_, Option<String>>(5)?, r.get::<_, bool>(6)?),
+            (r.get::<_, String>(7)?, r.get::<_, i64>(8)?, r.get::<_, String>(9)?),
         ))
     })?;
     let mut designs: Vec<DesignView> = Vec::new();
     for row in rows {
-        let (conversation, kind, project_id, title, ticket_number, task, message, at_ms, file) =
-            row?;
-        let Ok(file) = serde_json::from_str::<FileRef>(&file) else {
-            continue;
-        };
-        let page = DesignPageView {
-            file,
-            message_id: parse(MessageId::parse(&message))?,
-            at_ms,
-        };
+        let ((conversation, kind, project_id, title), (ticket_number, task, design), (message, at_ms, file)) = row?;
+        let Ok(file) = serde_json::from_str::<FileRef>(&file) else { continue };
+        let page = DesignPageView { file, message_id: parse(MessageId::parse(&message))?, at_ms };
         let conversation = parse(ConversationId::parse(&conversation))?;
-        match designs
-            .last_mut()
-            .filter(|d| d.conversation_id == conversation)
-        {
-            Some(design) => {
-                design.last_at_ms = design.last_at_ms.max(at_ms);
-                match design
-                    .pages
-                    .iter_mut()
-                    .find(|p| p.file.name == page.file.name)
-                {
+        match designs.last_mut().filter(|d| d.conversation_id == conversation) {
+            Some(found) => {
+                found.last_at_ms = found.last_at_ms.max(at_ms);
+                match found.pages.iter_mut().find(|p| p.file.name == page.file.name) {
                     Some(older) => *older = page,
-                    None => design.pages.push(page),
+                    None => found.pages.push(page),
                 }
             }
             None => designs.push(DesignView {
@@ -74,10 +53,35 @@ pub fn list(
                 title,
                 ticket_number,
                 task_id: task.map(|t| parse(TaskId::parse(&t))).transpose()?,
+                design,
                 pages: vec![page],
                 last_at_ms: at_ms,
             }),
         }
+    }
+    // Design sessions without a page yet.
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.project_id, c.title, w.created_at_ms FROM work_sessions w JOIN conversations c ON c.id = w.conversation_id
+         WHERE w.design = 1 AND c.kind = 'session' AND c.archived_at_ms IS NULL AND (?1 IS NULL OR c.project_id = ?1)",
+    )?;
+    let empty = stmt.query_map(params![project.map(|p| p.to_string())], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))?;
+    for row in empty {
+        let (conversation, project_id, title, created_at_ms) = row?;
+        let conversation = parse(ConversationId::parse(&conversation))?;
+        if designs.iter().any(|d| d.conversation_id == conversation) {
+            continue;
+        }
+        designs.push(DesignView {
+            conversation_id: conversation,
+            kind: "session".to_owned(),
+            project_id: parse(ProjectId::parse(&project_id))?,
+            title,
+            ticket_number: None,
+            task_id: None,
+            design: true,
+            pages: Vec::new(),
+            last_at_ms: created_at_ms,
+        });
     }
     designs.sort_by_key(|d| std::cmp::Reverse(d.last_at_ms));
     designs.truncate(DESIGNS_MAX);
@@ -223,5 +227,42 @@ mod tests {
             .map(|d| d.title)
             .collect();
         assert_eq!(titles, ["Beta page", "About page", "Landing page"]);
+    }
+}
+
+#[cfg(test)]
+mod design_session_tests {
+    use super::*;
+    use crate::{Store, work_sessions};
+    use aurelius_domain::{EmployeeId, UserId};
+
+    const ALPHA: &str = "00000000-0000-7000-8000-0000000008a1";
+    const PIXEL: &str = "00000000-0000-7000-8000-0000000008b1";
+    const ALEX: &str = "00000000-0000-7000-8000-0000000008c1";
+
+    #[test]
+    fn a_design_session_is_a_design_before_its_first_page_and_a_plain_session_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let (design, plain) = (ConversationId::new(), ConversationId::new());
+        store
+            .write(move |tx| {
+                let company: String = tx.query_row("SELECT id FROM company", [], |r| r.get(0))?;
+                let global: String = tx.query_row("SELECT id FROM scopes WHERE kind = 'global'", [], |r| r.get(0))?;
+                tx.execute_batch(&format!(
+                    "INSERT INTO scopes(id, kind, parent_id, owner_id) VALUES ('pa', 'project', '{global}', '{ALPHA}'), ('ep', 'employee', '{global}', '{PIXEL}');
+                     INSERT INTO projects(id, scope_id, name, status, version, created_at_ms, updated_at_ms) VALUES ('{ALPHA}', 'pa', 'Alpha', 'active', 1, 1, 1);
+                     INSERT INTO employees(id, scope_id, name, role, config_json, status, version, created_at_ms, updated_at_ms) VALUES ('{PIXEL}', 'ep', 'Pixel', 'Designer', '{{}}', 'active', 1, 1, 1);
+                     INSERT INTO users(id, company_id, username, password_hash, created_at_ms, updated_at_ms) VALUES ('{ALEX}', '{company}', 'alex', '$argon2id$x', 1, 1);"
+                ))?;
+                let (project, employee, user) = (ProjectId::parse(ALPHA).unwrap(), EmployeeId::parse(PIXEL).unwrap(), UserId::parse(ALEX).unwrap());
+                work_sessions::insert(tx, design, project, employee, "Pricing page", user, None, None, true)?;
+                work_sessions::insert(tx, plain, project, employee, "Fix the login", user, None, None, false)?;
+                Ok(())
+            })
+            .unwrap();
+        let designs = store.read(|c| list(c, Some(ProjectId::parse(ALPHA).unwrap()))).unwrap();
+        let shown: Vec<_> = designs.iter().map(|d| (d.conversation_id, d.title.as_str(), d.design, d.pages.len())).collect();
+        assert_eq!(shown, [(design, "Pricing page", true, 0)]);
     }
 }

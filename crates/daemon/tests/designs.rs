@@ -126,6 +126,7 @@ async fn a_page_an_employee_writes_in_a_session_is_listed_as_a_design_of_its_pro
         worktree: false,
         run: Default::default(),
         confirm_secret: false,
+        design: true,
     };
     let CommandResult::WorkSessionStarted {
         conversation_id, ..
@@ -140,7 +141,8 @@ async fn a_page_an_employee_writes_in_a_session_is_listed_as_a_design_of_its_pro
 
     let mut listed = designs(&client, Some(tidewater)).await;
     for _ in 0..400 {
-        if !listed.designs.is_empty() {
+        // A design session is listed from its start; wait for its first page.
+        if listed.designs.iter().any(|d| !d.pages.is_empty()) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
@@ -170,6 +172,11 @@ async fn a_page_an_employee_writes_in_a_session_is_listed_as_a_design_of_its_pro
         "the page opens with file.get"
     );
 
+    assert!(design.design, "a design session");
+    assert!(aurelius_protocol::FEATURES.contains(&feature::DESIGN_SESSIONS));
+    let ResponseBody::WorkSessions(listed_sessions) = client.call(Method::WorkSessionList { project_id: Some(tidewater) }).await.unwrap() else { panic!("not sessions") };
+    let sessions = listed_sessions.sessions;
+    assert!(sessions.iter().any(|s| s.conversation_id == conversation_id && s.design), "{sessions:?}");
     assert!(
         designs(&client, Some(other)).await.designs.is_empty(),
         "another project has none"

@@ -461,6 +461,11 @@ pub mod feature {
     /// pages of each conversation of a project. A client without this feature shows no
     /// Designs page.
     pub const DESIGNS: &str = "designs";
+    /// Design sessions (protocol 5, additive): `work_session.start` and `work_session.dispatch`
+    /// take `design`, the employee is told to make HTML pages, `work_session.list` and
+    /// `design.list` say which sessions are designs. A client without this feature offers no
+    /// Design in New session.
+    pub const DESIGN_SESSIONS: &str = "design_sessions";
 }
 
 /// Every feature this build has.
@@ -522,6 +527,7 @@ pub const FEATURES: &[&str] = &[
     feature::CODE_VIEW,
     feature::ARTIFACT_DRAFTS,
     feature::DESIGNS,
+    feature::DESIGN_SESSIONS,
 ];
 
 /// The answer of `command.applied`.

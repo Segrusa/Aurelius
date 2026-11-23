@@ -67,7 +67,7 @@ fn setup() -> Setup {
 }
 
 fn start(project: ProjectId, employee: EmployeeId, worktree: bool) -> Command {
-    Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], files: vec![], worktree, run: RunSettings::default(), confirm_secret: false })
+    Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], files: vec![], worktree, run: RunSettings::default(), confirm_secret: false, design: false })
 }
 
 fn started(result: CommandResult) -> (ConversationId, aurelius_domain::RunId) {
@@ -163,10 +163,32 @@ fn a_session_starts_with_the_chosen_mode_model_and_effort() {
 
 #[test]
 fn a_sessions_run_is_told_it_is_a_session_and_where_it_works() {
-    let folder = crate::run::plan::work_session_guidance(None);
+    let folder = crate::run::plan::work_session_guidance(None, false);
     assert!(folder.contains("## This is a work session") && folder.contains("no ticket") && folder.contains("project's folder itself"));
-    let own = crate::run::plan::work_session_guidance(Some(("/data/worktrees/session-1a2b3c4d", "session/1a2b3c4d")));
+    assert!(!folder.contains("design session"), "a session that is no design");
+    let own = crate::run::plan::work_session_guidance(Some(("/data/worktrees/session-1a2b3c4d", "session/1a2b3c4d")), false);
     assert!(own.contains("/data/worktrees/session-1a2b3c4d") && own.contains("session/1a2b3c4d") && own.contains("never merge"));
+}
+
+#[test]
+fn a_design_sessions_run_is_told_to_make_html_pages_and_name_their_paths() {
+    let design = crate::run::plan::work_session_guidance(None, true);
+    assert!(design.contains("## This is a work session") && design.contains("## This is a design session"), "{design}");
+    assert!(design.contains("design/<kebab-name>.html") && design.contains("Name the full path"), "{design}");
+}
+
+#[test]
+fn a_design_session_keeps_that_it_is_one() {
+    let s = setup();
+    let mut cmd = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut cmd {
+        start.design = true;
+    }
+    let (conversation, _) = started(exec_as(&s, Some(s.user), cmd).unwrap());
+    let session = s.service.store().read(|c| aurelius_storage::work_sessions::of_conversation(c, conversation)).unwrap().unwrap();
+    assert!(session.design);
+    let listed = s.service.store().read(|c| aurelius_storage::work_sessions::list(c, s.user, None)).unwrap();
+    assert!(listed.iter().any(|v| v.conversation_id == conversation && v.design), "{listed:?}");
 }
 
 #[test]
