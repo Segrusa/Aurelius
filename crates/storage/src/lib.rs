@@ -20,6 +20,7 @@ pub mod message_edits;
 pub mod conversation_sessions;
 pub mod employees;
 pub mod work_sessions;
+pub mod designs;
 pub mod code;
 pub mod employee_profiles;
 pub mod activity_log;

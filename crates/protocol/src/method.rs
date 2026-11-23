@@ -105,6 +105,13 @@ pub enum Method {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         project_id: Option<aurelius_domain::ProjectId>,
     },
+    /// The designs of a project, or of all without one: the kept HTML pages of each
+    /// conversation, the latest first (feature `designs`).
+    #[serde(rename = "design.list")]
+    DesignList {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project_id: Option<aurelius_domain::ProjectId>,
+    },
     /// The company's group chat (Team chat): the user and every employee. Its
     /// messages and settings, as `conversation.get` answers them; an employee's
     /// messages carry its name as `author`. Write with `group_chat.send`.

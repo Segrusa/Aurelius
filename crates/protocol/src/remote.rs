@@ -57,6 +57,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::EmployeeChat { .. }
         | Method::EmployeeChats
         | Method::WorkSessionList { .. }
+        | Method::DesignList { .. }
         | Method::ScheduledMessageList { .. }
         | Method::ThreadWaiting { .. }
         | Method::EmployeeScratchpad { .. }

@@ -457,6 +457,10 @@ pub mod feature {
     /// but only to a connection whose hello accepts `artifact_drafts`. The whole call
     /// follows as ever in `activity`.
     pub const ARTIFACT_DRAFTS: &str = "artifact_drafts";
+    /// A workspace's designs (protocol 5, additive): `design.list` gives the kept HTML
+    /// pages of each conversation of a project. A client without this feature shows no
+    /// Designs page.
+    pub const DESIGNS: &str = "designs";
 }
 
 /// Every feature this build has.
@@ -517,6 +521,7 @@ pub const FEATURES: &[&str] = &[
     feature::TICKET_MADE_TITLE,
     feature::CODE_VIEW,
     feature::ARTIFACT_DRAFTS,
+    feature::DESIGNS,
 ];
 
 /// The answer of `command.applied`.
@@ -687,6 +692,8 @@ pub enum ResponseBody {
     RunGuidelines(aurelius_domain::guideline::RunGuidelines),
     /// `server.get_name`.
     ServerName(aurelius_domain::server::ServerNameView),
+    /// `design.list`.
+    Designs(aurelius_domain::views::DesignsSnapshot),
     ProjectConversations(ProjectConversationsSnapshot),
     Approvals(ApprovalsSnapshot),
     Connections(ProvidersSnapshot),
