@@ -168,6 +168,8 @@ function serveArtifacts(): void {
   );
   // Comments and tweaks: main runs its own code in an isolated world of the view and checks what
   // comes back (artifact-world.ts, artifact-tweaks.ts). The artifact itself gets no channel.
+  // A design being written: its newer HTML, shown in the same document (no new view).
+  handle("artifact:update", (sender, html: unknown) => views.update(sender, html));
   handle("artifact:pick", (sender) => views.pick(sender));
   handle("artifact:pick-stop", (sender) => views.stopPick(sender));
   handle("artifact:tweaks", (sender) => views.tweaks(sender));

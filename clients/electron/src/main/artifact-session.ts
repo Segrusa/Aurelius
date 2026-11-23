@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserWindow, type Session, session, type WebContents, WebContentsView } from "electron";
 import {
+  ARTIFACT_BYTES_MAX,
   ARTIFACT_CSP,
   ARTIFACT_PARTITION,
   ARTIFACT_PROXY,
@@ -39,6 +40,8 @@ import {
   tweakValue,
 } from "./artifact-tweaks";
 import {
+  morphChildren,
+  morphInWorld,
   pickInWorld,
   readTweaksInWorld,
   resetTweaksInWorld,
@@ -275,6 +278,18 @@ export class ArtifactViews {
     );
     const raw = await Promise.race([picked, stopped]);
     return checkPick(raw);
+  }
+
+  /**
+   * Shows `html` in `owner`'s view in place of what it shows, in the same document (morphInWorld):
+   * a design that is still being written grows without a new view. False when there is no view,
+   * the HTML is not a string within ARTIFACT_BYTES_MAX, or the world call failed.
+   */
+  async update(owner: WebContents, html: unknown): Promise<boolean> {
+    if (typeof html !== "string" || html.length > ARTIFACT_BYTES_MAX) return false;
+    const shown = this.own(owner);
+    if (shown === null) return false;
+    return (await this.run(shown, worldCall(morphInWorld, html, morphChildren))) === true;
   }
 
   /** Ends comment mode in `owner`'s view: the outline goes, and a waiting pick gives null. */

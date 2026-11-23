@@ -286,3 +286,20 @@ export function withDrag<P extends DragHandlers>(props: P, onDrag: (dragging: bo
     },
   };
 }
+
+/**
+ * What the viewer of a design being written does with newer HTML (`html`) while it shows `served`:
+ * load the first draft in a view ("serve"), grow it in that same view ("update": no new view, so
+ * no flash and the scroll stays), or nothing. A finished design that holds scripts is loaded once
+ * more, because scripts put in by an update do not run.
+ */
+export function liveStep(
+  served: string | undefined,
+  html: string | undefined,
+  writing: boolean,
+): "serve" | "update" | "none" {
+  if (html === undefined || html === served) return "none";
+  if (served === undefined) return "serve";
+  if (!writing && /<script[\s>]/i.test(html)) return "serve";
+  return "update";
+}

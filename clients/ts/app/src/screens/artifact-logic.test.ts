@@ -9,6 +9,7 @@ import {
   designToOpen,
   htmlOf,
   isArtifact,
+  liveStep,
   OVERLAY_SELECTOR,
   type Overlay,
   overlaysOver,
@@ -323,5 +324,22 @@ describe("withDrag", () => {
     wrapped._onResizeStart();
     wrapped._onResizeCancel?.();
     expect(seen).toEqual([true, false]);
+  });
+});
+
+describe("liveStep", () => {
+  const a = "<h1>A</h1>";
+  const ab = "<h1>A</h1><p>B</p>";
+  it("loads the first draft, then grows it in the same view while it is written", () => {
+    expect(liveStep(undefined, undefined, true)).toBe("none");
+    expect(liveStep(undefined, a, true)).toBe("serve");
+    expect(liveStep(a, a, true)).toBe("none");
+    expect(liveStep(a, ab, true)).toBe("update");
+  });
+  it("loads a finished design once more only when it has scripts to run", () => {
+    expect(liveStep(a, ab, false)).toBe("update");
+    expect(liveStep(a, `${ab}<script>go()</script>`, false)).toBe("serve");
+    expect(liveStep(a, `${ab}<SCRIPT type="module">`, false)).toBe("serve");
+    expect(liveStep(a, `${ab}<scripts-list>`, false)).toBe("update");
   });
 });

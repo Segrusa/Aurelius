@@ -111,6 +111,11 @@ export interface Platform {
     /** Without a slot: every view of this page. */
     hide(slot?: ArtifactSlot): Promise<void>;
     /**
+     * Shows newer HTML of the design in the viewer's own view, in the same document: no new view,
+     * so no flash and the scroll stays. False when there is no view to show it in.
+     */
+    update(html: string): Promise<boolean>;
+    /**
      * Comment mode in the viewer's own view: resolves with the element the board member clicks,
      * or null when `stopPick` ended it or the view went.
      */

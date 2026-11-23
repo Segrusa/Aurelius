@@ -50,6 +50,7 @@ import {
   type ArtifactVersion,
   DIALOG_SELECTOR,
   htmlOf,
+  liveStep,
   OVERLAY_SELECTOR,
   overlaysOver,
   stageBounds,
@@ -203,24 +204,6 @@ export interface LiveDesign {
   html: string | null;
   writing: boolean;
   error: string | null;
-}
-
-/** While a design grows, the view shows it again at most this often (each time is a new view). */
-const LIVE_REDRAW_MS = 1000;
-
-/** `value`, changed at most every `everyMs` (always the latest); at once when `everyMs` is 0. */
-function useSteady<T>(value: T, everyMs: number): T {
-  const [shown, setShown] = useState(value);
-  const last = useRef(0);
-  useEffect(() => {
-    const wait = everyMs === 0 ? 0 : Math.max(0, last.current + everyMs - Date.now());
-    const timer = setTimeout(() => {
-      last.current = Date.now();
-      setShown(value);
-    }, wait);
-    return () => clearTimeout(timer);
-  }, [value, everyMs]);
-  return everyMs === 0 ? value : shown;
 }
 
 /** The HTML of one version, handed to main for as long as it is shown. */
@@ -742,8 +725,14 @@ export function ArtifactViewer({
   const [compareId, setCompareId] = useState<string | null>(null);
   const current = versions.find((v) => v.file.id === id) ?? versions[0];
   const file = useArtifactFile(live ? null : id);
-  const html = useSteady(live ? (live.html ?? undefined) : file.data?.html, live?.writing ? LIVE_REDRAW_MS : 0);
-  const url = useServed(artifacts, html);
+  const html = live ? (live.html ?? undefined) : file.data?.html;
+  const writing = live?.writing === true;
+  // A design being written loads once and then grows in that same view (liveStep): a new view
+  // per draft flashed and jumped back to the top.
+  const [liveServed, setLiveServed] = useState<string | undefined>(undefined);
+  const step = live ? liveStep(liveServed, html, writing) : "none";
+  if (step === "serve") setLiveServed(html);
+  const url = useServed(artifacts, live ? liveServed : html);
   // The dock's width: dragged at its left edge, remembered. While it is dragged the view steps
   // aside, because the pointer over the view would go to the artifact's page, not to the handle.
   const resizing = useRef(false);
@@ -760,7 +749,10 @@ export function ArtifactViewer({
     resizing.current = on;
   });
   const { frame, stage, ready } = useArtifactView(artifacts, url, reloads, "main", resizing);
-  const writing = live?.writing === true;
+  const growing = ready && step === "update" ? html : undefined;
+  useEffect(() => {
+    if (growing !== undefined) void artifacts.update(growing);
+  }, [artifacts, growing]);
   const loadError = live ? live.error : (file.error?.message ?? null);
   const { post } = usePost(send);
   // Another screen: the viewer closes with it (main takes the view away as well).
@@ -880,7 +872,8 @@ export function ArtifactViewer({
           label="Reload"
           onClick={() => {
             setReloads((n) => n + 1);
-            if (!live) void file.refetch();
+            if (live) setLiveServed(html);
+            else void file.refetch();
           }}
         />
       </span>

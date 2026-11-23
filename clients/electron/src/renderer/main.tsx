@@ -58,6 +58,7 @@ interface Bridge {
   showArtifact(url: string, bounds: ArtifactBounds | null, slot?: ArtifactSlot): Promise<void>;
   placeArtifact(bounds: ArtifactBounds | null, slot?: ArtifactSlot): Promise<void>;
   hideArtifact(slot?: ArtifactSlot): Promise<void>;
+  updateArtifact(html: string): Promise<boolean>;
   pickInArtifact(): Promise<ArtifactPick | null>;
   stopArtifactPick(): Promise<void>;
   artifactTweaks(): Promise<ArtifactTweak[]>;
@@ -156,6 +157,7 @@ const platform: Platform = {
     show: (url, bounds, slot) => bridge.showArtifact(url, bounds, slot),
     place: (bounds, slot) => bridge.placeArtifact(bounds, slot),
     hide: (slot) => bridge.hideArtifact(slot),
+    update: (html) => bridge.updateArtifact(html),
     pick: () => bridge.pickInArtifact(),
     stopPick: () => bridge.stopArtifactPick(),
     tweaks: () => bridge.artifactTweaks(),

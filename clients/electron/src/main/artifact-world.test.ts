@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { type SelectorNode, selectorOf, stopPickInWorld, worldCall } from "./artifact-world";
+import {
+  type MorphNode,
+  morphChildren,
+  type SelectorNode,
+  selectorOf,
+  stopPickInWorld,
+  worldCall,
+} from "./artifact-world";
 
 /** A small tree of fake elements: `tree("body", [["main", [["button"], ["button"]]]])`. */
 type Spec = [tag: string, children?: Spec[], id?: string];
@@ -95,5 +102,102 @@ describe("worldCall", () => {
     expect(stopped).toBeNull();
     delete scope.__aureliusPick;
     expect(new Function(`return ${worldCall(stopPickInWorld)}`)()).toBe(false);
+  });
+});
+
+/** A fake DOM node for morphChildren: elements (`<tag>` with attributes) and text. */
+class Fake implements MorphNode {
+  parent: Fake | null = null;
+  kids: Fake[] = [];
+  attrs = new Map<string, string>();
+  constructor(
+    readonly nodeType: number,
+    readonly nodeName: string,
+    public nodeValue: string | null = null,
+  ) {}
+  get childNodes() {
+    return this.kids;
+  }
+  get attributes() {
+    return [...this.attrs].map(([name, value]) => ({ name, value }));
+  }
+  getAttribute(name: string) {
+    return this.attrs.get(name) ?? null;
+  }
+  setAttribute(name: string, value: string) {
+    this.attrs.set(name, value);
+  }
+  removeAttribute(name: string) {
+    this.attrs.delete(name);
+  }
+  isEqualNode(other: MorphNode): boolean {
+    return render(this) === render(other as Fake);
+  }
+  appendChild(node: MorphNode) {
+    const n = node as Fake;
+    n.parent?.kids.splice(n.parent.kids.indexOf(n), 1);
+    n.parent = this;
+    this.kids.push(n);
+    return n;
+  }
+  replaceWith(node: MorphNode) {
+    const n = node as Fake;
+    n.parent?.kids.splice(n.parent.kids.indexOf(n), 1);
+    const parent = this.parent as Fake;
+    parent.kids[parent.kids.indexOf(this)] = n;
+    n.parent = parent;
+    this.parent = null;
+  }
+  remove() {
+    this.parent?.kids.splice(this.parent.kids.indexOf(this), 1);
+    this.parent = null;
+  }
+}
+const el = (tag: string, attrs: Record<string, string> = {}, ...kids: Fake[]) => {
+  const e = new Fake(1, tag.toUpperCase());
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  for (const k of kids) e.appendChild(k);
+  return e;
+};
+const text = (value: string) => new Fake(3, "#text", value);
+const render = (n: Fake): string =>
+  n.nodeType === 3
+    ? (n.nodeValue ?? "")
+    : `<${n.nodeName.toLowerCase()}${n.attributes.map((a) => ` ${a.name}="${a.value}"`).join("")}>${n.kids.map(render).join("")}</${n.nodeName.toLowerCase()}>`;
+
+describe("morphChildren", () => {
+  it("keeps the nodes that did not change and grows the one being written", () => {
+    const header = el("header", {}, text("Tidewater"));
+    const card = el("section", { class: "card" }, el("h2", {}, text("Plan your")));
+    const now = el("body", {}, header, card);
+    const next = el(
+      "body",
+      {},
+      el("header", {}, text("Tidewater")),
+      el("section", { class: "card" }, el("h2", {}, text("Plan your week")), el("p", {}, text("Calm"))),
+      el("section", { class: "card" }),
+    );
+    morphChildren(now, next);
+    expect(render(now)).toBe(
+      '<body><header>Tidewater</header><section class="card"><h2>Plan your week</h2><p>Calm</p></section><section class="card"></section></body>',
+    );
+    // The same nodes stay in the document: nothing above the written part is drawn again.
+    expect(now.kids[0]).toBe(header);
+    expect(now.kids[1]).toBe(card);
+  });
+
+  it("follows changed attributes, a new tag and removed nodes", () => {
+    const now = el("body", { class: "a" }, el("div", { id: "x", hidden: "" }), el("p"), el("p"));
+    const next = el("body", { class: "b" }, el("div", { id: "y" }), el("ul"));
+    morphChildren(now, next);
+    expect(render(now)).toBe('<body class="a"><div id="y"></div><ul></ul></body>');
+  });
+
+  it("puts a script in as a new node instead of changing one in place", () => {
+    const old = el("script", {}, text("a()"));
+    const now = el("body", {}, old);
+    morphChildren(now, el("body", {}, el("script", {}, text("b()"))));
+    expect(now.kids[0]).not.toBe(old);
+    expect(render(now)).toBe("<body><script>b()</script></body>");
   });
 });
