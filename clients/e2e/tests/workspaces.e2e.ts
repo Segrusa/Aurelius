@@ -69,6 +69,12 @@ const script = {
 
 const choose = chooseWorkspace;
 
+/** A workspace tile opens its Overview (ticket #82): the tests of the Board open it again from the panel. */
+async function openBoard(page: Page) {
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Board", exact: true }).click();
+  await expect(page).toHaveURL(/\/board$/);
+}
+
 interface Box {
   x: number;
   y: number;
@@ -198,6 +204,7 @@ test("switching narrows the board and the inbox, and All workspaces shows everyt
     await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeVisible();
 
     await choose(page, "Atlas");
+    await openBoard(page);
     await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
     await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeHidden();
 
@@ -216,6 +223,7 @@ test("switching narrows the board and the inbox, and All workspaces shows everyt
     await expectWorkspace(page, "Zephyr");
 
     await choose(page, "All workspaces");
+    await openBoard(page);
     await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
     await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeVisible();
   } finally {
@@ -239,6 +247,7 @@ test("new work starts in the workspace", async ({ page }) => {
   const site = await open(page, "/board");
   try {
     await choose(page, "Zephyr");
+    await openBoard(page);
     // The Board's own New ticket.
     await page.getByRole("main").getByRole("button", { name: "New ticket" }).click();
     const dialog = page.getByRole("dialog");
@@ -263,6 +272,9 @@ test("the rail switches with the sidebar folded, and the palette switches too", 
     await expect(page.locator("[data-sidebar]").first()).toHaveJSProperty("offsetWidth", 56);
     await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
     await choose(page, "Atlas");
+    // The tile opens the workspace's Overview, also with the panel folded.
+    await expect(page).toHaveURL(/\/overview$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Atlas" })).toBeVisible();
     await expect(page.getByRole("main").getByText("Zephyr ticket")).toBeHidden();
 
     await page.keyboard.press("Control+k");
@@ -321,9 +333,117 @@ for (const theme of ["dark", "light"] as const) {
       }, theme);
       await page.reload();
       await choose(page, "Atlas");
+      await openBoard(page);
       await expect(page.getByRole("main").getByText("Atlas ticket")).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
       await page.screenshot({ path: join(SHOTS as string, `workspace-${theme}.png`), animations: "disabled" });
+    } finally {
+      site.close();
+    }
+  });
+}
+
+// The Overview (ticket #82): a tile opens it; it shows the workspace's facts, what needs you, the board
+// in five lanes and what got done; All workspaces shows a card per workspace.
+const ZEPHYR_REVIEW = ticket("t3", 23, "review", {
+  title: "Zephyr review",
+  project_id: ZEPHYR,
+  project_name: "Zephyr",
+  owner_name: "Flux",
+  owner_employee_id: "e-flux",
+});
+const ZEPHYR_DONE = ticket("t4", 24, "done", {
+  title: "Zephyr shipped",
+  project_id: ZEPHYR,
+  project_name: "Zephyr",
+  owner_name: "Forge",
+  done_at_ms: Date.now() - 60_000,
+});
+
+async function openOverview(page: Page, path: string, workspace?: string) {
+  const site = await serveStatic(WEB_DIST);
+  if (workspace) await page.addInitScript((id) => localStorage.setItem("aurelius.workspace:h", id), workspace);
+  await scriptServer(page, {
+    ...script,
+    projects: [
+      project(ATLAS, "Atlas"),
+      { ...project(ZEPHYR, "Zephyr"), description: "Room booking for coworking spaces.", folder: "/work/zephyr" },
+    ],
+    tickets: [...tickets, ZEPHYR_REVIEW, ZEPHYR_DONE],
+  });
+  await page.goto(`${site.origin}${path}`);
+  return site;
+}
+
+test("a workspace tile opens its Overview, with its facts, needs, board and what got done", async ({ page }) => {
+  const site = await openOverview(page, "/board");
+  try {
+    await choose(page, "Zephyr");
+    await expect(page).toHaveURL(/\/overview$/);
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { level: 1, name: /Zephyr/ })).toBeVisible();
+    await expect(main.getByText("Room booking for coworking spaces.")).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Overview" }),
+    ).toHaveAttribute("aria-current", "page");
+
+    const facts = main.getByRole("region", { name: "Workspace" });
+    await expect(facts.getByText("/work/zephyr")).toBeVisible();
+    await expect(facts.getByText("Only each employee's own")).toBeVisible();
+
+    const needs = main.getByRole("region", { name: "Needs you" });
+    await expect(
+      needs.getByRole("button", { name: /Ready for review · Flux.*#23 Zephyr review.*Review$/ }),
+    ).toBeVisible();
+
+    const board = main.getByRole("region", { name: "Board" });
+    await expect(board.getByRole("button", { name: "Todo: 1" })).toBeVisible();
+    await expect(board.getByRole("button", { name: "Review: 1" })).toBeVisible();
+    await expect(board.getByRole("button", { name: "Done: 1" })).toBeVisible();
+    await expect(main.getByRole("region", { name: "Running now" }).getByText("Nothing is running.")).toBeVisible();
+
+    const done = main.getByRole("region", { name: "Recently done" });
+    await expect(done.getByText("Today")).toBeVisible();
+    await expect(done.getByRole("button", { name: /#24 Zephyr shipped.*Forge/ })).toBeVisible();
+
+    // A Needs you card opens the ticket's session.
+    await needs.getByRole("button", { name: /#23 Zephyr review/ }).click();
+    await expect(page).toHaveURL(/\/ticket\/23$/);
+  } finally {
+    site.close();
+  }
+});
+
+test("All workspaces' Overview has a card per workspace that opens it", async ({ page }) => {
+  const site = await openOverview(page, "/overview");
+  try {
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
+    await expect(main.getByText("2 workspaces · 0 sessions running · 2 waiting on you")).toBeVisible();
+    const cards = main.getByRole("region", { name: "Workspaces" });
+    await expect(cards.getByRole("button", { name: "Atlas" })).toBeVisible();
+    await expect(cards.getByRole("button", { name: "Zephyr" })).toContainText("2 need you");
+    await cards.getByRole("button", { name: "Zephyr" }).click();
+    await expectWorkspace(page, "Zephyr");
+    await expect(main.getByRole("heading", { level: 1, name: /Zephyr/ })).toBeVisible();
+  } finally {
+    site.close();
+  }
+});
+
+for (const theme of ["light", "dark"] as const) {
+  test(`the Overview of a workspace, ${theme}`, async ({ page }) => {
+    test.skip(!SHOTS, "only when pictures are asked for");
+    const site = await openOverview(page, "/overview", ZEPHYR);
+    try {
+      await page.evaluate((t) => localStorage.setItem("aurelius.appearance", t), theme);
+      await page.reload();
+      await expect(page.getByRole("heading", { level: 1, name: /Zephyr/ })).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      await page.screenshot({ path: join(SHOTS as string, `overview-${theme}.png`), animations: "disabled" });
+      await choose(page, "All workspaces");
+      await expect(page.getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
+      await page.screenshot({ path: join(SHOTS as string, `overview-all-${theme}.png`), animations: "disabled" });
     } finally {
       site.close();
     }
