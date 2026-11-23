@@ -13,6 +13,8 @@ import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
+import { percent, pixel } from "@astryxdesign/core/Resizable/utils";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Slider } from "@astryxdesign/core/Slider";
@@ -55,6 +57,7 @@ import {
   type Viewport,
   versionLabel,
   viewportWidth,
+  withDrag,
 } from "./artifact-logic";
 import { FormDialog, Hint, Loading } from "./org-kit";
 
@@ -136,12 +139,8 @@ const styles = stylex.create({
   dock: {
     display: "flex",
     flexDirection: "column",
-    width: "clamp(380px, 52%, 1100px)",
     flexShrink: 0,
     minHeight: 0,
-    borderLeftWidth: 1,
-    borderLeftStyle: "solid",
-    borderLeftColor: "var(--color-border)",
     backgroundColor: "var(--color-background-surface)",
   },
   dockTop: {
@@ -182,6 +181,15 @@ const styles = stylex.create({
 });
 
 /** In the dock the stage and the tool panels stretch to the row instead of a set height. */
+/** The dock's width at first, as a share of the row beside the conversation, never below its minimum. */
+const DOCK_DEFAULT_PERCENT = 50;
+/** The narrowest the dock gets; the artifact's own tools still fit. */
+const DOCK_MIN_PX = 360;
+/** The widest the dock gets, so the conversation stays readable beside it. */
+const DOCK_MAX_PERCENT = 70;
+/** Where the dock's width is remembered (one width for every conversation). */
+const DOCK_SAVE_ID = "artifact-dock";
+
 const DOCK_FILL = { "--artifact-h": "auto", "--artifact-min-h": "0px" } as React.CSSProperties;
 
 type Artifacts = NonNullable<Platform["artifacts"]>;
@@ -252,6 +260,9 @@ function useArtifactFile(id: string | null) {
   );
 }
 
+/** A view that is never held away (`useArtifactView`'s `held`). */
+const NOT_HELD: React.RefObject<boolean> = { current: false };
+
 /** The dialogs open now; the ones open when the view comes are under it and never count. */
 const openDialogs = () => new Set([...document.querySelectorAll(DIALOG_SELECTOR)].filter((d) => d.checkVisibility()));
 
@@ -274,7 +285,13 @@ const overlaysOf = (stage: Element, before: ReadonlySet<Element>) =>
  * reload shows a new one. `ready`: the view of this url and reload is there, so the tools may
  * run in it.
  */
-function useArtifactView(artifacts: Artifacts, url: string | null, reloads: number, slot: ArtifactSlot) {
+function useArtifactView(
+  artifacts: Artifacts,
+  url: string | null,
+  reloads: number,
+  slot: ArtifactSlot,
+  held: React.RefObject<boolean> = NOT_HELD,
+) {
   const frame = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const [shown, setShown] = useState<string | null>(null);
@@ -286,12 +303,14 @@ function useArtifactView(artifacts: Artifacts, url: string | null, reloads: numb
     if (url === null || box === null || around === null) return;
     const before = openDialogs();
     const measure = () =>
-      stageBounds(
-        box.getBoundingClientRect(),
-        around.getBoundingClientRect(),
-        { width: window.innerWidth, height: window.innerHeight },
-        overlaysOf(around, before),
-      );
+      held.current
+        ? null
+        : stageBounds(
+            box.getBoundingClientRect(),
+            around.getBoundingClientRect(),
+            { width: window.innerWidth, height: window.innerHeight },
+            overlaysOf(around, before),
+          );
     let sent = "";
     let up = false;
     let gone = false;
@@ -321,7 +340,7 @@ function useArtifactView(artifacts: Artifacts, url: string | null, reloads: numb
       setShown(null);
       void artifacts.hide(slot);
     };
-  }, [artifacts, url, reloads, slot]);
+  }, [artifacts, url, reloads, slot, held]);
   return { frame, stage, ready: showing !== null && shown === showing };
 }
 
@@ -725,7 +744,22 @@ export function ArtifactViewer({
   const file = useArtifactFile(live ? null : id);
   const html = useSteady(live ? (live.html ?? undefined) : file.data?.html, live?.writing ? LIVE_REDRAW_MS : 0);
   const url = useServed(artifacts, html);
-  const { frame, stage, ready } = useArtifactView(artifacts, url, reloads, "main");
+  // The dock's width: dragged at its left edge, remembered. While it is dragged the view steps
+  // aside, because the pointer over the view would go to the artifact's page, not to the handle.
+  const resizing = useRef(false);
+  // Shares are of the row the dock sits in (beside the conversation), not of the window.
+  const dockRow = useRef<HTMLElement | null>(null);
+  const dockSize = useResizable({
+    containerRef: dockRow,
+    defaultSize: percent(DOCK_DEFAULT_PERCENT, { min: pixel(DOCK_MIN_PX) }),
+    minSize: DOCK_MIN_PX,
+    maxSize: `${DOCK_MAX_PERCENT}%`,
+    autoSaveId: DOCK_SAVE_ID,
+  });
+  const dockHandle = withDrag(dockSize.props, (on) => {
+    resizing.current = on;
+  });
+  const { frame, stage, ready } = useArtifactView(artifacts, url, reloads, "main", resizing);
   const writing = live?.writing === true;
   const loadError = live ? live.error : (file.error?.message ?? null);
   const { post } = usePost(send);
@@ -895,19 +929,29 @@ export function ArtifactViewer({
 
   if (docked)
     return (
-      <aside aria-label={`Design ${name}`} {...stylex.props(styles.dock)} style={DOCK_FILL}>
-        <div {...stylex.props(styles.dockTop)}>
-          <Heading level={2} xstyle={styles.dockTitle}>
-            {title}
-          </Heading>
-          <IconButton size="sm" variant="ghost" label="Close design" icon={<Icon icon="close" />} onClick={onClose} />
-        </div>
-        <div {...stylex.props(styles.dockBody)}>
-          {tools}
-          {view(styles.dockRow)}
-        </div>
-        <div {...stylex.props(styles.dockFoot)}>{actions}</div>
-      </aside>
+      <>
+        <ResizeHandle direction="horizontal" isReversed hasDivider label="Resize design panel" resizable={dockHandle} />
+        <aside
+          ref={(el) => {
+            dockRow.current = el?.parentElement ?? null;
+          }}
+          aria-label={`Design ${name}`}
+          {...stylex.props(styles.dock)}
+          style={{ ...DOCK_FILL, width: dockSize.size }}
+        >
+          <div {...stylex.props(styles.dockTop)}>
+            <Heading level={2} xstyle={styles.dockTitle}>
+              {title}
+            </Heading>
+            <IconButton size="sm" variant="ghost" label="Close design" icon={<Icon icon="close" />} onClick={onClose} />
+          </div>
+          <div {...stylex.props(styles.dockBody)}>
+            {tools}
+            {view(styles.dockRow)}
+          </div>
+          <div {...stylex.props(styles.dockFoot)}>{actions}</div>
+        </aside>
+      </>
     );
   return (
     <FormDialog

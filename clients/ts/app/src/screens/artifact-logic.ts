@@ -257,3 +257,32 @@ export function writtenContent(input: unknown): string | null {
   const content = (input as { content?: unknown } | null)?.content;
   return typeof content === "string" ? content : null;
 }
+
+/** The handlers of a resizable region's drag (the design system's `ResizableProps`). */
+interface DragHandlers {
+  _onResizeStart: () => void;
+  _onResizeEnd: () => void;
+  _onResizeCancel?: () => void;
+}
+
+/**
+ * A resizable region's props that also tell `onDrag` when a drag starts (true) and ends or is
+ * cancelled (false), so the artifact's view can step aside while its panel is dragged.
+ */
+export function withDrag<P extends DragHandlers>(props: P, onDrag: (dragging: boolean) => void): P {
+  return {
+    ...props,
+    _onResizeStart: () => {
+      onDrag(true);
+      props._onResizeStart();
+    },
+    _onResizeEnd: () => {
+      onDrag(false);
+      props._onResizeEnd();
+    },
+    _onResizeCancel: () => {
+      onDrag(false);
+      props._onResizeCancel?.();
+    },
+  };
+}

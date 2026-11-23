@@ -17,6 +17,7 @@ import {
   versionOf,
   versionsFor,
   viewportWidth,
+  withDrag,
   writtenContent,
 } from "./artifact-logic";
 
@@ -286,5 +287,41 @@ describe("designs written live", () => {
     // Closed by the user (already opened once): it stays closed until a new write.
     expect(designToOpen(designsOf(history, draft), new Set(["w2"]))).toBeNull();
     expect(designToOpen(designsOf([], { ...draft, call_id: "w3" }), new Set(["w2"]))?.callId).toBe("w3");
+  });
+});
+
+describe("withDrag", () => {
+  it("tells when a drag starts and ends, and still calls the region's own handlers", () => {
+    const calls: string[] = [];
+    const props = {
+      _size: 400,
+      _onResizeStart: () => calls.push("start"),
+      _onResizeMove: (d: number) => calls.push(`move ${d}`),
+      _onResizeEnd: () => calls.push("end"),
+      _onResizeCancel: () => calls.push("cancel"),
+    };
+    const wrapped = withDrag(props, (on) => calls.push(on ? "drag on" : "drag off"));
+    wrapped._onResizeStart();
+    wrapped._onResizeMove(12);
+    wrapped._onResizeEnd();
+    wrapped._onResizeStart();
+    wrapped._onResizeCancel?.();
+    expect(calls).toEqual(["drag on", "start", "move 12", "drag off", "end", "drag on", "start", "drag off", "cancel"]);
+    expect(wrapped._size).toBe(400);
+  });
+
+  it("ends a cancelled drag also for a region without its own cancel", () => {
+    const seen: boolean[] = [];
+    const wrapped = withDrag(
+      { _onResizeStart: () => undefined, _onResizeEnd: () => undefined } as {
+        _onResizeStart: () => void;
+        _onResizeEnd: () => void;
+        _onResizeCancel?: () => void;
+      },
+      (on) => seen.push(on),
+    );
+    wrapped._onResizeStart();
+    wrapped._onResizeCancel?.();
+    expect(seen).toEqual([true, false]);
   });
 });
