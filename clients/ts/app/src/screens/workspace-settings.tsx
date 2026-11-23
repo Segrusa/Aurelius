@@ -41,7 +41,7 @@ const styles = stylex.create({
   title: { margin: 0, fontSize: 20, fontWeight: 650, letterSpacing: "-0.01em" },
   notice: { marginBlockEnd: 20 },
   group: { display: "flex", flexDirection: "column", gap: 4, marginBlockEnd: 32 },
-  groupTitle: { margin: 0, marginBlockEnd: 8, fontSize: 15, fontWeight: 600 },
+  groupTitle: { margin: 0, fontSize: 15, fontWeight: 600 },
   card: { borderWidth: 1, borderStyle: "solid", borderColor: "var(--color-border)", borderRadius: 8 },
   danger: { borderColor: "color-mix(in srgb, var(--color-text-error) 30%, transparent)" },
   wide: {

@@ -152,6 +152,7 @@ const styles = stylex.create({
     borderWidth: 0,
   },
   headButton: { width: 28, height: 28, borderRadius: 8 },
+  headButtonOn: { color: "var(--color-text-primary)", backgroundColor: "var(--color-overlay-hover)" },
   newTile: { borderWidth: 1, borderStyle: "dashed", borderColor: "var(--color-border-emphasized)" },
   grow: { flexGrow: 1 },
   head: { display: "flex", alignItems: "center", gap: 4, height: 36 },
@@ -711,6 +712,8 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
   const newKey = keysFor(NEW_SESSION_KEYS, kind)[0];
   const title = !available ? "Aurelius" : (project?.name ?? ALL_NAME);
   const settingsLabel = id ? "Workspace settings" : "All workspaces settings";
+  const path = usePath();
+  const settingsOpen = id ? path === `/projects/${id}` : path === "/projects";
   return (
     <SideNav
       aria-label="Main"
@@ -740,10 +743,11 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
               <button
                 type="button"
                 aria-label={settingsLabel}
+                aria-current={settingsOpen ? "page" : undefined}
                 onClick={() =>
                   void (id ? navigate({ to: "/projects/$id", params: { id } }) : navigate({ to: "/projects" }))
                 }
-                {...stylex.props(styles.railButton, styles.headButton)}
+                {...stylex.props(styles.railButton, styles.headButton, settingsOpen && styles.headButtonOn)}
               >
                 <Icon name="settings" size={15} />
               </button>
