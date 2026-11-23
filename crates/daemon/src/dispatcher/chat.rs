@@ -3,6 +3,8 @@
 use super::*;
 
 const CHECKPOINT_EVERY: Duration = Duration::from_millis(1500);
+/// A design being written goes out at most this often (`StreamDelta::draft`).
+const DRAFT_EVERY: Duration = Duration::from_millis(400);
 /// While a tool call is open the run may be silent this many times the idle limit
 /// (a long build or test run says nothing until it ends).
 const TOOL_IDLE_FACTOR: u32 = 3;
@@ -287,6 +289,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     // for the idle limit is stopped with a note, so its conversation goes on.
     let mut open_tools: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut last_progress = tokio::time::Instant::now();
+    let mut last_draft: Option<tokio::time::Instant> = None;
     let outcome = loop {
         let limit = if open_tools.is_empty() { idle } else { idle * TOOL_IDLE_FACTOR };
         let next = tokio::select! {
@@ -368,6 +371,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     activity_changes: false,
                     mode: None,
                     thread_parent: None,
+                    draft: None,
                 });
             }
             RuntimeEvent::TextDelta(delta) => {
@@ -387,6 +391,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     activity_changes: false,
                     mode: None,
                     thread_parent: None,
+                    draft: None,
                 });
                 if last_checkpoint.elapsed() >= CHECKPOINT_EVERY {
                     last_checkpoint = tokio::time::Instant::now();
@@ -417,6 +422,26 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                         }));
                         let _ = blocking(move || s.service.record_activity_started(&p, &call_id, &tool, &input, parent.as_deref(), offset)).await;
                     }
+                    // A design being written: shown live, never stored; its whole call comes as `Started`.
+                    Activity::Drafting { call_id, path, content } => {
+                        let due = last_draft.is_none_or(|at: tokio::time::Instant| at.elapsed() >= DRAFT_EVERY);
+                        if due && content.len() <= aurelius_protocol::ARTIFACT_DRAFT_MAX_BYTES && !open_tools.contains(&call_id) {
+                            last_draft = Some(tokio::time::Instant::now());
+                            stream(&shared, &plan, StreamDelta {
+                                run_id: plan.run_id,
+                                conversation_id: plan.conversation_id,
+                                message_id: plan.message_id,
+                                text: text.clone(),
+                                activity: activity.clone(),
+                                progress: progress(&shared, plan.run_id),
+                                activity_changes: false,
+                                mode: None,
+                                thread_parent: None,
+                                draft: Some(aurelius_protocol::ArtifactDraft { call_id, path, content }),
+                            });
+                        }
+                        continue;
+                    }
                     Activity::Finished { call_id, ok, output } => {
                         open_tools.remove(&call_id);
                         if let Some(a) = activity.iter_mut().find(|a| a.call_id == call_id) {
@@ -437,6 +462,7 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                     activity_changes: false,
                     mode: None,
                     thread_parent: None,
+                    draft: None,
                 });
             }
             // Claude Code compacts on its own while it answers: the answer says so while it does.
@@ -588,6 +614,7 @@ fn send_progress(shared: &Shared, plan: &ChatRunPlan) {
         activity_changes: false,
         mode: None,
         thread_parent: None,
+        draft: None,
     });
 }
 

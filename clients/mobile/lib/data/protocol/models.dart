@@ -711,6 +711,36 @@ final class ApprovalsSnapshot {
   };
 }
 
+/// An HTML file an employee is writing, before its `Write` call is complete: the
+/// app shows it as it grows, as Claude Desktop does with an artifact. Display
+/// only, never stored; the call itself arrives in `activity` once it is whole.
+final class ArtifactDraft {
+  const ArtifactDraft({
+    required this.callId,
+    required this.content,
+    required this.path,
+  });
+
+  /// The `Write` call's id (`ActivityView::call_id` once it is whole).
+  final String callId;
+  /// The content written so far (at most `ARTIFACT_DRAFT_MAX_BYTES`).
+  final String content;
+  /// The file's path as the employee wrote it.
+  final String path;
+
+  factory ArtifactDraft.fromJson(Map<String, dynamic> json) => ArtifactDraft(
+    callId: (json['call_id'] as String),
+    content: (json['content'] as String),
+    path: (json['path'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'call_id': callId,
+    'content': content,
+    'path': path,
+  };
+}
+
 /// The user gives a task to an employee (or takes it back: a draft). Allowed
 /// while nothing runs: draft, queued or waiting.
 final class AssignTask {
@@ -18132,6 +18162,7 @@ final class StreamAppend {
     this.activity,
     this.activityChanges,
     required this.conversationId,
+    this.draft,
     required this.messageId,
     this.mode,
     required this.offset,
@@ -18147,6 +18178,8 @@ final class StreamAppend {
   /// `activity` holds only new or changed calls (see `StreamDelta::activity_changes`).
   final bool? activityChanges;
   final String conversationId;
+  /// A design being written (see `StreamDelta::draft`).
+  final ArtifactDraft? draft;
   final String messageId;
   /// A group chat answer: the mode its run started in (see `StreamDelta::mode`).
   final AgentMode? mode;
@@ -18162,6 +18195,7 @@ final class StreamAppend {
     activity: (json['activity'] == null ? null : (json['activity'] as List<dynamic>).map((x0) => ActivityView.fromJson(x0 as Map<String, dynamic>)).toList()),
     activityChanges: (json['activity_changes'] == null ? null : (json['activity_changes'] as bool)),
     conversationId: (json['conversation_id'] as String),
+    draft: (json['draft'] == null ? null : ArtifactDraft.fromJson(json['draft'] as Map<String, dynamic>)),
     messageId: (json['message_id'] as String),
     mode: (json['mode'] == null ? null : AgentMode.fromJson(json['mode'] as String)),
     offset: (json['offset'] as num).toInt(),
@@ -18175,6 +18209,7 @@ final class StreamAppend {
     if (activity != null) 'activity': activity?.map((x0) => x0.toJson()).toList(),
     if (activityChanges != null) 'activity_changes': activityChanges,
     'conversation_id': conversationId,
+    if (draft != null) 'draft': draft?.toJson(),
     'message_id': messageId,
     if (mode != null) 'mode': mode?.toJson(),
     'offset': offset,
@@ -18192,6 +18227,7 @@ final class StreamDelta {
     required this.activity,
     this.activityChanges,
     required this.conversationId,
+    this.draft,
     required this.messageId,
     this.mode,
     this.progress,
@@ -18210,6 +18246,10 @@ final class StreamDelta {
   /// update of a message in that session (that one carries every call).
   final bool? activityChanges;
   final String conversationId;
+  /// A design the answer is writing now (feature `artifact_drafts`): only on the
+  /// update that brings it, and only to a connection that accepts
+  /// `artifact_drafts`. Left out elsewhere and by older servers.
+  final ArtifactDraft? draft;
   final String messageId;
   /// A group chat answer streaming: the mode its run started in. Left out
   /// elsewhere and by older servers.
@@ -18228,6 +18268,7 @@ final class StreamDelta {
     activity: (json['activity'] as List<dynamic>).map((x0) => ActivityView.fromJson(x0 as Map<String, dynamic>)).toList(),
     activityChanges: (json['activity_changes'] == null ? null : (json['activity_changes'] as bool)),
     conversationId: (json['conversation_id'] as String),
+    draft: (json['draft'] == null ? null : ArtifactDraft.fromJson(json['draft'] as Map<String, dynamic>)),
     messageId: (json['message_id'] as String),
     mode: (json['mode'] == null ? null : AgentMode.fromJson(json['mode'] as String)),
     progress: (json['progress'] == null ? null : RunProgress.fromJson(json['progress'] as Map<String, dynamic>)),
@@ -18240,6 +18281,7 @@ final class StreamDelta {
     'activity': activity.map((x0) => x0.toJson()).toList(),
     if (activityChanges != null) 'activity_changes': activityChanges,
     'conversation_id': conversationId,
+    if (draft != null) 'draft': draft?.toJson(),
     'message_id': messageId,
     if (mode != null) 'mode': mode?.toJson(),
     if (progress != null) 'progress': progress?.toJson(),

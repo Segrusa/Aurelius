@@ -19,6 +19,7 @@
 
 mod job;
 pub mod login;
+pub mod draft;
 pub mod parse;
 pub mod session;
 

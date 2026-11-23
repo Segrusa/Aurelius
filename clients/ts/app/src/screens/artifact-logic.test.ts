@@ -1,8 +1,12 @@
-import type { FileRef, MessageView } from "@aurelius/protocol";
+import type { ActivityView, FileRef, MessageView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  applyEdit,
   artifactVersions,
+  baseName,
   DIALOG_SELECTOR,
+  designsOf,
+  designToOpen,
   htmlOf,
   isArtifact,
   OVERLAY_SELECTOR,
@@ -13,6 +17,7 @@ import {
   versionOf,
   versionsFor,
   viewportWidth,
+  writtenContent,
 } from "./artifact-logic";
 
 const html = (id: string, name = "landing.html"): FileRef => ({ id, name, media_type: "text/html", size: 10 });
@@ -207,5 +212,79 @@ describe("the frame", () => {
     const text = "<p>Café ✓</p>";
     const base64 = btoa(String.fromCharCode(...new TextEncoder().encode(text)));
     expect(htmlOf(base64)).toBe(text);
+  });
+});
+
+describe("designs written live", () => {
+  const step = (
+    call_id: string,
+    tool: string,
+    input: object,
+    ok: boolean | null = true,
+    parent: string | null = null,
+  ) => ({ call_id, tool, input, ok, output: null, offset: 0, parent_call_id: parent }) as unknown as ActivityView;
+
+  it("are an answer's own HTML writes, newest write per file, with the edits after it", () => {
+    const designs = designsOf(
+      [
+        step("w1", "Write", { file_path: "/p/a.html", content: "<p>1</p>" }),
+        step("e0", "Edit", { file_path: "/p/b.html", old_string: "x", new_string: "y" }),
+        step("n1", "Write", { file_path: "/p/notes.md", content: "#" }),
+        step("s1", "Write", { file_path: "/p/sub.html", content: "<p>" }, true, "agent"),
+        step("e1", "Edit", { file_path: "/p/a.html", old_string: "1", new_string: "2" }),
+        step("e2", "Edit", { file_path: "/p/a.html", old_string: "2", new_string: "3" }, false),
+        step("w2", "Write", { file_path: "C:\\p\\B.HTM", content: "<b>" }, null),
+      ],
+      null,
+    );
+    expect(designs).toEqual([
+      { path: "/p/a.html", name: "a.html", callId: "w1", writing: false, draft: null, edits: ["e1"] },
+      { path: "C:\\p\\B.HTM", name: "B.HTM", callId: "w2", writing: true, draft: null, edits: [] },
+    ]);
+  });
+
+  it("show the draft until its call is whole", () => {
+    const draft = { call_id: "w1", path: "/p/a.html", content: "<p>Hal" };
+    expect(designsOf([], draft)).toEqual([
+      { path: "/p/a.html", name: "a.html", callId: "w1", writing: true, draft: "<p>Hal", edits: [] },
+    ]);
+    const whole = [step("w1", "Write", { file_path: "/p/a.html", content: "<p>Hallo</p>" }, null)];
+    expect(designsOf(whole, draft)[0]?.draft).toBeNull();
+    expect(designsOf([], { ...draft, path: "/p/a.md" })).toEqual([]);
+  });
+
+  it("apply edits as the tools do, and refuse one that does not fit", () => {
+    expect(applyEdit("<p>a a</p>", { old_string: "a", new_string: "$&b" })).toBe("<p>$&b a</p>");
+    expect(applyEdit("<p>a a</p>", { old_string: "a", new_string: "b", replace_all: true })).toBe("<p>b b</p>");
+    expect(
+      applyEdit("<p>a</p>", {
+        edits: [
+          { old_string: "a", new_string: "b" },
+          { old_string: "b", new_string: "c" },
+        ],
+      }),
+    ).toBe("<p>c</p>");
+    expect(applyEdit("<p>a</p>", { old_string: "z", new_string: "b" })).toBeNull();
+    expect(
+      applyEdit("<p>a</p>", {
+        edits: [
+          { old_string: "a", new_string: "b" },
+          { old_string: "a", new_string: "c" },
+        ],
+      }),
+    ).toBeNull();
+    expect(writtenContent({ file_path: "/p/a.html", content: "<p>" })).toBe("<p>");
+    expect(baseName("/p/x/y.html")).toBe("y.html");
+  });
+
+  it("open by themselves only while a draft streams, once per write", () => {
+    const draft = { call_id: "w2", path: "/p/b.html", content: "<p>" };
+    // A loaded chat: designs without a draft, also an unfinished one, never open by themselves.
+    const history = [step("w1", "Write", { file_path: "/p/a.html", content: "<p>" }, null)];
+    expect(designToOpen(designsOf(history, null), new Set())).toBeNull();
+    expect(designToOpen(designsOf(history, draft), new Set())?.callId).toBe("w2");
+    // Closed by the user (already opened once): it stays closed until a new write.
+    expect(designToOpen(designsOf(history, draft), new Set(["w2"]))).toBeNull();
+    expect(designToOpen(designsOf([], { ...draft, call_id: "w3" }), new Set(["w2"]))?.callId).toBe("w3");
   });
 });

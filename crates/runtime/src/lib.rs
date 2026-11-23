@@ -161,6 +161,10 @@ pub enum Activity {
     /// `parent`: the call that started the subagent doing this, if any.
     Started { call_id: String, tool: String, input: serde_json::Value, parent: Option<String> },
     Finished { call_id: String, ok: bool, output: String },
+    /// A design (an HTML file) the employee is writing, before the call is
+    /// complete: its path and the content so far. Display only, never stored;
+    /// `Started` with the whole input follows. Comes again as the content grows.
+    Drafting { call_id: String, path: String, content: String },
 }
 
 /// Normalized runtime events. Only `Completed` is a terminal success.
@@ -385,6 +389,7 @@ fn redact_event(r: &redact::Redactor, event: RuntimeEvent) -> RuntimeEvent {
             RuntimeEvent::Activity(Activity::Started { call_id, tool: s(tool), input, parent })
         }
         RuntimeEvent::Activity(Activity::Finished { call_id, ok, output }) => RuntimeEvent::Activity(Activity::Finished { call_id, ok, output: s(output) }),
+        RuntimeEvent::Activity(Activity::Drafting { call_id, path, content }) => RuntimeEvent::Activity(Activity::Drafting { call_id, path: s(path), content: s(content) }),
         RuntimeEvent::Failed { code, message } => RuntimeEvent::Failed { code, message: s(message) },
         other => other,
     }

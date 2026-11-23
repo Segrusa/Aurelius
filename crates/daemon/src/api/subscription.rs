@@ -22,6 +22,7 @@ pub(super) struct Accepts {
     pub chat_reactions: bool,
     pub ticket_follow: bool,
     pub message_edits: bool,
+    pub artifact_drafts: bool,
 }
 
 impl Accepts {
@@ -36,7 +37,14 @@ impl Accepts {
             chat_reactions: has(f::CHAT_REACTIONS),
             ticket_follow: has(f::TICKET_FOLLOW),
             message_edits: has(f::MESSAGE_EDITS),
+            artifact_drafts: has(f::ARTIFACT_DRAFTS),
         }
+    }
+
+    /// Whether this connection gets a live update: one that only brings a design
+    /// being written goes to a client that shows it.
+    pub(super) fn wants(&self, delta: &StreamDelta) -> bool {
+        delta.draft.is_none() || self.artifact_drafts
     }
 }
 
@@ -48,7 +56,8 @@ impl Accepts {
 /// ones and without `message_edits` the `message.edited` ones: an older client
 /// cannot read an event kind it does not know. Without `chat_threads` the streamed
 /// text of an answer in a thread is: an older client would show it in the
-/// channel's own list.
+/// channel's own list. Without `artifact_drafts` the updates that bring a design
+/// being written are left out (they change nothing else).
 pub(super) async fn subscribe(
     shared: &Arc<Shared>,
     after_seq: u64,
@@ -73,6 +82,8 @@ pub(super) async fn subscribe(
                 delta = streams.recv() => {
                     let delta = match delta {
                         Ok(delta) if hidden.hides_stream(&delta) => continue,
+                        // An update that only brings a design being written: for a client that shows it.
+                        Ok(delta) if !accepts.wants(&delta) => continue,
                         other => other,
                     };
                     match delta {
@@ -288,7 +299,7 @@ mod tests {
     }
 
     fn delta(message_id: MessageId, activity: Vec<ActivityView>) -> StreamDelta {
-        StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id, text: "x".into(), activity, progress: None, activity_changes: false, mode: None, thread_parent: None }
+        StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id, text: "x".into(), activity, progress: None, activity_changes: false, mode: None, thread_parent: None, draft: None }
     }
 
     fn ids(calls: &[ActivityView]) -> Vec<&str> {
@@ -378,5 +389,16 @@ mod tests {
         sent.forget();
         assert!(!sent.knows(message));
         assert_eq!(ids(&sent.changes(&next)), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn only_a_client_that_accepts_artifact_drafts_gets_a_design_being_written() {
+        let draft = aurelius_protocol::ArtifactDraft { call_id: "w1".into(), path: "/p/a.html".into(), content: "<p>".into() };
+        let drafting = StreamDelta { draft: Some(draft), ..delta(MessageId::new(), vec![]) };
+        let plain = delta(MessageId::new(), vec![]);
+        let older = Accepts::default();
+        let newer = Accepts::of(&["artifact_drafts".into()]);
+        assert!(newer.artifact_drafts && newer.wants(&drafting) && newer.wants(&plain));
+        assert!(!older.wants(&drafting) && older.wants(&plain));
     }
 }

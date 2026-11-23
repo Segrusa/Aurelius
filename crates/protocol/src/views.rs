@@ -134,6 +134,27 @@ pub struct StreamDelta {
     /// accept `chat_threads` get such an update. Left out elsewhere and by older servers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_parent: Option<MessageId>,
+    /// A design the answer is writing now (feature `artifact_drafts`): only on the
+    /// update that brings it, and only to a connection that accepts
+    /// `artifact_drafts`. Left out elsewhere and by older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<ArtifactDraft>,
+}
+
+/// Largest design content a live update carries; a bigger file shows once its call is whole.
+pub const ARTIFACT_DRAFT_MAX_BYTES: usize = 1024 * 1024;
+
+/// An HTML file an employee is writing, before its `Write` call is complete: the
+/// app shows it as it grows, as Claude Desktop does with an artifact. Display
+/// only, never stored; the call itself arrives in `activity` once it is whole.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ArtifactDraft {
+    /// The `Write` call's id (`ActivityView::call_id` once it is whole).
+    pub call_id: String,
+    /// The file's path as the employee wrote it.
+    pub path: String,
+    /// The content written so far (at most `ARTIFACT_DRAFT_MAX_BYTES`).
+    pub content: String,
 }
 
 /// Where the approval bridge keeps the agent's screenshots, under the data folder.

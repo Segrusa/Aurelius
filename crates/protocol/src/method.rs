@@ -689,6 +689,10 @@ pub mod client_feature {
     /// connection gets the event `message.edited`. An older client sees the new
     /// text at its next `conversation.get`.
     pub const MESSAGE_EDITS: &str = "message_edits";
+    /// The client shows a design while it is written (feature `artifact_drafts`):
+    /// only such a connection gets `StreamDelta::draft`, so no other client is
+    /// sent a growing HTML file it does not show.
+    pub const ARTIFACT_DRAFTS: &str = "artifact_drafts";
 }
 
 impl std::fmt::Debug for HelloParams {

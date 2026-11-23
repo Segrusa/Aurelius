@@ -42,6 +42,21 @@ pub struct StreamState {
     current_message: Option<String>,
     /// Tools the init line listed.
     tools: Vec<String>,
+    /// `Write` calls of the employee itself streaming now, by content block index:
+    /// their input so far, to show a design while it is written (`draft`).
+    drafts: Vec<(u64, Draft)>,
+}
+
+/// One `Write` call whose input is still streaming.
+#[derive(Default)]
+struct Draft {
+    call_id: String,
+    /// The input JSON so far.
+    json: String,
+    /// How long `json` was when it was last read.
+    read: usize,
+    /// Whether the design was reported yet.
+    reported: bool,
 }
 
 impl StreamState {
@@ -164,6 +179,17 @@ impl StreamState {
                         self.tokens_done += self.tokens_current;
                         self.tokens_current = event["message"]["usage"]["output_tokens"].as_u64().unwrap_or(0);
                         self.message_chars = 0;
+                        self.drafts.clear();
+                    }
+                    // A file written whole by the employee itself (a subagent's work is its own):
+                    // followed while its input streams, in case it is a design.
+                    Some("content_block_start") if event["content_block"]["type"] == "tool_use" && event["content_block"]["name"] == super::draft::DRAFT_TOOL && value["parent_tool_use_id"].is_null() => {
+                        let call_id = event["content_block"]["id"].as_str().unwrap_or_default().to_owned();
+                        self.drafts.push((event["index"].as_u64().unwrap_or(0), Draft { call_id, ..Draft::default() }));
+                    }
+                    Some("content_block_stop") => {
+                        let index = event["index"].as_u64().unwrap_or(0);
+                        self.drafts.retain(|(i, _)| *i != index);
                     }
                     Some("message_delta") => {
                         if let Some(id) = self.current_message.clone() {
@@ -190,6 +216,9 @@ impl StreamState {
                             self.streamed.push_str(piece);
                             self.text_len += piece.len();
                             events.push(RuntimeEvent::TextDelta(piece.to_owned()));
+                        }
+                        if delta["type"] == "input_json_delta" && !piece.is_empty() {
+                            events.extend(self.draft_grew(event["index"].as_u64().unwrap_or(0), piece));
                         }
                     }
                     _ => {}
@@ -318,6 +347,27 @@ impl StreamState {
 }
 
 impl StreamState {
+    /// Adds a piece of a `Write` call's input; the design written so far once it grew
+    /// enough. A file that is no design is no longer followed.
+    fn draft_grew(&mut self, index: u64, piece: &str) -> Option<RuntimeEvent> {
+        use super::draft::{DRAFT_PATH_STEP_BYTES, DRAFT_STEP_BYTES, is_design, partial_write};
+        let at = self.drafts.iter().position(|(i, _)| *i == index)?;
+        let draft = &mut self.drafts[at].1;
+        draft.json.push_str(piece);
+        let step = if draft.reported { DRAFT_STEP_BYTES } else { DRAFT_PATH_STEP_BYTES };
+        if draft.read > 0 && draft.json.len() < draft.read + step {
+            return None;
+        }
+        draft.read = draft.json.len();
+        let (path, content) = partial_write(&draft.json)?;
+        if !is_design(&path) {
+            self.drafts.remove(at);
+            return None;
+        }
+        draft.reported = true;
+        Some(RuntimeEvent::Activity(Activity::Drafting { call_id: draft.call_id.clone(), path, content }))
+    }
+
     /// The step of message `id`, with what `usage` says of it now (each count only grows:
     /// a message's lines repeat it, partly filled while it streams).
     fn step(&mut self, id: &str, usage: &Value, subagent: bool) -> &mut crate::UsageStep {
@@ -882,5 +932,52 @@ mod tests {
             vec![RuntimeEvent::Activity(Activity::Started { call_id: "t2".into(), tool: "Read".into(), input: serde_json::json!({"file_path": "a.txt"}), parent: Some("toolu_agent".into()) })]
         );
         assert!(s.streamed.is_empty(), "a subagent's text is not part of the answer");
+    }
+    /// Feeds a `Write` call's input in pieces of `size` bytes as the CLI streams it.
+    fn stream_write(s: &mut StreamState, parent: Option<&str>, input: &str, size: usize) -> Vec<RuntimeEvent> {
+        let parent = parent.map_or("null".to_owned(), |p| format!("\"{p}\""));
+        let mut events = s.feed(&format!(r#"{{"type":"stream_event","parent_tool_use_id":{parent},"event":{{"type":"content_block_start","index":1,"content_block":{{"type":"tool_use","id":"w1","name":"Write","input":{{}}}}}}}}"#)).unwrap();
+        let mut rest = input;
+        while !rest.is_empty() {
+            let mut cut = size.min(rest.len());
+            while !rest.is_char_boundary(cut) {
+                cut += 1;
+            }
+            let piece = serde_json::to_string(&rest[..cut]).unwrap();
+            events.extend(s.feed(&format!(r#"{{"type":"stream_event","parent_tool_use_id":{parent},"event":{{"type":"content_block_delta","index":1,"delta":{{"type":"input_json_delta","partial_json":{piece}}}}}}}"#)).unwrap());
+            rest = &rest[cut..];
+        }
+        events.extend(s.feed(r#"{"type":"stream_event","event":{"type":"content_block_stop","index":1}}"#).unwrap());
+        events
+    }
+
+    fn drafts(events: &[RuntimeEvent]) -> Vec<(&str, &str)> {
+        events.iter().filter_map(|e| if let RuntimeEvent::Activity(Activity::Drafting { path, content, .. }) = e { Some((path.as_str(), content.as_str())) } else { None }).collect()
+    }
+
+    #[test]
+    fn a_design_is_reported_while_its_write_streams() {
+        let mut s = StreamState::for_profile(&work());
+        let page = format!("<html><body>{}</body></html>", "<p>Café \"x\"</p>\n".repeat(400));
+        // In the order the model writes it: the path first (json! would sort the keys).
+        let input = format!(r#"{{"file_path":"/p/design.html","content":{}}}"#, serde_json::to_string(&page).unwrap());
+        let events = stream_write(&mut s, None, &input, 37);
+        let seen = drafts(&events);
+        assert!(seen.len() >= 3, "it grows in steps, not once: {}", seen.len());
+        assert!(seen.iter().all(|(path, content)| *path == "/p/design.html" && page.starts_with(content)));
+        // Not on every few characters: once per step of input at most, and always grown.
+        assert!(seen.len() <= input.len() / super::super::draft::DRAFT_STEP_BYTES + 2, "{} drafts", seen.len());
+        assert!(seen.windows(2).all(|w| w[1].1.len() > w[0].1.len()));
+        // The whole call comes with the complete message, as before.
+        let whole = format!(r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"w1","name":"Write","input":{input}}}]}}}}"#);
+        assert!(matches!(&s.feed(&whole).unwrap()[..], [RuntimeEvent::Activity(Activity::Started { call_id, .. })] if call_id == "w1"));
+    }
+
+    #[test]
+    fn only_the_employees_own_html_writes_are_drafts() {
+        let input = |path: &str| format!(r#"{{"file_path":"{path}","content":"{}"}}"#, "x".repeat(5_000));
+        assert!(drafts(&stream_write(&mut StreamState::for_profile(&work()), None, &input("/p/notes.md"), 50)).is_empty());
+        assert!(drafts(&stream_write(&mut StreamState::for_profile(&work()), Some("toolu_agent"), &input("/p/a.html"), 50)).is_empty());
+        assert!(!drafts(&stream_write(&mut StreamState::for_profile(&work()), None, &input("/p/a.HTM"), 50)).is_empty());
     }
 }

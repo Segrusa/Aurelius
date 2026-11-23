@@ -279,7 +279,7 @@ fn a_reaction_is_an_event_kind_of_its_own() {
 
 #[test]
 fn a_stream_outside_a_thread_is_written_as_before() {
-    let delta = crate::StreamDelta { run_id: aurelius_domain::RunId::new(), conversation_id: ConversationId::new(), message_id: MessageId::new(), text: "x".into(), activity: vec![], progress: None, activity_changes: false, mode: None, thread_parent: None };
+    let delta = crate::StreamDelta { run_id: aurelius_domain::RunId::new(), conversation_id: ConversationId::new(), message_id: MessageId::new(), text: "x".into(), activity: vec![], progress: None, activity_changes: false, mode: None, thread_parent: None, draft: None };
     assert!(serde_json::to_value(&delta).unwrap().get("thread_parent").is_none());
     let root = MessageId::new();
     let json = serde_json::to_value(crate::StreamDelta { thread_parent: Some(root), ..delta }).unwrap();

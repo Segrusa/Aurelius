@@ -132,6 +132,7 @@ impl Appends {
                 activity_changes: delta.activity_changes,
                 mode: delta.mode,
                 thread_parent: delta.thread_parent,
+                draft: delta.draft.clone(),
             },
             _ => StreamAppend {
                 run_id: delta.run_id,
@@ -144,6 +145,7 @@ impl Appends {
                 activity_changes: delta.activity_changes,
                 mode: delta.mode,
                 thread_parent: delta.thread_parent,
+                draft: delta.draft.clone(),
             },
         };
         if self.sent.len() > 64 {
@@ -177,7 +179,7 @@ mod tests {
     }
 
     fn delta_with(id: MessageId, text: &str, activity: Vec<ActivityView>) -> ServerMessage {
-        ServerMessage::Stream(StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: id, text: text.into(), activity, progress: None, activity_changes: false, mode: None, thread_parent: None })
+        ServerMessage::Stream(StreamDelta { run_id: RunId::new(), conversation_id: ConversationId::new(), message_id: id, text: text.into(), activity, progress: None, activity_changes: false, mode: None, thread_parent: None, draft: None })
     }
 
     fn tool(call: &str, ok: Option<bool>) -> ActivityView {

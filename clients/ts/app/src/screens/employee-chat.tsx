@@ -12,6 +12,7 @@ import { useApprovals, useEmployees, useMessages } from "../data";
 import { CHAT_FILES_FEATURE } from "../ui/attach-logic";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
+import { DockedArtifact, targetKey, useArtifactDock } from "./artifact-dock";
 import type { ArtifactSend } from "./artifact-feedback";
 import { Composer } from "./chat";
 import { useLiveAll, useLiveStore } from "./chat-live";
@@ -150,6 +151,9 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
     [name],
   );
 
+  // An artifact opens in a panel at the right, in place of the session's properties.
+  const dock = useArtifactDock();
+
   // A finished message ends its stream.
   useEffect(() => {
     store.settle(new Set(list.filter((m) => m.status !== "partial").map((m) => m.id)));
@@ -206,8 +210,21 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
       speaker: name,
       flash: null,
       artifactSend,
+      openArtifact: dock.open,
     }),
-    [store, features, user, name, employeesData, approvalMap, list, lastAnswerId, conversationId, artifactSend],
+    [
+      store,
+      features,
+      user,
+      name,
+      employeesData,
+      approvalMap,
+      list,
+      lastAnswerId,
+      conversationId,
+      artifactSend,
+      dock.open,
+    ],
   );
 
   const running =
@@ -355,7 +372,11 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
             )}
           </ChatProvider>
         </div>
-        {frame?.aside}
+        {dock.target ? (
+          <DockedArtifact key={targetKey(dock.target)} target={dock.target} ctx={ctx} onClose={dock.close} />
+        ) : (
+          frame?.aside
+        )}
       </div>
     </section>
   );
