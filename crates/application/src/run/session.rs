@@ -783,7 +783,7 @@ mod tests {
             reactions: Vec::new(),
         };
         let before = item(&m);
-        m.files.push(aurelius_domain::views::FileRef { id: "f".into(), name: "r.md".into(), media_type: "text/markdown".into(), size: 1 });
+        m.files.push(aurelius_domain::views::FileRef { id: "f".into(), name: "r.md".into(), media_type: "text/markdown".into(), size: 1, title: None });
         assert_eq!(item(&m), before, "files kept with an answer after it completed");
         m.text = "Done!".into();
         assert_ne!(item(&m), before);

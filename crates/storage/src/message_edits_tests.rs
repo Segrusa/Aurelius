@@ -164,7 +164,7 @@ fn a_deleted_message_serves_no_upload_and_no_file() {
     use aurelius_domain::views::{FileRef, MessageFileView};
     let (_dir, store) = channel();
     let upload = MessageFileView { id: None, name: "secret.pdf".into(), path: ".aurelius/uploads/secret.pdf".into(), byte_length: 3 };
-    let file = FileRef { id: "b1".into(), name: "notes.txt".into(), media_type: "text/plain".into(), size: 3 };
+    let file = FileRef { id: "b1".into(), name: "notes.txt".into(), media_type: "text/plain".into(), size: 3, title: None };
     store
         .write(move |tx| {
             conversations::set_message_uploads(tx, msg(PLAIN), &[upload])?;

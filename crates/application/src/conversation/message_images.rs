@@ -82,7 +82,7 @@ pub fn prepare(store: &Store, paths: &[String]) -> Result<Vec<PreparedImage>, Ap
         let extension = if media_type == "image/png" { "png" } else { "jpg" };
         let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).filter(|s| !s.is_empty()).unwrap_or_else(|| "image".into());
         let blob = store.blobs().put(&data, media_type).map_err(storage_error)?;
-        let file = FileRef { id: blob.id.to_string(), name: format!("{stem}.{extension}"), media_type: media_type.into(), size: data.len() as u64 };
+        let file = FileRef { id: blob.id.to_string(), name: format!("{stem}.{extension}"), media_type: media_type.into(), size: data.len() as u64, title: None };
         out.push(PreparedImage { blob, file });
     }
     Ok(out)

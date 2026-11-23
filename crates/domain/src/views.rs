@@ -1196,7 +1196,14 @@ pub struct FileRef {
     pub name: String,
     pub media_type: String,
     pub size: u64,
+    /// An HTML design's own `<title>`, so clients show a design by its title instead of its
+    /// file name. Absent on other files, on a page without a title and from older servers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
+
+/// Longest design title kept on a [`FileRef`], in characters.
+pub const FILE_TITLE_MAX: usize = 120;
 
 /// One tool use during an answer, shown at its place in the text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
