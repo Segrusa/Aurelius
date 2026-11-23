@@ -129,6 +129,20 @@ const key = (ownerId: number, slot: ViewSlot) => `${ownerId}/${slot}`;
 const SLOTS: readonly ViewSlot[] = ["main", "compare"];
 
 /**
+ * How long a replaced view stays in sight at most while the view that replaces it loads; after
+ * that it goes, loaded or not.
+ */
+export const VIEW_SWAP_MS = 2000;
+
+/** Takes a view off its window and ends its renderer. */
+function drop(shown: Shown): void {
+  shown.stopPick?.();
+  shown.detach();
+  if (!shown.window.isDestroyed()) shown.window.contentView.removeChildView(shown.view);
+  if (!shown.view.webContents.isDestroyed()) shown.view.webContents.close();
+}
+
+/**
  * The viewers that are open, at most one per page (the WebContents that asked) and slot. A view
  * follows only the page that showed it, and goes as soon as that page navigates, reloads, crashes
  * or closes.
@@ -137,23 +151,37 @@ export class ArtifactViews {
   private readonly shown = new Map<string, Shown>();
   /** Counts the shows of each page and slot, so a show that a later show or hide overtook does nothing. */
   private readonly asked = new Map<string, number>();
+  /** Views a newer show replaced, still in sight above it until it has loaded (per page and slot). */
+  private readonly leaving = new Map<string, Shown[]>();
 
   constructor(
     private readonly store: ArtifactStore,
     private readonly ready: Promise<Session>,
   ) {}
 
-  /** Lays a new view with `url` over `owner`'s stage; a view the page showed before in that slot goes first. */
+  /**
+   * Lays a new view with `url` over `owner`'s stage. A view the page showed before in that slot
+   * stays in sight above it until the new one has loaded (at most VIEW_SWAP_MS), so the stage never
+   * shows a blank page between two.
+   */
   async show(owner: WebContents, url: string, bounds: unknown, slot: ViewSlot = "main"): Promise<void> {
     if (!this.store.owns(owner.id, url)) throw new Error("This artifact is not open any more.");
     const window = BrowserWindow.fromWebContents(owner);
     if (window === null) throw new Error("No window to show this artifact in.");
-    this.hide(owner.id, slot);
     const at = key(owner.id, slot);
     const ask = (this.asked.get(at) ?? 0) + 1;
     this.asked.set(at, ask);
     const artifactSession = await this.ready;
     if (this.asked.get(at) !== ask || window.isDestroyed() || owner.isDestroyed()) return;
+    const before = this.shown.get(at);
+    this.shown.delete(at);
+    if (before !== undefined) {
+      // It no longer follows the page or picks; it only stays painted for a moment.
+      before.stopPick?.();
+      before.stopPick = null;
+      before.detach();
+      before.detach = () => undefined;
+    }
 
     const view = new WebContentsView({ webPreferences: preferences(artifactSession) });
     // An artifact paints its own page; without a background of its own it is a white one.
@@ -173,19 +201,46 @@ export class ArtifactViews {
       window.off("closed", gone);
     };
     this.shown.set(at, { view, window, detach, stopPick: null });
-    window.contentView.addChildView(view);
+    const under =
+      before !== undefined && before.window === window ? window.contentView.children.indexOf(before.view) : -1;
+    if (under >= 0) window.contentView.addChildView(view, under);
+    else window.contentView.addChildView(view);
     this.place(owner, bounds, slot);
+    if (before !== undefined) this.replace(at, before, view);
     view.webContents.loadURL(url).catch(() => undefined);
+  }
+
+  /** Keeps `before` in sight until `view` has loaded (or failed, or VIEW_SWAP_MS passed), then drops it. */
+  private replace(at: string, before: Shown, view: WebContentsView): void {
+    this.leaving.set(at, [...(this.leaving.get(at) ?? []), before]);
+    let done = false;
+    const go = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      view.webContents.off("did-finish-load", go);
+      view.webContents.off("did-fail-load", go);
+      const rest = (this.leaving.get(at) ?? []).filter((s) => s !== before);
+      if (rest.length > 0) this.leaving.set(at, rest);
+      else this.leaving.delete(at);
+      drop(before);
+    };
+    const timer = setTimeout(go, VIEW_SWAP_MS);
+    view.webContents.once("did-finish-load", go);
+    view.webContents.once("did-fail-load", go);
   }
 
   /** Moves `owner`'s view to where its stage is now; null bounds hide it. Only its own view. */
   place(owner: WebContents, bounds: unknown, slot: ViewSlot = "main"): void {
-    const shown = this.shown.get(key(owner.id, slot));
+    const at = key(owner.id, slot);
+    const shown = this.shown.get(at);
     if (shown === undefined || shown.window.isDestroyed()) return;
     const content = shown.window.getContentBounds();
     const placed = viewBounds(bounds, owner.getZoomFactor(), content);
     if (placed === null) {
       shown.view.setVisible(false);
+      // A view on its way out must not lie over what covers the stage either.
+      for (const old of this.leaving.get(at) ?? []) old.view.setVisible(false);
       return;
     }
     shown.view.setBounds(placed);
@@ -197,13 +252,12 @@ export class ArtifactViews {
     for (const one of slot === undefined ? SLOTS : [slot]) {
       const at = key(ownerId, one);
       this.asked.set(at, (this.asked.get(at) ?? 0) + 1);
+      for (const old of this.leaving.get(at) ?? []) drop(old);
+      this.leaving.delete(at);
       const shown = this.shown.get(at);
       if (shown === undefined) continue;
       this.shown.delete(at);
-      shown.stopPick?.();
-      shown.detach();
-      if (!shown.window.isDestroyed()) shown.window.contentView.removeChildView(shown.view);
-      if (!shown.view.webContents.isDestroyed()) shown.view.webContents.close();
+      drop(shown);
     }
   }
 

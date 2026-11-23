@@ -11,6 +11,8 @@ import {
   designTicket,
   designTitle,
   designToOpen,
+  draftHasContent,
+  draftPhase,
   htmlOf,
   htmlTitle,
   isArtifact,
@@ -340,6 +342,41 @@ describe("liveStep", () => {
     expect(liveStep(a, `${ab}<script>go()</script>`, false)).toBe("serve");
     expect(liveStep(a, `${ab}<SCRIPT type="module">`, false)).toBe("serve");
     expect(liveStep(a, `${ab}<scripts-list>`, false)).toBe("update");
+  });
+  it("waits with the first view while the draft is still in its head, so no blank page shows", () => {
+    const head = "<!doctype html><html><head><title>Pricing</title><style>body { color: red }";
+    expect(liveStep(undefined, head, true)).toBe("none");
+    expect(liveStep(undefined, `${head}</style></head><body><h1>Plans`, true)).toBe("serve");
+    expect(liveStep(undefined, head, false)).toBe("serve");
+  });
+});
+
+describe("draftHasContent", () => {
+  it("is false while only the head, its styles or its scripts are written", () => {
+    expect(draftHasContent("")).toBe(false);
+    expect(draftHasContent('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">')).toBe(false);
+    expect(draftHasContent("<!doctype html><head><title>Pricing</title><style>.a { color: red }")).toBe(false);
+    expect(draftHasContent("<head><style>.a{}</style><script>const a = '<h1>';")).toBe(false);
+    expect(draftHasContent("<head><style>.a{}</style></head>")).toBe(false);
+    expect(draftHasContent("<head><!-- a <b>note</b>")).toBe(false);
+    expect(draftHasContent("<head><style>.a{}</style><sty")).toBe(false);
+  });
+  it("is true once the page itself starts, with or without a body tag", () => {
+    expect(draftHasContent("<head><style>.a{}</style></head><body>")).toBe(true);
+    expect(draftHasContent("<!doctype html><style>.a{}</style><main>")).toBe(true);
+    expect(draftHasContent("<h1>A</h1>")).toBe(true);
+    expect(draftHasContent("Hello")).toBe(true);
+  });
+});
+
+describe("draftPhase", () => {
+  it("names what the draft is writing before the page shows", () => {
+    expect(draftPhase(null)).toBe("starting");
+    expect(draftPhase("")).toBe("starting");
+    expect(draftPhase("<!doctype html><head><meta charset=utf-8>")).toBe("head");
+    expect(draftPhase("<head><style>.a{")).toBe("styles");
+    expect(draftPhase("<head><style>.a{}</style><script>let a")).toBe("scripts");
+    expect(draftPhase("<head><style>.a{}</style></head><body><h1>")).toBe("page");
   });
 });
 

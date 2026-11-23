@@ -15,10 +15,12 @@ import type { ArtifactTarget } from "./artifact-dock";
 import type { ArtifactSend } from "./artifact-feedback";
 import {
   applyEdit,
+  type DesignPage,
   designsOf,
   designTitle,
   designToOpen,
   isArtifact,
+  sizeText,
   type WrittenDesign,
   writtenContent,
 } from "./artifact-logic";
@@ -48,10 +50,8 @@ const styles = stylex.create({
   meta: { fontSize: 11, color: "var(--precision-text3)" },
 });
 
-const sizeText = (chars: number) => (chars >= 1024 ? `${Math.round(chars / 1024)} KB` : `${chars} B`);
-
 /** The design's HTML after its call: the whole `Write`, then each edit that fits, in order. */
-function useWrittenHtml(messageId: string, design: WrittenDesign) {
+function useWrittenHtml(messageId: string, design: WrittenDesign, enabled: boolean) {
   const connection = useConnection();
   const call = async (callId: string) =>
     expectBody(await connection.call("activity.get", { message_id: messageId, call_id: callId }), "activity").value
@@ -70,13 +70,18 @@ function useWrittenHtml(messageId: string, design: WrittenDesign) {
       }
       return out;
     },
-    design.draft === null,
+    enabled && design.draft === null,
   );
 }
 
-/** The viewer of a written design: its draft while it streams, then the HTML of its calls. */
+/**
+ * The viewer of a written design: its draft while it streams, then the HTML of its calls, then
+ * (`kept`) the pages the answer kept. One viewer throughout, so the page in sight stays and only
+ * loads again when the kept file differs from what was written.
+ */
 export function DesignViewer({
   design,
+  kept = null,
   messageId,
   messages,
   conversationId,
@@ -86,6 +91,8 @@ export function DesignViewer({
   onClose,
 }: {
   design: WrittenDesign;
+  /** The design's kept pages once the answer kept it (designPages), and the page to show. */
+  kept?: { pages: DesignPage[]; openName: string } | null;
   messageId: string;
   messages: readonly MessageView[];
   conversationId: string | null;
@@ -96,7 +103,7 @@ export function DesignViewer({
   onClose: () => void;
 }) {
   const { artifacts } = usePlatform();
-  const loaded = useWrittenHtml(messageId, design);
+  const loaded = useWrittenHtml(messageId, design, kept === null);
   // Between the last draft and the whole call, the last draft stays in sight.
   const last = useRef<string | null>(null);
   const html = design.draft ?? loaded.data ?? last.current;
@@ -104,20 +111,24 @@ export function DesignViewer({
   if (!artifacts) return null;
   return (
     <ArtifactViewer
-      pages={[]}
-      openName={design.name}
+      pages={kept?.pages ?? []}
+      openName={kept?.openName ?? design.name}
       artifacts={artifacts}
       messages={messages}
       conversationId={conversationId}
       send={send}
       docked={docked}
       notice={notice}
-      live={{
-        name: design.name,
-        html,
-        writing: design.writing,
-        error: html === null ? (loaded.error?.message ?? null) : null,
-      }}
+      live={
+        kept
+          ? null
+          : {
+              name: design.name,
+              html,
+              writing: design.writing,
+              error: html === null ? (loaded.error?.message ?? null) : null,
+            }
+      }
       onClose={onClose}
     />
   );
