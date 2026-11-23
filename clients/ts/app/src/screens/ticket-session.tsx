@@ -43,6 +43,7 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
+import { designPagesAcross } from "./artifact-logic";
 import {
   deadlineInput,
   doneCheck,
@@ -59,6 +60,7 @@ import { artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { parseDeadline, parseLabels, useModels } from "./dialogs";
 import { isQuick } from "./quick-logic";
 import {
+  DesignPagesSection,
   FilesWritten,
   type PropertiesDock,
   PropertiesPanel,
@@ -702,6 +704,7 @@ function PropertiesTab({ detail, t }: { detail: TicketDetail; t: TicketView }) {
   const root = detail.root_task ?? null;
   return (
     <>
+      <TicketDesign detail={detail} t={t} />
       <SideSection title="Run">
         <SideRow name="Status">
           {root ? <RootState task={root} /> : <span {...stylex.props(styles.third)}>Not started</span>}
@@ -893,6 +896,14 @@ function RunsOfTicket({ detail, t, part }: { detail: TicketDetail; t: TicketView
       {part === "files" ? <FilesWritten files={files} /> : <RunGuidelines runId={run} title="Guidelines in the runs" />}
     </>
   );
+}
+
+/** The design the ticket's discussion and its tasks made, when there is one (`DesignPagesSection`). */
+function TicketDesign({ detail, t }: { detail: TicketDetail; t: TicketView }) {
+  const ids = useMemo(() => ticketConversations(t.conversation_id, detail.tasks), [t.conversation_id, detail.tasks]);
+  const reads = useMessagesOf(ids);
+  const pages = designPagesAcross(reads.map((r) => r.data?.messages));
+  return <DesignPagesSection pages={pages} />;
 }
 
 /** What all of the ticket's runs used (`usage.get_totals { ticket_id }`), only on a server with `run_cards`. */

@@ -11,6 +11,8 @@ export function isArtifact(file: Pick<FileRef, "media_type">): boolean {
 /** One page of a design: the newest kept HTML file with this name in the conversation. */
 export interface DesignPage {
   name: string;
+  /** What the page is shown as (`designTitle`). */
+  title: string;
   file: FileRef;
   messageId: string;
   atMs: number;
@@ -24,11 +26,60 @@ export interface DesignPage {
 export function designPages(messages: readonly MessageView[], opened?: FileRef, atMs = 0): DesignPage[] {
   const pages = new Map<string, DesignPage>();
   for (const m of messages.filter((x) => !x.deleted_at_ms).toSorted((a, b) => a.ordinal - b.ordinal))
-    for (const file of (m.files ?? []).filter(isArtifact))
-      pages.set(file.name, { name: file.name, file, messageId: m.id, atMs: m.created_at_ms });
-  if (opened && !pages.has(opened.name))
-    pages.set(opened.name, { name: opened.name, file: opened, messageId: "", atMs });
+    for (const file of (m.files ?? []).filter(isArtifact)) pages.set(file.name, pageOf(file, m.id, m.created_at_ms));
+  if (opened && !pages.has(opened.name)) pages.set(opened.name, pageOf(opened, "", atMs));
   return [...pages.values()];
+}
+
+/** A kept file as a page of its design. */
+export function pageOf(file: FileRef, messageId: string, atMs: number): DesignPage {
+  return { name: file.name, title: designTitle(file), file, messageId, atMs };
+}
+
+/**
+ * The pages of the designs over several conversations (a ticket's discussion and its tasks): one
+ * per file name, the newest by time, in the order the pages first came. A list not read yet is
+ * left out.
+ */
+export function designPagesAcross(lists: readonly (readonly MessageView[] | undefined)[]): DesignPage[] {
+  const pages = new Map<string, DesignPage>();
+  for (const list of lists)
+    for (const page of designPages(list ?? [])) {
+      const had = pages.get(page.name);
+      if (!had || page.atMs >= had.atMs) pages.set(page.name, page);
+    }
+  return [...pages.values()];
+}
+
+/**
+ * What a design page is called: its own `<title>` (read by the server when it kept the file),
+ * else its file name made readable: "workspace-settings.html" is "Workspace settings".
+ */
+export function designTitle(file: { name: string; title?: string | null }): string {
+  const own = file.title?.trim();
+  if (own) return own;
+  const words = file.name
+    .replace(/\.html?$/i, "")
+    .replace(/[-_]+/g, " ")
+    .trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : file.name;
+}
+
+/** The `<title>` in an HTML page's head, decoded and on one line; null without one. */
+export function htmlTitle(html: string): string | null {
+  const head = html.slice(0, Math.max(0, html.search(/<\/head/i)) || html.length);
+  const found = /<title(?:\s[^>]*)?>([\s\S]*?)<\/title/i.exec(head);
+  if (!found?.[1]) return null;
+  const text = found[1]
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || null;
 }
 
 export const VIEWPORTS = [
@@ -307,8 +358,8 @@ export function keptDesign(message: Pick<MessageView, "status" | "files">, path:
 }
 
 /**
- * What a ticket made from a page of a design starts with: the page's file name in the title, the
- * path the employee named in the description. The page goes along as a file.
+ * What a ticket made from a page of a design starts with: the page's title (`designTitle`) in the
+ * ticket's title, the path the employee named in the description. The page goes along as a file.
  */
 export function designTicket(name: string, path: string): { title: string; description: string } {
   return {

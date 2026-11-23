@@ -40,6 +40,7 @@ describe("pagesOf", () => {
     expect(pagesOf(design())).toEqual([
       {
         name: "landing.html",
+        title: "Landing",
         file: { id: "f1", name: "landing.html", media_type: "text/html", size: 10 },
         messageId: "m1",
         atMs: 100,

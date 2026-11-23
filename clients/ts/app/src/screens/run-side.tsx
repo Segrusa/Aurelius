@@ -13,6 +13,8 @@ import { useRunGuidelines } from "../data";
 import { usePlatform } from "../platform";
 import { Icon } from "../ui/icons";
 import { toast } from "../ui/toast";
+import { useDockOpener } from "./artifact-dock";
+import type { DesignPage } from "./artifact-logic";
 import { fileName, fileRows, isAbsolutePath, type UsageTotals } from "./run-logic";
 import { tokensShort } from "./usage-logic";
 
@@ -116,6 +118,7 @@ const styles = stylex.create({
   guideline: { display: "flex", justifyContent: "space-between", gap: 8, paddingBlock: 4 },
   truncate: { overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" },
   version: { flexShrink: 0, color: "var(--precision-text3)" },
+  accent: { flexShrink: 0, color: "var(--color-text-accent)" },
   usage: { fontSize: 12, lineHeight: 1.7 },
   titleRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 },
   titleInRow: { marginBottom: 0 },
@@ -309,6 +312,46 @@ export function FilesWritten({ files }: { files: string[] }) {
         );
       })}
     </FoldedSection>
+  );
+}
+
+/**
+ * The design of the conversation, when it has one: each page by its title, the newest last; a
+ * click opens it in the dock beside the conversation. Not shown where designs cannot open (the web).
+ */
+export function DesignPagesSection({ pages }: { pages: readonly DesignPage[] }) {
+  const { artifacts } = usePlatform();
+  const openInDock = useDockOpener();
+  if (pages.length === 0 || !artifacts) return null;
+  return (
+    <SideSection title="Design">
+      {pages.map((page) => {
+        const label = (
+          <>
+            <span aria-hidden {...stylex.props(styles.accent)}>
+              ◧
+            </span>
+            <span {...stylex.props(styles.truncate)}>{page.title}</span>
+          </>
+        );
+        return openInDock ? (
+          <button
+            key={page.file.id}
+            type="button"
+            title={page.file.name}
+            aria-label={`Open the design ${page.title}`}
+            onClick={() => openInDock({ kind: "file", file: page.file })}
+            {...stylex.props(styles.file, styles.fileButton)}
+          >
+            {label}
+          </button>
+        ) : (
+          <div key={page.file.id} title={page.file.name} {...stylex.props(styles.file)}>
+            {label}
+          </div>
+        );
+      })}
+    </SideSection>
   );
 }
 

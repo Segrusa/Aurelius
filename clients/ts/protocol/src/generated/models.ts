@@ -2405,6 +2405,11 @@ export interface FileRef {
   media_type: string;
   name: string;
   size: number;
+  /**
+   * An HTML design's own `<title>`, so clients show a design by its title instead of its
+   * file name. Absent on other files, on a page without a title and from older servers.
+   */
+  title?: string | null;
 }
 
 /**

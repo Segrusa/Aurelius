@@ -13,7 +13,15 @@ import { useKeyed } from "../data";
 import { usePlatform } from "../platform";
 import type { ArtifactTarget } from "./artifact-dock";
 import type { ArtifactSend } from "./artifact-feedback";
-import { applyEdit, designsOf, designToOpen, isArtifact, type WrittenDesign, writtenContent } from "./artifact-logic";
+import {
+  applyEdit,
+  designsOf,
+  designTitle,
+  designToOpen,
+  isArtifact,
+  type WrittenDesign,
+  writtenContent,
+} from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 
 const styles = stylex.create({
@@ -175,7 +183,7 @@ export function WrittenDesigns({
         >
           <span {...stylex.props(styles.accent)}>◧</span>
           <span {...stylex.props(styles.text)}>
-            <span>{d.name}</span>
+            <span>{designTitle({ name: d.name })}</span>
             <span {...stylex.props(styles.meta)}>
               {d.writing ? `Writing…${d.draft === null ? "" : ` · ${sizeText(d.draft.length)}`}` : "Design"}
             </span>

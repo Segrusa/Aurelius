@@ -6,10 +6,13 @@ import {
   DIALOG_SELECTOR,
   designFile,
   designPages,
+  designPagesAcross,
   designsOf,
   designTicket,
+  designTitle,
   designToOpen,
   htmlOf,
+  htmlTitle,
   isArtifact,
   keptDesign,
   liveStep,
@@ -54,7 +57,47 @@ describe("isArtifact", () => {
   });
 });
 
+describe("designTitle", () => {
+  it("is the page's own title when the server read one", () => {
+    expect(designTitle({ name: "uitleg-flow.html", title: "Onboarding flow" })).toBe("Onboarding flow");
+  });
+
+  it("is the file name made readable without one", () => {
+    expect(designTitle({ name: "workspace-settings_v2.html" })).toBe("Workspace settings v2");
+    expect(designTitle({ name: "pricing.HTM", title: "  " })).toBe("Pricing");
+    expect(designTitle({ name: ".html" })).toBe(".html");
+  });
+});
+
+describe("htmlTitle", () => {
+  it("reads the head's title, decoded and on one line", () => {
+    expect(htmlTitle("<html><head><TITLE>\n Plans &amp; pricing </TITLE></head>")).toBe("Plans & pricing");
+  });
+
+  it("is null without a title in the head", () => {
+    expect(htmlTitle("<head></head><body><svg><title>Icon</title></svg>")).toBeNull();
+    expect(htmlTitle("<title>   </title>")).toBeNull();
+    expect(htmlTitle("<title>still being writ")).toBeNull();
+  });
+});
+
+describe("designPagesAcross", () => {
+  it("is one page per name over several conversations, the newest by time", () => {
+    const discussion = [msg("a", 1, [html("l1")])];
+    const task = [msg("b", 5, [html("l2"), html("p1", "pricing.html")])];
+    expect(designPagesAcross([discussion, undefined, task]).map((p) => [p.name, p.file.id])).toEqual([
+      ["landing.html", "l2"],
+      ["pricing.html", "p1"],
+    ]);
+  });
+});
+
 describe("designPages", () => {
+  it("names each page by its title", () => {
+    const titled = { ...html("t1", "uitleg.html"), title: "Checkout" };
+    expect(designPages([msg("a", 1, [titled, html("l1")])]).map((p) => p.title)).toEqual(["Checkout", "Landing"]);
+  });
+
   it("is one page per name, the newest kept file of each, in the order the pages first came", () => {
     const messages = [msg("a", 1, [html("l1")]), msg("b", 2, [html("p1", "pricing.html")]), msg("c", 3, [html("l2")])];
     expect(designPages(messages).map((p) => [p.name, p.file.id, p.messageId])).toEqual([

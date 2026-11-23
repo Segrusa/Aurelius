@@ -16,12 +16,14 @@ import { useAction, useKeyContext } from "../keys/provider";
 import { Chip } from "../ui/chip";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { designPages } from "./artifact-logic";
 import { EFFORTS } from "./dialog-logic";
 import { useModels } from "./dialogs";
 import { EmployeeChat } from "./employee-chat";
 import { MODE_LABELS, MODES } from "./employee-logic";
 import { lastRunOf, usageTotals } from "./run-logic";
 import {
+  DesignPagesSection,
   FilesWritten,
   type PropertiesDock,
   PropertiesPanel,
@@ -145,6 +147,7 @@ function SessionDetails({
   const feed = useMessages(conversationId);
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
   const files = useMemo(() => filesWritten(list), [list]);
+  const designs = useMemo(() => designPages(list), [list]);
   const usage = useMemo(() => usageTotals(list), [list]);
   const run = feed.data?.run;
   const mode = feed.data?.agent_mode;
@@ -177,6 +180,7 @@ function SessionDetails({
         live={running}
         {...(session ? { askedBy: session.employee_name } : {})}
       />
+      <DesignPagesSection pages={designs} />
       <FilesWritten files={files} />
       <RunGuidelines runId={lastRunOf(list)} />
     </PropertiesPanel>

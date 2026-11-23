@@ -44,7 +44,9 @@ import {
   type DesignPage,
   DIALOG_SELECTOR,
   designTicket,
+  designTitle,
   htmlOf,
+  htmlTitle,
   liveStep,
   OVERLAY_SELECTOR,
   overlaysOver,
@@ -596,6 +598,11 @@ export function ArtifactViewer({
     if (path !== openedAt.current) onClose();
   }, [path, onClose]);
   const name = live?.name ?? current?.file.name ?? file.data?.name ?? "Artifact";
+  // A page shows by its own <title> (also one kept before the server read titles), else its readable file name.
+  const pageTitle =
+    (live ? null : current?.file.title?.trim()) ||
+    (html !== undefined ? htmlTitle(html) : null) ||
+    designTitle({ name });
   const answer = messages.find((m) => m.id === current?.messageId)?.text ?? "";
   const artifactName = artifactPath(answer, name);
   const width = viewportWidth(viewport);
@@ -639,12 +646,12 @@ export function ArtifactViewer({
   const ticket = () => {
     if (html === undefined) return;
     overlays.open("ticket", {
-      ...designTicket(name, artifactName),
+      ...designTicket(pageTitle, artifactName),
       files: [new File([html], name, { type: "text/html" })],
     });
   };
 
-  const title = writing ? `${name} · Writing…` : name;
+  const title = writing ? `${pageTitle} · Writing…` : pageTitle;
   const tools = (
     <div {...stylex.props(styles.bar)}>
       {pages.length > 1 ? (
@@ -653,7 +660,7 @@ export function ArtifactViewer({
           size="sm"
           value={current?.name ?? pageName}
           onChange={(v) => setPageName(v)}
-          options={pages.map((p) => ({ value: p.name, label: p.name }))}
+          options={pages.map((p) => ({ value: p.name, label: p.title }))}
         />
       ) : null}
       <span {...stylex.props(styles.grow)} />
