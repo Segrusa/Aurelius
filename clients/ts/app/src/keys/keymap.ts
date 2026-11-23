@@ -202,15 +202,6 @@ export const SHORTCUTS: Shortcut[] = [
     action: "NavForward",
   },
   {
-    keys: ["secondary-b"],
-    context: "Aurelius",
-    navKeys: [],
-    label: "Expand / collapse the sidebar",
-    section: "General",
-    inPalette: true,
-    action: "ToggleSidebar",
-  },
-  {
     keys: ["secondary-."],
     context: "Aurelius",
     navKeys: [],

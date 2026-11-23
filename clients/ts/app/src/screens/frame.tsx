@@ -3,7 +3,7 @@ import { expectBody } from "@aurelius/client";
 import type { NotificationView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useAllTasks, useLiveQueries, useNotifications, useTickets } from "../data";
 import { useAction, useFallbackAction, useKeys } from "../keys/provider";
@@ -54,8 +54,6 @@ const styles = stylex.create({
   },
   settingsSidebar: { display: "flex", height: "100%" },
 });
-
-const SIDEBAR_KEY = "sidebar";
 
 const GO_TO: Record<string, string> = {
   GoDashboard: "/new",
@@ -237,19 +235,13 @@ export function Frame({ children }: { children: ReactNode }) {
   useScreenCounter();
   useUpdateNotice();
   useNoteToasts();
-  const { storage, windowProject } = usePlatform();
-  const [sidebarHidden, setSidebarHidden] = useState(() => storage.get(SIDEBAR_KEY) === "hidden");
-  const setHidden = (hidden: boolean) => {
-    storage.set(SIDEBAR_KEY, hidden ? "hidden" : "shown");
-    setSidebarHidden(hidden);
-  };
-  useAction("ToggleSidebar", () => setHidden(!sidebarHidden));
+  const { windowProject } = usePlatform();
 
-  // A project window has no sidebar. The app's sidebar folds to a rail; Settings' has no rail to fold to.
+  // A project window has no sidebar.
   let side: ReactNode = null;
   if (windowProject === null) {
-    if (!inSettings) side = <Sidebar collapsed={sidebarHidden} onCollapse={setHidden} />;
-    else if (!sidebarHidden) {
+    if (!inSettings) side = <Sidebar />;
+    else {
       side = (
         <div data-sidebar {...stylex.props(styles.settingsSidebar)}>
           <SettingsSidebar />

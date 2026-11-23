@@ -45,9 +45,8 @@ const NAV_PATHS = {
   cpu: "M4.5 4.5h7v7h-7zM6.75 6.75h2.5v2.5h-2.5zM6.5 2v2.5M9.5 2v2.5M6.5 11.5V14M9.5 11.5V14M2 6.5h2.5M2 9.5h2.5M11.5 6.5H14M11.5 9.5H14",
   memory: "M1.5 5h13v5.5h-13zM4 7v1.5M6.67 7v1.5M9.33 7v1.5M12 7v1.5M3.5 10.5v2M6 10.5v2M10 10.5v2M12.5 10.5v2",
   server: "M2.5 2.5h11v4.5h-11zM2.5 9h11v4.5h-11zM5 4.75h.01M5 11.25h.01M8 4.75h3M8 11.25h3",
-  // A panel with its left column: folds and unfolds the sidebar, in its head.
+  // Four tiles: All workspaces in the rail.
   grid: "M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM9 9h4v4H9z",
-  sidebar: "M3.5 3h9a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zM6.5 3v10",
   // The user menu's rows: a gauge for the usage, a laptop with a phone for remote access, a door out.
   usage: "M2.5 11.5a5.5 5.5 0 1 1 11 0M8 11.5l2.5-3",
   devices: "M2 4h8.5v5.5H2zM1 11.5h8.5M11.5 6.5h3v6.5h-3z",

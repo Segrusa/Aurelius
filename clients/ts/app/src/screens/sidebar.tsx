@@ -641,17 +641,7 @@ function RailTile({
   );
 }
 
-function Rail({
-  projects,
-  needs,
-  collapsed,
-  onCollapse,
-}: {
-  projects: ProjectSummary[];
-  needs: Map<string, number>;
-  collapsed: boolean;
-  onCollapse: (collapsed: boolean) => void;
-}) {
+function Rail({ projects, needs }: { projects: ProjectSummary[]; needs: Map<string, number> }) {
   const { id, available, locked } = useWorkspace();
   const { user } = useLinkState();
   const switchTo = useSwitchWorkspace();
@@ -659,7 +649,6 @@ function Rail({
   const navigate = useNavigate();
   const workspaces = available && !locked;
   const allNeeds = [...needs.values()].reduce((n, v) => n + v, 0);
-  const fold = collapsed ? "Show sidebar" : "Hide sidebar";
   return (
     <nav aria-label="Workspaces" data-sidebar-drag {...stylex.props(styles.rail)}>
       {workspaces ? (
@@ -708,16 +697,6 @@ function Rail({
           </button>
         </Tooltip>
       )}
-      <Tooltip content={fold} placement="end" delay={400} hasHoverIndication={false}>
-        <button
-          type="button"
-          aria-label={fold}
-          onClick={() => onCollapse(!collapsed)}
-          {...stylex.props(styles.railButton)}
-        >
-          <Icon name="sidebar" size={18} />
-        </button>
-      </Tooltip>
     </nav>
   );
 }
@@ -805,8 +784,8 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
   );
 }
 
-/** The rail, and beside it the panel unless the sidebar is folded to the rail. */
-export function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onCollapse: (collapsed: boolean) => void }) {
+/** The rail, and beside it the panel. */
+export function Sidebar() {
   const projects = useProjects();
   const [pins] = useProjectPins();
   const items = useSidebarItems();
@@ -814,8 +793,8 @@ export function Sidebar({ collapsed, onCollapse }: { collapsed: boolean; onColla
   const needs = useMemo(() => needsPerProject(items), [items]);
   return (
     <div data-sidebar {...stylex.props(styles.side)}>
-      <Rail projects={list} needs={needs} collapsed={collapsed} onCollapse={onCollapse} />
-      {collapsed ? null : <Panel items={items} projects={list} />}
+      <Rail projects={list} needs={needs} />
+      <Panel items={items} projects={list} />
     </div>
   );
 }
