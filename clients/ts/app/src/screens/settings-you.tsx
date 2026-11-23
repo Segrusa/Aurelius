@@ -9,6 +9,7 @@ import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { parseScreenUse, SCREEN_USE_KEY } from "../screen-use";
 import { ClaudeLogin, passwordProblem } from "./settings-accounts";
+import { YourDevices } from "./settings-devices";
 import {
   ConfirmButton,
   Group,
@@ -153,6 +154,7 @@ export function AccountSection() {
         <ChangePassword />
       </Group>
       <ClaudeLogin />
+      <YourDevices />
       <Sessions />
     </>
   );

@@ -68,6 +68,8 @@ export const METHODS = {
   "conversation.set_run": "command",
   "conversation.set_screen_allowed": "command",
   "design.list": "read",
+  "device.list": "read",
+  "device.revoke": "host",
   "discussion.audience": "read",
   "employee.chat": "read",
   "employee.chats": "read",
@@ -458,6 +460,17 @@ export interface MethodParams {
    * conversation, the latest first (feature `designs`).
    */
   "design.list": { project_id?: string | null };
+  /**
+   * The devices the session's board member paired, newest first (feature
+   * `own_devices`). Never another board member's. A session method.
+   */
+  "device.list": undefined;
+  /**
+   * Remove one of the session's own paired devices (feature `own_devices`): its
+   * sessions end and its connections close. Another board member's device is
+   * `not_found`. Answers `Done`.
+   */
+  "device.revoke": { client_id: string };
   /**
    * Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
    * answered with `DiscussionAudience`, for the reader's own message (the

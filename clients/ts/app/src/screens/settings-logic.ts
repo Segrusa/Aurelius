@@ -5,6 +5,7 @@ import type {
   EmployeeRunLine,
   EmployeeRunsView,
   Recurrence,
+  RemoteClientView,
   RunValueSource,
   Setting2,
 } from "@aurelius/protocol";
@@ -154,4 +155,21 @@ const COMPANY_PAGES = ["/employees", "/knowledge"];
 export function inSettingsArea(path: string): boolean {
   const under = (root: string) => path === root || path.startsWith(`${root}/`);
   return under("/settings") || COMPANY_PAGES.some(under) || path === "/projects";
+}
+
+/** The feature that makes a paired device its pairer's own (Account → Your devices). */
+export const OWN_DEVICES = "own_devices";
+
+/** "ios · Connected now · Notifications on": where a paired device stands. `seen` formats a time. */
+export function deviceHint(device: RemoteClientView, seen: (ms: number | null | undefined) => string): string {
+  const state = device.connected ? "Connected now" : `Last seen ${seen(device.last_seen_ms)}`;
+  return [device.platform, state, device.push ? "Notifications on" : null].filter(Boolean).join(" · ");
+}
+
+/**
+ * The devices Settings → Remote access lists. With `own_devices` a board member's devices are
+ * in Account, so only those of nobody; an older server keeps every device here.
+ */
+export function remoteAccessDevices(clients: RemoteClientView[], ownDevices: boolean): RemoteClientView[] {
+  return ownDevices ? clients.filter((c) => !c.paired_by) : clients;
 }

@@ -120,14 +120,20 @@ test("every section works against a real daemon, and what is changed stays chang
     await main(page).getByRole("button", { name: "Yes, remove" }).click();
     await expect(main(page).getByRole("button", { name: /Anthropic API/ })).toBeHidden();
 
+    // Remote access is the server's switch; each board member pairs their own devices in Account.
     await open(page, "Remote access");
     await main(page).getByRole("switch", { name: "Remote access" }).click();
+    await expect(main(page).getByText("Pair and revoke your own phones and computers under Account.")).toBeVisible();
+    await expect(main(page).getByRole("button", { name: "Show code" })).toBeHidden();
+    await open(page, "Account");
+    await expect(main(page).getByText("Your devices", { exact: true })).toBeVisible();
+    await expect(main(page).getByText("No paired devices.")).toBeVisible();
     await main(page).getByRole("button", { name: "Show code" }).click();
     await expect(main(page).getByText(/Valid until/)).toBeVisible();
 
     // All of it still so after a reload, read back from the server.
     await page.reload();
-    await expect(page.getByRole("heading", { level: 1, name: "Remote access" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Account" })).toBeVisible();
     await open(page, "Company");
     await expect(main(page).getByLabel("Company name")).toHaveValue("Northwind");
     await expect(main(page).getByRole("switch", { name: "Management chooses the mode" })).toBeChecked({

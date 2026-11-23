@@ -1757,6 +1757,13 @@ export interface DesignsSnapshot {
   designs: DesignView[];
 }
 
+/**
+ * `device.list`: the session's own paired devices, newest first.
+ */
+export interface DevicesSnapshot {
+  devices: RemoteClientView[];
+}
+
 export interface DirEntryView {
   name: string;
   path: string;
@@ -2905,6 +2912,12 @@ export type HostWrite =
    */
   | ({ method: "compaction.set_threshold"; params: { threshold_tokens: number } })
   /**
+   * Remove one of the session's own paired devices (feature `own_devices`): its
+   * sessions end and its connections close. Another board member's device is
+   * `not_found`. Answers `Done`.
+   */
+  | ({ method: "device.revoke"; params: { client_id: string } })
+  /**
    * A new folder `name` in the folder `parent`.
    */
   | ({ method: "fs.create_dir"; params: { name: string; parent: string } })
@@ -3968,6 +3981,11 @@ export type Method =
    */
   | ({ method: "design.list"; params: { project_id?: string | null } })
   /**
+   * The devices the session's board member paired, newest first (feature
+   * `own_devices`). Never another board member's. A session method.
+   */
+  | ({ method: "device.list" })
+  /**
    * Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
    * answered with `DiscussionAudience`, for the reader's own message (the
    * reader is never counted). `channel`: a channel or a ticket's discussion
@@ -4815,6 +4833,12 @@ export interface RemoteClientView {
   last_seen_ms?: number | null;
   name: string;
   /**
+   * The board member who paired it (feature `own_devices`); none: a device paired
+   * before devices had an owner and never signed in on, which only the server's
+   * Remote access settings show.
+   */
+  paired_by?: string | null;
+  /**
    * ios | android | windows | macos | linux
    */
   platform: string;
@@ -4897,6 +4921,10 @@ export type ResponseBody =
    * `design.list`.
    */
   | ({ type: "designs"; value: DesignsSnapshot })
+  /**
+   * `device.list`.
+   */
+  | ({ type: "devices"; value: DevicesSnapshot })
   | ({ type: "dir_listing"; value: DirListing })
   /**
    * `discussion.audience`.
