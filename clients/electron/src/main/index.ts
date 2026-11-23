@@ -716,7 +716,8 @@ function openProjectWindow(id: string, name: string): void {
       minHeight: MIN_HEIGHT,
       title: `${name} · Aurelius`,
     },
-    `/projects/${encodeURIComponent(id)}`,
+    // The window knows its project by projectWindows, so it starts where the main window does.
+    "/",
   );
   // The window's name is the project's, whatever screen the page shows.
   window.on("page-title-updated", (event) => event.preventDefault());

@@ -17,7 +17,6 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
-import { BoardScreen } from "./board";
 import { canPin, pinnedFirst, togglePin } from "./employee-logic";
 import { pinKey, usePins } from "./employees";
 import { IdeasBody } from "./ideas";
@@ -25,7 +24,6 @@ import { Confirm, Empty, FormDialog, failureOf, Hint, KnowledgeTabs, Page, PageH
 import { useFolderChooser } from "./run-tools";
 import { ScheduleDialog } from "./settings-advanced";
 import { focusField } from "./settings-kit";
-import { TasksScreen } from "./tasks";
 import { VaultBody } from "./vault";
 import { WorkspaceSettingsBody } from "./workspace-settings";
 
@@ -466,15 +464,13 @@ const TABS: { key: ProjectTab; label: string; feature?: Feature }[] = shown([
 /** A hidden tab in a URL opens the overview. */
 export const projectTabShown = (tab: string): boolean => TABS.some((t) => t.key === tab);
 
-// With a sidebar these two are its screens, narrowed to the workspace. A project window has no
-// sidebar, so there they stay tabs.
+// These two are the sidebar's screens, narrowed to the workspace, in a project window too.
 const SIDEBAR_SCREENS: ProjectTab[] = ["board", "tasks"];
-const tabsOf = (hasSidebar: boolean) => TABS.filter((t) => !hasSidebar || !SIDEBAR_SCREENS.includes(t.key));
+const PAGE_TABS = TABS.filter((t) => !SIDEBAR_SCREENS.includes(t.key));
 
 export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab }) {
   const navigate = useNavigate();
-  const { windowProject } = usePlatform();
-  const tabs = tabsOf(windowProject === null);
+  const tabs = PAGE_TABS;
   const tab = tabs.some((t) => t.key === asked) ? asked : "overview";
   const projects = useProjects();
   const project = projects.data?.find((p) => p.id === id) ?? null;
@@ -529,7 +525,6 @@ export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab })
   }
   return (
     <Page>
-      {/* A project window has no sidebar: its board and tasks stay tabs above the settings. */}
       {tabs.length > 1 ? (
         <PageHead
           title={project.name}
@@ -551,8 +546,6 @@ export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab })
           onArchiving={setArchiving}
         />
       ) : null}
-      {tab === "board" ? <BoardScreen projectId={project.id} /> : null}
-      {tab === "tasks" ? <TasksScreen projectId={project.id} /> : null}
       {tab === "ideas" ? <IdeasBody projectId={project.id} chrome={false} /> : null}
       {tab === "vault" ? (
         <div {...stylex.props(styles.fill)}>

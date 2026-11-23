@@ -197,30 +197,25 @@ test("a link from the operating system opens in the running app; a project gets 
         .getByText("This link is for a server this device isn't paired with."),
     ).toBeVisible();
 
-    // A window per project, not a second one; the page there has no sidebar.
+    // A window per project, not a second one.
     await page.goto("app://aurelius/projects");
     await page
       .getByRole("link", { name: /Northwind API/ })
       .first()
       .click();
-    await page
-      .getByRole("button", { name: /More|Project menu|Project actions/ })
-      .first()
-      .click();
+    // The workspace settings page offers it.
     const [window] = await Promise.all([
       app.waitForEvent("window"),
-      page.getByRole("menuitem", { name: "Open in new window" }).click(),
+      page.getByRole("button", { name: "Open window" }).click(),
     ]);
+    // It has the same sidebar, on its own workspace, without a way to another one.
+    await expect(window.getByRole("navigation", { name: "Main" })).toBeVisible();
     await expect(window.getByText("Northwind API").first()).toBeVisible();
-    await expect(window.getByRole("navigation", { name: /main|Sidebar/i })).toBeHidden();
+    await expect(window.getByRole("button", { name: "New workspace" })).toHaveCount(0);
     const titles = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.getTitle()));
     expect(titles).toContain("Northwind API · Aurelius");
     // Asking again brings that window forward instead of a third.
-    await page
-      .getByRole("button", { name: /More|Project menu|Project actions/ })
-      .first()
-      .click();
-    await page.getByRole("menuitem", { name: "Open in new window" }).click();
+    await page.getByRole("button", { name: "Open window" }).click();
     await expect.poll(() => app.windows().length).toBe(2);
   } finally {
     await app.close();

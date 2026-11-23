@@ -235,27 +235,21 @@ export function Frame({ children }: { children: ReactNode }) {
   useScreenCounter();
   useUpdateNotice();
   useNoteToasts();
-  const { windowProject } = usePlatform();
-
-  // A project window has no sidebar.
-  let side: ReactNode = null;
-  if (windowProject === null) {
-    if (!inSettings) side = <Sidebar />;
-    else {
-      side = (
-        <div data-sidebar {...stylex.props(styles.settingsSidebar)}>
-          <SettingsSidebar />
-        </div>
-      );
-    }
-  }
+  // A project window has the same sidebar; its rail just offers no other workspace (locked).
+  const side: ReactNode = inSettings ? (
+    <div data-sidebar {...stylex.props(styles.settingsSidebar)}>
+      <SettingsSidebar />
+    </div>
+  ) : (
+    <Sidebar />
+  );
 
   return (
     <>
       {Object.entries(GO_TO).map(([action, to]) => (
         <GoAction key={action} action={action} to={to} />
       ))}
-      <AppShell variant="section" height="fill" mobileNav={false} {...(side ? { sideNav: side } : {})}>
+      <AppShell variant="section" height="fill" mobileNav={false} sideNav={side}>
         <div {...stylex.props(styles.screen)}>
           <div {...stylex.props(styles.page)}>{children}</div>
           <ActivityBar />
