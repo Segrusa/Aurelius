@@ -117,6 +117,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::MessageLocate { message_id } => message_location(shared, message_id).await,
         Method::TicketFollowers { ticket_id } => ticket_followers(shared, ticket_id).await,
         Method::TicketMyTickets { project_id, include_done } => my_tickets(shared, reader, project_id, include_done).await,
+        Method::UserRailPins => rail_pins(shared, reader).await,
         Method::TicketHistory { project_id, employee_id, from_ms, to_ms, query, before_done_at_ms, before_number, limit } => {
             let before = before_done_at_ms.zip(before_number);
             let filter = aurelius_storage::history::Filter { project: project_id, employee: employee_id, from_ms, to_ms, query, before };
@@ -914,6 +915,14 @@ async fn my_tickets(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId
     })
     .await
     .map(ResponseBody::MyTickets)
+}
+
+/// `user.rail_pins`: the rail of the board member of the session, never of one
+/// named in a param. An app has no rail.
+async fn rail_pins(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
+    let Some(user) = reader else { return Err(ProtocolError::new(ErrorCode::BoardMemberRequired, "A rail is a board member's own.")) };
+    let store = shared.store().clone();
+    storage_task(move || store.read(|c| aurelius_storage::rail_pins::get(c, user))).await.map(ResponseBody::RailPins)
 }
 
 /// `message.history { message_id }`: the earlier texts of an edited message of a

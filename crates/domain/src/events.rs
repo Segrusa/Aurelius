@@ -213,6 +213,11 @@ event_kinds! {
     // (`server`). `metadata`: `by`, `before` and `after` (the shown names) and `chosen`
     // (none: the computer's name). Clients read `server.get_name` again.
     ServerRenamed => "server.renamed",
+    // A board member pinned, unpinned or reordered the workspaces on their rail
+    // (feature `rail_pins`); the aggregate is the user, so `aggregate_id` is their id.
+    // `metadata.user_id` and `project_ids`. A client whose board member it is reads
+    // `user.rail_pins` again; the others ignore it.
+    UserRailPinsChanged => "user.rail_pins_changed",
 }
 
 impl EventKind {

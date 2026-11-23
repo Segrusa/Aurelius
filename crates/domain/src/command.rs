@@ -331,4 +331,10 @@ pub enum CommandResult {
         message_id: MessageId,
         deleted_at_ms: i64,
     },
+    /// `user.set_rail_pins` (feature `rail_pins`): the rail as stored now.
+    /// `changed` is false when it already was this list.
+    RailPinsSet {
+        project_ids: Vec<crate::ProjectId>,
+        changed: bool,
+    },
 }

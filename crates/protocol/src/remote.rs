@@ -142,6 +142,8 @@ fn method_needs(method: &Method) -> Needs {
         // the board member's session is the second layer, not a device right.
         | Method::UserList
         | Method::UserWhoami
+        // One's own rail, from every own device.
+        | Method::UserRailPins
         | Method::UserLogin(_)
         | Method::UserLogout
         | Method::SessionList { .. }
@@ -368,6 +370,8 @@ fn command_needs(command: &Command) -> Needs {
         | Command::SetEmployeeFolder(_) => Needs::Owner,
         // The server's name is a host setting, like the other settings of the server (A-04).
         Command::SetServerName(_) => Needs::Owner,
+        // One's own rail, like marking one's own notifications read: it changes nothing for others.
+        Command::SetRailPins(_) => Needs::Cap(Read),
     }
 }
 

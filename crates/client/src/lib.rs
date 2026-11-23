@@ -1035,6 +1035,16 @@ impl Client {
         self.execute(envelope(Command::SetTicketResponsible(aurelius_domain::ticket::SetTicketResponsible { ticket_id, responsible_user_id }), None)).await
     }
 
+    /// The workspaces the signed-in board member pinned to their rail (`user.rail_pins`, feature `rail_pins`).
+    pub async fn rail_pins(&self) -> Result<aurelius_domain::user::RailPinsView, ClientError> {
+        self.read(Method::UserRailPins, body!(RailPins)).await
+    }
+
+    /// Pin these workspaces to the signed-in board member's rail, in this order (`user.set_rail_pins`).
+    pub async fn set_rail_pins(&self, project_ids: Vec<aurelius_domain::ProjectId>) -> Result<CommandReceipt, ClientError> {
+        self.execute(envelope(Command::SetRailPins(aurelius_domain::user::SetRailPins { project_ids }), None)).await
+    }
+
     /// Start (`on`) or stop following a ticket (`ticket.follow`, feature `ticket_follow`).
     pub async fn follow_ticket(&self, ticket_id: aurelius_domain::TicketId, on: bool) -> Result<CommandReceipt, ClientError> {
         self.execute(envelope(Command::FollowTicket(aurelius_domain::ticket::FollowTicket { ticket_id, on }), None)).await

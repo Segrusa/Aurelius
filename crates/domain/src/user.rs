@@ -7,7 +7,7 @@
 //! the password (argon2id) and keeps only the token's SHA-256, so they are in
 //! no command, receipt hash, event or log.
 
-use crate::{ClientId, DomainError, SessionId, UserId};
+use crate::{ClientId, DomainError, ProjectId, SessionId, UserId};
 use serde::{Deserialize, Serialize};
 
 pub const USERNAME_MIN: usize = 3;
@@ -186,9 +186,64 @@ pub struct CreateUser {
     pub username: String,
 }
 
+/// The most workspaces one board member can pin to their rail. Far above what a
+/// rail shows; it only bounds the size of one write.
+pub const RAIL_PINS_MAX: usize = 500;
+
+/// `user.set_rail_pins` (feature `rail_pins`): the workspaces the board member of
+/// the session pins to their rail, in rail order. Replaces the whole list, so
+/// reordering and unpinning are the same write; an empty list is a choice too
+/// ("none"). Answers `RailPinsSet`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetRailPins {
+    pub project_ids: Vec<ProjectId>,
+}
+
+impl SetRailPins {
+    /// The list to store: at most `RAIL_PINS_MAX`, a workspace named twice only
+    /// at its first place.
+    pub fn valid_pins(&self) -> Result<Vec<ProjectId>, DomainError> {
+        if self.project_ids.len() > RAIL_PINS_MAX {
+            return Err(DomainError::OutOfRange { field: "project_ids".into(), detail: format!("at most {RAIL_PINS_MAX} workspaces can be pinned") });
+        }
+        let mut pins: Vec<ProjectId> = Vec::with_capacity(self.project_ids.len());
+        for id in &self.project_ids {
+            if !pins.contains(id) {
+                pins.push(*id);
+            }
+        }
+        Ok(pins)
+    }
+}
+
+/// `user.rail_pins` (feature `rail_pins`): the workspaces the board member of
+/// the session pinned to their rail, in rail order. Archived ones stay listed;
+/// the client shows only open ones.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RailPinsView {
+    /// False until the board member pins or unpins for the first time: the
+    /// client then pins every open workspace, so no rail starts empty.
+    pub chosen: bool,
+    pub project_ids: Vec<ProjectId>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rail_pins_keep_their_order_and_a_workspace_named_twice_only_at_its_first_place() {
+        let (a, b) = (ProjectId::new(), ProjectId::new());
+        let pins = SetRailPins { project_ids: vec![b, a, b] }.valid_pins().unwrap();
+        assert_eq!(pins, [b, a]);
+    }
+
+    #[test]
+    fn more_rail_pins_than_the_limit_are_refused() {
+        let many = SetRailPins { project_ids: (0..=RAIL_PINS_MAX).map(|_| ProjectId::new()).collect() };
+        assert!(matches!(many.valid_pins(), Err(DomainError::OutOfRange { .. })));
+    }
 
     #[test]
     fn a_login_result_never_prints_its_token() {

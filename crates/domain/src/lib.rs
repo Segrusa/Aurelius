@@ -176,6 +176,7 @@ pub enum Command {
     FollowTicket(ticket::FollowTicket),
     EditMessage(group_chat::EditMessage),
     DeleteMessage(group_chat::DeleteMessage),
+    SetRailPins(user::SetRailPins),
 }
 
 /// `(type, method)` for every command: the tag in the JSON of a `Command` and
@@ -279,6 +280,7 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("follow_ticket", "ticket.follow"),
     ("edit_message", "message.edit"),
     ("delete_message", "message.delete"),
+    ("set_rail_pins", "user.set_rail_pins"),
 ];
 
 impl Command {

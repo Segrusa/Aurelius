@@ -269,6 +269,10 @@ pub enum Method {
     /// Works without a session.
     #[serde(rename = "user.whoami")]
     UserWhoami,
+    /// The workspaces the board member of the session pinned to their rail
+    /// (feature `rail_pins`), never another's. Not for apps.
+    #[serde(rename = "user.rail_pins")]
+    UserRailPins,
     /// Sign in (protocol 5): a right username and password give this connection a
     /// session and answer `Login` with its token, shown once (keep it for the
     /// server and give it in every hello). A wrong password, an unknown username

@@ -478,6 +478,10 @@ pub mod feature {
     /// own devices and those of nobody. A client without this feature keeps its
     /// device list in the Remote access settings.
     pub const OWN_DEVICES: &str = "own_devices";
+    /// Each board member's own rail (protocol 5, additive): the read `user.rail_pins`,
+    /// the write `user.set_rail_pins` and the event `user.rail_pins_changed`. A client
+    /// without it keeps the pins on the device.
+    pub const RAIL_PINS: &str = "rail_pins";
 }
 
 /// Every feature this build has.
@@ -542,6 +546,7 @@ pub const FEATURES: &[&str] = &[
     feature::DESIGN_SESSIONS,
     feature::SESSION_OWN_BRANCH,
     feature::OWN_DEVICES,
+    feature::RAIL_PINS,
 ];
 
 /// The answer of `command.applied`.
@@ -671,6 +676,8 @@ pub enum ResponseBody {
     TicketFollowers(aurelius_domain::ticket::TicketFollowersView),
     /// `ticket.my_tickets`.
     MyTickets(aurelius_domain::ticket::MyTicketsView),
+    /// `user.rail_pins`.
+    RailPins(aurelius_domain::user::RailPinsView),
     /// `ticket.history`.
     History(aurelius_domain::history::HistoryPage),
     /// `work_session.history`.
