@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ticket Activity and Timeline — design v2 (Pixel)</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --body: #08090a; --surface: #0f1012; --card: #16171a; --muted-bg: #0f1012;
+    --text: #edeef0; --text2: #a0a4ab; --text3: #7d828a;
+    --line: rgb(255 255 255 / 0.07); --line2: rgb(255 255 255 / 0.05); --line-em: rgb(255 255 255 / 0.09);
+    --accent: #1f7a4c; --accent-text: #5fcb95;
+    --warning: #e8a84a; --warning-muted: rgb(229 162 58 / 0.1);
+    --success: #5fcb95; --success-muted: rgb(95 203 149 / 0.12);
+    --error: #f08a8a; --error-muted: rgb(240 138 138 / 0.12);
+    --info: #7ea6f8; --info-muted: rgb(126 166 248 / 0.12);
+    --neutral: rgb(255 255 255 / 0.06);
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  :root.light {
+    color-scheme: light;
+    --body: #f3f3f2; --surface: #ffffff; --card: #ffffff; --muted-bg: #f8f8f7;
+    --text: #1b1c1e; --text2: #55595f; --text3: #696d74;
+    --line: rgb(0 0 0 / 0.08); --line2: rgb(0 0 0 / 0.06); --line-em: rgb(0 0 0 / 0.12);
+    --accent: #17603f; --accent-text: #17603f;
+    --warning: #9a5800; --warning-muted: rgb(196 122 0 / 0.08);
+    --success: #17603f; --success-muted: rgb(23 96 63 / 0.08);
+    --error: #c2281c; --error-muted: rgb(194 40 28 / 0.08);
+    --info: #2d5bd0; --info-muted: rgb(45 91 208 / 0.08);
+    --neutral: rgb(0 0 0 / 0.05);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--body); color: var(--text); font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; }
+  button, input, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; border-radius: 4px; }
+
+  .app { flex: 1; display: flex; min-height: 0; }
+  .rail { width: 210px; flex-shrink: 0; border-right: 1px solid var(--line); padding: 12px; color: var(--text2); display: flex; flex-direction: column; gap: 2px; }
+  .rail .item { padding: 6px 8px; border-radius: 6px; }
+  .rail .item.on { background: var(--neutral); color: var(--text); }
+
+  main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .head { flex-shrink: 0; padding: 10px 20px 0; border-bottom: 1px solid var(--line2); }
+  .head .l1 { display: flex; align-items: center; gap: 8px; }
+  .head h1 { margin: 0; font-size: 15px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hash { color: var(--text3); font-weight: 500; }
+  .head .l2 { color: var(--text3); font-size: 12px; margin-top: 2px; }
+  .chip { font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .chip.doing { background: var(--info-muted); color: var(--info); }
+  .chip.done { background: var(--success-muted); color: var(--success); }
+  .grow { flex: 1; }
+  .icon { width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--text2); cursor: pointer; }
+  .icon:hover { background: var(--neutral); }
+
+  /* tabs */
+  .tabs { display: flex; gap: 4px; margin-top: 8px; }
+  .tab { border: 0; background: transparent; padding: 7px 10px 9px; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; display: inline-flex; gap: 6px; align-items: center; font-weight: 500; }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent-text); }
+  .tab .count { font-size: 11px; font-weight: 700; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--warning-muted); color: var(--warning); text-align: center; }
+
+  .scroll { flex: 1; overflow: auto; }
+  .col { max-width: 980px; margin: 0 auto; padding: 16px 24px 28px; display: flex; flex-direction: column; gap: 14px; }
+  .sec-h { display: flex; align-items: baseline; gap: 8px; margin: 4px 0 -4px; }
+  .sec-h h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; }
+  .sec-h .n { color: var(--text3); font-size: 12px; }
+
+  .mark { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0; }
+  .mark.sm { width: 20px; height: 20px; font-size: 10px; border-radius: 5px; }
+  .m-s { background: #5b6170; } .m-o { background: #8a5cd0; } .m-f { background: #c2672b; } .m-x { background: #2f8fb8; } .m-t { background: #b0466b; }
+
+  /* overall line */
+  .overall { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); flex-wrap: wrap; }
+  .overall .big { font-weight: 600; }
+  .overall .sub { color: var(--text3); font-size: 12px; }
+  .pill { font-size: 12px; padding: 2px 9px; border-radius: 999px; background: var(--neutral); color: var(--text2); display: inline-flex; gap: 6px; align-items: center; }
+  .pill.ask { background: var(--warning-muted); color: var(--warning); font-weight: 600; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+  /* the ticket's plan (main task), moved here from the properties panel */
+  .plan { border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+  .p-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px 0; flex-wrap: wrap; }
+  .p-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+  .p-head .who2 { color: var(--text3); font-size: 12px; display: inline-flex; gap: 6px; align-items: center; }
+  .p-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .p-line { padding: 10px 14px 0; }
+  .p-steps { list-style: none; margin: 10px 0 0; padding: 0 0 6px; border-top: 1px solid var(--line2); counter-reset: st; }
+  .p-step { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 14px; border-top: 1px solid var(--line2); }
+  .p-step:first-child { border-top: 0; }
+  .p-step .i { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800; border: 1.5px solid var(--line-em); color: var(--text3); }
+  .p-step.d .i { background: var(--success-muted); border-color: transparent; color: var(--success); }
+  .p-step.n .i { border-color: var(--accent-text); }
+  .p-step.n .i::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-text); animation: pulse 1.4s ease-in-out infinite; }
+  .p-step.q .i { background: var(--warning-muted); border-color: transparent; color: var(--warning); }
+  .p-step .txt { min-width: 0; }
+  .p-step .txt b { font-weight: 500; }
+  .p-step.d .txt b { color: var(--text2); }
+  .p-step .txt .sub { display: block; color: var(--text3); font-size: 12px; }
+  .p-step .by { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text2); border: 0; background: transparent; padding: 2px 6px; border-radius: 6px; cursor: pointer; white-space: nowrap; }
+  .p-step .by:hover { background: var(--neutral); color: var(--text); }
+  .p-step .by .st { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; }
+  .st.w { background: var(--success-muted); color: var(--success); }
+  .st.a { background: var(--warning-muted); color: var(--warning); }
+  .st.o { background: var(--neutral); color: var(--text2); }
+  .card.flash { animation: flash 1.2s ease-out; }
+  @keyframes flash { 0% { box-shadow: 0 0 0 4px var(--accent-text); } 100% { box-shadow: 0 0 0 0 transparent; } }
+  @media (prefers-reduced-motion: reduce) { .p-step.n .i::after, .card.flash { animation: none; } }
+
+  .side-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line2); margin: -4px 0 10px; }
+  .side-tabs span { padding: 4px 8px 6px; font-size: 12.5px; color: var(--text2); border-bottom: 2px solid transparent; }
+  .side-tabs span.on { color: var(--text); border-bottom-color: var(--accent-text); }
+  .moved { margin-top: 14px; font-size: 12px; color: var(--text3); border: 1px dashed #5a4a8a; border-radius: 8px; padding: 8px 10px; }
+
+  /* employee cards */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 12px; background: var(--card); display: flex; flex-direction: column; min-width: 0; }
+  .card.asks { border-color: rgb(232 168 74 / .55); box-shadow: 0 0 0 3px var(--warning-muted); grid-column: 1 / -1; }
+  .card.live { border-color: rgb(95 203 149 / .3); }
+  .c-top { display: flex; gap: 10px; padding: 12px 14px 0; align-items: center; }
+  .c-name { font-weight: 600; }
+  .c-role { color: var(--text3); font-size: 12px; }
+  .state { margin-left: auto; font-size: 11.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+  .state.working { background: var(--success-muted); color: var(--success); }
+  .state.working .dot { animation: pulse 1.4s ease-in-out infinite; }
+  .state.asking { background: var(--warning-muted); color: var(--warning); }
+  .state.waiting { background: var(--neutral); color: var(--text2); }
+  .state.done { background: var(--neutral); color: var(--text2); }
+  @keyframes pulse { 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .state.working .dot { animation: none; } }
+
+  .c-task { padding: 8px 14px 0; color: var(--text2); font-size: 12.5px; }
+  .c-task b { color: var(--text); font-weight: 600; }
+
+  /* the status line */
+  .sline { padding: 10px 14px 0; }
+  .segs { display: flex; gap: 3px; }
+  .segs i { padding: 0; flex: 1; height: 5px; border-radius: 3px; background: var(--line-em); position: relative; }
+  .segs i.d { background: var(--success); }
+  .segs i.n { background: var(--accent-text); opacity: .5; }
+  .segs i.q { background: var(--warning); }
+  .seg-meta { display: flex; justify-content: space-between; color: var(--text3); font-size: 11.5px; margin-top: 4px; }
+  .now { padding: 8px 14px 0; font-size: 13.5px; line-height: 1.45; }
+  .now .lbl { color: var(--text3); font-size: 11.5px; display: block; margin-bottom: 1px; }
+
+  .c-steps { list-style: none; margin: 10px 14px 0; padding: 8px 0 0; border-top: 1px solid var(--line2); display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+  .c-steps li { display: flex; gap: 8px; align-items: baseline; color: var(--text2); }
+  .c-steps li .i { width: 14px; text-align: center; flex-shrink: 0; font-size: 11px; }
+  .c-steps li.d .i { color: var(--success); }
+  .c-steps li.n { color: var(--text); font-weight: 500; }
+  .c-steps li.n .i { color: var(--accent-text); }
+  .c-steps li.q .i { color: var(--warning); }
+  .c-steps li .t { margin-left: auto; color: var(--text3); font-size: 11.5px; white-space: nowrap; font-weight: 400; }
+  .c-foot { display: flex; gap: 4px; padding: 8px 8px 10px; margin-top: auto; flex-wrap: wrap; }
+  .link { border: 0; background: transparent; color: var(--text2); font-size: 12px; padding: 3px 6px; border-radius: 5px; cursor: pointer; }
+  .link:hover { background: var(--neutral); color: var(--text); }
+  .fact { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--neutral); color: var(--text2); white-space: nowrap; }
+  .fact.good { background: var(--success-muted); color: var(--success); }
+  .facts { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 14px 0; }
+
+  /* question inside a card */
+  .asks-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 0; }
+  .asks-body > div:first-child { border-right: 1px solid var(--line2); padding-bottom: 4px; }
+  .q { padding: 12px 14px 12px; }
+  .q .lbl { color: var(--warning); font-size: 11.5px; font-weight: 600; display: flex; gap: 6px; align-items: center; }
+  .q h3 { margin: 4px 0 4px; font-size: 14px; font-weight: 600; }
+  .q p { margin: 0 0 8px; color: var(--text2); font-size: 12.5px; }
+  .opts { display: flex; flex-direction: column; gap: 6px; }
+  .opt { text-align: left; border: 1px solid var(--line-em); background: var(--surface); border-radius: 8px; padding: 7px 10px; cursor: pointer; }
+  .opt:hover { border-color: var(--accent-text); }
+  .opt b { font-weight: 600; display: block; font-size: 12.5px; }
+  .opt span { color: var(--text3); font-size: 12px; }
+  .opt .rec { color: var(--accent-text); font-size: 11px; font-weight: 600; margin-left: 4px; }
+  .reply { display: flex; gap: 6px; margin-top: 8px; }
+  .reply input { flex: 1; min-width: 0; border: 1px solid var(--line-em); border-radius: 8px; background: var(--surface); padding: 6px 10px; }
+  .btn { border: 1px solid var(--line-em); background: var(--neutral); border-radius: 8px; padding: 5px 12px; cursor: pointer; font-weight: 500; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .answered { color: var(--success); font-size: 12.5px; padding: 0 14px 12px; }
+
+  /* done strip */
+  .done-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  .done-row + .done-row { margin-top: -6px; }
+  .done-row .txt { flex: 1; min-width: 0; color: var(--text2); font-size: 12.5px; }
+  .done-row .txt b { color: var(--text); font-weight: 600; }
+  .done-row .t { color: var(--text3); font-size: 12px; white-space: nowrap; }
+
+  .empty { border: 1px dashed var(--line-em); border-radius: 10px; padding: 14px; color: var(--text3); text-align: center; }
+
+  /* timeline (newest first) */
+  .composer { border: 1px solid var(--line-em); border-radius: 10px; padding: 10px 12px; color: var(--text3); background: var(--card); display: flex; gap: 8px; align-items: center; }
+  .composer .grow { min-width: 0; }
+  .tl-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; background: var(--body); padding: 6px 0; z-index: 2; }
+  .seg { display: inline-flex; border: 1px solid var(--line-em); border-radius: 7px; padding: 2px; gap: 2px; margin: 0; }
+  .seg button { border: 0; background: transparent; padding: 2px 10px; border-radius: 5px; color: var(--text2); cursor: pointer; font-size: 12px; }
+  .seg button[aria-pressed="true"] { background: var(--neutral); color: var(--text); }
+  .who-filter { display: inline-flex; gap: 4px; }
+  .who-filter button { border: 1px solid var(--line-em); background: transparent; border-radius: 999px; padding: 1px 9px 1px 3px; display: inline-flex; gap: 5px; align-items: center; cursor: pointer; font-size: 12px; color: var(--text2); }
+  .who-filter button[aria-pressed="true"] { background: var(--neutral); color: var(--text); border-color: var(--accent-text); }
+  .who-filter .mark { width: 16px; height: 16px; font-size: 9px; border-radius: 4px; }
+  .newbar { align-self: center; font-size: 12px; background: var(--accent); color: #fff; border: 0; border-radius: 999px; padding: 3px 12px; cursor: pointer; }
+
+  .tl { display: flex; flex-direction: column; gap: 10px; }
+  .day { text-align: center; color: var(--text3); font-size: 11.5px; display: flex; align-items: center; gap: 10px; }
+  .day::before, .day::after { content: ""; flex: 1; height: 1px; background: var(--line2); }
+  .ev { display: flex; gap: 10px; }
+  .ev .body { min-width: 0; flex: 1; }
+  .who { font-weight: 600; font-size: 12.5px; }
+  .who .role, .time { color: var(--text3); font-weight: 400; font-size: 12px; }
+  .sys { color: var(--text2); font-size: 12.5px; display: flex; align-items: center; gap: 8px; padding-left: 38px; }
+  .work { border: 1px solid var(--line); border-radius: 10px; background: var(--card); padding: 8px 12px; }
+  .work.live { border-color: rgb(95 203 149 / .35); }
+  .work .w-title { font-weight: 600; display: flex; gap: 6px; align-items: center; }
+  .work .w-note { color: var(--text2); font-size: 12.5px; margin-top: 2px; }
+  .work .facts { padding: 6px 0 0; }
+  .steps { border-top: 1px solid var(--line2); margin-top: 8px; padding-top: 6px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+  .step { display: flex; gap: 8px; align-items: baseline; color: var(--text2); }
+  .step .k { width: 62px; flex-shrink: 0; color: var(--text3); }
+  .step code { font-family: var(--mono); font-size: 11.5px; color: var(--text); background: var(--neutral); padding: 0 5px; border-radius: 4px; overflow-wrap: anywhere; }
+  .step .r { margin-left: auto; white-space: nowrap; color: var(--text3); }
+  .step .r.ok { color: var(--success); } .step .r.bad { color: var(--error); }
+  .qev { border: 1px solid rgb(232 168 74 / .45); background: var(--warning-muted); border-radius: 10px; padding: 8px 12px; }
+  .qev a, .sys a { color: var(--accent-text); text-decoration: none; font-size: 12px; cursor: pointer; }
+
+  aside { width: clamp(260px, 26%, 340px); flex-shrink: 0; border-left: 1px solid var(--line); background: var(--surface); padding: 12px 14px; color: var(--text2); overflow: auto; }
+  aside h2 { font-size: 13px; color: var(--text); margin: 0 0 10px; }
+  .prop { display: grid; grid-template-columns: 100px 1fr; padding: 4px 0; font-size: 12.5px; }
+  .prop span:first-child { color: var(--text3); }
+
+  .spec-wrap { border-top: 2px dashed #5a4a8a; background: var(--surface); }
+  .spec { margin: 0 auto; max-width: 980px; padding: 0 24px 28px; color: var(--text2); font-size: 12.5px; }
+  .spec h3 { color: var(--text); font-size: 13px; margin: 18px 0 6px; }
+  .spec table { border-collapse: collapse; width: 100%; }
+  .spec td, .spec th { text-align: left; border-top: 1px solid var(--line2); padding: 5px 8px 5px 0; vertical-align: top; }
+  .spec th { color: var(--text3); font-weight: 600; }
+  .spec code { font-family: var(--mono); font-size: 11.5px; background: var(--neutral); padding: 0 4px; border-radius: 4px; }
+
+  @media (max-width: 1180px) { aside { display: none; } }
+  @media (max-width: 760px) {
+    .rail { display: none; }
+    .col { padding-left: 12px; padding-right: 12px; }
+    .cards { grid-template-columns: 1fr; }
+    .asks-body { grid-template-columns: 1fr; }
+    .asks-body > div:first-child { border-right: 0; }
+    .sys { padding-left: 0; }
+    .ev > .mark { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <nav class="rail" aria-label="Sidebar">
+    <div class="item">New session</div><div class="item">Inbox</div><div class="item on">Board</div><div class="item">History</div><div class="item">Employees</div>
+  </nav>
+
+  <main>
+    <header class="head">
+      <div class="l1">
+        <h1><span class="hash">#82</span> Export the board as CSV</h1>
+        <span class="chip doing" id="col-chip">Doing</span>
+        <span class="grow"></span>
+        <button class="icon" aria-label="Hide ticket properties" aria-expanded="true">▥</button>
+        <button class="icon" aria-label="More">⋯</button>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Ticket views">
+        <button class="tab" role="tab" id="tab-act" aria-controls="p-act" aria-selected="true">Activity <span class="count" id="tab-count" aria-label="1 question for you">1</span></button>
+        <button class="tab" role="tab" id="tab-tl" aria-controls="p-tl" aria-selected="false" tabindex="-1">Timeline</button>
+      </div>
+    </header>
+
+    <div class="scroll" id="scroll">
+
+      <!-- ================= ACTIVITY ================= -->
+      <section class="col" id="p-act" role="tabpanel" aria-labelledby="tab-act">
+
+        <!-- live -->
+        <div id="act-live">
+          <section class="plan" aria-label="Plan">
+            <div class="p-head">
+              <h2>Plan</h2>
+              <span class="who2">Main task · Orion · step 2 of 5 · 38 min</span>
+            </div>
+            <div class="p-line">
+              <div class="segs" aria-hidden="true"><i class="d"></i><i class="n"></i><i class="q" id="plan-seg3"></i><i></i><i></i></div>
+            </div>
+            <ol class="p-steps">
+              <li class="p-step d"><span class="i">✓</span><div class="txt"><b>Split the ticket into a server part, a desktop part and a review</b></div><span class="time">10:32</span></li>
+              <li class="p-step n"><span class="i"></span><div class="txt"><b>Add board.export to the server</b><span class="sub">Running the export tests again after Trace's remark</span></div></li>
+              <li class="p-step q" id="plan-flux"><span class="i">?</span><div class="txt"><b>Add “Export CSV” to the desktop Board</b><span class="sub" id="plan-flux-sub">Asked you where the file goes</span></div></li>
+              <li class="p-step"><span class="i">4</span><div class="txt"><b>Review both parts</b><span class="sub">Server part reviewed; desktop part after Flux</span></div></li>
+              <li class="p-step"><span class="i">5</span><div class="txt"><b>Check everything is done and hand it to you for review</b></div></li>
+            </ol>
+          </section>
+
+          <div class="sec-h" style="margin-top:18px"><h2>Working now</h2></div>
+          <div class="cards" style="margin-top:12px">
+
+            <!-- Flux asks a question -->
+            <article class="card asks" id="flux-card" aria-label="Flux, needs your answer">
+              <div class="c-top">
+                <span class="mark m-f">F</span>
+                <div><div class="c-name">Flux</div><div class="c-role">Frontend Developer</div></div>
+                <span class="state asking" id="flux-state"><span class="dot"></span> Needs your answer</span>
+              </div>
+              <div class="asks-body">
+                <div>
+                  <div class="c-task">Working on <b>Desktop: Export CSV</b></div>
+                  <div class="sline">
+                    <div class="segs" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="q" id="flux-seg"></i><i></i></div>
+                    <div class="seg-meta"><span id="flux-steps-txt">Step 3 of 4</span><span>19 min</span></div>
+                  </div>
+                  <div class="now"><span class="lbl">Now</span><span id="flux-now">Paused before saving the file: asked you where the export goes.</span></div>
+                  <ul class="c-steps">
+                    <li class="d"><span class="i">✓</span>Found where the Board's More menu is built<span class="t">4 min</span></li>
+                    <li class="d"><span class="i">✓</span>Added “Export CSV” to the menu<span class="t">11 min</span></li>
+                    <li class="q" id="flux-li3"><span class="i">?</span>Save the file<span class="t">waiting on you</span></li>
+                    <li><span class="i">·</span>Check it on a narrow window</li>
+                  </ul>
+                </div>
+                <div class="q" id="flux-q">
+                  <div class="q-open">
+                    <div class="lbl">? Question for you · 2 min ago</div>
+                    <h3>Where should the CSV file go?</h3>
+                    <p>The server's export is ready. I can open the save dialog so you pick a place every time, or write it straight to Downloads and show a “Saved” note with an Open folder link.</p>
+                    <div class="opts" role="group" aria-label="Answer Flux">
+                      <button class="opt" data-ans="Save dialog every time"><b>Ask me every time <span class="rec">Flux's pick</span></b><span>Opens the save dialog, named “board-2026-11-23.csv”.</span></button>
+                      <button class="opt" data-ans="Straight to Downloads"><b>Straight to Downloads</b><span>No dialog; a note with Open folder.</span></button>
+                    </div>
+                    <div class="reply">
+                      <input aria-label="Or answer in your own words" placeholder="Or answer in your own words…">
+                      <button class="btn">Send</button>
+                    </div>
+                  </div>
+                  <div class="answered" hidden></div>
+                </div>
+              </div>
+            </article>
+
+            <!-- Forge working -->
+            <article class="card live" id="forge-card" aria-label="Forge, working">
+              <div class="c-top">
+                <span class="mark m-x">F</span>
+                <div><div class="c-name">Forge</div><div class="c-role">Backend Developer</div></div>
+                <span class="state working"><span class="dot"></span> Working</span>
+              </div>
+              <div class="c-task">Working on <b>Server: board.export</b></div>
+              <div class="sline">
+                <div class="segs" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="d"></i><i class="n"></i></div>
+                <div class="seg-meta"><span>Step 4 of 4</span><span>27 min</span></div>
+              </div>
+              <div class="now"><span class="lbl">Now · 20 s ago</span>Running all the export tests once more after Trace's remark about empty deadlines.</div>
+              <ul class="c-steps">
+                <li class="d"><span class="i">✓</span>Looked at how the board is read<span class="t">3 min</span></li>
+                <li class="d"><span class="i">✓</span>Added the export to the server<span class="t">15 min</span></li>
+                <li class="d"><span class="i">✓</span>Quoted titles with commas<span class="t">5 min</span></li>
+                <li class="n"><span class="i">●</span>Empty deadlines as an empty cell<span class="t">4 min</span></li>
+              </ul>
+              <div class="facts"><span class="fact">Changed 4 files</span><span class="fact good">Tests pass</span></div>
+              <div class="c-foot"><button class="link" data-goto="Forge">Timeline of Forge →</button><button class="link">Open task</button></div>
+            </article>
+
+            <!-- Trace waiting -->
+            <article class="card" id="trace-card" aria-label="Trace, waiting">
+              <div class="c-top">
+                <span class="mark m-t">T</span>
+                <div><div class="c-name">Trace</div><div class="c-role">Code Review Engineer</div></div>
+                <span class="state waiting">Waiting for Flux</span>
+              </div>
+              <div class="c-task">Working on <b>Review of the export</b></div>
+              <div class="sline">
+                <div class="segs" aria-hidden="true"><i class="d"></i><i></i></div>
+                <div class="seg-meta"><span>Step 1 of 2</span><span>9 min</span></div>
+              </div>
+              <div class="now"><span class="lbl">Now</span>Reviewed the server part: no blockers, one remark on empty deadlines. Reviews the desktop part when Flux is done.</div>
+              <ul class="c-steps">
+                <li class="d"><span class="i">✓</span>Reviewed the server part<span class="t">9 min</span></li>
+                <li><span class="i">·</span>Review the desktop part</li>
+              </ul>
+              <div class="c-foot"><button class="link" data-goto="Trace">Timeline of Trace →</button><button class="link">Open task</button></div>
+            </article>
+          </div>
+
+          </div>
+        </div>
+
+        <!-- done ticket -->
+        <div id="act-done" hidden>
+          <section class="plan" aria-label="Plan">
+            <div class="p-head">
+              <h2>Plan</h2>
+              <span class="who2">Main task · Orion · 5 of 5 done · 41 min</span>
+            </div>
+            <div class="p-line"><div class="segs" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></div></div>
+            <ol class="p-steps">
+              <li class="p-step d"><span class="i">✓</span><div class="txt"><b>Split the ticket into a server part, a desktop part and a review</b></div><span class="time">1 min</span></li>
+              <li class="p-step d"><span class="i">✓</span><div class="txt"><b>Add board.export to the server</b></div></li>
+              <li class="p-step d"><span class="i">✓</span><div class="txt"><b>Add “Export CSV” to the desktop Board</b></div></li>
+              <li class="p-step d"><span class="i">✓</span><div class="txt"><b>Review both parts</b></div></li>
+              <li class="p-step d"><span class="i">✓</span><div class="txt"><b>Check everything is done and hand it to you for review</b></div></li>
+            </ol>
+          </section>
+          <div class="sec-h" style="margin-top:14px"><h2>Who did what</h2></div>
+          <div class="cards" style="margin-top:12px">
+            <article class="card"><div class="c-top"><span class="mark m-x">F</span><div><div class="c-name">Forge</div><div class="c-role">Backend Developer</div></div><span class="state done">✓ Done · 31 min</span></div>
+              <div class="sline"><div class="segs" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></div></div>
+              <div class="now">Added the export to the server, with a test for every column, for commas in titles and for empty deadlines.</div>
+              <div class="facts"><span class="fact">Changed 4 files</span><span class="fact good">Tests pass</span></div>
+              <div class="c-foot"><button class="link" data-goto="Forge">Timeline of Forge →</button></div></article>
+            <article class="card"><div class="c-top"><span class="mark m-f">F</span><div><div class="c-name">Flux</div><div class="c-role">Frontend Developer</div></div><span class="state done">✓ Done · 26 min</span></div>
+              <div class="sline"><div class="segs" aria-hidden="true"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i></div></div>
+              <div class="now">Put “Export CSV” in the Board's More menu. The file is saved through the save dialog, as you chose.</div>
+              <div class="facts"><span class="fact">Changed 3 files</span><span class="fact good">Builds</span></div>
+              <div class="c-foot"><button class="link" data-goto="Flux">Timeline of Flux →</button></div></article>
+            <article class="card"><div class="c-top"><span class="mark m-t">T</span><div><div class="c-name">Trace</div><div class="c-role">Code Review Engineer</div></div><span class="state done">✓ Done · 14 min</span></div>
+              <div class="sline"><div class="segs" aria-hidden="true"><i class="d"></i><i class="d"></i></div></div>
+              <div class="now">Reviewed both parts: no blockers. One remark on empty deadlines, fixed by Forge.</div>
+              <div class="c-foot"><button class="link" data-goto="Trace">Timeline of Trace →</button></div></article>
+            <article class="card"><div class="c-top"><span class="mark m-o">O</span><div><div class="c-name">Orion</div><div class="c-role">Project Manager</div></div><span class="state done">✓ Done · 2 min</span></div>
+              <div class="sline"><div class="segs" aria-hidden="true"><i class="d"></i></div></div>
+              <div class="now">Split the ticket into three parts and checked that all three were done before review.</div>
+              <div class="c-foot"><button class="link" data-goto="Orion">Timeline of Orion →</button></div></article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= TIMELINE ================= -->
+      <section class="col" id="p-tl" role="tabpanel" aria-labelledby="tab-tl" hidden>
+        <div class="composer" id="composer"><span class="grow">Write to the team on this ticket…  <span style="opacity:.7">@ to mention</span></span><button class="btn primary">Send</button></div>
+
+        <div class="tl-head">
+          <fieldset class="seg" aria-label="Show">
+            <button aria-pressed="true">All</button><button aria-pressed="false">Changes</button><button aria-pressed="false">Messages</button>
+          </fieldset>
+          <div class="who-filter" role="group" aria-label="Employee">
+            <button data-who="Forge" aria-pressed="false"><span class="mark m-x">F</span>Forge</button>
+            <button data-who="Flux" aria-pressed="false"><span class="mark m-f">F</span>Flux</button>
+            <button data-who="Trace" aria-pressed="false"><span class="mark m-t">T</span>Trace</button>
+            <button data-who="Orion" aria-pressed="false"><span class="mark m-o">O</span>Orion</button>
+          </div>
+          <span class="grow"></span>
+          <span class="time">Newest first</span>
+        </div>
+
+        <button class="newbar" id="newbar">↑ 2 new</button>
+
+        <div class="tl" id="tl">
+          <div class="day">Today</div>
+
+          <div class="ev" data-who="Forge" data-kind="change">
+            <span class="mark m-x">F</span>
+            <div class="body"><div class="who">Forge <span class="time">10:58 · now</span></div>
+              <div class="work live">
+                <div class="w-title"><span style="color:var(--accent-text)">●</span> Empty deadlines as an empty cell</div>
+                <div class="w-note">Trace is right that an empty deadline printed “None”. It's an empty cell now; running all the export tests again.</div>
+                <div class="facts"><span class="fact">Changed 1 file +6 −2</span></div>
+                <button class="link" data-toggle="st1" aria-expanded="false" style="margin:4px 0 0 -6px">› Show the 3 steps</button>
+                <div class="steps" id="st1" hidden>
+                  <div class="step"><span class="k">Edited</span><code>crates/application/src/board/export.rs</code><span class="r ok">+6 −2</span></div>
+                  <div class="step"><span class="k">Command</span><code>cargo test -p aurelius-application export</code><span class="r">running…</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ev" data-who="Flux" data-kind="msg">
+            <span class="mark m-f">F</span>
+            <div class="body"><div class="who">Flux <span class="time">10:56</span></div>
+              <div class="qev"><b>? Asked you:</b> Where should the CSV file go? Save dialog every time, or straight to Downloads? <a data-goact>Answer in Activity →</a></div>
+            </div>
+          </div>
+
+          <div class="ev" data-who="Trace" data-kind="msg">
+            <span class="mark m-t">T</span>
+            <div class="body"><div class="who">Trace <span class="role">· Code Review Engineer</span> <span class="time">10:54</span></div>
+              Server part looks good, no blockers. One remark: an empty deadline comes out as “None” instead of an empty cell. @Forge</div>
+          </div>
+
+          <div class="ev" data-who="Flux" data-kind="change">
+            <span class="mark m-f">F</span>
+            <div class="body"><div class="who">Flux <span class="time">10:44–10:55</span></div>
+              <div class="work">
+                <div class="w-title"><span style="color:var(--success)">✓</span> Added “Export CSV” to the menu</div>
+                <div class="w-note">It sits under the Board's More menu, below Archive. It's greyed out when the server doesn't have the export.</div>
+                <div class="facts"><span class="fact">Changed 2 files +58 −1</span><span class="fact good">Builds</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ev" data-who="Forge" data-kind="change">
+            <span class="mark m-x">F</span>
+            <div class="body"><div class="who">Forge <span class="time">10:36–10:51</span></div>
+              <div class="work">
+                <div class="w-title"><span style="color:var(--success)">✓</span> Added the export to the server</div>
+                <div class="w-note">The test for a title with a quote in it failed at first. Every field is quoted now, and all export tests pass.</div>
+                <div class="facts"><span class="fact">Changed 3 files +142 −4</span><span class="fact good">Tests failed once, then passed</span><span class="fact">Saved a commit</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ev" data-who="Forge" data-kind="change">
+            <span class="mark m-x">F</span>
+            <div class="body"><div class="who">Forge <span class="time">10:33–10:36</span></div>
+              <div class="work">
+                <div class="w-title"><span style="color:var(--success)">✓</span> Looked at how the board is read</div>
+                <div class="w-note">The board read already returns column, owner and deadline, so the export can reuse it.</div>
+                <div class="facts"><span class="fact">Read 6 files</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sys" data-who="Orion" data-kind="msg"><span class="mark sm m-o">O</span> Orion gave “Server: board.export” to Forge, “Desktop: Export CSV” to Flux and “Review” to Trace.</div>
+
+          <div class="ev" data-who="You" data-kind="msg">
+            <span class="mark m-s">S</span>
+            <div class="body"><div class="who">Sam <span class="role">· board member</span> <span class="time">10:31</span></div>
+              I'd like to export the board to a spreadsheet, one row per ticket, with its column, owner and deadline.</div>
+          </div>
+        </div>
+      </section>
+
+      <div class="spec-wrap" id="spec" hidden>
+        <div class="spec">
+          <h3>Build notes</h3>
+          <table>
+            <tr><th style="width:190px">Part</th><th>Rule</th></tr>
+            <tr><td>Tabs</td><td><b>Activity</b> (default) and <b>Timeline</b> replace the single Activity feed. The Activity tab shows a count of open questions for you. Keyboard: arrow keys move between tabs (ARIA tablist).</td></tr>
+            <tr><td>Plan</td><td>The top of the Activity tab is the ticket's plan: the main task's todo list (today <code>PlanPanel</code>/<code>MainPlan</code> at the top of the properties panel, which leaves that panel). One row per step, with the plan's status line above it. The employee and state of a delegated step are on the cards below, not repeated in the plan. The current step shows its plain-language “now” line. No todo list yet: “Orion is making the plan…”; a ticket without a main task has no plan block.</td></tr>
+            <tr><td>Properties panel</td><td>Keeps only Properties and Files. Its Activity tab goes: that history is the Timeline tab.</td></tr>
+            <tr><td>Which cards</td><td>One card per delegated task on this ticket; the main task is the Plan above. <b>Working now</b> = running, waiting or asking. <b>Done</b> = finished tasks, as one compact row each. A failed or stopped task gets a card with state “Stopped” and its error in plain words.</td></tr>
+            <tr><td>Card order</td><td>Asking you first (full width, amber), then working, then waiting; ties by last activity.</td></tr>
+            <tr><td>State chip</td><td><i>Needs your answer</i> (open question or approval to you) · <i>Working</i> (run active) · <i>Waiting for X</i> (task waiting on a delegation or a person) · <i>Stopped</i> · <i>Done</i>.</td></tr>
+            <tr><td>Status line</td><td>One segment per plan step of the employee: done green, current light green, asking amber, open grey. Below it “Step n of m” and time on the task. No plan yet: one indeterminate segment and “Getting started”.</td></tr>
+            <tr><td>Now</td><td>The employee's latest own text in its run, cut to 2 lines. While a tool runs without new text, a fixed phrase from the tool (“Running the tests…”, “Changing the export code…”); lookups (read, grep, ls, git status) are never named. “· 20 s ago” when older than 10 s.</td></tr>
+            <tr><td>Steps</td><td>The plan steps with their time. A card shows at most 5; more becomes “+3 earlier steps”.</td></tr>
+            <tr><td>Questions</td><td>An open question or approval for a board member sits inside the card of the employee who asks it, with its options as buttons (the employee's own pick labelled) and a free-text reply. Answering uses the existing answer path; the card goes back to Working. Questions to another employee are not shown here, only in Timeline.</td></tr>
+            <tr><td>Done ticket</td><td>All cards become “Who did what”: one summary sentence per employee (the task's result, first sentence), the full status line and the result labels.</td></tr>
+            <tr><td>Timeline</td><td>The current feed with the plain-language work blocks from v1, but <b>newest first</b>. The composer moves to the top. New items while scrolled down show “↑ n new” instead of jumping. Filters: All / Changes / Messages plus one chip per employee; “Timeline of X →” on a card opens this tab with that chip on.</td></tr>
+            <tr><td>Accessibility</td><td>The overall line is a status region; a new question is announced once. Colour is never the only signal: state chips have text, segments have “Step n of m”. Pulse is off with reduced motion.</td></tr>
+            <tr><td>Narrow (&lt; 760 px)</td><td>One card per row; the question goes under the steps.</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <aside aria-label="Ticket properties">
+    <div class="side-tabs"><span class="on">Properties</span><span>Files</span></div>
+    <div class="prop"><span>Column</span><span id="p-col">Doing</span></div>
+    <div class="prop"><span>Owner</span><span>Orion</span></div>
+    <div class="prop"><span>Responsible</span><span>You</span></div>
+    <div class="prop"><span>Project</span><span>Aurelius</span></div>
+    <div class="prop"><span>Priority</span><span>Normal</span></div>
+    <div class="prop"><span>Created</span><span>Today 10:31</span></div>
+    <div class="moved">Design note: the Plan block and the Activity tab are no longer in this panel. The plan is at the top of the Activity tab; the history is the Timeline tab.</div>
+  </aside>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const tabAct = $('#tab-act'), tabTl = $('#tab-tl');
+
+  function showTab(which) {
+    const act = which === 'act';
+    tabAct.setAttribute('aria-selected', act); tabTl.setAttribute('aria-selected', !act);
+    tabAct.tabIndex = act ? 0 : -1; tabTl.tabIndex = act ? -1 : 0;
+    $('#p-act').hidden = !act; $('#p-tl').hidden = act;
+    $('#scroll').scrollTop = 0;
+  }
+  tabAct.onclick = () => showTab('act');
+  tabTl.onclick = () => showTab('tl');
+  $('.tabs').addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      const next = document.activeElement === tabAct ? tabTl : tabAct;
+      next.focus(); next.click();
+    }
+  });
+
+  function setWho(who) {
+    $$('.who-filter button').forEach(b => b.setAttribute('aria-pressed', b.dataset.who === who && b.getAttribute('aria-pressed') !== 'true' ? 'true' : 'false'));
+    const on = $('.who-filter button[aria-pressed="true"]');
+    $$('#tl [data-who]').forEach(el => el.hidden = on && el.dataset.who !== on.dataset.who);
+  }
+  $$('.who-filter button').forEach(b => b.onclick = () => setWho(b.dataset.who));
+  $$('[data-goto]').forEach(b => b.onclick = () => {
+    showTab('tl');
+    $$('.who-filter button').forEach(x => x.setAttribute('aria-pressed', 'false'));
+    setWho(b.dataset.goto);
+  });
+  $$('[data-goact]').forEach(a => a.onclick = () => showTab('act'));
+  $('#newbar').onclick = () => { $('#newbar').hidden = true; };
+
+  $$('[data-toggle]').forEach(b => b.onclick = () => {
+    const t = $('#' + b.dataset.toggle), open = t.hidden;
+    t.hidden = !open; b.setAttribute('aria-expanded', open);
+    b.textContent = (open ? '⌄ Hide' : '› Show') + ' the 3 steps';
+  });
+
+  $$('.seg').forEach(seg => $$('button', seg).forEach(b => b.onclick = () => {
+    $$('button', seg).forEach(x => x.setAttribute('aria-pressed', x === b));
+    const k = b.textContent;
+    $$('#tl [data-kind]').forEach(el => el.hidden = k === 'Changes' ? el.dataset.kind !== 'change' : k === 'Messages' ? el.dataset.kind !== 'msg' : false);
+  }));
+
+  function answer(text) {
+    $('#flux-q .q-open').hidden = true;
+    const a = $('#flux-q .answered');
+    a.hidden = false; a.style.padding = '0';
+    a.innerHTML = '✓ You answered: <b>' + text.replace(/</g, '&lt;') + '</b>. Flux goes on.';
+    const card = $('#flux-card'); card.classList.remove('asks'); card.classList.add('live');
+    $('#flux-state').className = 'state working'; $('#flux-state').innerHTML = '<span class="dot"></span> Working';
+    $('#flux-seg').className = 'n';
+    $('#flux-li3').className = 'n'; $('#flux-li3 .i').textContent = '●'; $('#flux-li3 .t').textContent = 'now';
+    $('#flux-now').textContent = 'Opening the save dialog with “board-2026-11-23.csv” as the name.';
+    $('#tab-count').hidden = true;
+    $('#plan-flux').className = 'p-step n'; $('#plan-flux .i').textContent = ''; $('#plan-seg3').className = 'n';
+    $('#plan-flux-sub').textContent = 'Opening the save dialog';
+  }
+  $$('.opt').forEach(o => o.onclick = () => answer(o.dataset.ans));
+  $('.reply .btn').onclick = () => { const v = $('.reply input').value.trim(); if (v) answer(v); };
+
+})();
+</script>
+</body>
+</html>
