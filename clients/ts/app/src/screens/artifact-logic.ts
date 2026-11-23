@@ -273,3 +273,11 @@ export function liveStep(
   if (!writing && /<script[\s>]/i.test(html)) return "serve";
   return "update";
 }
+
+/** What a ticket made from a page of a design starts with; the page goes along as a file. */
+export function designTicket(path: string): { title: string; description: string } {
+  return {
+    title: `Build ${path}`,
+    description: `Build this page as designed in ${path}. The design is attached: follow its layout, colours and texts.`,
+  };
+}

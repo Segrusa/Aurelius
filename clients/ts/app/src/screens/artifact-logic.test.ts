@@ -6,6 +6,7 @@ import {
   DIALOG_SELECTOR,
   designPages,
   designsOf,
+  designTicket,
   designToOpen,
   htmlOf,
   isArtifact,
@@ -293,5 +294,15 @@ describe("liveStep", () => {
     expect(liveStep(a, `${ab}<script>go()</script>`, false)).toBe("serve");
     expect(liveStep(a, `${ab}<SCRIPT type="module">`, false)).toBe("serve");
     expect(liveStep(a, `${ab}<scripts-list>`, false)).toBe("update");
+  });
+});
+
+describe("designTicket", () => {
+  it("asks to build the page, names its path and says the design is attached", () => {
+    expect(designTicket("design/pricing.html")).toEqual({
+      title: "Build design/pricing.html",
+      description:
+        "Build this page as designed in design/pricing.html. The design is attached: follow its layout, colours and texts.",
+    });
   });
 });

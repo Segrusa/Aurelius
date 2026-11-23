@@ -100,6 +100,8 @@ export function useAttachments(kept = 0) {
   return {
     files,
     pick,
+    /** Takes files the app made itself, as if they were dropped (a design's page). */
+    take,
     remove: (path: string) => setFiles((now) => now.filter((f) => f.path !== path)),
     clear: () => setFiles([]),
     paths: files.map((f) => f.path),

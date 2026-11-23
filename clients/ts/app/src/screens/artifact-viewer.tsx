@@ -43,6 +43,7 @@ import {
 import {
   type DesignPage,
   DIALOG_SELECTOR,
+  designTicket,
   htmlOf,
   liveStep,
   OVERLAY_SELECTOR,
@@ -54,6 +55,7 @@ import {
   withDrag,
 } from "./artifact-logic";
 import { FormDialog, Hint, Loading } from "./org-kit";
+import { overlays } from "./overlays-store";
 
 const styles = stylex.create({
   bar: { display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: 8 },
@@ -630,6 +632,15 @@ export function ArtifactViewer({
     else if (url !== null && exporting === null) void exportAs(key);
   };
 
+  // A ticket to build this page, with the page as its file.
+  const ticket = () => {
+    if (html === undefined) return;
+    overlays.open("ticket", {
+      ...designTicket(artifactName),
+      files: [new File([html], name, { type: "text/html" })],
+    });
+  };
+
   const title = writing ? `${name} · Writing…` : name;
   const tools = (
     <div {...stylex.props(styles.bar)}>
@@ -669,6 +680,7 @@ export function ArtifactViewer({
           }}
         />
       </span>
+      <Button label="Create ticket" isDisabled={html === undefined || writing} onClick={ticket} />
       <Menu
         label="Export"
         options={exportOptions}
