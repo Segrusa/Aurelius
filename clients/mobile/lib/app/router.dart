@@ -16,6 +16,7 @@ import '../data/aurelius_repository.dart';
 import '../features/employee_runs/employee_runs_page.dart';
 import '../features/account/account.dart';
 import '../features/account/claude_login.dart' show ClaudeLoginPage;
+import '../features/account/devices.dart' show DevicesPage;
 import '../features/board/board_settings_page.dart';
 import '../data/discussion.dart';
 import '../data/links.dart' show messageLocateFeature;
@@ -75,6 +76,7 @@ class AppRouter {
         redirect: (context, state) => state.uri.path == '/account' ? '/profile' : null,
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'sessions', pageBuilder: (context, state) => routePage(state, const SessionsPage())),
+          GoRoute(parentNavigatorKey: _root, path: 'devices', pageBuilder: (context, state) => routePage(state, const DevicesPage())),
           GoRoute(parentNavigatorKey: _root, path: 'password', pageBuilder: (context, state) => routePage(state, const ChangePasswordPage())),
           GoRoute(parentNavigatorKey: _root, path: 'claude', pageBuilder: (context, state) => routePage(state, const ClaudeLoginPage())),
         ],

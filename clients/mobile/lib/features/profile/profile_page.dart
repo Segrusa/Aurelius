@@ -11,6 +11,7 @@ import '../../core/widgets/ios.dart';
 import '../../core/widgets/widgets.dart' show Monogram, toast;
 import '../../data/aurelius_repository.dart';
 import '../account/claude_login.dart' show claudeLoginLine;
+import '../account/devices.dart' show ownDevicesFeature;
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../hosts/hosts_bloc.dart';
@@ -91,6 +92,15 @@ class ProfilePage extends StatelessWidget {
                 chevron: true,
                 onTap: () => context.push('/account/claude'),
               ),
+              // The devices you paired; nobody else sees them (feature `own_devices`).
+              if (link.features.contains(ownDevicesFeature))
+                GroupRow(
+                  key: const ValueKey('account-devices'),
+                  leading: const IconTile(CupertinoIcons.device_laptop),
+                  title: 'Your devices',
+                  chevron: true,
+                  onTap: () => context.push('/account/devices'),
+                ),
               GroupRow(
                 key: const ValueKey('account-sessions'),
                 leading: const IconTile(CupertinoIcons.device_phone_portrait),
