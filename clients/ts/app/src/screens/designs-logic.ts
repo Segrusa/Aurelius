@@ -27,12 +27,19 @@ export function designPlace(design: DesignView): { label: string; to: string | n
 export function designLink(design: DesignView, fileId?: string): string | null {
   const { to } = designPlace(design);
   if (to === null) return null;
-  const newest = design.pages.reduce<DesignView["pages"][number] | null>(
+  const id = fileId ?? newestPage(design)?.file.id;
+  return id ? `${to}?design=${encodeURIComponent(id)}` : to;
+}
+
+/**
+ * The page kept last, or null: a design session is listed from the start, before its first page
+ * (`design.list` then sends no pages).
+ */
+export function newestPage(design: DesignView): DesignView["pages"][number] | null {
+  return design.pages.reduce<DesignView["pages"][number] | null>(
     (best, p) => (best === null || p.at_ms > best.at_ms ? p : best),
     null,
   );
-  const id = fileId ?? newest?.file.id;
-  return id ? `${to}?design=${encodeURIComponent(id)}` : to;
 }
 
 /** The design's pages as the viewer takes them. */

@@ -15,7 +15,7 @@ import { usePlatform } from "../platform";
 import { useWorkspace } from "../workspace";
 import { designTitle } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
-import { designLink, designPlace, pagesOf } from "./designs-logic";
+import { designLink, designPlace, newestPage, pagesOf } from "./designs-logic";
 import { failureOf, Hint, Loading, Page, PageHead, Problem } from "./org-kit";
 
 const styles = stylex.create({
@@ -69,6 +69,7 @@ const styles = stylex.create({
     color: "var(--color-text-primary)",
   },
   accent: { color: "var(--color-text-accent)" },
+  none: { fontSize: 12.5, color: "var(--precision-text3)" },
   pad: { padding: 24 },
 });
 
@@ -100,17 +101,24 @@ export function DesignCard({
   onOpen: (page: string, fileId: string) => void;
 }) {
   const place = designPlace(design);
-  const newest = design.pages.reduce((best, p) => (p.at_ms > best.at_ms ? p : best));
+  const newest = newestPage(design);
   return (
     <article aria-label={`Design ${design.title}`} {...stylex.props(styles.card, openPage !== null && styles.open)}>
       <h2 {...stylex.props(styles.title)}>
-        <button
-          type="button"
-          onClick={() => onOpen(newest.file.name, newest.file.id)}
-          {...stylex.props(styles.titleButton)}
-        >
-          {design.title}
-        </button>
+        {newest ? (
+          <button
+            type="button"
+            onClick={() => onOpen(newest.file.name, newest.file.id)}
+            {...stylex.props(styles.titleButton)}
+          >
+            {design.title}
+          </button>
+        ) : place.to ? (
+          // A design session before its first page: there is nothing to view yet, only its conversation.
+          <Link href={place.to}>{design.title}</Link>
+        ) : (
+          design.title
+        )}
       </h2>
       <div {...stylex.props(styles.meta)}>
         {project ? <span>{project}</span> : null}
@@ -118,6 +126,7 @@ export function DesignCard({
         <span>{when(design.last_at_ms)}</span>
       </div>
       <div {...stylex.props(styles.pages)}>
+        {newest ? null : <span {...stylex.props(styles.none)}>No page yet</span>}
         {design.pages.map((p) => (
           <button
             key={p.file.id}

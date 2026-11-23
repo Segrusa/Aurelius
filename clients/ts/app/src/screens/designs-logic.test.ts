@@ -1,6 +1,6 @@
 import type { DesignView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import { designLink, designPlace, pagesOf } from "./designs-logic";
+import { designLink, designPlace, newestPage, pagesOf } from "./designs-logic";
 
 const design = (over: Partial<DesignView> = {}): DesignView => ({
   conversation_id: "c1",
@@ -63,5 +63,24 @@ describe("designLink", () => {
   });
   it("is nothing for a conversation without a screen", () => {
     expect(designLink(design({ kind: "project" }))).toBeNull();
+  });
+  it("opens a design session without a page yet on its conversation alone", () => {
+    expect(designLink(design({ design: true, pages: [] }))).toBe("/session/c1");
+  });
+});
+
+describe("newestPage", () => {
+  it("is the page kept last", () => {
+    const two = design({
+      pages: [
+        { file: { id: "f1", name: "a.html", media_type: "text/html", size: 1 }, message_id: "m1", at_ms: 300 },
+        { file: { id: "f2", name: "b.html", media_type: "text/html", size: 1 }, message_id: "m2", at_ms: 200 },
+      ],
+    });
+    expect(newestPage(two)?.file.id).toBe("f1");
+  });
+  // design.list sends a design session before its first page with no pages (storage/designs.rs).
+  it("is nothing for a design session without a page yet", () => {
+    expect(newestPage(design({ design: true, pages: [] }))).toBeNull();
   });
 });
