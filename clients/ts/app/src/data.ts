@@ -395,11 +395,12 @@ export function useWorkSessions(projectId: string | null = null) {
 }
 
 /** A channel's messages; reading marks it read on the server. `channel` null: general. */
-export function useChannelFeed(channel: string | null) {
+export function useChannelFeed(channel: string | null, wanted = true) {
   const connection = useConnection();
   return useKeyed(
     ["messages", "feed", channel],
     async () => expectBody(await connection.call("group_chat.get", { channel }), "messages").value,
+    wanted,
   );
 }
 

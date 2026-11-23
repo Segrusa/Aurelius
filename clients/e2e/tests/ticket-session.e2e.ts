@@ -7,6 +7,8 @@ import { expect, type Page, test } from "@playwright/test";
 import { REPO, serveStatic, WEB_DIST } from "./daemon";
 import { boardOf, channel, message, messages, scriptServer, task, ticket } from "./fake-server";
 
+/** The ticket's Timeline tab: its talk, newest first, with the composer (ticket #83). */
+const timeline = (page: Page) => page.getByRole("tab", { name: "Timeline" }).click();
 const SHOTS = process.env.AURELIUS_SHOTS ?? join(REPO, "target/ticket-70");
 const FEATURES = [
   "ticket_channels",
@@ -198,6 +200,9 @@ test.describe("a ticket's session", () => {
     await expect(page).toHaveURL(/\/ticket\/80$/);
     await expect(page.getByRole("heading", { level: 1 })).toContainText("#80");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("From the dialog");
+    // A ticket opens on its Activity (ticket #83); the talk and the composer are on the Timeline.
+    await expect(page.getByRole("tab", { name: /Activity/ })).toHaveAttribute("aria-selected", "true");
+    await timeline(page);
     await expect(box(page)).toHaveAttribute("placeholder", "Message Pixel (owner)… · @ to mention");
   });
 
@@ -223,6 +228,7 @@ test.describe("a ticket's session", () => {
       }),
     );
     await page.goto(`${site.origin}/ticket/70`);
+    await timeline(page);
     await expect(page.getByText("Design first, then Flux builds.")).toBeVisible();
     await expect(page.getByText("@Name asks that employee; without a name, Pixel (owner) answers.")).toBeVisible();
     await box(page).fill("How far is the head?");
@@ -278,6 +284,8 @@ test.describe("a ticket's session", () => {
     await expect
       .poll(() => writes.find((w) => w.method === "ticket.accept")?.params)
       .toMatchObject({ ticket_id: "t70" });
+    // The gate sat on the Activity tab; the read-only bar is under the talk, on the Timeline.
+    await timeline(page);
     await expect(page.getByText("#70 is Done · read-only.")).toBeVisible();
     await expect(box(page)).toHaveCount(0);
     await expect(page.getByRole("region", { name: "Your decision" })).toHaveCount(0);
@@ -481,6 +489,7 @@ test("shots", async ({ page }) => {
   try {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${site.origin}/ticket/70`);
+    await timeline(page);
     await expect(page.getByText("ui-ontwerp.md is committed")).toBeVisible();
     await expect(page.getByRole("complementary", { name: "Ticket properties" })).toBeVisible();
     await shot("doing.png");
@@ -494,6 +503,7 @@ test("shots", async ({ page }) => {
     await shot("plan-review.png");
 
     await page.goto(`${site.origin}/ticket/73`);
+    await timeline(page);
     await expect(page.getByText("#73 is Done · read-only.")).toBeVisible();
     await shot("done-readonly.png");
 
@@ -503,6 +513,7 @@ test("shots", async ({ page }) => {
 
     await page.setViewportSize({ width: 820, height: 900 });
     await page.goto(`${site.origin}/ticket/70`);
+    await timeline(page);
     await expect(page.getByText("ui-ontwerp.md is committed")).toBeVisible();
     await page.getByRole("button", { name: "Show ticket properties" }).click();
     await expect(page.getByRole("dialog", { name: "Ticket properties" })).toBeVisible();

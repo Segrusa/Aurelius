@@ -112,10 +112,11 @@ test("the board and a ticket's session against a real daemon", async () => {
     await page.keyboard.press("Enter");
     await until("renamed", async () => ((await read()).todo as string[]).includes("Second ticket, renamed"));
 
-    // The talk is the session's timeline; the activity tells what happened.
-    const panel = page.getByRole("complementary", { name: "Ticket properties" });
-    await panel.getByRole("tab", { name: "Activity" }).click();
-    await expect(panel.getByText("Nothing happened yet.")).toHaveCount(0);
+    // A ticket opens on its Activity; the talk is the Timeline tab (ticket #83).
+    const timeline = page.getByRole("tab", { name: "Timeline" });
+    await timeline.click();
+    await expect(timeline).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("textbox", { name: /^Message/ })).toBeVisible();
 
     // The reads behind the run card and the odometer, on the real server (fake-server answers anything).
     const onBoard = expectBody(await server.call("board.get", { project_id: project?.id ?? null }), "board").value;

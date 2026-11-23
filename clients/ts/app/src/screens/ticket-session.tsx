@@ -21,7 +21,7 @@ import { expectBody } from "@aurelius/client";
 import type { AgentMode, TaskView, TicketDetail, TicketPriority, TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import {
   useBoard,
@@ -73,11 +73,11 @@ import {
 } from "./run-side";
 import { FileChips } from "./run-tools";
 import { taskStateLine } from "./tasks-logic";
+import { ActivityPanel, type TicketTab, TicketTabs, useTicketAsks } from "./ticket-activity";
 import { branchOf, latestTodos } from "./ticket-overview-logic";
-import { LiveBar, NowCard, PageSection, PlanPanel, useTicketWork } from "./ticket-page";
+import { PageSection, type Person, useTicketWork } from "./ticket-page";
 import { planStep } from "./ticket-page-logic";
 import {
-  Activity,
   Box,
   DesignRow,
   Editable,
@@ -190,8 +190,7 @@ const styles = stylex.create({
   taskWho: { flexShrink: 0, fontSize: 12, color: "var(--color-text-secondary)" },
   taskState: { flexShrink: 0, fontSize: 12 },
   mono: { fontFamily: "var(--font-family-code)", fontSize: 12 },
-  olderTop: { marginInline: "auto", width: "100%", maxWidth: 820, boxSizing: "border-box", paddingInline: 24 },
-  plan: { paddingBottom: 12 },
+  olderPanel: { minHeight: 0, flexGrow: 1, flexBasis: 0, overflowY: "auto" },
   count: { marginInlineStart: 4, color: "var(--precision-text3)" },
   // DESCRIPTION_LINES: StyleX needs the literal here.
   folded: { display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 3, overflow: "hidden" },
@@ -202,10 +201,10 @@ const styles = stylex.create({
 export const DESCRIPTION_LINES = 3;
 
 /**
- * What the ticket page shows above its talk: the description (editable while the ticket is open),
- * the feedback the owner works on, and what every task of the ticket does now.
+ * The ticket's description (editable while the ticket is open) and the feedback the owner works
+ * on, at the end of the Activity tab (ticket #83).
  */
-function PageTop({ detail, t }: { detail: TicketDetail; t: TicketView }) {
+function PageTop({ t }: { t: TicketView }) {
   const { status } = useLinkState();
   const write = useTicketWrite();
   const open = !readOnly(t, null) && status === "online";
@@ -226,49 +225,54 @@ function PageTop({ detail, t }: { detail: TicketDetail; t: TicketView }) {
     return () => observer.disconnect();
   }, [t.description, unfolded]);
   return (
-    <>
-      <PageSection title="Description">
-        {t.review_feedback && t.column === "doing" ? (
-          <Box>
-            <span {...stylex.props(styles.third)}>{feedbackLabel(activity.data)}</span>
-            <span>{t.review_feedback}</span>
-          </Box>
-        ) : null}
-        <Editable
-          label="Description"
-          value={t.description ?? ""}
-          enabled={open}
-          multiline
-          display={
-            t.description?.trim() ? (
-              <div ref={folded} {...stylex.props(!unfolded && styles.folded)}>
-                <Markdown text={t.description} />
-              </div>
-            ) : (
-              <span {...stylex.props(styles.third)}>No description.</span>
-            )
-          }
-          footer={
-            t.description?.trim() && (long || unfolded) ? (
-              <div {...stylex.props(styles.foldButton)}>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-expanded={unfolded}
-                  label={unfolded ? "Show less" : "Show more"}
-                  onClick={() => setUnfoldedFor(unfolded ? null : t.id)}
-                />
-              </div>
-            ) : null
-          }
-          onSave={(description) =>
-            write("ticket.update", { ticket_id: t.id, description }, { expectedVersion: t.version })
-          }
-        />
-      </PageSection>
-      <NowCard tasks={detail.tasks} rootId={detail.root_task?.id ?? t.root_task_id ?? null} />
-    </>
+    <PageSection title="Description">
+      {t.review_feedback && t.column === "doing" ? (
+        <Box>
+          <span {...stylex.props(styles.third)}>{feedbackLabel(activity.data)}</span>
+          <span>{t.review_feedback}</span>
+        </Box>
+      ) : null}
+      <Editable
+        label="Description"
+        value={t.description ?? ""}
+        enabled={open}
+        multiline
+        display={
+          t.description?.trim() ? (
+            <div ref={folded} {...stylex.props(!unfolded && styles.folded)}>
+              <Markdown text={t.description} />
+            </div>
+          ) : (
+            <span {...stylex.props(styles.third)}>No description.</span>
+          )
+        }
+        footer={
+          t.description?.trim() && (long || unfolded) ? (
+            <div {...stylex.props(styles.foldButton)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-expanded={unfolded}
+                label={unfolded ? "Show less" : "Show more"}
+                onClick={() => setUnfoldedFor(unfolded ? null : t.id)}
+              />
+            </div>
+          ) : null
+        }
+        onSave={(description) =>
+          write("ticket.update", { ticket_id: t.id, description }, { expectedVersion: t.version })
+        }
+      />
+    </PageSection>
   );
+}
+
+/** The employees of a ticket's tasks, each once, in the order they joined: the Timeline's chips. */
+function ticketPeople(tasks: readonly TaskView[]): Person[] {
+  const out: Person[] = [];
+  for (const task of tasks)
+    if (task.employee_name && !out.some((p) => p.name === task.employee_name)) out.push({ name: task.employee_name });
+  return out;
 }
 
 /** The ticket of `/ticket/N`: its channel in the cached list, else `ticket.list "#N"`. */
@@ -411,12 +415,36 @@ function Session({
   const conversation = features.includes("ticket_channels") ? (t.conversation_id ?? null) : null;
   const closed = readOnly(t, null);
   const dock = usePropertiesDock();
-  // The head spans the screen; the properties dock beside the conversation, below it.
-  const head = <Head t={t} dock={dock} />;
   const gate = <TicketGate detail={detail} t={t} />;
-  const rootId = detail.root_task?.id ?? t.root_task_id ?? null;
-  const top = <PageTop detail={detail} t={t} />;
+  const top = <PageTop t={t} />;
   const work = useTicketWork(detail.tasks);
+  const asks = useTicketAsks(detail, t, work);
+  // A link to a message or a thread opens the Timeline; else the Activity is what a ticket opens on.
+  const [tab, setTab] = useState<TicketTab>(message || thread ? "timeline" : "activity");
+  const [who, setWho] = useState<string | null>(null);
+  const people = useMemo(() => ticketPeople(detail.tasks), [detail.tasks]);
+  // The head spans the screen; the properties dock beside the conversation, below it.
+  const head = (
+    <Head
+      t={t}
+      dock={dock}
+      tabs={conversation ? <TicketTabs tab={tab} onTab={setTab} questions={asks.size} /> : null}
+    />
+  );
+  const panel = (
+    <ActivityPanel
+      detail={detail}
+      t={t}
+      work={work}
+      asks={asks}
+      gate={gate}
+      description={top}
+      onTimeline={(name) => {
+        setWho(name);
+        setTab("timeline");
+      }}
+    />
+  );
   const aside = (
     <PropertiesPanel dock={dock} label="Ticket properties" wide>
       <Properties detail={detail} t={t} />
@@ -425,9 +453,14 @@ function Session({
   const slots: SessionSlots = {
     design,
     head: null,
-    top,
-    work,
-    live: <LiveBar tasks={detail.tasks} rootId={rootId} />,
+    top: null,
+    work: work.blocks,
+    ...(tab === "activity" ? { panel } : {}),
+    newestFirst: true,
+    people,
+    who,
+    onWho: setWho,
+    live: null,
     gate,
     chips: <RunChips t={t} />,
     aside,
@@ -458,11 +491,7 @@ function Session({
         // An older server has no ticket conversation: the ticket's data and decision still work.
         <div {...stylex.props(styles.body)}>
           <div {...stylex.props(styles.main)}>
-            <div {...stylex.props(styles.olderTop)}>{top}</div>
-            <div {...stylex.props(styles.centre)}>
-              <EmptyState isCompact title="This server has no ticket conversation." />
-            </div>
-            {gate}
+            <div {...stylex.props(styles.olderPanel)}>{panel}</div>
           </div>
           {aside}
         </div>
@@ -474,10 +503,13 @@ function Session({
 function Head({
   t,
   dock,
+  tabs,
 }: {
   t: TicketView;
   /** The properties panel the head's button shows or hides. */
   dock: PropertiesDock;
+  /** Activity and Timeline under the title (ticket #83). */
+  tabs: ReactNode;
 }) {
   const { status } = useLinkState();
   const board = useBoard(null);
@@ -508,6 +540,7 @@ function Head({
             {column}
           </Chip>
         </div>
+        {tabs}
       </div>
       <div {...stylex.props(styles.tools)}>
         <Menu
@@ -598,9 +631,9 @@ function RunChips({ t }: { t: TicketView }) {
   );
 }
 
-type Section = "properties" | "files" | "activity";
+type Section = "properties" | "files";
 
-/** The details panel: the plan of the ticket's tasks, then tabs for its data, its files and what happened to it. */
+/** The details panel: tabs for the ticket's data and its files (its plan and history are the Activity and Timeline tabs). */
 function Properties({ detail, t }: { detail: TicketDetail; t: TicketView }) {
   const platform = usePlatform();
   const [tab, setTab] = useState<Section>("properties");
@@ -641,9 +674,6 @@ function Properties({ detail, t }: { detail: TicketDetail; t: TicketView }) {
         takeFiles(given);
       }}
     >
-      <div {...stylex.props(styles.plan)}>
-        <PlanPanel tasks={detail.tasks} root={detail.root_task ?? null} />
-      </div>
       <TabList
         role="tablist"
         aria-label="Ticket properties"
@@ -661,16 +691,9 @@ function Properties({ detail, t }: { detail: TicketDetail; t: TicketView }) {
           }
           panelId="ticket-properties-tab"
         />
-        <Tab value="activity" label="Activity" panelId="ticket-properties-tab" />
       </TabList>
-      <div
-        id="ticket-properties-tab"
-        role="tabpanel"
-        aria-label={tab === "activity" ? "Activity" : tab === "files" ? "Files" : "Properties"}
-      >
-        {tab === "activity" ? (
-          <Activity id={t.id} />
-        ) : tab === "files" ? (
+      <div id="ticket-properties-tab" role="tabpanel" aria-label={tab === "files" ? "Files" : "Properties"}>
+        {tab === "files" ? (
           <FilesTab detail={detail} t={t} onAddFiles={() => platform.pickFiles().then(addFiles, addFailed)} />
         ) : (
           <PropertiesTab detail={detail} t={t} />

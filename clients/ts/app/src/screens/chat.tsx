@@ -72,9 +72,10 @@ import { usePlanDock } from "./plan-dock";
 import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
 import { ThreadWaiting } from "./scheduled";
-import { mergeByTime, type WorkRow, workInFilter } from "./ticket-activity-logic";
+import { mergeByTime, workInFilter } from "./ticket-activity-logic";
+import { byWho, holdNew, type WorkBlock } from "./ticket-activity-plain-logic";
 import { OVERVIEW_KEY, OverviewPanel, ProgressCard, useTicketProgress } from "./ticket-overview";
-import { ActivityHead, WorkItem } from "./ticket-page";
+import { ActivityHead, type Person, WorkBlockItem } from "./ticket-page";
 import { type ActivityFilter, inFilter } from "./ticket-page-logic";
 import { ticketPlace } from "./ticket-session-logic";
 import { ColumnGlyph } from "./tickets-kit";
@@ -294,6 +295,22 @@ const styles = stylex.create({
   },
   pointer: { cursor: "pointer" },
   feedBox: { minHeight: 0, flexGrow: 1, flexBasis: 0 },
+  // The ticket's Activity tab, in place of the talk (ticket #83).
+  panel: { minHeight: 0, flexGrow: 1, flexBasis: 0, overflowY: "auto" },
+  // The Timeline's composer and filter above its newest-first list.
+  newestTop: { display: "flex", flexShrink: 0, flexDirection: "column", paddingTop: 12 },
+  newBar: {
+    alignSelf: "center",
+    marginBottom: 4,
+    borderWidth: 0,
+    borderRadius: 999,
+    paddingInline: 12,
+    paddingBlock: 3,
+    cursor: "pointer",
+    fontSize: 12,
+    color: "var(--color-on-dark)",
+    backgroundColor: "var(--color-accent)",
+  },
   loading: { display: "flex", flexDirection: "column", gap: 8, padding: 24 },
   waiting: { margin: 0, padding: 24, color: "var(--precision-text3)" },
   problem: { padding: 24 },
@@ -788,9 +805,11 @@ function ThreadPanel({
 
 type Row =
   | { kind: "message"; m: MessageView; day: boolean; isNew: boolean; grouped: boolean; earlier: number }
-  | { kind: "live"; id: string; run: string }
-  | { kind: "work"; id: string; w: WorkRow }
-  | { kind: "approval"; id: string };
+  | { kind: "live"; id: string; run: string; day?: boolean }
+  | { kind: "work"; id: string; w: WorkBlock; day?: boolean }
+  | { kind: "approval"; id: string; day?: boolean };
+
+const rowKey = (row: Row) => (row.kind === "message" ? row.m.id : row.id);
 
 interface ChannelProps {
   channel: string | null;
@@ -813,8 +832,19 @@ export interface SessionSlots {
    * now. With it the talk gets an Activity heading with a filter.
    */
   top?: ReactNode;
-  /** What the ticket's tasks read, edited and ran, merged in time into the Activity (ticket #76). */
-  work?: readonly WorkRow[];
+  /** The ticket's tasks' work as plain blocks, merged in time into the Timeline (tickets #76, #83). */
+  work?: readonly WorkBlock[];
+  /**
+   * In place of the talk, its composer and gate: the ticket's Activity tab (ticket #83). The head,
+   * the panel on the right and the open artifact or thread stay.
+   */
+  panel?: ReactNode;
+  /** The Timeline of ticket #83: newest first, the composer at the top, nothing jumps while you read. */
+  newestFirst?: boolean;
+  /** The employees the Timeline can be narrowed to, the one picked, and how to pick one. */
+  people?: readonly Person[];
+  who?: string | null;
+  onWho?: (who: string | null) => void;
   /** In place of the progress card above the composer: what runs this second. */
   live?: ReactNode;
   /** Between the progress and the composer: the decision of the moment. */
@@ -912,22 +942,18 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
   // The ticket page's Activity filter; a channel's own chat shows everything.
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const filtering = session?.top !== undefined;
+  const newest = session?.newestFirst === true;
+  const who = session?.who ?? null;
   const list2 = useMemo(
-    () => (filtering && filter !== "all" ? folded.shown.filter((m) => inFilter(m, filter)) : folded.shown),
-    [filtering, filter, folded.shown],
+    () =>
+      filtering && (filter !== "all" || who !== null)
+        ? folded.shown.filter((m) => inFilter(m, filter) && byWho(m, who))
+        : folded.shown,
+    [filtering, filter, who, folded.shown],
   );
   const handle = useRef<VirtuosoHandle>(null);
   // The message a link led to: into view, and marked for a moment.
   const [flash, setFlash] = useState<string | null>(null);
-  useEffect(() => {
-    if (message === null) return;
-    const at = list2.findIndex((m) => m.id === message);
-    if (at < 0) return;
-    setFlash(message);
-    handle.current?.scrollToIndex({ index: at, align: "center" });
-    const timer = setTimeout(() => setFlash(null), 2000);
-    return () => clearTimeout(timer);
-  }, [message, list2]);
   const atBottom = useRef(true);
 
   // The line "New messages" is decided once, from what was unread before this read.
@@ -966,9 +992,11 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
   const onCard = useMemo(() => new Set(list.flatMap((m) => m.approval_id ?? [])), [list]);
   const inList = useMemo(() => new Set(list.map((m) => m.id)), [list]);
 
+  const employeesList = useMemo(() => employees.data ?? [], [employees.data]);
   const rows = useMemo<Row[]>(() => {
     const dayOf = (ms: number) => localDay(ms, offset());
-    const work = filtering && workInFilter(filter) ? (session?.work ?? []) : [];
+    const work =
+      filtering && workInFilter(filter) ? (session?.work ?? []).filter((w) => who === null || w.who === who) : [];
     const out: Row[] = mergeByTime(list2, work).map((r, at, all) => {
       if (r.kind === "work") return { kind: "work", id: r.w.id, w: r.w };
       const b = before(list2, r.index, newAt, dayOf);
@@ -984,14 +1012,65 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
       };
     });
     // What streams and what waits on you is talk, not a change.
-    if (filter === "changes") return out;
-    for (const u of live) {
-      if (!inList.has(u.message_id) && streamTo(u.thread_parent, null) === "channel")
-        out.push({ kind: "live", id: u.message_id, run: u.run_id });
+    if (filter !== "changes") {
+      for (const u of live) {
+        if (who !== null && runAuthor(employeesList, u.run_id) !== who) continue;
+        if (!inList.has(u.message_id) && streamTo(u.thread_parent, null) === "channel")
+          out.push({ kind: "live", id: u.message_id, run: u.run_id });
+      }
+      for (const a of pending)
+        if (!onCard.has(a.id) && (who === null || a.requester === who)) out.push({ kind: "approval", id: a.id });
     }
-    for (const a of pending) if (!onCard.has(a.id)) out.push({ kind: "approval", id: a.id });
-    return out;
-  }, [list2, folded.earlier, newAt, live, inList, pending, onCard, filter, filtering, session?.work]);
+    if (!newest) return out;
+    // Newest first (ticket #83): every row has its own head, and a day line tops the newest row of each day.
+    let shownDay: number | null = null;
+    return out.reverse().map((r) => {
+      const at =
+        r.kind === "message"
+          ? r.m.created_at_ms
+          : r.kind === "work" && Number.isFinite(r.w.atMs)
+            ? r.w.atMs
+            : Date.now();
+      const day = dayOf(at);
+      const first = day !== shownDay;
+      shownDay = day;
+      return r.kind === "message" ? { ...r, day: first, isNew: false, grouped: false } : { ...r, day: first };
+    });
+  }, [
+    list2,
+    folded.earlier,
+    newAt,
+    live,
+    inList,
+    pending,
+    onCard,
+    filter,
+    filtering,
+    session?.work,
+    who,
+    newest,
+    employeesList,
+  ]);
+
+  // While you read further down a newest-first Timeline, new rows wait above "↑ n new".
+  const [held, setHeld] = useState<Set<string> | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: another filter starts at the top again.
+  useEffect(() => setHeld(null), [filter, who]);
+  const { shown, fresh } = useMemo(() => holdNew(rows, rowKey, newest ? held : null), [rows, held, newest]);
+  const toTop = () => {
+    setHeld(null);
+    handle.current?.scrollToIndex({ index: 0, align: "start" });
+  };
+
+  useEffect(() => {
+    if (message === null) return;
+    const at = shown.findIndex((r) => r.kind === "message" && r.m.id === message);
+    if (at < 0) return;
+    setFlash(message);
+    handle.current?.scrollToIndex({ index: at, align: "center" });
+    const timer = setTimeout(() => setFlash(null), 2000);
+    return () => clearTimeout(timer);
+  }, [message, shown]);
 
   const readOnly = session ? session.readOnly : (c?.archived ?? false) || feed.data?.read_only === true;
   const caps = useMemo<Caps>(
@@ -1116,7 +1195,10 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
     () =>
       filtering
         ? {
-            top: (
+            // Newest first, the filter sits above the list and stays in view.
+            top: newest ? (
+              session?.top
+            ) : (
               <>
                 {session?.top}
                 <ActivityHead filter={filter} onFilter={setFilter} />
@@ -1130,7 +1212,49 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
                   : "No messages yet.",
           }
         : { top: null, empty: null },
-    [filtering, session?.top, filter, t, owner],
+    [filtering, session?.top, filter, t, owner, newest],
+  );
+
+  const composer = readOnly ? (
+    <div {...stylex.props(styles.readOnlyRow)}>
+      <div {...stylex.props(styles.readOnlyBar)}>
+        <span {...stylex.props(styles.readOnlyText)}>
+          {session
+            ? session.readOnlyText
+            : c
+              ? readOnlyBar(c, c.ticket_column === "done")
+              : "This channel is read-only."}
+        </span>
+        {session?.readOnlyEnd}
+        {c?.ticket_id && !session ? (
+          <Link {...ticketPlace({ id: c.ticket_id, number: c.ticket_number })} {...stylex.props(styles.readOnlyLink)}>
+            Open ticket
+          </Link>
+        ) : null}
+      </div>
+    </div>
+  ) : (
+    <Composer
+      key={channel ?? "general"}
+      draftKey={channel ?? "general"}
+      channel={channel}
+      threadParent={null}
+      waiting={!running && list2.at(-1)?.role === "user"}
+      placeholder={placeholder}
+      hint={hint}
+      activeRun={running}
+      people={people}
+      archived={archived}
+      quick={quick}
+      everyone={everyone}
+      prompt={TEAM_PROMPT}
+      {...(session?.chips ? { footer: session.chips } : {})}
+      onSent={() => {
+        if (newest) return toTop();
+        atBottom.current = true;
+        handle.current?.scrollToIndex({ index: "LAST", align: "end" });
+      }}
+    />
   );
 
   return (
@@ -1189,137 +1313,152 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
         <ThreadWaiting conversationId={openId} />
         {contextOf ? <ContextDialog run={contextOf} onClose={() => setContextOf(null)} /> : null}
         <ChatProvider value={ctx}>
-          <FeedIdsProvider value={{ conversationId: openId ?? null }}>
-            <div {...stylex.props(styles.feedBox)}>
-              {feed.error ? (
-                <div {...stylex.props(styles.problem)}>
-                  <Banner
-                    status="error"
-                    role="alert"
-                    title="The ticket chat did not load."
-                    description={feed.error.message}
-                    endContent={<Button label="Try again" onClick={() => void feed.refetch()} />}
-                  />
+          {session?.panel !== undefined ? (
+            // The ticket's Activity tab takes the place of the talk.
+            <div {...stylex.props(styles.panel)}>{session.panel}</div>
+          ) : (
+            <>
+              {newest ? (
+                <div {...stylex.props(styles.newestTop)}>
+                  {session?.gate}
+                  {composer}
+                  <div {...FEED_COLUMN}>
+                    <ActivityHead
+                      filter={filter}
+                      onFilter={setFilter}
+                      people={session?.people ?? []}
+                      who={who}
+                      {...(session?.onWho ? { onWho: session.onWho } : {})}
+                      newestFirst
+                    />
+                  </div>
+                  {fresh > 0 ? (
+                    <button type="button" onClick={toTop} {...stylex.props(styles.newBar)}>
+                      {`↑ ${fresh} new`}
+                    </button>
+                  ) : null}
                 </div>
-              ) : feed.isPending ? (
-                status === "online" ? (
-                  loading ? (
-                    <div {...stylex.props(styles.loading)}>
-                      <Skeleton height={48} />
-                      <Skeleton height={48} />
-                      <Skeleton height={48} />
+              ) : null}
+              <FeedIdsProvider value={{ conversationId: openId ?? null }}>
+                <div {...stylex.props(styles.feedBox)}>
+                  {feed.error ? (
+                    <div {...stylex.props(styles.problem)}>
+                      <Banner
+                        status="error"
+                        role="alert"
+                        title="The ticket chat did not load."
+                        description={feed.error.message}
+                        endContent={<Button label="Try again" onClick={() => void feed.refetch()} />}
+                      />
                     </div>
-                  ) : null
-                ) : (
-                  <p {...stylex.props(styles.waiting)}>Waiting for the server…</p>
-                )
-              ) : rows.length === 0 && !filtering ? (
-                <EmptyState
-                  title={isTicket ? "Discuss the ticket here." : "Talk with your whole team here."}
-                  description={
-                    isTicket
-                      ? `Write @Name to ask an employee${t ? ownerAnswers(owner) : " about this ticket"}.`
-                      : `Write @Name to ask an employee; without a name, ${first ?? "the top of the org chart"} answers and brings in whoever is needed.`
-                  }
-                />
-              ) : (
-                <Virtuoso
-                  ref={handle}
-                  key={openId}
-                  data={rows}
-                  {...stylex.props(styles.feed)}
-                  increaseViewportBy={600}
-                  initialTopMostItemIndex={{ index: "LAST", align: "end" }}
-                  atBottomThreshold={120}
-                  atBottomStateChange={(b) => {
-                    atBottom.current = b;
-                  }}
-                  followOutput={(bottom) => (bottom ? "auto" : false)}
-                  computeItemKey={(_, row) => (row.kind === "message" ? row.m.id : row.id)}
-                  components={FEED_PARTS}
-                  context={feedContext}
-                  itemContent={(_, row) => (
-                    <div {...FEED_COLUMN}>
-                      {row.kind === "message" ? (
-                        <>
-                          {row.earlier > 0 ? (
-                            <button type="button" onClick={() => setUnfolded(true)} {...stylex.props(styles.earlier)}>
-                              {row.earlier === 1 ? "1 earlier update" : `${row.earlier} earlier updates`}
-                            </button>
-                          ) : null}
-                          {row.day ? <DayLine ms={row.m.created_at_ms} /> : null}
-                          {row.isNew ? <NewLine /> : null}
-                          <div {...(row.grouped ? null : TOP_GAP)}>
-                            <MessageRow m={row.m} grouped={row.grouped} />
-                          </div>
-                        </>
-                      ) : row.kind === "work" ? (
-                        <WorkItem row={row.w} />
-                      ) : row.kind === "live" ? (
-                        <LiveRow
-                          id={row.id}
-                          name={runAuthor(employeesData ?? [], row.run) ?? "An employee"}
-                          kind="employee"
-                        />
-                      ) : (
-                        <div {...stylex.props(styles.approvalGap)}>
-                          {approvalMap.get(row.id) ? (
-                            <ApprovalCard
-                              approval={approvalMap.get(row.id) as NonNullable<ReturnType<typeof approvalMap.get>>}
-                            />
-                          ) : null}
+                  ) : feed.isPending ? (
+                    status === "online" ? (
+                      loading ? (
+                        <div {...stylex.props(styles.loading)}>
+                          <Skeleton height={48} />
+                          <Skeleton height={48} />
+                          <Skeleton height={48} />
+                        </div>
+                      ) : null
+                    ) : (
+                      <p {...stylex.props(styles.waiting)}>Waiting for the server…</p>
+                    )
+                  ) : rows.length === 0 && !filtering ? (
+                    <EmptyState
+                      title={isTicket ? "Discuss the ticket here." : "Talk with your whole team here."}
+                      description={
+                        isTicket
+                          ? `Write @Name to ask an employee${t ? ownerAnswers(owner) : " about this ticket"}.`
+                          : `Write @Name to ask an employee; without a name, ${first ?? "the top of the org chart"} answers and brings in whoever is needed.`
+                      }
+                    />
+                  ) : (
+                    <Virtuoso
+                      ref={handle}
+                      key={newest ? `${openId}:${filter}:${who ?? ""}` : openId}
+                      data={shown}
+                      {...stylex.props(styles.feed)}
+                      increaseViewportBy={600}
+                      initialTopMostItemIndex={newest ? 0 : { index: "LAST", align: "end" }}
+                      atBottomThreshold={120}
+                      atBottomStateChange={(b) => {
+                        atBottom.current = b;
+                      }}
+                      atTopThreshold={80}
+                      atTopStateChange={(top) => {
+                        if (newest) setHeld(top ? null : new Set(shown.map(rowKey)));
+                      }}
+                      followOutput={newest ? false : (bottom) => (bottom ? "auto" : false)}
+                      computeItemKey={(_, row) => rowKey(row)}
+                      components={FEED_PARTS}
+                      context={feedContext}
+                      itemContent={(_, row) => (
+                        <div {...FEED_COLUMN}>
+                          {row.kind === "message" ? (
+                            <>
+                              {row.earlier > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setUnfolded(true)}
+                                  {...stylex.props(styles.earlier)}
+                                >
+                                  {row.earlier === 1 ? "1 earlier update" : `${row.earlier} earlier updates`}
+                                </button>
+                              ) : null}
+                              {row.day ? <DayLine ms={row.m.created_at_ms} /> : null}
+                              {row.isNew ? <NewLine /> : null}
+                              <div {...(row.grouped ? null : TOP_GAP)}>
+                                <MessageRow m={row.m} grouped={row.grouped} />
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              {row.day ? (
+                                <DayLine
+                                  ms={row.kind === "work" && Number.isFinite(row.w.atMs) ? row.w.atMs : Date.now()}
+                                />
+                              ) : null}
+                              {row.kind === "work" ? (
+                                <WorkBlockItem block={row.w} />
+                              ) : row.kind === "live" ? (
+                                <LiveRow
+                                  id={row.id}
+                                  name={runAuthor(employeesData ?? [], row.run) ?? "An employee"}
+                                  kind="employee"
+                                />
+                              ) : (
+                                <div {...stylex.props(styles.approvalGap)}>
+                                  {approvalMap.get(row.id) ? (
+                                    <ApprovalCard
+                                      approval={
+                                        approvalMap.get(row.id) as NonNullable<ReturnType<typeof approvalMap.get>>
+                                      }
+                                    />
+                                  ) : null}
+                                </div>
+                              )}
+                            </>
+                          )}
                         </div>
                       )}
-                    </div>
+                    />
                   )}
-                />
+                </div>
+              </FeedIdsProvider>
+              {newest ? null : (
+                <>
+                  {isTicket && !readOnly ? (
+                    session?.live !== undefined ? (
+                      session.live
+                    ) : (
+                      <ProgressCard p={progress} />
+                    )
+                  ) : null}
+                  {session?.gate}
+                  {composer}
+                </>
               )}
-            </div>
-          </FeedIdsProvider>
-          {isTicket && !readOnly ? session?.live !== undefined ? session.live : <ProgressCard p={progress} /> : null}
-          {session?.gate}
-          {readOnly ? (
-            <div {...stylex.props(styles.readOnlyRow)}>
-              <div {...stylex.props(styles.readOnlyBar)}>
-                <span {...stylex.props(styles.readOnlyText)}>
-                  {session
-                    ? session.readOnlyText
-                    : c
-                      ? readOnlyBar(c, c.ticket_column === "done")
-                      : "This channel is read-only."}
-                </span>
-                {session?.readOnlyEnd}
-                {c?.ticket_id && !session ? (
-                  <Link
-                    {...ticketPlace({ id: c.ticket_id, number: c.ticket_number })}
-                    {...stylex.props(styles.readOnlyLink)}
-                  >
-                    Open ticket
-                  </Link>
-                ) : null}
-              </div>
-            </div>
-          ) : (
-            <Composer
-              key={channel ?? "general"}
-              draftKey={channel ?? "general"}
-              channel={channel}
-              threadParent={null}
-              waiting={!running && list2.at(-1)?.role === "user"}
-              placeholder={placeholder}
-              hint={hint}
-              activeRun={running}
-              people={people}
-              archived={archived}
-              quick={quick}
-              everyone={everyone}
-              prompt={TEAM_PROMPT}
-              {...(session?.chips ? { footer: session.chips } : {})}
-              onSent={() => {
-                atBottom.current = true;
-                handle.current?.scrollToIndex({ index: "LAST", align: "end" });
-              }}
-            />
+            </>
           )}
         </ChatProvider>
       </div>
