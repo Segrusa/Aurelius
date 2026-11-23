@@ -19,11 +19,12 @@ serde_json.workspace = true
 base64.workspace = true
 uuid.workspace = true
 tracing.workspace = true
+# Scaling and encoding shots: the screen tools and view_design (a design session).
+image.workspace = true
+# view_design's scratch folder for the headless browser.
+tempfile.workspace = true
 
 # Screenshots for the agent's screen tools; desktops only.
 [target.'cfg(any(windows, target_os = "macos"))'.dependencies]
 xcap = "0.9.8"
-image.workspace = true
 
-[dev-dependencies]
-tempfile.workspace = true

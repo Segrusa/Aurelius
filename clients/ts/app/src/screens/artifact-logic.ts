@@ -312,7 +312,9 @@ export function withDrag<P extends DragHandlers>(props: P, onDrag: (dragging: bo
  * What the viewer of a design being written does with newer HTML (`html`) while it shows `served`:
  * load the first draft in a view ("serve"), grow it in that same view ("update": no new view, so
  * no flash and the scroll stays), or nothing. A finished design that holds scripts is loaded once
- * more, because scripts put in by an update do not run.
+ * more, because scripts put in by an update do not run. The first view waits until the draft has
+ * left its head (draftHasContent): before that it is a blank white page for as long as the styles
+ * take to write.
  */
 export function liveStep(
   served: string | undefined,
@@ -320,9 +322,49 @@ export function liveStep(
   writing: boolean,
 ): "serve" | "update" | "none" {
   if (html === undefined || html === served) return "none";
-  if (served === undefined) return "serve";
+  if (served === undefined) return writing && !draftHasContent(html) ? "none" : "serve";
   if (!writing && /<script[\s>]/i.test(html)) return "serve";
   return "update";
+}
+
+/** A draft's size for the board member, e.g. "12 KB". */
+export const sizeText = (chars: number) => (chars >= 1024 ? `${Math.round(chars / 1024)} KB` : `${chars} B`);
+
+/** A draft without what never shows: comments, styles, scripts, the title and the head's tags. */
+function draftBody(html: string): string {
+  return (
+    html
+      // Unclosed ones run to the end of the draft: they are still being written.
+      .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
+      .replace(/<(style|script|title|template|noscript)\b[\s\S]*?(?:<\/\1\s*>|$)/gi, "")
+      .replace(/<!doctype[^>]*>?/gi, "")
+      .replace(/<\/?(?:html|head|meta|link|base)\b[^>]*>?/gi, "")
+      // A tag cut off by the end of the draft: what it is shows in the next one.
+      .replace(/<[^>]*$/, "")
+  );
+}
+
+/**
+ * Whether a draft holds anything of the page itself yet: its body, an element or text outside the
+ * head. A design writes its head first (often many KB of styles), which shows as a blank page.
+ */
+export function draftHasContent(html: string): boolean {
+  return draftBody(html).trim() !== "";
+}
+
+/** What a design being written is at, before its page shows: shown to the board member while they wait. */
+export type DraftPhase = "starting" | "head" | "styles" | "scripts" | "page";
+
+export function draftPhase(html: string | null): DraftPhase {
+  if (html === null || html.trim() === "") return "starting";
+  if (draftHasContent(html)) return "page";
+  const open = (tag: string) => {
+    const opened = html.toLowerCase().lastIndexOf(`<${tag}`);
+    return opened >= 0 && !html.slice(opened).toLowerCase().includes(`</${tag}`);
+  };
+  if (open("style")) return "styles";
+  if (open("script")) return "scripts";
+  return "head";
 }
 
 /** The page a design session opens with: the newest kept HTML file of the conversation. */

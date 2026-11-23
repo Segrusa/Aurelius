@@ -83,14 +83,16 @@ function DockedDesign({
   const message = ctx.messages.find((m) => m.id === messageId);
   const activity = update?.activity ?? message?.activity ?? [];
   const design = designsOf(activity, update?.draft ?? null).find((d) => d.path === path) ?? null;
-  // Once the answer kept the page, the panel shows the design's kept pages (with comments).
+  // Once the answer kept the page, the panel shows the design's kept pages (with comments), in the
+  // same viewer, so the page in sight does not load again.
   const kept = message ? keptDesign(message, path) : null;
-  if (kept && artifacts)
+  const keptPages = kept ? { pages: designPages(ctx.messages, kept, Date.now()), openName: kept.name } : null;
+  if (design)
     return (
-      <ArtifactViewer
-        pages={designPages(ctx.messages, kept, Date.now())}
-        openName={kept.name}
-        artifacts={artifacts}
+      <DesignViewer
+        design={design}
+        kept={keptPages}
+        messageId={messageId}
         messages={ctx.messages}
         conversationId={ctx.conversationId}
         send={ctx.artifactSend ?? null}
@@ -99,11 +101,12 @@ function DockedDesign({
         onClose={onClose}
       />
     );
-  if (!design) return null;
+  if (!keptPages || !artifacts) return null;
   return (
-    <DesignViewer
-      design={design}
-      messageId={messageId}
+    <ArtifactViewer
+      pages={keptPages.pages}
+      openName={keptPages.openName}
+      artifacts={artifacts}
       messages={ctx.messages}
       conversationId={ctx.conversationId}
       send={ctx.artifactSend ?? null}

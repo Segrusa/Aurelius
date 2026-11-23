@@ -2,6 +2,7 @@
 //! `aurelius-bridge --data-dir <dir> --run <run_id> [--project]`; see `mcp`.
 //! The daemon spawns it; it is not meant to be run by hand.
 
+mod design;
 mod mcp;
 mod screen;
 

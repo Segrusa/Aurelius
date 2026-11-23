@@ -17,6 +17,7 @@ import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
 import { percent, pixel } from "@astryxdesign/core/Resizable/utils";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { arrived, expectBody } from "@aurelius/client";
@@ -31,6 +32,7 @@ import type { ArtifactPick, ArtifactSlot, Platform } from "../platform";
 import { saveBlob } from "../ui/download";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { useDelayed } from "../ui/use-delayed";
 import {
   type ArtifactSend,
   artifactComments,
@@ -45,18 +47,20 @@ import {
   DIALOG_SELECTOR,
   designTicket,
   designTitle,
+  draftPhase,
   htmlOf,
   htmlTitle,
   liveStep,
   OVERLAY_SELECTOR,
   overlaysOver,
+  sizeText,
   stageBounds,
   VIEWPORTS,
   type Viewport,
   viewportWidth,
   withDrag,
 } from "./artifact-logic";
-import { FormDialog, Hint, Loading } from "./org-kit";
+import { FormDialog, Hint } from "./org-kit";
 import { overlays } from "./overlays-store";
 
 const styles = stylex.create({
@@ -103,6 +107,31 @@ const styles = stylex.create({
     borderColor: "var(--color-border)",
     boxSizing: "border-box",
   },
+  // The outline of a page while the real one is on its way (StagePlaceholder).
+  waiting: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 14,
+    width: "100%",
+    padding: 16,
+    boxSizing: "border-box",
+  },
+  paper: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    maxWidth: "100%",
+    padding: 20,
+    boxSizing: "border-box",
+    borderRadius: 6,
+    backgroundColor: "var(--color-background-surface)",
+    boxShadow: "0 1px 2px rgb(0 0 0 / 0.06)",
+  },
+  paperBar: { display: "flex", alignItems: "center", gap: 12, marginBottom: 10 },
+  paperCards: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(90px, 1fr))", gap: 12, marginBlock: 8 },
+  waitText: { display: "flex", flexDirection: "column", alignItems: "center", gap: 2, textAlign: "center" },
+  waitLabel: { fontSize: 13, fontWeight: 600 },
   panelTitle: { margin: 0, fontSize: 13, fontWeight: 600 },
   quiet: { margin: 0, fontSize: 12, color: "var(--precision-text3)" },
   target: {
@@ -201,27 +230,44 @@ export interface LiveDesign {
   error: string | null;
 }
 
-/** The HTML of one page, handed to main for as long as it is shown. */
+/**
+ * The HTML of one page, handed to main for as long as it is shown. New HTML keeps the URL before
+ * it until its own is there, so the view goes from one page to the next without a blank between.
+ */
 function useServed(artifacts: Artifacts, html: string | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
+  // URLs that newer HTML replaced: let go of once the next one is served, or when the viewer goes.
+  const replaced = useRef<string[]>([]);
   useEffect(() => {
-    if (html === undefined) return;
+    if (html === undefined) {
+      setUrl(null);
+      return;
+    }
     let gone = false;
     let made: string | null = null;
     artifacts
       .serve(html)
       .then((served) => {
+        if (gone) {
+          void artifacts.release(served);
+          return;
+        }
         made = served;
-        if (gone) void artifacts.release(served);
-        else setUrl(served);
+        setUrl(served);
+        for (const old of replaced.current.splice(0)) void artifacts.release(old);
       })
       .catch((e: unknown) => toast(e instanceof Error ? e.message : "This artifact did not open."));
     return () => {
       gone = true;
-      setUrl(null);
-      if (made) void artifacts.release(made);
+      if (made) replaced.current.push(made);
     };
   }, [artifacts, html]);
+  useEffect(
+    () => () => {
+      for (const old of replaced.current.splice(0)) void artifacts.release(old);
+    },
+    [artifacts],
+  );
   return url;
 }
 
@@ -274,11 +320,15 @@ function useArtifactView(
   const stage = useRef<HTMLDivElement>(null);
   const [shown, setShown] = useState<string | null>(null);
   const showing = url === null ? null : `${url}#${reloads}`;
+  // The hide of the view before: put off to after this commit, so a next show replaces it (main
+  // keeps the old view in sight until the new one has loaded) instead of a blank stage between.
+  const hiding = useRef<{ cancelled: boolean } | null>(null);
   // A reload shows the artifact in a new view.
   useEffect(() => {
     const box = frame.current;
     const around = stage.current;
     if (url === null || box === null || around === null) return;
+    if (hiding.current) hiding.current.cancelled = true;
     const before = openDialogs();
     const measure = () =>
       held.current
@@ -316,10 +366,66 @@ function useArtifactView(
       gone = true;
       cancelAnimationFrame(next);
       setShown(null);
-      void artifacts.hide(slot);
+      const hide = { cancelled: false };
+      hiding.current = hide;
+      queueMicrotask(() => {
+        if (!hide.cancelled) void artifacts.hide(slot);
+      });
     };
   }, [artifacts, url, reloads, slot, held]);
   return { frame, stage, ready: showing !== null && shown === showing };
+}
+
+/** What the stage says while it waits for its page: what is coming, and how far it is. */
+export interface StageWait {
+  label: string;
+  detail: string | null;
+  /** A design being written shows at once; a kept page only when it takes a moment (no flicker). */
+  now: boolean;
+}
+
+/** What a design being written says before its page shows (draftPhase). */
+export function writingWait(title: string, html: string | null): StageWait {
+  const size = html === null ? "" : ` · ${sizeText(html.length)}`;
+  const detail = {
+    starting: "Starting…",
+    head: `Setting up the page${size}`,
+    styles: `Writing the styles${size}`,
+    scripts: `Writing the scripts${size}`,
+    page: `Opening the page${size}`,
+  }[draftPhase(html)];
+  return { label: `Writing ${title}…`, detail, now: true };
+}
+
+/** A page in outline while the real one is on its way: in place of a blank white frame. */
+function StagePlaceholder({ wait, width }: { wait: StageWait; width: number }) {
+  const shown = useDelayed(true);
+  if (!wait.now && !shown) return null;
+  return (
+    <div role="status" aria-live="polite" {...stylex.props(styles.waiting)}>
+      <div aria-hidden {...stylex.props(styles.paper)} style={{ width }}>
+        <div {...stylex.props(styles.paperBar)}>
+          <Skeleton width={84} height={12} index={0} />
+          <span {...stylex.props(styles.grow)} />
+          <Skeleton width={48} height={10} index={1} />
+          <Skeleton width={48} height={10} index={2} />
+        </div>
+        <Skeleton width="62%" height={22} index={3} />
+        <Skeleton width="44%" height={14} index={4} />
+        <div {...stylex.props(styles.paperCards)}>
+          {[5, 6, 7].map((i) => (
+            <Skeleton key={i} height={96} index={i} radius={2} />
+          ))}
+        </div>
+        <Skeleton width="80%" height={12} index={8} />
+        <Skeleton width="70%" height={12} index={9} />
+      </div>
+      <div {...stylex.props(styles.waitText)}>
+        <span {...stylex.props(styles.waitLabel)}>{wait.label}</span>
+        {wait.detail ? <span {...stylex.props(styles.quiet)}>{wait.detail}</span> : null}
+      </div>
+    </div>
+  );
 }
 
 /** The stage a view lies over: the frame box at the chosen width, or what it is waiting for. */
@@ -330,6 +436,7 @@ function Stage({
   name,
   width,
   error,
+  wait,
 }: {
   stage: React.RefObject<HTMLDivElement | null>;
   frame: React.RefObject<HTMLDivElement | null>;
@@ -337,6 +444,7 @@ function Stage({
   name: string;
   width: number;
   error: string | null;
+  wait: StageWait;
 }) {
   return (
     <div ref={stage} {...stylex.props(styles.stage)}>
@@ -352,7 +460,7 @@ function Stage({
       ) : error ? (
         <Hint>{error}</Hint>
       ) : (
-        <Loading />
+        <StagePlaceholder wait={wait} width={width} />
       )}
     </div>
   );
@@ -561,14 +669,19 @@ export function ArtifactViewer({
   const [commenting, setCommenting] = useState(false);
   const current = pages.find((p) => p.name === pageName) ?? pages[0];
   const file = useArtifactFile(live ? null : (current?.file.id ?? null));
-  const html = live ? (live.html ?? undefined) : file.data?.html;
+  // While a page loads (another page, or the kept file after the design was written), the page
+  // shown stays in sight; when it is the same HTML, nothing loads again.
+  const lastShown = useRef<string | undefined>(undefined);
+  const html = live ? (live.html ?? undefined) : (file.data?.html ?? (file.error ? undefined : lastShown.current));
   const writing = live?.writing === true;
   // A design being written loads once and then grows in that same view (liveStep): a new view
   // per draft flashed and jumped back to the top.
   const [liveServed, setLiveServed] = useState<string | undefined>(undefined);
   const step = live ? liveStep(liveServed, html, writing) : "none";
   if (step === "serve") setLiveServed(html);
-  const url = useServed(artifacts, live ? liveServed : html);
+  const served = live ? liveServed : html;
+  lastShown.current = served ?? lastShown.current;
+  const url = useServed(artifacts, served);
   // The dock's width: dragged at its left edge, remembered. While it is dragged the view steps
   // aside, because the pointer over the view would go to the artifact's page, not to the handle.
   const resizing = useRef(false);
@@ -606,6 +719,9 @@ export function ArtifactViewer({
   const answer = messages.find((m) => m.id === current?.messageId)?.text ?? "";
   const artifactName = artifactPath(answer, name);
   const width = viewportWidth(viewport);
+  const wait: StageWait = writing
+    ? writingWait(pageTitle, live?.html ?? null)
+    : { label: `Opening ${pageTitle}…`, detail: null, now: false };
 
   const exportAs = async (kind: "pdf" | "png") => {
     if (url === null) return;
@@ -701,7 +817,7 @@ export function ArtifactViewer({
   );
   const view = (extra: stylex.StyleXStyles | null) => (
     <div {...stylex.props(styles.row, extra)}>
-      <Stage stage={stage} frame={frame} url={url} name={name} width={width} error={loadError} />
+      <Stage stage={stage} frame={frame} url={url} name={name} width={width} error={loadError} wait={wait} />
       {commenting && !writing ? (
         <CommentPanel
           key={`${current?.file.id}#${reloads}`}

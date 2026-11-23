@@ -343,3 +343,31 @@ fn writing_in_a_conversation_that_does_not_exist_is_not_found() {
     let refused = exec_as(&s, Some(s.user), send_in(ConversationId::new())).unwrap_err();
     assert_eq!(refused.code, aurelius_domain::ErrorCode::NotFound);
 }
+
+/// The plan of the next run, as the daemon claims and prepares it.
+fn next_plan(s: &Setup) -> crate::run::plan::ChatRunPlan {
+    let job = s.service.store().write(|tx| aurelius_storage::queries::claim_due_job(tx, "test", aurelius_storage::now_ms(), 45_000, 4)).unwrap().expect("a job");
+    s.service.prepare_chat_run(&job.payload).unwrap().expect("a run to prepare")
+}
+
+#[test]
+fn only_a_design_sessions_run_may_render_its_pages_and_is_told_to_look_at_them() {
+    let s = setup();
+    let mut cmd = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut cmd {
+        start.design = true;
+    }
+    let (conversation, _) = started(exec_as(&s, Some(s.user), cmd).unwrap());
+    let plan = next_plan(&s);
+    assert_eq!(plan.conversation_id, conversation);
+    assert!(plan.design_session, "a design session's run offers view_design");
+    assert!(plan.work.is_some(), "with the work folder it renders from");
+    assert!(plan.system.as_deref().unwrap_or("").contains("view_design"), "and is told to use it");
+
+    let s = setup();
+    let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
+    let plan = next_plan(&s);
+    assert_eq!(plan.conversation_id, conversation);
+    assert!(!plan.design_session, "a plain session does not");
+    assert!(!plan.system.as_deref().unwrap_or("").contains("view_design"));
+}
