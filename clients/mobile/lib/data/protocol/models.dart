@@ -6306,6 +6306,7 @@ final class DispatchWorkSession {
     this.design,
     this.files = const [],
     this.images = const [],
+    this.ownBranch,
     required this.projectId,
     this.run,
     required this.text,
@@ -6320,6 +6321,8 @@ final class DispatchWorkSession {
   final List<String> files;
   /// See `StartWorkSession::images`.
   final List<String> images;
+  /// See `StartWorkSession::own_branch`.
+  final bool? ownBranch;
   final String projectId;
   /// See `StartWorkSession::run`; it applies to the chosen employee's runs.
   final TaskRun? run;
@@ -6332,6 +6335,7 @@ final class DispatchWorkSession {
     design: (json['design'] == null ? null : (json['design'] as bool)),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    ownBranch: (json['own_branch'] == null ? null : (json['own_branch'] as bool)),
     projectId: (json['project_id'] as String),
     run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
     text: (json['text'] as String),
@@ -6343,6 +6347,7 @@ final class DispatchWorkSession {
     if (design != null) 'design': design,
     'files': files,
     'images': images,
+    if (ownBranch != null) 'own_branch': ownBranch,
     'project_id': projectId,
     if (run != null) 'run': run?.toJson(),
     'text': text,
@@ -18187,6 +18192,7 @@ final class StartWorkSession {
     required this.employeeId,
     this.files = const [],
     this.images = const [],
+    this.ownBranch,
     required this.projectId,
     this.run,
     required this.text,
@@ -18205,6 +18211,12 @@ final class StartWorkSession {
   final List<String> files;
   /// Images that belong to the first message (see `SendChatMessage::images`).
   final List<String> images;
+  /// Work in the project's folder itself, on a branch of its own that the daemon
+  /// makes from what the folder has checked out (feature `session_own_branch`). Needs
+  /// a project folder that is a git repository; not with `worktree`. Each run is
+  /// refused while the folder has uncommitted changes on another branch, or while
+  /// another run works in it, because checking out changes the folder for everyone.
+  final bool? ownBranch;
   final String projectId;
   /// Mode, model and effort it starts with (empty: the employee's defaults).
   final TaskRun? run;
@@ -18219,6 +18231,7 @@ final class StartWorkSession {
     employeeId: (json['employee_id'] as String),
     files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     images: (json['images'] == null ? const [] : (json['images'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    ownBranch: (json['own_branch'] == null ? null : (json['own_branch'] as bool)),
     projectId: (json['project_id'] as String),
     run: (json['run'] == null ? null : TaskRun.fromJson(json['run'] as Map<String, dynamic>)),
     text: (json['text'] as String),
@@ -18231,6 +18244,7 @@ final class StartWorkSession {
     'employee_id': employeeId,
     'files': files,
     'images': images,
+    if (ownBranch != null) 'own_branch': ownBranch,
     'project_id': projectId,
     if (run != null) 'run': run?.toJson(),
     'text': text,
@@ -21083,6 +21097,7 @@ final class WorkSessionView {
     required this.employeeId,
     required this.employeeName,
     required this.lastActivityMs,
+    this.ownBranch,
     required this.projectId,
     required this.projectName,
     required this.running,
@@ -21103,6 +21118,9 @@ final class WorkSessionView {
   final String employeeId;
   final String employeeName;
   final int lastActivityMs;
+  /// It works in the project's folder on its own `branch` (feature
+  /// `session_own_branch`); older servers leave it out.
+  final bool? ownBranch;
   final String projectId;
   final String projectName;
   /// Whether a run of it is queued or working now.
@@ -21115,6 +21133,7 @@ final class WorkSessionView {
   /// servers leave it out, and a client then shows no mark.
   final bool? unseen;
   /// Its own worktree and branch; none when it works in the project's folder.
+  /// With `own_branch` the worktree is the project's folder itself.
   final String? worktree;
 
   factory WorkSessionView.fromJson(Map<String, dynamic> json) => WorkSessionView(
@@ -21126,6 +21145,7 @@ final class WorkSessionView {
     employeeId: (json['employee_id'] as String),
     employeeName: (json['employee_name'] as String),
     lastActivityMs: (json['last_activity_ms'] as num).toInt(),
+    ownBranch: (json['own_branch'] == null ? null : (json['own_branch'] as bool)),
     projectId: (json['project_id'] as String),
     projectName: (json['project_name'] as String),
     running: (json['running'] as bool),
@@ -21143,6 +21163,7 @@ final class WorkSessionView {
     'employee_id': employeeId,
     'employee_name': employeeName,
     'last_activity_ms': lastActivityMs,
+    if (ownBranch != null) 'own_branch': ownBranch,
     'project_id': projectId,
     'project_name': projectName,
     'running': running,

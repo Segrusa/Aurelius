@@ -1845,6 +1845,10 @@ export interface DispatchWorkSession {
    * See `StartWorkSession::images`.
    */
   images?: string[];
+  /**
+   * See `StartWorkSession::own_branch`.
+   */
+  own_branch?: boolean;
   project_id: string;
   /**
    * See `StartWorkSession::run`; it applies to the chosen employee's runs.
@@ -5924,6 +5928,14 @@ export interface StartWorkSession {
    * Images that belong to the first message (see `SendChatMessage::images`).
    */
   images?: string[];
+  /**
+   * Work in the project's folder itself, on a branch of its own that the daemon
+   * makes from what the folder has checked out (feature `session_own_branch`). Needs
+   * a project folder that is a git repository; not with `worktree`. Each run is
+   * refused while the folder has uncommitted changes on another branch, or while
+   * another run works in it, because checking out changes the folder for everyone.
+   */
+  own_branch?: boolean;
   project_id: string;
   /**
    * Mode, model and effort it starts with (empty: the employee's defaults).
@@ -7376,6 +7388,11 @@ export interface WorkSessionView {
   employee_id: string;
   employee_name: string;
   last_activity_ms: number;
+  /**
+   * It works in the project's folder on its own `branch` (feature
+   * `session_own_branch`); older servers leave it out.
+   */
+  own_branch?: boolean;
   project_id: string;
   project_name: string;
   /**
@@ -7395,6 +7412,7 @@ export interface WorkSessionView {
   unseen?: boolean;
   /**
    * Its own worktree and branch; none when it works in the project's folder.
+   * With `own_branch` the worktree is the project's folder itself.
    */
   worktree?: string | null;
 }
