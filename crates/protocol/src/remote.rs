@@ -499,6 +499,9 @@ pub struct StreamAppend {
     /// An answer streaming into a thread: its root (see `StreamDelta::thread_parent`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_parent: Option<aurelius_domain::MessageId>,
+    /// A design being written (see `StreamDelta::draft`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft: Option<crate::views::ArtifactDraft>,
 }
 
 #[cfg(test)]

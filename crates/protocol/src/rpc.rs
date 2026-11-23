@@ -452,6 +452,11 @@ pub mod feature {
     /// (`ticket.updated { changed: ["title"] }`), unless someone renamed it meanwhile.
     /// Older servers refuse an empty title, so a client without this feature sends one.
     pub const TICKET_MADE_TITLE: &str = "ticket_made_title";
+    /// A design written live (protocol 5, additive): while an employee's `Write` of an
+    /// HTML file streams, live updates carry the content so far (`StreamDelta::draft`),
+    /// but only to a connection whose hello accepts `artifact_drafts`. The whole call
+    /// follows as ever in `activity`.
+    pub const ARTIFACT_DRAFTS: &str = "artifact_drafts";
 }
 
 /// Every feature this build has.
@@ -511,6 +516,7 @@ pub const FEATURES: &[&str] = &[
     feature::COMMAND_APPLIED,
     feature::TICKET_MADE_TITLE,
     feature::CODE_VIEW,
+    feature::ARTIFACT_DRAFTS,
 ];
 
 /// The answer of `command.applied`.

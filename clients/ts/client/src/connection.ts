@@ -106,6 +106,7 @@ const ACCEPTS = [
   "chat_reactions",
   "ticket_follow",
   "message_edits",
+  "artifact_drafts",
 ];
 
 const BACKOFF_MS = [250, 500, 1000, 2000, 5000];

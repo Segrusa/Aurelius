@@ -81,3 +81,27 @@ describe("tool calls", () => {
     expect(update.activity).toEqual([a, b]);
   });
 });
+
+describe("designs being written", () => {
+  const draft = (content: string) => ({ call_id: "w1", path: "/p/a.html", content });
+  const delta = (more: Partial<StreamDelta> = {}): StreamDelta => ({ ...ids, text: "t", activity: [], ...more });
+
+  it("stay until their call is whole", () => {
+    const merge = new StreamMerge();
+    expect(merge.delta(delta()).draft).toBeNull();
+    expect(merge.delta(delta({ draft: draft("<p>") })).draft).toEqual(draft("<p>"));
+    // A text update says nothing of the design: the last one holds.
+    expect(merge.delta(delta({ text: "tt" })).draft).toEqual(draft("<p>"));
+    expect(merge.append(append(0, "x", { draft: draft("<p>Hi") }))?.draft).toEqual(draft("<p>Hi"));
+    expect(merge.delta(delta({ activity: [call("w1")] })).draft).toBeNull();
+    expect(merge.delta(delta()).draft).toBeNull();
+  });
+
+  it("are one per answer and go with a new connection", () => {
+    const merge = new StreamMerge();
+    merge.delta(delta({ draft: draft("<p>") }));
+    expect(merge.delta({ ...delta(), message_id: "other" }).draft).toBeNull();
+    merge.reset();
+    expect(merge.delta(delta()).draft).toBeNull();
+  });
+});
