@@ -139,6 +139,9 @@ abstract final class Methods {
   static const String conversationSetBrowserAllowed = 'conversation.set_browser_allowed';
   static const String conversationSetRun = 'conversation.set_run';
   static const String conversationSetScreenAllowed = 'conversation.set_screen_allowed';
+  /// The designs of a project, or of all without one: the kept HTML pages of each
+  /// conversation, the latest first (feature `designs`).
+  static const String designList = 'design.list';
   /// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
   /// answered with `DiscussionAudience`, for the reader's own message (the
   /// reader is never counted). `channel`: a channel or a ticket's discussion
@@ -739,6 +742,15 @@ Map<String, dynamic> conversationGet({required String conversationId}) => <Strin
   'method': Methods.conversationGet,
   'params': <String, dynamic>{
     'conversation_id': conversationId,
+  },
+};
+
+/// The designs of a project, or of all without one: the kept HTML pages of each
+/// conversation, the latest first (feature `designs`).
+Map<String, dynamic> designList({String? projectId}) => <String, dynamic>{
+  'method': Methods.designList,
+  'params': <String, dynamic>{
+    if (projectId != null) 'project_id': projectId,
   },
 };
 

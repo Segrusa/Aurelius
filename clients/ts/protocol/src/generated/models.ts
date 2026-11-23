@@ -1700,6 +1700,59 @@ export interface DeleteTaskSchedule {
   schedule_id: string;
 }
 
+/**
+ * One page of a design: the newest kept HTML file with its name in the conversation.
+ */
+export interface DesignPageView {
+  at_ms: number;
+  file: FileRef;
+  /**
+   * The message the file was kept with (`file.get` reads it by `file.id`).
+   */
+  message_id: string;
+}
+
+/**
+ * One design in `design.list`: the kept HTML pages of one conversation of a project
+ * (a work session, a ticket's discussion, a task), and where it was made.
+ */
+export interface DesignView {
+  conversation_id: string;
+  /**
+   * `session`, `ticket`, `task` or `project`: where a client opens the conversation.
+   */
+  kind: string;
+  /**
+   * When its newest page was kept.
+   */
+  last_at_ms: number;
+  /**
+   * One per file name, in the order the pages first came.
+   */
+  pages: DesignPageView[];
+  project_id: string;
+  /**
+   * The task of a task's conversation.
+   */
+  task_id?: string | null;
+  /**
+   * The ticket of a ticket's discussion, by number.
+   */
+  ticket_number?: number | null;
+  /**
+   * The conversation's title (a session's, a ticket's or a task's).
+   */
+  title: string;
+}
+
+/**
+ * `design.list`: the designs of one project or of all, the latest first (at most `DESIGNS_MAX`).
+ */
+export interface DesignsSnapshot {
+  as_of_seq: number;
+  designs: DesignView[];
+}
+
 export interface DirEntryView {
   name: string;
   path: string;
@@ -3893,6 +3946,11 @@ export type Method =
    */
   | ({ method: "conversation.get"; params: { conversation_id: string } })
   /**
+   * The designs of a project, or of all without one: the kept HTML pages of each
+   * conversation, the latest first (feature `designs`).
+   */
+  | ({ method: "design.list"; params: { project_id?: string | null } })
+  /**
    * Whom `@Everyone` would reach in a discussion (feature `everyone_mention`),
    * answered with `DiscussionAudience`, for the reader's own message (the
    * reader is never counted). `channel`: a channel or a ticket's discussion
@@ -4818,6 +4876,10 @@ export type ResponseBody =
   | ({ type: "company"; value: CompanySnapshot })
   | ({ type: "connections"; value: ConnectionsSnapshot })
   | ({ type: "context"; value: ContextView })
+  /**
+   * `design.list`.
+   */
+  | ({ type: "designs"; value: DesignsSnapshot })
   | ({ type: "dir_listing"; value: DirListing })
   /**
    * `discussion.audience`.

@@ -6082,6 +6082,105 @@ final class DeleteTaskSchedule {
   };
 }
 
+/// One page of a design: the newest kept HTML file with its name in the conversation.
+final class DesignPageView {
+  const DesignPageView({
+    required this.atMs,
+    required this.file,
+    required this.messageId,
+  });
+
+  final int atMs;
+  final FileRef file;
+  /// The message the file was kept with (`file.get` reads it by `file.id`).
+  final String messageId;
+
+  factory DesignPageView.fromJson(Map<String, dynamic> json) => DesignPageView(
+    atMs: (json['at_ms'] as num).toInt(),
+    file: FileRef.fromJson(json['file'] as Map<String, dynamic>),
+    messageId: (json['message_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'at_ms': atMs,
+    'file': file.toJson(),
+    'message_id': messageId,
+  };
+}
+
+/// One design in `design.list`: the kept HTML pages of one conversation of a project
+/// (a work session, a ticket's discussion, a task), and where it was made.
+final class DesignView {
+  const DesignView({
+    required this.conversationId,
+    required this.kind,
+    required this.lastAtMs,
+    required this.pages,
+    required this.projectId,
+    this.taskId,
+    this.ticketNumber,
+    required this.title,
+  });
+
+  final String conversationId;
+  /// `session`, `ticket`, `task` or `project`: where a client opens the conversation.
+  final String kind;
+  /// When its newest page was kept.
+  final int lastAtMs;
+  /// One per file name, in the order the pages first came.
+  final List<DesignPageView> pages;
+  final String projectId;
+  /// The task of a task's conversation.
+  final String? taskId;
+  /// The ticket of a ticket's discussion, by number.
+  final int? ticketNumber;
+  /// The conversation's title (a session's, a ticket's or a task's).
+  final String title;
+
+  factory DesignView.fromJson(Map<String, dynamic> json) => DesignView(
+    conversationId: (json['conversation_id'] as String),
+    kind: (json['kind'] as String),
+    lastAtMs: (json['last_at_ms'] as num).toInt(),
+    pages: (json['pages'] as List<dynamic>).map((x0) => DesignPageView.fromJson(x0 as Map<String, dynamic>)).toList(),
+    projectId: (json['project_id'] as String),
+    taskId: (json['task_id'] == null ? null : (json['task_id'] as String)),
+    ticketNumber: (json['ticket_number'] == null ? null : (json['ticket_number'] as num).toInt()),
+    title: (json['title'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'conversation_id': conversationId,
+    'kind': kind,
+    'last_at_ms': lastAtMs,
+    'pages': pages.map((x0) => x0.toJson()).toList(),
+    'project_id': projectId,
+    if (taskId != null) 'task_id': taskId,
+    if (ticketNumber != null) 'ticket_number': ticketNumber,
+    'title': title,
+  };
+}
+
+/// `design.list`: the designs of one project or of all, the latest first (at most `DESIGNS_MAX`).
+final class DesignsSnapshot {
+  const DesignsSnapshot({
+    required this.asOfSeq,
+    required this.designs,
+  });
+
+  final int asOfSeq;
+  final List<DesignView> designs;
+
+  factory DesignsSnapshot.fromJson(Map<String, dynamic> json) => DesignsSnapshot(
+    asOfSeq: (json['as_of_seq'] as num).toInt(),
+    designs: (json['designs'] as List<dynamic>).map((x0) => DesignView.fromJson(x0 as Map<String, dynamic>)).toList(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'as_of_seq': asOfSeq,
+    'designs': designs.map((x0) => x0.toJson()).toList(),
+  };
+}
+
 final class DirEntryView {
   const DirEntryView({
     required this.name,
@@ -11229,6 +11328,13 @@ sealed class Method {
           conversationId: (src['conversation_id'] as String),
         );
         }
+      case 'design.list':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodDesignList(
+          projectId: (src['project_id'] == null ? null : (src['project_id'] as String)),
+        );
+        }
       case 'discussion.audience':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -11983,6 +12089,24 @@ final class MethodConversationGet extends Method {
       'method': 'conversation.get',
       'params': <String, dynamic>{
       'conversation_id': conversationId,
+    },
+    };
+}
+
+/// The designs of a project, or of all without one: the kept HTML pages of each
+/// conversation, the latest first (feature `designs`).
+final class MethodDesignList extends Method {
+  const MethodDesignList({
+    this.projectId,
+  });
+
+  final String? projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'design.list',
+      'params': <String, dynamic>{
+      if (projectId != null) 'project_id': projectId,
     },
     };
 }
@@ -14614,6 +14738,8 @@ sealed class ResponseBody {
         return ResponseBodyConnections(value: ConnectionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'context':
         return ResponseBodyContext(value: ContextView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'designs':
+        return ResponseBodyDesigns(value: DesignsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'dir_listing':
         return ResponseBodyDirListing(value: DirListing.fromJson(json['value'] as Map<String, dynamic>));
       case 'discussion_audience':
@@ -15039,6 +15165,21 @@ final class ResponseBodyContext extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'context',
+      'value': value.toJson(),
+    };
+}
+
+/// `design.list`.
+final class ResponseBodyDesigns extends ResponseBody {
+  const ResponseBodyDesigns({
+    required this.value,
+  });
+
+  final DesignsSnapshot value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'designs',
       'value': value.toJson(),
     };
 }
