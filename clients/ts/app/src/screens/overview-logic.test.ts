@@ -5,7 +5,6 @@ import {
   boardLanes,
   donePerDay,
   elapsed,
-  firstLine,
   groupDigits,
   linkedGuidelines,
   needCards,
@@ -82,12 +81,12 @@ describe("needCards", () => {
     );
     expect(cards.map((c) => c.key)).toEqual(["s:c1", "t:a"]);
     expect(cards[1]).toMatchObject({ kind: "review", title: "#80 iOS tab bar", who: "Flux", to: "/ticket/80" });
-    expect(cards[0]).toMatchObject({ kind: "question", to: "/session/c1", conversationId: "c1" });
+    expect(cards[0]).toMatchObject({ kind: "question", to: "/session/c1" });
   });
 
-  it("says what the ticket waits for when no post does", () => {
+  it("says in one line what the ticket waits for", () => {
     const [card] = needCards([review], [], needs, () => true);
-    expect(card?.fallback).toBe("Ready for your review.");
+    expect(card?.text).toBe("Ready for your review.");
   });
 });
 
@@ -198,9 +197,5 @@ describe("small formats", () => {
     expect(elapsed(NOW - 4 * 60_000, NOW)).toBe("4 min");
     expect(elapsed(NOW - 61 * 60_000, NOW)).toBe("1 h");
     expect(elapsed(NOW - 50 * 3_600_000, NOW)).toBe("2 d");
-  });
-
-  it("takes the first line of a post without its markdown marks", () => {
-    expect(firstLine("\n## Plan ready\nmore")).toBe("Plan ready");
   });
 });

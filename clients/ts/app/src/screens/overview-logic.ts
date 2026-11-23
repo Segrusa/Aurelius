@@ -30,10 +30,11 @@ export interface NeedCard {
   atMs: number;
   /** Where the card opens: the ticket's or the session's screen. */
   to: string;
-  /** The conversation whose last post waiting for the reader gives the card its line of text. */
-  conversationId: string | null;
-  /** Said when no post waits: what the ticket or session waits for. */
-  fallback: string;
+  /**
+   * What it waits for, in one line. Not the post itself: reading a conversation marks it seen, which an
+   * overview must not do.
+   */
+  text: string;
 }
 
 /** A ticket's need as one of the three cards of the design: a plan, a review, else a question. */
@@ -55,7 +56,7 @@ export const NEED_ACTIONS: Record<NeedKind, string> = {
   review: "Review",
 };
 
-const NEED_FALLBACKS: Record<Needs, string> = {
+const NEED_TEXTS: Record<Needs, string> = {
   review: "Ready for your review.",
   plan_review: "A plan waits for your approval.",
   choose_owner: "Choose who takes this ticket.",
@@ -88,8 +89,7 @@ export function needCards(
         projectId: t.project_id,
         atMs: t.updated_at_ms,
         to: `/ticket/${t.number}`,
-        conversationId: t.conversation_id ?? null,
-        fallback: need ? NEED_FALLBACKS[need] : "Waits for you.",
+        text: need ? NEED_TEXTS[need] : "Waits for you.",
       };
     });
   const fromSessions = sessions
@@ -104,8 +104,7 @@ export function needCards(
         projectId: s.project_id,
         atMs: s.last_activity_ms,
         to: `/session/${s.conversation_id}`,
-        conversationId: s.conversation_id,
-        fallback: "Nobody took this session. Choose who does it.",
+        text: "Nobody took this session. Choose who does it.",
       }),
     );
   return [...fromTickets, ...fromSessions].sort((a, b) => b.atMs - a.atMs);
@@ -283,7 +282,10 @@ export function styleguideName(url: string): string {
     const u = new URL(url);
     const last = u.pathname.split("/").filter(Boolean).at(-1);
     if (!last) return u.host;
-    const words = decodeURIComponent(last).replace(/\.[a-z0-9]+$/i, "").split(/[-_\s]+/).filter(Boolean);
+    const words = decodeURIComponent(last)
+      .replace(/\.[a-z0-9]+$/i, "")
+      .split(/[-_\s]+/)
+      .filter(Boolean);
     if (words.length === 0 || /^[0-9a-f-]{16,}$/i.test(last)) return u.host;
     return words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
   } catch {
@@ -299,14 +301,4 @@ export function elapsed(fromMs: number, nowMs: number): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours} h`;
   return `${Math.floor(hours / 24)} d`;
-}
-
-/** The first line of a post, for a card that has room for one. */
-export function firstLine(text: string): string {
-  return (
-    text
-      .split("\n")
-      .map((l) => l.replace(/^[#>*\-\s]+/, "").trim())
-      .find((l) => l !== "") ?? ""
-  );
 }

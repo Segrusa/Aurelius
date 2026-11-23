@@ -74,7 +74,8 @@ const styles = stylex.create({
 const when = (ms: number) =>
   new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
-function useDesigns(projectId: string | null, wanted: boolean) {
+/** The designs of a workspace (all of them under All workspaces), the latest first. */
+export function useDesigns(projectId: string | null, wanted: boolean) {
   const connection = useConnection();
   return useKeyed(
     ["messages", "designs", projectId],
@@ -85,7 +86,8 @@ function useDesigns(projectId: string | null, wanted: boolean) {
   );
 }
 
-function DesignCard({
+/** One design: its title, where it was made, when, and its pages. The Overview shows the same card. */
+export function DesignCard({
   design,
   project,
   openPage,

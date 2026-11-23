@@ -34,6 +34,7 @@ import { IdeasBody } from "./screens/ideas";
 import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
 import { NewSessionScreen } from "./screens/new-session";
+import { OverviewScreen } from "./screens/overview";
 import { ProjectPage, ProjectsScreen, projectTabShown } from "./screens/projects";
 import { ScheduledScreen } from "./screens/scheduled";
 import { SessionScreen } from "./screens/session";
@@ -92,6 +93,8 @@ const formerTalk = createRoute({
   },
 });
 const newSession = createRoute({ getParentRoute: () => root, path: "/new", component: NewSessionScreen });
+// The workspace's Overview (ticket #82); a workspace tile in the rail opens it.
+const overview = createRoute({ getParentRoute: () => root, path: "/overview", component: OverviewScreen });
 const ticketSearch = (search: Record<string, unknown>): { ticket?: string } => ({
   ...(typeof search.ticket === "string" ? { ticket: search.ticket } : {}),
 });
@@ -305,6 +308,7 @@ const router = createRouter({
     formerChat,
     formerTalk,
     newSession,
+    overview,
     inbox,
     board,
     myTickets,

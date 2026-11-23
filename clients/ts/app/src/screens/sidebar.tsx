@@ -1,5 +1,5 @@
 // The app's sidebar: a rail of workspaces on the left (All workspaces, one tile per project, the Inbox
-// bell, the account and the fold button), and beside it the workspace's panel with New session, Board and History, and
+// bell, the account and the fold button), and beside it the workspace's panel with Overview, New session, Board and History, and
 // a Sessions and a Tickets section, each under Running, Today and Earlier. Under All workspaces those come per
 // workspace. Both sections always show and fold on their own; a closed fold still shows the row you are in.
 
@@ -45,7 +45,7 @@ import {
 import { inTicketsSection, ticketSignal } from "./ticket-session-logic";
 import { useTicketNeeds } from "./tickets-kit";
 import { UserMenu } from "./user-menu";
-import { useSwitchWorkspace, WorkspaceMark } from "./workspace-kit";
+import { WorkspaceMark } from "./workspace-kit";
 import { openProjects } from "./workspace-logic";
 
 // A working session's dot breathes, so it reads as live next to the still ones.
@@ -645,13 +645,17 @@ function RailTile({
 }
 
 function Rail({ projects, needs }: { projects: ProjectSummary[]; needs: Map<string, number> }) {
-  const { id, available, locked } = useWorkspace();
+  const { id, available, locked, choose } = useWorkspace();
   const { user } = useLinkState();
-  const switchTo = useSwitchWorkspace();
   const keys = useKeys();
   const navigate = useNavigate();
   const workspaces = available && !locked;
   const allNeeds = [...needs.values()].reduce((n, v) => n + v, 0);
+  // A tile opens that workspace's Overview, not the screen you were on (ticket #82).
+  const switchTo = (next: string | null) => {
+    choose(next);
+    void navigate({ to: "/overview", search: {} });
+  };
   return (
     <nav aria-label="Workspaces" data-sidebar-drag {...stylex.props(styles.rail)}>
       {workspaces ? (
@@ -757,6 +761,7 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
       }
       topContent={
         <>
+          <NavRow to="/overview" label="Overview" icon={NAV_ICONS.home} />
           <NavRow
             to="/new"
             label="New session"
