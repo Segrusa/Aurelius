@@ -92,9 +92,21 @@ fn run_in(f: &Fixture, conversation: ConversationId, status: &'static str) {
 }
 
 fn session(f: &Fixture, employee: EmployeeId, worktree: &str, branch: &str) -> ConversationId {
-    let (id, project, user, worktree, branch) = (ConversationId::new(), f.atlas, f.user, worktree.to_owned(), branch.to_owned());
-    f.store.write(move |tx| work_sessions::insert(tx, id, project, employee, "Session", user, Some((&worktree, &branch)), None, false)).unwrap();
+    session_where(f, employee, Some((worktree, branch)), false)
+}
+
+/// A session of Atlas: in the project's folder (`None`), in a worktree, or on its own branch.
+fn session_where(f: &Fixture, employee: EmployeeId, place: Option<(&str, &str)>, own_branch: bool) -> ConversationId {
+    let (id, project, user) = (ConversationId::new(), f.atlas, f.user);
+    let place = place.map(|(w, b)| (w.to_owned(), b.to_owned()));
+    f.store
+        .write(move |tx| work_sessions::insert(tx, id, project, employee, "Session", user, place.as_ref().map(|(w, b)| (w.as_str(), b.as_str())), None, false, own_branch))
+        .unwrap();
     id
+}
+
+fn others_in_folder(f: &Fixture, project: ProjectId, except: ConversationId) -> bool {
+    f.store.read(move |c| work_sessions::others_working_in_folder(c, project, except)).unwrap()
 }
 
 fn link(f: &Fixture, branch: &str) -> BranchLink {
@@ -200,4 +212,37 @@ fn a_branch_stays_open_until_its_ticket_is_done_or_its_session_is_deleted() {
     assert!(link(&f, "session/0a0b0c0d").open, "a session that is not deleted");
     f.store.write(move |tx| Ok(tx.execute("UPDATE conversations SET archived_at_ms = 5 WHERE id = ?1", [conversation.to_string()])?)).unwrap();
     assert!(!link(&f, "session/0a0b0c0d").open, "a deleted session");
+}
+
+#[test]
+fn a_session_on_its_own_branch_sees_runs_in_the_project_folder_but_not_its_own_or_one_in_a_worktree() {
+    let f = fixture();
+    let me = session_where(&f, f.ann, Some(("/repo/atlas", "session/aaaaaaaa")), true);
+    run_in(&f, me, "starting");
+    assert!(!others_in_folder(&f, f.atlas, me), "its own run");
+    let in_worktree = session(&f, f.bob, "/data/worktrees/s2", "session/bbbbbbbb");
+    run_in(&f, in_worktree, "running");
+    assert!(!others_in_folder(&f, f.atlas, me), "a session in a worktree of its own");
+    let done = session_where(&f, f.bob, None, false);
+    run_in(&f, done, "succeeded");
+    assert!(!others_in_folder(&f, f.atlas, me), "a run that ended");
+    let in_folder = session_where(&f, f.bob, None, false);
+    run_in(&f, in_folder, "waiting");
+    assert!(others_in_folder(&f, f.atlas, me), "a session in the project's folder");
+    assert!(!others_in_folder(&f, f.hermes, me), "only runs of that project");
+}
+
+#[test]
+fn a_task_run_and_another_own_branch_session_count_as_working_in_the_folder() {
+    let f = fixture();
+    let me = session_where(&f, f.ann, Some(("/repo/atlas", "session/aaaaaaaa")), true);
+    let other = session_where(&f, f.bob, Some(("/repo/atlas", "session/cccccccc")), true);
+    run_in(&f, other, "running");
+    assert!(others_in_folder(&f, f.atlas, me), "another session on its own branch");
+    let f = fixture();
+    let me = session_where(&f, f.ann, Some(("/repo/atlas", "session/aaaaaaaa")), true);
+    let (ticket, _) = ticket(&f, f.atlas, "Work", Some(f.ann), TicketKind::Normal);
+    let task = task_of(&f, ticket, TaskStatus::Running);
+    run_in(&f, task, "running");
+    assert!(others_in_folder(&f, f.atlas, me), "a ticket's task");
 }

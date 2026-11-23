@@ -37,13 +37,17 @@ import {
   defaultWho,
   keptChoice,
   MADE_TITLE_FEATURE,
+  OWN_BRANCH_FEATURE,
   offeredKind,
   parseRecent,
   placeholderOf,
+  placeLabel,
+  placeOptions,
   projectRows,
   remembered,
   SESSION_DISPATCH_FEATURE,
   type SessionKind,
+  type SessionPlace,
   sessionDispatchParams,
   sessionKey,
   sessionRequest,
@@ -201,7 +205,11 @@ export function NewSessionScreen() {
   const designsOn = other === "session" && features.includes(DESIGN_SESSIONS_FEATURE);
   const [chosenDesign, setDesign] = useState(() => defaultDesign(storage.get(sessionKey("kind", hostId)), true));
   const design = designsOn && kind === "session" && chosenDesign;
-  const [worktree, setWorktree] = useState(false);
+  const [chosenPlace, setPlace] = useState<SessionPlace>("folder");
+  // Own branch only where the server has it; a server without it falls back to the project folder.
+  const ownBranchOn = features.includes(OWN_BRANCH_FEATURE);
+  const place: SessionPlace = chosenPlace === "branch" && !ownBranchOn ? "folder" : chosenPlace;
+  const worktree = place === "worktree";
   // A ticket takes files of any type; a session's first message where the server has `chat_files`.
   const sessionFiles = features.includes(CHAT_FILES_FEATURE);
   const attach = usePromptAttachments({ files: kind !== "session" || (sessionFiles && !worktree), folders: true });
@@ -301,12 +309,12 @@ export function NewSessionScreen() {
         };
         const dispatched = whoId === DISPATCHER;
         const receipt = dispatched
-          ? await connection.write("work_session.dispatch", sessionDispatchParams(first, worktree, confirmSecret), {
+          ? await connection.write("work_session.dispatch", sessionDispatchParams(first, place, confirmSecret), {
               retry: false,
             })
           : await connection.write(
               "work_session.start",
-              sessionStartParams({ ...first, employeeId: whoId }, worktree, confirmSecret),
+              sessionStartParams({ ...first, employeeId: whoId }, place, confirmSecret),
               { retry: false },
             );
         startedTo.current = startedSession(receipt);
@@ -580,15 +588,12 @@ export function NewSessionScreen() {
                 {kind === "session" ? (
                   <Menu
                     label="Where"
-                    value={worktree ? "worktree" : "folder"}
-                    options={[
-                      { key: "folder", label: "Project folder", description: "Works in the project's folder itself" },
-                      { key: "worktree", label: "Own worktree", description: "A worktree and branch of its own" },
-                    ]}
-                    onPick={(key) => setWorktree(key === "worktree")}
+                    value={place}
+                    options={placeOptions(ownBranchOn)}
+                    onPick={(key) => setPlace(key as SessionPlace)}
                     trigger={
                       <Chip name="Where" quiet>
-                        {worktree ? "Own worktree" : "Project folder"}
+                        {placeLabel(place)}
                       </Chip>
                     }
                   />

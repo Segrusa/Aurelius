@@ -256,8 +256,8 @@ mod design_session_tests {
                      INSERT INTO users(id, company_id, username, password_hash, created_at_ms, updated_at_ms) VALUES ('{ALEX}', '{company}', 'alex', '$argon2id$x', 1, 1);"
                 ))?;
                 let (project, employee, user) = (ProjectId::parse(ALPHA).unwrap(), EmployeeId::parse(PIXEL).unwrap(), UserId::parse(ALEX).unwrap());
-                work_sessions::insert(tx, design, project, employee, "Pricing page", user, None, None, true)?;
-                work_sessions::insert(tx, plain, project, employee, "Fix the login", user, None, None, false)?;
+                work_sessions::insert(tx, design, project, employee, "Pricing page", user, None, None, true, false)?;
+                work_sessions::insert(tx, plain, project, employee, "Fix the login", user, None, None, false, false)?;
                 Ok(())
             })
             .unwrap();

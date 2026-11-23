@@ -54,7 +54,7 @@ fn setup() -> Setup {
 }
 
 fn session(s: &Setup) -> (ConversationId, aurelius_domain::RunId) {
-    let start = Command::StartWorkSession(StartWorkSession { project_id: s.project, employee_id: s.orion, text: "Maak de export sneller.".into(), images: vec![], files: vec![], worktree: false, run: RunSettings::default(), confirm_secret: false, design: false });
+    let start = Command::StartWorkSession(StartWorkSession { project_id: s.project, employee_id: s.orion, text: "Maak de export sneller.".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: RunSettings::default(), confirm_secret: false, design: false });
     let result = exec_as(s, Some(s.grace), start).unwrap();
     let CommandResult::WorkSessionStarted { conversation_id, run_id, .. } = result else { panic!("{result:?}") };
     (conversation_id, run_id)
