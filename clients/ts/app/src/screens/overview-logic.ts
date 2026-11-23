@@ -10,12 +10,8 @@ import { sessionSignal } from "./session-logic";
 export const LANE_TOP = 2;
 /** How many finished tickets Recently done lists. */
 export const RECENT_DONE = 5;
-/** How many days the done-per-day bars of a workspace card cover. */
-export const DONE_DAYS = 14;
 /** How many designs the Designs section shows; All designs has the rest. */
 export const DESIGNS_SHOWN = 4;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type NeedKind = "question" | "plan" | "review";
 
@@ -216,45 +212,6 @@ export function recentlyDone(tickets: TicketView[], max = RECENT_DONE): TicketVi
     .filter((t) => t.column === "done" && !t.archived_at_ms)
     .sort((a, b) => doneAt(b) - doneAt(a))
     .slice(0, max);
-}
-
-/** Midnight of the local day `ms` falls in. */
-function dayStart(ms: number): number {
-  const d = new Date(ms);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
-/** Tickets finished per local day over the last `days` days, the oldest day first and today last. */
-export function donePerDay(tickets: TicketView[], now: number, days = DONE_DAYS): number[] {
-  const today = dayStart(now);
-  const counts = new Array<number>(days).fill(0);
-  for (const t of tickets) {
-    if (t.column !== "done" || t.archived_at_ms) continue;
-    // Whole days between the two midnights; rounding absorbs a daylight saving hour.
-    const back = Math.round((today - dayStart(doneAt(t))) / DAY_MS);
-    if (back >= 0 && back < days) counts[days - 1 - back] = (counts[days - 1 - back] ?? 0) + 1;
-  }
-  return counts;
-}
-
-/** The four numbers of a workspace card under All workspaces. */
-export interface WorkspaceNumbers {
-  running: number;
-  open: number;
-  review: number;
-  done7: number;
-}
-
-export function workspaceNumbers(tickets: TicketView[], running: number, now: number): WorkspaceNumbers {
-  const live = tickets.filter((t) => !t.archived_at_ms);
-  const week = dayStart(now) - 6 * DAY_MS;
-  return {
-    running,
-    open: live.filter((t) => t.column !== "done").length,
-    review: live.filter((t) => LANE_OF[t.column] === "Review").length,
-    done7: live.filter((t) => t.column === "done" && doneAt(t) >= week).length,
-  };
 }
 
 /** The guidelines linked to this workspace's project, and how much text they add to every run. */

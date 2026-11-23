@@ -414,18 +414,99 @@ test("a workspace tile opens its Overview, with its facts, needs, board and what
   }
 });
 
-test("All workspaces' Overview has a card per workspace that opens it", async ({ page }) => {
+test("All workspaces lists every workspace by name, and a row opens it", async ({ page }) => {
   const site = await openOverview(page, "/overview");
   try {
     const main = page.getByRole("main");
     await expect(main.getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
-    await expect(main.getByText("2 workspaces · 0 sessions running · 2 waiting on you")).toBeVisible();
-    const cards = main.getByRole("region", { name: "Workspaces" });
-    await expect(cards.getByRole("button", { name: "Atlas" })).toBeVisible();
-    await expect(cards.getByRole("button", { name: "Zephyr" })).toContainText("2 need you");
-    await cards.getByRole("button", { name: "Zephyr" }).click();
+    await expect(main.getByText("2 workspaces · 2 pinned to your rail")).toBeVisible();
+    const list = main.getByRole("region", { name: "Workspaces" });
+    await expect(list.getByRole("listitem")).toHaveCount(2);
+    await expect(list.getByRole("listitem").first()).toContainText("Atlas");
+    await expect(list.getByRole("button", { name: "Open Zephyr" })).toContainText("2 need you");
+    await main.getByRole("searchbox", { name: "Find a workspace" }).fill("coworking");
+    await expect(list.getByRole("listitem")).toHaveCount(1);
+    await list.getByRole("button", { name: "Open Zephyr" }).click();
     await expectWorkspace(page, "Zephyr");
     await expect(main.getByRole("heading", { level: 1, name: /Zephyr/ })).toBeVisible();
+  } finally {
+    site.close();
+  }
+});
+
+test("pinning on All workspaces decides which tiles this device's rail shows", async ({ page }) => {
+  const site = await openOverview(page, "/overview");
+  try {
+    const list = page.getByRole("main").getByRole("region", { name: "Workspaces" });
+    // Until this device chooses, every workspace is on the rail.
+    await expect(workspaceTile(page, "Atlas")).toBeVisible();
+    await expect(workspaceTile(page, "Zephyr")).toBeVisible();
+
+    await list.getByRole("button", { name: "Unpin Atlas from your rail" }).click();
+    await expect(workspaceTile(page, "Atlas")).toHaveCount(0);
+    await expect(list.getByRole("button", { name: "Pin Atlas to your rail" })).toHaveAttribute("aria-pressed", "false");
+
+    // The choice stays after a reload.
+    await page.reload();
+    await expect(workspaceTile(page, "Zephyr")).toBeVisible();
+    await expect(workspaceTile(page, "Atlas")).toHaveCount(0);
+
+    // An unpinned workspace still gets a tile while it is the current one.
+    await list.getByRole("button", { name: "Open Atlas" }).click();
+    await expect(workspaceTile(page, "Atlas")).toHaveAttribute("aria-label", "Atlas · not pinned");
+    await expectWorkspace(page, "Atlas");
+
+    await chooseWorkspace(page, "All workspaces");
+    await expect(workspaceTile(page, "Atlas")).toHaveCount(0);
+    await list.getByRole("button", { name: "Pin Atlas to your rail" }).click();
+    await expect(workspaceTile(page, "Atlas")).toBeVisible();
+  } finally {
+    site.close();
+  }
+});
+
+test("a server that keeps rails gives the board member the same rail on every device", async ({ browser }) => {
+  const site = await serveStatic(WEB_DIST);
+  // The server's rail of this board member: nothing chosen yet.
+  let rail: { chosen: boolean; project_ids: string[] } = { chosen: false, project_ids: [] };
+  const device = async () => {
+    const page = await (await browser.newContext()).newPage();
+    const server = await scriptServer(page, {
+      ...script,
+      features: [...script.features, "rail_pins"],
+      projects: [project(ATLAS, "Atlas"), project(ZEPHYR, "Zephyr")],
+      reads: { "user.rail_pins": () => ({ type: "rail_pins", value: rail }) },
+      onWrite: (request) => {
+        if (request.method === "user.set_rail_pins") {
+          rail = { chosen: true, project_ids: (request.params as { project_ids: string[] }).project_ids };
+        }
+      },
+    });
+    await page.goto(`${site.origin}/overview`);
+    return { page, server };
+  };
+  try {
+    const laptop = await device();
+    const list = laptop.page.getByRole("main").getByRole("region", { name: "Workspaces" });
+    await expect(workspaceTile(laptop.page, "Atlas")).toBeVisible();
+    await list.getByRole("button", { name: "Unpin Atlas from your rail" }).click();
+    await expect(workspaceTile(laptop.page, "Atlas")).toHaveCount(0);
+    expect(laptop.server.writes.map((w) => [w.method, w.params])).toEqual([
+      ["user.set_rail_pins", { project_ids: [ZEPHYR] }],
+    ]);
+
+    // Another device, with nothing stored on it, shows the same rail.
+    const desktop = await device();
+    await expect(workspaceTile(desktop.page, "Zephyr")).toBeVisible();
+    await expect(workspaceTile(desktop.page, "Atlas")).toHaveCount(0);
+
+    // When the laptop pins Atlas again, the desktop follows on the server's event.
+    await list.getByRole("button", { name: "Pin Atlas to your rail" }).click();
+    await expect(workspaceTile(laptop.page, "Atlas")).toBeVisible();
+    desktop.server.push({ type: "event", seq: 3, kind: "user.rail_pins_changed", aggregate_id: "u", at_ms: 1 });
+    await expect(workspaceTile(desktop.page, "Atlas")).toBeVisible();
+    await laptop.page.context().close();
+    await desktop.page.context().close();
   } finally {
     site.close();
   }

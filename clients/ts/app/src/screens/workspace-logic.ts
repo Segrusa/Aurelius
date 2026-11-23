@@ -1,7 +1,13 @@
 // What a workspace is, without a screen: which project is current, what belongs to it, and where a
 // link takes it. A workspace is a project; null is All projects, where everything shows as it always did.
 
-import type { EmployeeSummary, GuidelineProposalView, GuidelineView, ProjectSummary } from "@aurelius/protocol";
+import type {
+  EmployeeSummary,
+  GuidelineProposalView,
+  GuidelineView,
+  ProjectSummary,
+  RailPinsView,
+} from "@aurelius/protocol";
 
 export type Workspace = string | null;
 
@@ -15,6 +21,48 @@ export function storedWorkspace(value: string | null): Workspace {
 }
 
 export const openProjects = (projects: ProjectSummary[]) => projects.filter((p) => p.status !== "archived");
+
+/** Where this device keeps the workspaces pinned to its rail, per server, when the server cannot. */
+export const RAIL_PINS = "rail_projects";
+
+/** The server keeps each board member's rail, so it follows them to every device. */
+export const RAIL_PINS_FEATURE = "rail_pins";
+
+/**
+ * What the board member chose for their rail: the server's choice when it keeps rails, else this
+ * device's. null: nothing chosen yet (every open workspace counts as pinned). undefined: the server's
+ * rail has not loaded yet, so a pin now would overwrite a choice it does not know.
+ */
+export function chosenRail(
+  serverKeeps: boolean,
+  server: RailPinsView | undefined,
+  device: string[] | null,
+): string[] | null | undefined {
+  if (!serverKeeps) return device;
+  if (server === undefined) return undefined;
+  return server.chosen ? server.project_ids : null;
+}
+
+/**
+ * The workspaces pinned to the rail, in rail order. Until this device chose (`stored` null) every open
+ * workspace counts as pinned, in the order the old "pin to the top" stars gave, so nobody's rail empties.
+ */
+export function railPins(stored: string[] | null, open: ProjectSummary[], legacy: string[]): string[] {
+  if (stored !== null) return stored;
+  const first = legacy.filter((id) => open.some((p) => p.id === id));
+  return [...first, ...open.filter((p) => !first.includes(p.id)).map((p) => p.id)];
+}
+
+/** The rail's tiles: the pinned open workspaces, then the current one while it is not pinned. */
+export function railProjects(pins: string[], open: ProjectSummary[], current: Workspace): ProjectSummary[] {
+  const pinned = pins.flatMap((id) => open.find((p) => p.id === id) ?? []);
+  const here = current !== null && !pins.includes(current) ? open.filter((p) => p.id === current) : [];
+  return [...pinned, ...here];
+}
+
+/** Every open workspace for All workspaces, by name. */
+export const byName = (projects: ProjectSummary[]) =>
+  [...projects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 
 /** The remembered workspace, unless its project is gone or archived. While projects are unknown: as remembered. */
 export function resolveWorkspace(stored: Workspace, projects: ProjectSummary[] | undefined): Workspace {

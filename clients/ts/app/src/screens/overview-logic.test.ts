@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { Needs } from "./board-logic";
 import {
   boardLanes,
-  donePerDay,
   elapsed,
   groupDigits,
   linkedGuidelines,
@@ -12,7 +11,6 @@ import {
   recentlyDone,
   runningRows,
   styleguideName,
-  workspaceNumbers,
 } from "./overview-logic";
 
 const tv = (over: Partial<TicketView> = {}): TicketView => ({
@@ -134,7 +132,7 @@ describe("boardLanes", () => {
   });
 });
 
-describe("recentlyDone and donePerDay", () => {
+describe("recentlyDone", () => {
   const done = [
     tv({ id: "a", column: "done", done_at_ms: daysAgo(0) }),
     tv({ id: "b", column: "done", done_at_ms: daysAgo(0, 8) }),
@@ -147,24 +145,6 @@ describe("recentlyDone and donePerDay", () => {
 
   it("keeps the newest finished tickets, archived ones left out", () => {
     expect(recentlyDone(done, 3).map((t) => t.id)).toEqual(["a", "b", "c"]);
-  });
-
-  it("counts per day over 14 days, today last", () => {
-    const bars = donePerDay(done, NOW);
-    expect(bars).toHaveLength(14);
-    expect(bars[13]).toBe(2);
-    expect(bars[12]).toBe(1);
-    expect(bars[0]).toBe(1);
-    expect(bars.reduce((a, b) => a + b, 0)).toBe(4);
-  });
-
-  it("gives the numbers of a workspace card", () => {
-    expect(workspaceNumbers([...done, tv({ column: "backlog" })], 2, NOW)).toEqual({
-      running: 2,
-      open: 2,
-      review: 1,
-      done7: 3,
-    });
   });
 });
 

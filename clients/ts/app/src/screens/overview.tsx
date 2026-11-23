@@ -1,7 +1,7 @@
 // The Overview of a workspace (ticket #82, design workspace-overview.html): one column with the
 // workspace's facts, what needs the board member, what runs, the board in five lanes, the newest designs
-// and what got done. Under All workspaces: what needs the board member everywhere, a card per workspace
-// and the newest designs of all. The numbers come from the tickets and sessions the sidebar reads too.
+// and what got done. All workspaces is the list of every workspace of the company, where each board member
+// pins the ones they want on their own rail.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -10,7 +10,7 @@ import type { ProjectSummary, TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import {
   useActivityOverview,
@@ -34,7 +34,6 @@ import { failureOf, hhmm } from "./org-kit";
 import {
   boardLanes,
   DESIGNS_SHOWN,
-  donePerDay,
   elapsed,
   groupDigits,
   type LaneName,
@@ -47,10 +46,10 @@ import {
   recentlyDone,
   runningRows,
   styleguideName,
-  workspaceNumbers,
 } from "./overview-logic";
+import { useRailPins } from "./projects";
 import { useTicketNeeds } from "./tickets-kit";
-import { openProjects } from "./workspace-logic";
+import { byName, openProjects } from "./workspace-logic";
 
 // The running dot breathes, as in the sidebar.
 const pulse = stylex.keyframes({
@@ -404,67 +403,66 @@ const styles = stylex.create({
   stepDone: { backgroundColor: "var(--color-accent)", color: "var(--color-on-accent)" },
   stepName: { fontWeight: 600 },
   stepText: { fontSize: 12, lineHeight: 1.4, color: "var(--color-text-secondary)" },
-  wsGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 },
-  ws: {
+  find: {
+    width: "100%",
+    maxWidth: 360,
+    boxSizing: "border-box",
+    height: 32,
+    marginBlockEnd: 12,
+    paddingInline: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: { default: "var(--color-border)", ":focus": "var(--color-border-emphasized)" },
+    backgroundColor: "var(--color-background-card)",
+    color: "var(--color-text-primary)",
+    font: "inherit",
+    outline: "none",
+  },
+  wsList: {
     display: "flex",
     flexDirection: "column",
-    gap: 14,
-    padding: 16,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
     borderRadius: 8,
     borderWidth: 1,
     borderStyle: "solid",
-    borderColor: { default: "var(--color-border)", ":hover": "var(--color-border-emphasized)" },
+    borderColor: "var(--color-border)",
     backgroundColor: "var(--color-background-card)",
-    boxShadow: "var(--precision-card-shadow)",
+    overflow: "hidden",
+  },
+  wsRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    paddingInlineEnd: 12,
+    borderBlockStartWidth: { default: 1, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--color-border)",
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+  },
+  wsOpen: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    minWidth: 0,
+    flex: 1,
+    paddingBlock: 12,
+    paddingInlineStart: 14,
+    borderWidth: 0,
+    backgroundColor: "transparent",
     color: "var(--color-text-primary)",
     font: "inherit",
     textAlign: "start",
     cursor: "pointer",
   },
-  wsNew: {
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 6,
-    minHeight: 180,
-    borderStyle: "dashed",
-    boxShadow: "none",
-    backgroundColor: "transparent",
-    color: "var(--color-text-secondary)",
-  },
-  wsHead: { display: "flex", alignItems: "center", gap: 10 },
   wsName: { minWidth: 0, flex: 1, fontSize: 15, fontWeight: 600 },
   wsSmall: { display: "block", fontSize: 12, fontWeight: 400, color: "var(--precision-text3)", ...ellipsis },
-  nums: {
-    display: "grid",
-    gridTemplateColumns: { default: "repeat(4, 1fr)", "@media (max-width: 600px)": "repeat(2, 1fr)" },
-    gap: 8,
-  },
-  numCell: { display: "flex", flexDirection: "column" },
-  numB: { fontSize: 17, fontWeight: 600, fontVariantNumeric: "tabular-nums" },
-  numL: { fontSize: 11, color: "var(--precision-text3)" },
-  bars: { display: "flex", alignItems: "flex-end", gap: 2, height: 28 },
-  bar: {
-    flex: 1,
-    minHeight: 2,
-    borderRadius: "3px 3px 1px 1px",
-    backgroundColor: "var(--color-accent)",
-    opacity: { default: 0.85, ":last-child": 1 },
-  },
-  barZero: { backgroundColor: "var(--color-border-emphasized)", opacity: 1 },
-  last: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    paddingBlockStart: 12,
-    borderBlockStartWidth: 1,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: "var(--color-border)",
-    fontSize: 12,
-    color: "var(--color-text-secondary)",
-  },
-  lastT: { minWidth: 0, ...ellipsis },
-  pushRight: { marginInlineStart: "auto" },
+  wsState: { flexShrink: 0, fontSize: 12, color: "var(--precision-text3)", whiteSpace: "nowrap" },
+  wsStateNeed: { color: "var(--color-text-warning)" },
+  wsStateRun: { color: "var(--color-text-accent)" },
+  pinOn: { borderColor: "var(--color-text-accent)", color: "var(--color-text-accent)" },
 });
 
 /** The colour of a lane's bar, as in the design. */
@@ -916,99 +914,33 @@ function WorkspaceOverview({ project }: { project: ProjectSummary }) {
   );
 }
 
-function WorkspaceCard({
-  project,
-  tickets,
-  running,
-  needs,
-  onOpen,
-}: {
-  project: ProjectSummary;
-  tickets: TicketView[];
-  running: RunningRow[];
-  needs: number;
-  onOpen: () => void;
-}) {
-  const now = Date.now();
-  const numbers = workspaceNumbers(tickets, running.length, now);
-  const bars = donePerDay(tickets, now);
-  const max = Math.max(1, ...bars);
-  const lastDone = recentlyDone(tickets, 1)[0];
-  const first = running[0];
-  return (
-    <button type="button" aria-label={project.name} onClick={onOpen} {...stylex.props(styles.ws)}>
-      <span {...stylex.props(styles.wsHead)}>
-        <Mark letter={initial(project.name)} color={markColor(project.id)} size={32} radius={8} />
-        <span {...stylex.props(styles.wsName)}>
-          {project.name}
-          <small {...stylex.props(styles.wsSmall)}>{project.description || project.folder || ""}</small>
-        </span>
-        {project.status === "paused" ? (
-          <span {...stylex.props(styles.pill, styles.pillPaused)}>Paused</span>
-        ) : needs > 0 ? (
-          <span {...stylex.props(styles.pill, styles.pillNeed)}>{needs} need you</span>
-        ) : null}
-      </span>
-      <span {...stylex.props(styles.nums)}>
-        {(
-          [
-            [numbers.running, "Running"],
-            [numbers.open, "Open"],
-            [numbers.review, "In review"],
-            [numbers.done7, "Done 7 d"],
-          ] as const
-        ).map(([n, label]) => (
-          <span key={label} {...stylex.props(styles.numCell)}>
-            <b {...stylex.props(styles.numB)}>{n}</b>
-            <span {...stylex.props(styles.numL)}>{label}</span>
-          </span>
-        ))}
-      </span>
-      <span aria-hidden="true" {...stylex.props(styles.bars)}>
-        {bars.map((v, i) => (
-          <i
-            // biome-ignore lint/suspicious/noArrayIndexKey: one bar per day, the day is its place.
-            key={i}
-            {...stylex.props(styles.bar, v === 0 && styles.barZero)}
-            style={{ height: `${v ? Math.max(8, (v / max) * 100) : 4}%` }}
-          />
-        ))}
-      </span>
-      <span {...stylex.props(styles.last)}>
-        {first ? (
-          <>
-            <span {...stylex.props(styles.dot, styles.dotRun)} />
-            <span {...stylex.props(styles.lastT)}>
-              {first.who} · {first.number === null ? "" : `#${first.number} `}
-              {first.title}
-            </span>
-          </>
-        ) : lastDone ? (
-          <>
-            <CheckMark />
-            <span {...stylex.props(styles.lastT)}>
-              #{lastDone.number} {lastDone.title}
-            </span>
-            <span {...stylex.props(styles.side, styles.pushRight)}>
-              {groupAt([lastDone], (t) => t.done_at_ms ?? t.updated_at_ms, new Date(now), "en-GB")[0]?.label}
-            </span>
-          </>
-        ) : (
-          <span {...stylex.props(styles.lastT, styles.muted)}>No work yet</span>
-        )}
-      </span>
-    </button>
-  );
+/** What a workspace row says about its state: paused first, then what waits, then what runs. */
+function rowState(
+  project: ProjectSummary,
+  needs: number,
+  running: number,
+): { label: string; tone: "need" | "run" | null } {
+  if (project.status === "paused") return { label: "Paused", tone: null };
+  if (needs > 0) return { label: `${needs} need${needs === 1 ? "s" : ""} you`, tone: "need" };
+  if (running > 0) return { label: `${running} running`, tone: "run" };
+  return { label: "Quiet", tone: null };
 }
 
+/**
+ * All workspaces: every open workspace of the company, by name. Each board member pins the ones they
+ * want on their own rail here; the others stay one click away in this list and the palette.
+ */
 function AllOverview({ projects }: { projects: ProjectSummary[] }) {
   const navigate = useNavigate();
   const keys = useKeys();
   const { choose } = useWorkspace();
+  const rail = useRailPins();
   const data = useOverviewData();
-  const ids = new Set(projects.map((p) => p.id));
-  const needs = data.needs.filter((c) => ids.has(c.projectId));
-  const running = data.running.filter((r) => ids.has(r.projectId));
+  const [query, setQuery] = useState("");
+  const sorted = useMemo(() => byName(projects), [projects]);
+  const words = query.trim().toLowerCase();
+  const shown = words ? sorted.filter((p) => `${p.name} ${p.description ?? ""}`.toLowerCase().includes(words)) : sorted;
+  const pinned = projects.filter((p) => rail.pins.includes(p.id)).length;
   return (
     <>
       <header {...stylex.props(styles.hero)}>
@@ -1018,49 +950,79 @@ function AllOverview({ projects }: { projects: ProjectSummary[] }) {
         <div {...stylex.props(styles.grow)}>
           <h1 {...stylex.props(styles.heroTitle)}>All workspaces</h1>
           <p {...stylex.props(styles.heroText)}>
-            {projects.length} {projects.length === 1 ? "workspace" : "workspaces"} · {running.length}{" "}
-            {running.length === 1 ? "session" : "sessions"} running · {needs.length} waiting on you
+            {projects.length} {projects.length === 1 ? "workspace" : "workspaces"} · {pinned} pinned to your rail
           </p>
         </div>
         <div {...stylex.props(styles.actions)}>
-          <button type="button" onClick={() => keys.run("NewProject")} {...stylex.props(styles.btn)}>
+          <button type="button" onClick={() => keys.run("NewProject")} {...stylex.props(styles.btn, styles.primary)}>
             <PlusIcon size={14} />
             New workspace
-          </button>
-          <button
-            type="button"
-            onClick={() => void navigate({ to: "/new" })}
-            {...stylex.props(styles.btn, styles.primary)}
-          >
-            <PlusIcon size={14} />
-            New session
           </button>
         </div>
       </header>
-      <NeedsSection cards={needs} projects={projects} />
       <section aria-label="Workspaces">
-        <SectionTitle title="Workspaces" count={projects.length} />
-        <div {...stylex.props(styles.wsGrid)}>
-          {projects.map((p) => (
-            <WorkspaceCard
-              key={p.id}
-              project={p}
-              tickets={data.tickets.filter((t) => t.project_id === p.id)}
-              running={running.filter((r) => r.projectId === p.id)}
-              needs={needs.filter((c) => c.projectId === p.id).length}
-              onOpen={() => {
-                choose(p.id);
-                void navigate({ to: "/overview" });
-              }}
-            />
-          ))}
-          <button type="button" onClick={() => keys.run("NewProject")} {...stylex.props(styles.ws, styles.wsNew)}>
-            <PlusIcon size={14} />
-            New workspace
-          </button>
-        </div>
+        {projects.length > 0 ? (
+          <input
+            type="search"
+            aria-label="Find a workspace"
+            placeholder="Find a workspace"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            {...stylex.props(styles.find)}
+          />
+        ) : null}
+        <ul {...stylex.props(styles.wsList)}>
+          {shown.map((p) => {
+            const on = rail.pins.includes(p.id);
+            const state = rowState(
+              p,
+              data.needs.filter((c) => c.projectId === p.id).length,
+              data.running.filter((r) => r.projectId === p.id).length,
+            );
+            return (
+              <li key={p.id} {...stylex.props(styles.wsRow)}>
+                <button
+                  type="button"
+                  aria-label={`Open ${p.name}`}
+                  onClick={() => {
+                    choose(p.id);
+                    void navigate({ to: "/overview" });
+                  }}
+                  {...stylex.props(styles.wsOpen)}
+                >
+                  <Mark letter={initial(p.name)} color={markColor(p.id)} size={32} radius={8} />
+                  <span {...stylex.props(styles.wsName)}>
+                    {p.name}
+                    <small {...stylex.props(styles.wsSmall)}>{p.description || p.folder || ""}</small>
+                  </span>
+                  <span
+                    {...stylex.props(
+                      styles.wsState,
+                      state.tone === "need" && styles.wsStateNeed,
+                      state.tone === "run" && styles.wsStateRun,
+                    )}
+                  >
+                    {state.label}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={on}
+                  aria-label={`${on ? "Unpin" : "Pin"} ${p.name} ${on ? "from" : "to"} your rail`}
+                  onClick={() => rail.toggle(p.id)}
+                  {...stylex.props(styles.btn, on && styles.pinOn)}
+                >
+                  {on ? "Pinned" : "Pin to rail"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        {projects.length === 0 ? <p {...stylex.props(styles.muted)}>No workspaces yet.</p> : null}
+        {projects.length > 0 && shown.length === 0 ? (
+          <p {...stylex.props(styles.muted)}>No workspace matches “{query.trim()}”.</p>
+        ) : null}
       </section>
-      <DesignsSection projectId={null} projects={projects} />
     </>
   );
 }

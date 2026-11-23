@@ -20,7 +20,7 @@ export function workspaceTile(page: Page, name: string) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return page
     .getByRole("navigation", { name: "Workspaces" })
-    .getByRole("button", { name: new RegExp(`^${escaped}(,|$)`) });
+    .getByRole("button", { name: new RegExp(`^${escaped}(,| ·|$)`) });
 }
 
 /** Switches the workspace on the rail and waits until it is the current one. */

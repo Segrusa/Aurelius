@@ -13,6 +13,7 @@ import type {
   NotificationView,
   ProjectSummary,
   ProposalView,
+  RailPinsView,
   SubscriptionUsage,
   TaskView,
   TicketView,
@@ -42,10 +43,13 @@ export type Area =
   | "usage"
   | "memory"
   | "vault"
-  | "scheduled";
+  | "scheduled"
+  | "rail";
 
 /** The areas an event may have changed. An event of a newer server changes nothing here. */
 export function areasOf(kind: EventKind | string): Area[] {
+  // One board member's own rail: nothing else changed.
+  if (kind === "user.rail_pins_changed") return ["rail"];
   const family = kind.split(".")[0];
   switch (family) {
     case "approval":
@@ -136,6 +140,17 @@ export function useApprovals(project: string | null = null) {
     async () =>
       expectBody(await connection.call("approval.list", project ? { project_id: project } : {}), "approvals").value
         .approvals,
+  );
+}
+
+/** The board member's own rail (feature `rail_pins`); `wanted` false on a server that cannot keep it. */
+export function useRailRead(wanted: boolean) {
+  const connection = useConnection();
+  return useRead<RailPinsView>(
+    "rail",
+    async () => expectBody(await connection.call("user.rail_pins"), "rail_pins").value,
+    30_000,
+    wanted,
   );
 }
 

@@ -220,16 +220,27 @@ const styles = stylex.create({
 /** Every list of pins on screen follows a change, the sidebar too. */
 const pinListeners = new Set<(key: string) => void>();
 
+const NO_PINS: string[] = [];
+
 export function usePins(key: string) {
+  const [pins, set] = useStoredPins(key);
+  return [pins ?? NO_PINS, set] as const;
+}
+
+/** The pins under `key`, or null while nobody chose any on this device: a default may then apply. */
+export function useStoredPins(key: string) {
   const platform = usePlatform();
   const read = useCallback(() => {
+    const raw = platform.storage.get(key);
+    if (raw === null) return null;
     try {
-      return JSON.parse(platform.storage.get(key) ?? "[]") as string[];
+      const value: unknown = JSON.parse(raw);
+      return Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
     } catch {
       return [];
     }
   }, [key, platform]);
-  const [pins, setPins] = useState<string[]>(read);
+  const [pins, setPins] = useState<string[] | null>(read);
   useEffect(() => {
     const changed = (other: string) => {
       if (other === key) setPins(read());

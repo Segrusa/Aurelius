@@ -3,13 +3,13 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
 import { TextInput } from "@astryxdesign/core/TextInput";
-import type { ProjectSummary, TaskView } from "@aurelius/protocol";
+import type { ProjectSummary, RailPinsView, TaskView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useEmployees, useOpenTasks, useProjects } from "../data";
+import { useEmployees, useOpenTasks, useProjects, useRailRead } from "../data";
 import { type Feature, hidden, shown } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
@@ -17,14 +17,15 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
-import { canPin, pinnedFirst, togglePin } from "./employee-logic";
-import { pinKey, usePins } from "./employees";
+import { pinnedFirst, togglePin } from "./employee-logic";
+import { pinKey, usePins, useStoredPins } from "./employees";
 import { IdeasBody } from "./ideas";
 import { Confirm, Empty, FormDialog, failureOf, Hint, KnowledgeTabs, Page, PageHead, Problem } from "./org-kit";
 import { useFolderChooser } from "./run-tools";
 import { ScheduleDialog } from "./settings-advanced";
 import { focusField } from "./settings-kit";
 import { VaultBody } from "./vault";
+import { chosenRail, openProjects, RAIL_PINS, RAIL_PINS_FEATURE, railPins } from "./workspace-logic";
 import { WorkspaceSettingsBody } from "./workspace-settings";
 
 // Selector takes no empty value, so "the company's default dispatcher" needs a word of its own.
@@ -92,9 +93,48 @@ const people = (n: number, working: number) =>
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const isActive = (t: TaskView) => !["succeeded", "failed", "cancelled"].includes(t.status) || Boolean(t.live_run);
 
-export function useProjectPins() {
-  const { hostName } = useLinkState();
-  return usePins(pinKey(hostName, "pinned_projects"));
+/**
+ * The workspaces the board member pinned to their rail. The server keeps them per board member, so they
+ * follow them to every device; an older server cannot, and then they stay on this device. All workspaces
+ * lists every workspace, pinned or not.
+ */
+export function useRailPins() {
+  const { hostName, features } = useLinkState();
+  const connection = useConnection();
+  const client = useQueryClient();
+  const projects = useProjects();
+  const serverKeeps = features.includes(RAIL_PINS_FEATURE);
+  const server = useRailRead(serverKeeps);
+  const [device, setDevice] = useStoredPins(pinKey(hostName, RAIL_PINS));
+  // The stars of before; they only order the rail until the board member pins for themselves.
+  const [legacy] = usePins(pinKey(hostName, "pinned_projects"));
+  const stored = chosenRail(serverKeeps, server.data, device);
+  const pins = useMemo(
+    () => railPins(stored ?? null, openProjects(projects.data ?? []), legacy),
+    [stored, projects.data, legacy],
+  );
+  const set = (next: string[]) => {
+    if (!serverKeeps) return setDevice(next);
+    const before = server.data;
+    // The rail moves at once; the server's answer and event confirm it.
+    client.setQueryData<RailPinsView>(["rail"], { chosen: true, project_ids: next });
+    connection.write("user.set_rail_pins", { project_ids: next }, { retry: false }).catch((e: unknown) => {
+      client.setQueryData(["rail"], before);
+      void client.invalidateQueries({ queryKey: ["rail"] });
+      toast(`Could not change your rail: ${failureOf(e)}`);
+    });
+  };
+  return {
+    pins,
+    /** Not before the projects and the rail are in, or the default "all of them" would be written as "none". */
+    toggle: (id: string) => {
+      if (projects.data && stored !== undefined) set(togglePin(pins, id));
+    },
+    /** A workspace you just made goes on your rail; under the default it is there already. */
+    pin: (id: string) => {
+      if (stored && !stored.includes(id)) set([...stored, id]);
+    },
+  };
 }
 
 function NewProject({ onClose }: { onClose: () => void }) {
@@ -102,6 +142,7 @@ function NewProject({ onClose }: { onClose: () => void }) {
   const connection = useConnection();
   const client = useQueryClient();
   const navigate = useNavigate();
+  const rail = useRailPins();
   const folders = useFolderChooser();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -130,6 +171,7 @@ function NewProject({ onClose }: { onClose: () => void }) {
       onClose();
       const made = receipt.result;
       if (made.kind === "command" && made.value.type === "project_created") {
+        rail.pin(made.value.project_id);
         void navigate({ to: "/projects/$id", params: { id: made.value.project_id } });
       }
     } catch (e) {
@@ -352,7 +394,7 @@ function ProjectRow({
             type="button"
             aria-label={`${pinned ? "Unpin" : "Pin"} ${project.name}`}
             aria-pressed={pinned}
-            title={pinned ? "Unpin from the top of the switcher" : "Pin to the top of the switcher"}
+            title={pinned ? "Unpin from your rail" : "Pin to your rail"}
             onClick={onPin}
             {...stylex.props(styles.pin, pinned && styles.pinned)}
           >
@@ -374,17 +416,10 @@ export function ProjectsScreen() {
   const navigate = useNavigate();
   const projects = useProjects();
   const tasks = useOpenTasks();
-  const [pins, setPins] = useProjectPins();
+  const rail = useRailPins();
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState(0);
-  const list = useMemo(
-    () =>
-      pinnedFirst(
-        (projects.data ?? []).filter((p) => p.status !== "archived"),
-        pins,
-      ),
-    [projects.data, pins],
-  );
+  const list = useMemo(() => pinnedFirst(openProjects(projects.data ?? []), rail.pins), [projects.data, rail.pins]);
   const forProject = (id: string) => (tasks.data ?? []).filter((t) => t.project_id === id);
   const waitingOf = (id: string) => {
     const mine = forProject(id);
@@ -435,12 +470,9 @@ export function ProjectsScreen() {
                   tasks={forProject(p.id)}
                   waiting={waitingOf(p.id)}
                   selected={i === selected}
-                  pinned={pins.includes(p.id)}
+                  pinned={rail.pins.includes(p.id)}
                   onEdit={() => void navigate({ to: "/projects/$id", params: { id: p.id } })}
-                  onPin={() => {
-                    if (!canPin(pins, p.id)) return toast("Only 5 projects can be pinned. Unpin one first.");
-                    setPins(togglePin(pins, p.id));
-                  }}
+                  onPin={() => rail.toggle(p.id)}
                 />
               ))}
             </TableBody>

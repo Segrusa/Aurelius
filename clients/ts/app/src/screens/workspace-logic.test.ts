@@ -1,6 +1,9 @@
 import type { GuidelineProposalView, ProjectSummary } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
+import { areasOf } from "../data";
 import {
+  byName,
+  chosenRail,
   guidelineProposalsIn,
   guidelineReach,
   guidelinesIn,
@@ -8,6 +11,8 @@ import {
   narrow,
   openProjects,
   pathAfterSwitch,
+  railPins,
+  railProjects,
   resolveWorkspace,
   storedWorkspace,
   targetOf,
@@ -23,6 +28,55 @@ const onEmployee = (id: string) => ({ kind: "employee", id }) as const;
 const atlas = project("atlas");
 const gone = project("gone", "archived");
 const projects = [atlas, project("zephyr"), gone];
+
+describe("the rail's workspaces", () => {
+  const open = [atlas, project("zephyr"), project("mira")];
+  const ids = (list: ProjectSummary[]) => list.map((p) => p.id);
+
+  it("pins every open workspace until this device chooses, the old stars first", () => {
+    expect(railPins(null, open, [])).toEqual(["atlas", "zephyr", "mira"]);
+    expect(railPins(null, open, ["mira", "gone"])).toEqual(["mira", "atlas", "zephyr"]);
+  });
+
+  it("keeps exactly what this device chose, even nothing", () => {
+    expect(railPins(["zephyr"], open, ["mira"])).toEqual(["zephyr"]);
+    expect(railPins([], open, [])).toEqual([]);
+  });
+
+  it("shows only pinned open workspaces, in pin order, skipping an archived pin", () => {
+    expect(ids(railProjects(["mira", "gone", "atlas"], openProjects([...open, gone]), null))).toEqual([
+      "mira",
+      "atlas",
+    ]);
+  });
+
+  it("adds the current workspace at the end while it is not pinned", () => {
+    expect(ids(railProjects(["atlas"], open, "mira"))).toEqual(["atlas", "mira"]);
+    expect(ids(railProjects(["atlas"], open, "atlas"))).toEqual(["atlas"]);
+  });
+
+  it("takes the board member's rail from the server when it keeps rails, and this device's otherwise", () => {
+    expect(chosenRail(true, { chosen: true, project_ids: ["mira"] }, ["atlas"])).toEqual(["mira"]);
+    expect(chosenRail(true, { chosen: true, project_ids: [] }, ["atlas"])).toEqual([]);
+    expect(chosenRail(false, undefined, ["atlas"])).toEqual(["atlas"]);
+    expect(chosenRail(false, undefined, null)).toBeNull();
+  });
+
+  it("rereads only the rail when a board member's rail changed", () => {
+    expect(areasOf("user.rail_pins_changed")).toEqual(["rail"]);
+    expect(areasOf("user.created")).not.toContain("rail");
+  });
+
+  it("counts a rail the board member never chose as unchosen, and an unloaded one as unknown", () => {
+    expect(chosenRail(true, { chosen: false, project_ids: [] }, ["atlas"])).toBeNull();
+    expect(chosenRail(true, undefined, ["atlas"])).toBeUndefined();
+  });
+
+  it("lists All workspaces by name, whatever the case", () => {
+    const named = (id: string, name: string) => ({ ...project(id), name });
+    expect(ids(byName([named("b", "beta"), named("a", "Alpha"), named("c", "Céline")]))).toEqual(["a", "b", "c"]);
+  });
+});
 
 describe("the current workspace", () => {
   it("is remembered per server, and empty means All projects", () => {

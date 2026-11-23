@@ -1,4 +1,5 @@
-// The app's sidebar: a rail of workspaces on the left (All workspaces, one tile per project, the Inbox
+// The app's sidebar: a rail of workspaces on the left (All workspaces, a tile per workspace this board member
+// pinned, plus the current one while it is not pinned, the Inbox
 // bell, the account and the fold button), and beside it the workspace's panel with Overview, New session, Board and History, and
 // a Sessions and a Tickets section, each under Running, Today and Earlier. Under All workspaces those come per
 // workspace. Both sections always show and fold on their own; a closed fold still shows the row you are in.
@@ -25,7 +26,7 @@ import { CODE_VIEW } from "./code-logic";
 import { pinnedFirst } from "./employee-logic";
 import { InboxBell } from "./inbox-bell";
 import { overlays } from "./overlays-store";
-import { useProjectPins } from "./projects";
+import { useRailPins } from "./projects";
 import { type SessionSignal, sessionSignal, startOfDay } from "./session-logic";
 import {
   BUCKET_LABELS,
@@ -46,7 +47,7 @@ import { inTicketsSection, ticketSignal } from "./ticket-session-logic";
 import { useTicketNeeds } from "./tickets-kit";
 import { UserMenu } from "./user-menu";
 import { WorkspaceMark } from "./workspace-kit";
-import { openProjects } from "./workspace-logic";
+import { openProjects, railProjects } from "./workspace-logic";
 
 // A working session's dot breathes, so it reads as live next to the still ones.
 const pulse = stylex.keyframes({
@@ -644,12 +645,13 @@ function RailTile({
   );
 }
 
-function Rail({ projects, needs }: { projects: ProjectSummary[]; needs: Map<string, number> }) {
+function Rail({ projects, pins, needs }: { projects: ProjectSummary[]; pins: string[]; needs: Map<string, number> }) {
   const { id, available, locked, choose } = useWorkspace();
   const { user } = useLinkState();
   const keys = useKeys();
   const navigate = useNavigate();
   const workspaces = available && !locked;
+  // All workspaces counts what waits everywhere, also in workspaces that are not on the rail.
   const allNeeds = [...needs.values()].reduce((n, v) => n + v, 0);
   // A tile opens that workspace's Overview, not the screen you were on (ticket #82).
   const switchTo = (next: string | null) => {
@@ -667,7 +669,9 @@ function Rail({ projects, needs }: { projects: ProjectSummary[]; needs: Map<stri
           {projects.map((p) => (
             <RailTile
               key={p.id}
-              label={p.status === "paused" ? `${p.name} · paused` : p.name}
+              label={[p.name, p.status === "paused" ? "paused" : null, pins.includes(p.id) ? null : "not pinned"]
+                .filter(Boolean)
+                .join(" · ")}
               on={id === p.id}
               needs={needs.get(p.id) ?? 0}
               onClick={() => switchTo(p.id)}
@@ -798,13 +802,17 @@ function Panel({ items, projects }: { items: SidebarItem[]; projects: ProjectSum
 /** The rail, and beside it the panel. */
 export function Sidebar() {
   const projects = useProjects();
-  const [pins] = useProjectPins();
+  const { pins } = useRailPins();
+  const { id } = useWorkspace();
   const items = useSidebarItems();
-  const list = useMemo(() => pinnedFirst(openProjects(projects.data ?? []), pins), [projects.data, pins]);
+  const open = useMemo(() => openProjects(projects.data ?? []), [projects.data]);
+  // The panel groups every workspace, the rail shows only what this board member pinned.
+  const list = useMemo(() => pinnedFirst(open, pins), [open, pins]);
+  const tiles = useMemo(() => railProjects(pins, open, id), [pins, open, id]);
   const needs = useMemo(() => needsPerProject(items), [items]);
   return (
     <div data-sidebar {...stylex.props(styles.side)}>
-      <Rail projects={list} needs={needs} />
+      <Rail projects={tiles} pins={pins} needs={needs} />
       <Panel items={items} projects={list} />
     </div>
   );
