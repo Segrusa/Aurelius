@@ -20,7 +20,7 @@ import { saveBlob } from "../ui/download";
 import { Markdown } from "../ui/markdown";
 import { toast } from "../ui/toast";
 import type { ArtifactSend } from "./artifact-feedback";
-import { designPages, isArtifact } from "./artifact-logic";
+import { designPages, designTitle, isArtifact } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 import { FormDialog, Hint, Loading, Problem } from "./org-kit";
 import { markdownPaths, screenshotId, traceSessionText, usageLine, waitingText } from "./run-logic";
@@ -476,12 +476,13 @@ export function KeptFiles({
           <button
             key={f.id}
             type="button"
+            title={f.name}
             onClick={() => void open(f)}
             {...stylex.props(styles.chip, styles.kept, styles.artifactCard)}
           >
             <span {...stylex.props(styles.accent)}>◧</span>
             <span {...stylex.props(styles.artifactText)}>
-              <span>{f.name}</span>
+              <span>{designTitle(f)}</span>
               <span {...stylex.props(styles.size)}>{`Design · ${sizeText(f.size)}`}</span>
             </span>
             <span {...stylex.props(styles.accent)}>Open</span>

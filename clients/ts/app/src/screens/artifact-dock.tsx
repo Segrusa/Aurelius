@@ -5,7 +5,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import type { FileRef, MessageView } from "@aurelius/protocol";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePlatform } from "../platform";
 import { DesignViewer } from "./artifact-live";
 import { designFile, designPages, designsOf, keptDesign } from "./artifact-logic";
@@ -31,6 +31,14 @@ export const targetKey = (t: ArtifactTarget) =>
     : t.kind === "design"
       ? `design:${t.messageId}:${t.path}`
       : `plan:${t.messageId}`;
+
+/**
+ * Opens something in the conversation's dock from beside it: the properties panel is not inside
+ * the chat, so the chat hands it the dock this way. Null where there is no dock.
+ */
+const DockOpener = createContext<((target: ArtifactTarget) => void) | null>(null);
+export const DockOpenerProvider = DockOpener.Provider;
+export const useDockOpener = () => useContext(DockOpener);
 
 /** The dock's state for a conversation's frame: what is open, and opening or closing it. */
 export function useArtifactDock() {

@@ -25,7 +25,14 @@ import { PromptBox, PromptTextarea } from "../ui/prompt-box";
 import { toast } from "../ui/toast";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
-import { type ArtifactTarget, DockedArtifact, targetKey, useArtifactDock, useOpenDesign } from "./artifact-dock";
+import {
+  type ArtifactTarget,
+  DockedArtifact,
+  DockOpenerProvider,
+  targetKey,
+  useArtifactDock,
+  useOpenDesign,
+} from "./artifact-dock";
 import { foldUpdates } from "./board-logic";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import {
@@ -1335,7 +1342,7 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
           />
         </ChatProvider>
       ) : session ? (
-        (session.aside ?? null)
+        <DockOpenerProvider value={dock.open}>{session.aside ?? null}</DockOpenerProvider>
       ) : isTicket && overviewOpen ? (
         <OverviewPanel p={progress} onClose={() => showOverview(false)} />
       ) : null}

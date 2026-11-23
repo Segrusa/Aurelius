@@ -13,6 +13,7 @@ import { useConnection, useLinkState } from "../connection";
 import { useKeyed, useProjects } from "../data";
 import { usePlatform } from "../platform";
 import { useWorkspace } from "../workspace";
+import { designTitle } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 import { designLink, designPlace, pagesOf } from "./designs-logic";
 import { failureOf, Hint, Loading, Page, PageHead, Problem } from "./org-kit";
@@ -119,13 +120,14 @@ function DesignCard({
           <button
             key={p.file.id}
             type="button"
-            aria-label={`Open the page ${p.file.name} of ${design.title}`}
+            title={p.file.name}
+            aria-label={`Open the page ${designTitle(p.file)} of ${design.title}`}
             aria-pressed={openPage === p.file.name}
             onClick={() => onOpen(p.file.name, p.file.id)}
             {...stylex.props(styles.page)}
           >
             <span {...stylex.props(styles.accent)}>◧</span>
-            {p.file.name}
+            {designTitle(p.file)}
           </button>
         ))}
       </div>

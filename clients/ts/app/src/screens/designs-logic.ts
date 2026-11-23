@@ -2,7 +2,7 @@
 // pages as the viewer takes them.
 
 import type { DesignView } from "@aurelius/protocol";
-import type { DesignPage } from "./artifact-logic";
+import { type DesignPage, pageOf } from "./artifact-logic";
 
 /** Where a design was made, and the screen that opens that conversation (none: no screen). */
 export function designPlace(design: DesignView): { label: string; to: string | null } {
@@ -37,5 +37,5 @@ export function designLink(design: DesignView, fileId?: string): string | null {
 
 /** The design's pages as the viewer takes them. */
 export function pagesOf(design: DesignView): DesignPage[] {
-  return design.pages.map((p) => ({ name: p.file.name, file: p.file, messageId: p.message_id, atMs: p.at_ms }));
+  return design.pages.map((p) => pageOf(p.file, p.message_id, p.at_ms));
 }

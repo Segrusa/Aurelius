@@ -12,7 +12,7 @@ import { useApprovals, useEmployees, useMessages } from "../data";
 import { CHAT_FILES_FEATURE } from "../ui/attach-logic";
 import { useDelayed } from "../ui/use-delayed";
 import { ApprovalCard } from "./approval-card";
-import { DockedArtifact, targetKey, useArtifactDock, useOpenDesign } from "./artifact-dock";
+import { DockedArtifact, DockOpenerProvider, targetKey, useArtifactDock, useOpenDesign } from "./artifact-dock";
 import type { ArtifactSend } from "./artifact-feedback";
 import { newestDesignFile } from "./artifact-logic";
 import { Composer } from "./chat";
@@ -386,7 +386,7 @@ export function EmployeeChat({ conversationId, frame }: { conversationId: string
         {dock.target ? (
           <DockedArtifact key={targetKey(dock.target)} target={dock.target} ctx={ctx} onClose={dock.close} />
         ) : (
-          frame?.aside
+          <DockOpenerProvider value={dock.open}>{frame?.aside}</DockOpenerProvider>
         )}
       </div>
     </section>

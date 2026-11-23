@@ -20,12 +20,14 @@ import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
+import { designPages } from "./artifact-logic";
 import { ContextDialog } from "./chat-message";
 import { type ChatMessage, EmployeeChat } from "./employee-chat";
 import { MODE_LABELS, nextMode } from "./employee-logic";
 import { Confirm, Page } from "./org-kit";
 import { boardOnlyReason, lastRunOf, usageTotals } from "./run-logic";
 import {
+  DesignPagesSection,
   FilesWritten,
   type PropertiesDock,
   PropertiesPanel,
@@ -341,6 +343,7 @@ function TaskDetails({ dock, task, conversationId }: { dock: PropertiesDock; tas
   const feed = useMessages(conversationId);
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
   const files = useMemo(() => filesWritten(list), [list]);
+  const designs = useMemo(() => designPages(list), [list]);
   const usage = useMemo(() => usageTotals(list), [list]);
   const subtasks = useMemo(() => subtasksOf(tasks.data ?? [], task.id), [tasks.data, task.id]);
   const project = projects.data?.find((p) => p.id === task.project_id);
@@ -388,6 +391,7 @@ function TaskDetails({ dock, task, conversationId }: { dock: PropertiesDock; tas
         </SideSection>
       ) : null}
       <SubagentsAtWork conversationId={conversationId} live={Boolean(task.live_run)} askedBy={name} />
+      <DesignPagesSection pages={designs} />
       <FilesWritten files={files} />
       <RunGuidelines runId={lastRunOf(list)} />
     </PropertiesPanel>
