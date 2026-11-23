@@ -125,6 +125,33 @@ pub fn ensure_worktree(repo: &Path, branch: &str, worktree: &Path) -> Result<(),
     }
 }
 
+/// Put the project's folder on a work session's own branch (feature `session_own_branch`):
+/// nothing when it is on it already; otherwise the branch is checked out as it is, or made
+/// from what the folder has checked out. `busy`: another run works in the folder now. The
+/// folder is changed only when nobody else works in it and it has no uncommitted changes,
+/// so a checkout never moves someone else's work or carries it along.
+pub fn ensure_own_branch(repo: &Path, branch: &str, busy: bool) -> Result<(), String> {
+    let _one = lock();
+    let head = ok(repo, &["symbolic-ref", "--quiet", "--short", "HEAD"]).ok();
+    if head.as_deref() == Some(branch) {
+        return Ok(());
+    }
+    let on = head.unwrap_or_else(|| "a detached HEAD".to_owned());
+    if busy {
+        return Err(format!("another run works in the project's folder now (on {on}); send your message again when it is done, or start the session in a worktree of its own"));
+    }
+    match ok(repo, &["status", "--porcelain", "--untracked-files=no"]) {
+        Ok(changes) if changes.is_empty() => {}
+        Ok(_) => return Err(format!("the project's folder has uncommitted changes on {on}; commit or stash them first, or start the session in a worktree of its own")),
+        Err(e) => return Err(e),
+    }
+    if branch_exists(repo, branch) {
+        ok(repo, &["switch", "--no-guess", branch]).map(drop)
+    } else {
+        ok(repo, &["switch", "-c", branch]).map(drop)
+    }
+}
+
 /// Merge a quick task's branch into the project's main (`--no-ff`, the ticket's number in
 /// the message). Every failure leaves main as it was.
 pub fn merge(repo: &Path, branch: &str, message: &str) -> MergeOutcome {
@@ -215,7 +242,8 @@ pub fn merge_message(repo: &QuickRepo) -> String {
 }
 
 /// Before a run: the worktree of a quick task (when its employee works on it) or of a
-/// work session that asked for one. `Err` says why it could not be made; the run then
+/// work session that asked for one, or the own branch of a work session checked out in
+/// the project's folder. `Err` says why it could not be made; the run then
 /// fails with that reason and never starts without its folder (and so without tools).
 pub(crate) async fn prepare_run(shared: &Arc<Shared>, conversation: Option<aurelius_domain::ConversationId>) -> Result<(), String> {
     let Some(conversation) = conversation else { return Ok(()) };
@@ -234,6 +262,9 @@ pub(crate) async fn prepare_run(shared: &Arc<Shared>, conversation: Option<aurel
             let worktree = std::path::PathBuf::from(worktree);
             if worktree.join(".git").exists() {
                 return Ok(());
+            }
+            if session.own_branch {
+                return own_branch_before_run(shared, conversation, session.project, worktree, branch).await;
             }
             let Some(folder) = folder else { return Err("Aurelius could not make this session's worktree: the project has no folder".into()) };
             let made = blocking(move || ensure_worktree(Path::new(&folder), &branch, &worktree)).await.unwrap_or_else(|| Err("the git work stopped".into()));
@@ -259,6 +290,21 @@ pub(crate) async fn prepare_run(shared: &Arc<Shared>, conversation: Option<aurel
         }
         None => Err("Aurelius could not make the quick task's worktree: the git work stopped".into()),
     }
+}
+
+/// A session on its own branch: check it out in the project's folder (`ensure_own_branch`).
+async fn own_branch_before_run(shared: &Arc<Shared>, conversation: aurelius_domain::ConversationId, project: aurelius_domain::ProjectId, folder: std::path::PathBuf, branch: String) -> Result<(), String> {
+    let store = shared.store().clone();
+    let busy = match blocking(move || store.read(|c| aurelius_storage::work_sessions::others_working_in_folder(c, project, conversation))).await {
+        Some(Ok(busy)) => busy,
+        Some(Err(e)) => return Err(format!("Aurelius could not read who works in the project's folder: {e}")),
+        None => return Err("Aurelius could not read who works in the project's folder".into()),
+    };
+    let done = blocking(move || ensure_own_branch(&folder, &branch, busy)).await.unwrap_or_else(|| Err("the git work stopped".into()));
+    done.map_err(|e| {
+        tracing::warn!(%conversation, error = %e, "could not check out the work session's own branch");
+        format!("Aurelius could not put the project's folder on this session's branch: {e}")
+    })
 }
 
 async fn close(shared: &Arc<Shared>, job: &str, epoch: i64) {

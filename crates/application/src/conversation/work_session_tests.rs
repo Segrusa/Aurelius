@@ -67,7 +67,7 @@ fn setup() -> Setup {
 }
 
 fn start(project: ProjectId, employee: EmployeeId, worktree: bool) -> Command {
-    Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], files: vec![], worktree, run: RunSettings::default(), confirm_secret: false, design: false })
+    Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], files: vec![], worktree, own_branch: false, run: RunSettings::default(), confirm_secret: false, design: false })
 }
 
 fn started(result: CommandResult) -> (ConversationId, aurelius_domain::RunId) {
@@ -163,16 +163,61 @@ fn a_session_starts_with_the_chosen_mode_model_and_effort() {
 
 #[test]
 fn a_sessions_run_is_told_it_is_a_session_and_where_it_works() {
-    let folder = crate::run::plan::work_session_guidance(None, false);
+    let folder = crate::run::plan::work_session_guidance(None, false, false);
     assert!(folder.contains("## This is a work session") && folder.contains("no ticket") && folder.contains("project's folder itself"));
     assert!(!folder.contains("design session"), "a session that is no design");
-    let own = crate::run::plan::work_session_guidance(Some(("/data/worktrees/session-1a2b3c4d", "session/1a2b3c4d")), false);
+    let own = crate::run::plan::work_session_guidance(Some(("/data/worktrees/session-1a2b3c4d", "session/1a2b3c4d")), false, false);
     assert!(own.contains("/data/worktrees/session-1a2b3c4d") && own.contains("session/1a2b3c4d") && own.contains("never merge"));
 }
 
 #[test]
+fn a_session_on_its_own_branch_is_told_to_stay_on_it_in_the_project_folder() {
+    let own = crate::run::plan::work_session_guidance(Some(("/repo/planora", "session/1a2b3c4d")), true, false);
+    assert!(own.contains("project's folder /repo/planora") && own.contains("own branch session/1a2b3c4d") && own.contains("never switch branches"), "{own}");
+    assert!(!own.contains("worktree"), "{own}");
+}
+
+/// `start` on a branch of its own.
+fn start_on_own_branch(project: ProjectId, employee: EmployeeId) -> Command {
+    let mut command = start(project, employee, false);
+    if let Command::StartWorkSession(start) = &mut command {
+        start.own_branch = true;
+    }
+    command
+}
+
+#[test]
+fn a_session_on_its_own_branch_works_in_the_project_folder_on_its_branch() {
+    let s = setup();
+    let (conversation, _) = started(exec_as(&s, Some(s.user), start_on_own_branch(s.repo, s.orion)).unwrap());
+    let session = s.service.store().read(|c| aurelius_storage::work_sessions::of_conversation(c, conversation)).unwrap().unwrap();
+    assert!(session.own_branch);
+    let project_folder = s.repo_folder.to_string_lossy().into_owned();
+    assert_eq!(session.worktree, Some((project_folder.clone(), branch_of(conversation))));
+    let folders = s.service.store().read(|c| aurelius_storage::conversations::work_folders(c, conversation)).unwrap();
+    assert_eq!(folders.first(), Some(&project_folder), "the project's folder itself");
+    let listed = s.service.store().read(|c| aurelius_storage::work_sessions::list(c, s.user, None)).unwrap();
+    assert!(listed.iter().any(|v| v.conversation_id == conversation && v.own_branch && v.branch.as_deref() == Some(branch_of(conversation).as_str())), "{listed:?}");
+}
+
+#[test]
+fn a_branch_of_its_own_needs_a_git_folder_and_goes_not_with_a_worktree() {
+    let s = setup();
+    let refused = exec_as(&s, Some(s.user), start_on_own_branch(s.plain, s.orion)).unwrap_err();
+    assert!(refused.message.contains("branch of its own needs") && refused.message.contains("git repository"), "{}", refused.message);
+    let mut both = start_on_own_branch(s.repo, s.orion);
+    if let Command::StartWorkSession(start) = &mut both {
+        start.worktree = true;
+    }
+    let refused = exec_as(&s, Some(s.user), both).unwrap_err();
+    assert!(refused.message.contains("not both"), "{}", refused.message);
+    let sessions: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'session'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(sessions, 0, "nothing was made");
+}
+
+#[test]
 fn a_design_sessions_run_is_told_to_make_html_pages_and_name_their_paths() {
-    let design = crate::run::plan::work_session_guidance(None, true);
+    let design = crate::run::plan::work_session_guidance(None, false, true);
     assert!(design.contains("## This is a work session") && design.contains("## This is a design session"), "{design}");
     assert!(design.contains("design/<kebab-name>.html") && design.contains("Name the full path"), "{design}");
 }

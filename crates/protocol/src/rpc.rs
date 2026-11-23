@@ -466,6 +466,12 @@ pub mod feature {
     /// `design.list` say which sessions are designs. A client without this feature offers no
     /// Design in New session.
     pub const DESIGN_SESSIONS: &str = "design_sessions";
+    /// A work session on a branch of its own in the project's folder (protocol 5,
+    /// additive): `work_session.start` and `work_session.dispatch` take `own_branch`,
+    /// and `WorkSessionView::own_branch` says a session works so. The daemon checks the
+    /// branch out before each run, never while another run works in the folder or the
+    /// folder has uncommitted changes. A client without this feature does not offer it.
+    pub const SESSION_OWN_BRANCH: &str = "session_own_branch";
 }
 
 /// Every feature this build has.
@@ -528,6 +534,7 @@ pub const FEATURES: &[&str] = &[
     feature::ARTIFACT_DRAFTS,
     feature::DESIGNS,
     feature::DESIGN_SESSIONS,
+    feature::SESSION_OWN_BRANCH,
 ];
 
 /// The answer of `command.applied`.

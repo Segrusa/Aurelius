@@ -1,8 +1,8 @@
 //! Work sessions (feature `work_sessions`): a board member starts one employee in
 //! one project's folder by typing, without a ticket (see
 //! `aurelius_domain::work_session`). This is the database side; the worktree, when
-//! the session asked for one, is made by the daemon before the first run
-//! (`aurelius_daemon::worktrees`).
+//! the session asked for one, is made by the daemon before the first run, and a
+//! branch of its own is checked out by the daemon before each run (`aurelius_daemon::quick`).
 
 use crate::run::events::{Ev, emit};
 use crate::run::queue::queue_run;
@@ -24,6 +24,12 @@ use std::path::{Path, PathBuf};
 
 /// Refused: a worktree needs a project folder that is a git repository.
 pub const WORKTREE_NEEDS_GIT: &str = "A worktree of its own needs a project folder that is a git repository; start the session without one, or set the project's folder.";
+
+/// Refused: a branch of its own needs a project folder that is a git repository.
+pub const OWN_BRANCH_NEEDS_GIT: &str = "A branch of its own needs a project folder that is a git repository; start the session without one, or set the project's folder.";
+
+/// Refused: a session works either in a worktree of its own or on its own branch.
+pub const WORKTREE_OR_OWN_BRANCH: &str = "Choose a worktree of its own or a branch of its own, not both.";
 
 /// Refused: files with the first message of a session in a worktree of its own (that
 /// folder is made only before the first run).
@@ -77,19 +83,20 @@ struct Start<'a> {
     images: &'a [String],
     files: &'a [String],
     worktree: bool,
+    own_branch: bool,
     run: &'a aurelius_domain::task::RunSettings,
     design: bool,
 }
 
 impl CommandService {
     pub(crate) fn start_work_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &StartWorkSession) -> Result<Committed, AppError> {
-        let start = Start { project_id: cmd.project_id, employee: Some(cmd.employee_id), text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, run: &cmd.run, design: cmd.design };
+        let start = Start { project_id: cmd.project_id, employee: Some(cmd.employee_id), text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, own_branch: cmd.own_branch, run: &cmd.run, design: cmd.design };
         self.start_session(ctx, envelope, hash, start)
     }
 
     /// `work_session.dispatch`: as `work_session.start`, and the dispatcher chooses who takes it (`session_dispatch`).
     pub(crate) fn dispatch_work_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &DispatchWorkSession) -> Result<Committed, AppError> {
-        let start = Start { project_id: cmd.project_id, employee: None, text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, run: &cmd.run, design: cmd.design };
+        let start = Start { project_id: cmd.project_id, employee: None, text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, own_branch: cmd.own_branch, run: &cmd.run, design: cmd.design };
         self.start_session(ctx, envelope, hash, start)
     }
 
@@ -99,6 +106,9 @@ impl CommandService {
         };
         let text = aurelius_domain::conversation::validate_employee_message(cmd.text, cmd.images, cmd.files).map_err(domain_error)?;
         let run = cmd.run.validated().map_err(domain_error)?;
+        if cmd.worktree && cmd.own_branch {
+            return Err(domain_error(DomainError::OutOfRange { field: "own_branch".into(), detail: WORKTREE_OR_OWN_BRANCH.into() }));
+        }
         if cmd.worktree && !cmd.files.is_empty() {
             return Err(domain_error(DomainError::OutOfRange { field: "files".into(), detail: FILES_NEED_FOLDER.into() }));
         }
@@ -116,7 +126,7 @@ impl CommandService {
         };
         let uploads = uploaded.as_ref().map(|(_, u)| u.clone()).unwrap_or_default();
         let text_blob = self.store.blobs().put(text.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?;
-        let (project_id, asked, worktree, design) = (cmd.project_id, cmd.employee, cmd.worktree, cmd.design);
+        let (project_id, asked, worktree, own_branch, design) = (cmd.project_id, cmd.employee, cmd.worktree, cmd.own_branch, cmd.design);
         let conversation_id = ConversationId::new();
         let worktree_folder = worktree.then(|| worktree_path(self.store.root(), conversation_id));
         let message_id = MessageId::new();
@@ -148,6 +158,14 @@ impl CommandService {
                 LifecycleStatus::Active => {}
             }
             let worktree = match &worktree_folder {
+                // On its own branch: the "worktree" is the project's folder itself.
+                None if own_branch => {
+                    let project_folder: Option<String> = tx.query_row("SELECT folder FROM projects WHERE id = ?1", [project_id.to_string()], |r| r.get(0)).optional()?.flatten();
+                    match project_folder.filter(|f| crate::ticket::quick::is_git_folder(Path::new(f))) {
+                        Some(folder) => Some((folder, branch_of(conversation_id))),
+                        None => return Ok(Err(domain_error(DomainError::OutOfRange { field: "own_branch".into(), detail: OWN_BRANCH_NEEDS_GIT.into() }))),
+                    }
+                }
                 None => None,
                 Some(folder) => {
                     let project_folder: Option<String> = tx.query_row("SELECT folder FROM projects WHERE id = ?1", [project_id.to_string()], |r| r.get(0)).optional()?.flatten();
@@ -158,7 +176,7 @@ impl CommandService {
                 }
             };
             let title = aurelius_domain::conversation::derive_title(&text);
-            aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str())), dispatch, design)?;
+            aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str())), dispatch, design, own_branch)?;
             if let Some(mode) = run.mode {
                 conv::set_agent_mode(tx, conversation_id, mode)?;
             }
@@ -179,6 +197,9 @@ impl CommandService {
             if let Some((folder, branch)) = &worktree {
                 started["worktree"] = folder.clone().into();
                 started["branch"] = branch.clone().into();
+                if own_branch {
+                    started["own_branch"] = true.into();
+                }
             }
             let (_, mut n) = emit(tx, Ev {
                 aggregate_type: "conversation",

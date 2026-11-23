@@ -140,6 +140,7 @@ impl CommandService {
                 let project: String = tx.query_row("SELECT name FROM projects WHERE id = ?1", [session.project.to_string()], |r| r.get(0))?;
                 let text = first_message(tx, conversation)?.and_then(|(_, key)| key).and_then(|k| read(&k)).unwrap_or_default();
                 let place = match &session.worktree {
+                    Some((_, branch)) if session.own_branch => format!("in the project's folder on its own branch {branch}"),
                     Some((_, branch)) => format!("in a worktree of its own on {branch}"),
                     None => "in the project's folder".to_owned(),
                 };

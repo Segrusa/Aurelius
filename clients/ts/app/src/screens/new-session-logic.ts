@@ -14,6 +14,30 @@ export const SESSIONS_FEATURE = "work_sessions";
 export const SESSION_DISPATCH_FEATURE = "session_dispatch";
 /** The server has design sessions: a session whose employee makes HTML pages (`design`). */
 export const DESIGN_SESSIONS_FEATURE = "design_sessions";
+/** The server lets a session work on a branch of its own in the project's folder. */
+export const OWN_BRANCH_FEATURE = "session_own_branch";
+
+/** Where a session works: the project's folder, a worktree of its own, or its own branch in the project's folder. */
+export type SessionPlace = "folder" | "worktree" | "branch";
+
+const PLACES: { key: SessionPlace; label: string; description: string }[] = [
+  { key: "folder", label: "Project folder", description: "Works in the project's folder itself" },
+  { key: "worktree", label: "Own worktree", description: "A worktree and branch of its own" },
+  {
+    key: "branch",
+    label: "Own branch",
+    description: "A branch of its own, checked out in the project's folder",
+  },
+];
+
+/** The Where menu's choices; Own branch only where the server has `session_own_branch`. */
+export function placeOptions(ownBranch: boolean): { key: SessionPlace; label: string; description: string }[] {
+  return PLACES.filter((p) => p.key !== "branch" || ownBranch);
+}
+
+export function placeLabel(place: SessionPlace): string {
+  return PLACES.find((p) => p.key === place)?.label ?? "Project folder";
+}
 /** The server makes a ticket's title from its description when the title is empty. */
 export const MADE_TITLE_FEATURE = "ticket_made_title";
 
@@ -330,7 +354,7 @@ export function sessionStartParams(
     /** A design session (`design_sessions`). */
     design?: boolean;
   },
-  worktree: boolean,
+  place: SessionPlace,
   confirmSecret: boolean,
 ): MethodParams["work_session.start"] {
   const pick = (value: string) => (value === "default" ? null : value);
@@ -341,7 +365,8 @@ export function sessionStartParams(
     text: start.text.trim(),
     ...(start.images && start.images.length > 0 ? { images: start.images } : {}),
     ...(start.files && start.files.length > 0 ? { files: start.files } : {}),
-    worktree,
+    worktree: place === "worktree",
+    ...(place === "branch" ? { own_branch: true } : {}),
     run: {
       ...(mode ? { mode: mode as AgentMode } : {}),
       model: pick(start.model),
@@ -355,10 +380,10 @@ export function sessionStartParams(
 /** The request of a session the dispatcher gives to someone: a session start without the employee. */
 export function sessionDispatchParams(
   start: Omit<Parameters<typeof sessionStartParams>[0], "employeeId">,
-  worktree: boolean,
+  place: SessionPlace,
   confirmSecret: boolean,
 ): MethodParams["work_session.dispatch"] {
-  const { employee_id: _, ...params } = sessionStartParams({ ...start, employeeId: "" }, worktree, confirmSecret);
+  const { employee_id: _, ...params } = sessionStartParams({ ...start, employeeId: "" }, place, confirmSecret);
   return params;
 }
 

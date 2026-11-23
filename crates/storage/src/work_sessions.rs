@@ -14,8 +14,12 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 pub struct Session {
     pub project: ProjectId,
     pub started_by: UserId,
-    /// `(worktree folder, branch)`; none: the project's folder itself.
+    /// `(worktree folder, branch)`; none: the project's folder itself. With
+    /// `own_branch` the folder is the project's folder.
     pub worktree: Option<(String, String)>,
+    /// It works in the project's folder on its own branch (`migrations/0049`): the
+    /// daemon checks the branch out there instead of making a worktree.
+    pub own_branch: bool,
     /// The dispatcher still chooses who takes it, or chose nobody (`migrations/0044`).
     pub dispatch: Option<SessionDispatch>,
     /// A design session (`migrations/0048`).
@@ -23,7 +27,8 @@ pub struct Session {
 }
 
 /// Make the session's conversation and its row. `employee`: who works in it, or
-/// the dispatcher who chooses (then `dispatch` is `Choosing`).
+/// the dispatcher who chooses (then `dispatch` is `Choosing`). `own_branch`: the
+/// `worktree` folder is the project's folder, where its branch is checked out.
 #[allow(clippy::too_many_arguments)]
 pub fn insert(
     tx: &Transaction<'_>,
@@ -35,6 +40,7 @@ pub fn insert(
     worktree: Option<(&str, &str)>,
     dispatch: Option<SessionDispatch>,
     design: bool,
+    own_branch: bool,
 ) -> Result<(), StorageError> {
     let now = now_ms();
     tx.execute(
@@ -42,30 +48,31 @@ pub fn insert(
         params![id.to_string(), project.to_string(), employee.to_string(), title, now],
     )?;
     tx.execute(
-        "INSERT INTO work_sessions(conversation_id, started_by, worktree, branch, created_at_ms, dispatch, design) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![id.to_string(), started_by.to_string(), worktree.map(|w| w.0), worktree.map(|w| w.1), now, dispatch.map(SessionDispatch::as_str), design],
+        "INSERT INTO work_sessions(conversation_id, started_by, worktree, branch, created_at_ms, dispatch, design, own_branch) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![id.to_string(), started_by.to_string(), worktree.map(|w| w.0), worktree.map(|w| w.1), now, dispatch.map(SessionDispatch::as_str), design, own_branch && worktree.is_some()],
     )?;
     Ok(())
 }
 
-/// project, started_by, worktree, branch, dispatch, design.
-type SessionRow = (String, String, Option<String>, Option<String>, Option<String>, bool);
+/// project, started_by, worktree, branch, dispatch, design, own_branch.
+type SessionRow = (String, String, Option<String>, Option<String>, Option<String>, bool, bool);
 
 /// The session a conversation is, if it is one.
 pub fn of_conversation(conn: &Connection, conversation: ConversationId) -> Result<Option<Session>, StorageError> {
     let row: Option<SessionRow> = conn
         .query_row(
-            "SELECT c.project_id, s.started_by, s.worktree, s.branch, s.dispatch, s.design FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
+            "SELECT c.project_id, s.started_by, s.worktree, s.branch, s.dispatch, s.design, s.own_branch FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
              WHERE s.conversation_id = ?1 AND c.kind = 'session'",
             [conversation.to_string()],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
         )
         .optional()?;
-    let Some((project, started_by, worktree, branch, dispatch, design)) = row else { return Ok(None) };
+    let Some((project, started_by, worktree, branch, dispatch, design, own_branch)) = row else { return Ok(None) };
     Ok(Some(Session {
         project: ProjectId::parse(&project).map_err(bad)?,
         started_by: UserId::parse(&started_by).map_err(bad)?,
         worktree: worktree.zip(branch),
+        own_branch,
         dispatch: dispatch.as_deref().and_then(SessionDispatch::parse),
         design,
     }))
@@ -89,7 +96,7 @@ pub fn list(conn: &Connection, user: UserId, project: Option<ProjectId>) -> Resu
                 s.dispatch,
                 EXISTS(SELECT 1 FROM discussion_reads dr JOIN runs r ON r.conversation_id = dr.conversation_id
                        WHERE dr.user_id = ?1 AND dr.conversation_id = c.id AND r.status IN ('succeeded','failed') AND r.ended_at_ms > dr.read_at_ms),
-                s.design
+                s.design, s.own_branch
          FROM work_sessions s JOIN conversations c ON c.id = s.conversation_id
          JOIN projects p ON p.id = c.project_id JOIN employees e ON e.id = c.employee_id
          WHERE s.started_by = ?1 AND c.kind = 'session' AND c.archived_at_ms IS NULL AND (?2 IS NULL OR c.project_id = ?2)
@@ -111,10 +118,11 @@ pub fn list(conn: &Connection, user: UserId, project: Option<ProjectId>) -> Resu
             r.get::<_, Option<String>>(11)?,
             r.get::<_, bool>(12)?,
             r.get::<_, bool>(13)?,
+            r.get::<_, bool>(14)?,
         ))
     })?;
     rows.map(|row| {
-        let (conversation, project, project_name, employee, employee_name, title, worktree, branch, created_at_ms, last_activity_ms, running, dispatch, ended_unseen, design) = row?;
+        let (conversation, project, project_name, employee, employee_name, title, worktree, branch, created_at_ms, last_activity_ms, running, dispatch, ended_unseen, design, own_branch) = row?;
         let dispatch = dispatch.as_deref().and_then(SessionDispatch::parse);
         // A dispatcher that still chooses is working on it too.
         let running = running || dispatch == Some(SessionDispatch::Choosing);
@@ -133,9 +141,31 @@ pub fn list(conn: &Connection, user: UserId, project: Option<ProjectId>) -> Resu
             dispatch,
             unseen: ended_unseen && !running,
             design,
+            own_branch,
         })
     })
     .collect()
+}
+
+/// Whether a run other than those of the session `except` works in `project`'s folder
+/// now: a run of one of its conversations or tasks (a task's run may be in its
+/// employee's own conversation, so the task decides), but not of a session in a worktree
+/// of its own. A session on its own branch checks out only while this is false, so it
+/// never changes the branch under someone else's run.
+pub fn others_working_in_folder(conn: &Connection, project: ProjectId, except: ConversationId) -> Result<bool, StorageError> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM runs r
+           LEFT JOIN conversations c ON c.id = r.conversation_id
+           LEFT JOIN tasks t ON t.id = r.task_id
+           LEFT JOIN work_sessions s ON s.conversation_id = r.conversation_id
+           WHERE r.status IN ('created','starting','running','waiting','cancelling')
+             AND COALESCE(t.project_id, (SELECT tc.project_id FROM tasks tc WHERE tc.conversation_id = r.conversation_id ORDER BY tc.created_at_ms DESC LIMIT 1), c.project_id) = ?1
+             AND (r.conversation_id IS NULL OR r.conversation_id <> ?2)
+             AND NOT COALESCE(s.worktree IS NOT NULL AND s.own_branch = 0, 0))",
+        params![project.to_string(), except.to_string()],
+        |r| r.get(0),
+    )?)
 }
 
 /// Set where the dispatcher is with a session (none: an employee works in it).

@@ -175,3 +175,57 @@ fn a_sessions_worktree_is_made_on_its_own_branch() {
     ensure_worktree(&repo, "session/1a2b3c4d", &worktree).unwrap();
     assert_eq!(run(&worktree, &["symbolic-ref", "--short", "HEAD"]), "session/1a2b3c4d");
 }
+
+const OWN: &str = "session/1a2b3c4d";
+
+fn branch_in(repo: &Path) -> String {
+    run(repo, &["symbolic-ref", "--short", "HEAD"])
+}
+
+#[test]
+fn an_own_branch_is_made_from_what_the_folder_has_checked_out_and_switched_back_to() {
+    let (_dir, repo, _) = repo();
+    let first = head(&repo);
+    ensure_own_branch(&repo, OWN, false).unwrap();
+    assert_eq!(branch_in(&repo), OWN);
+    assert_eq!(head(&repo), first, "from main as it was");
+    commit_in(&repo, "a.txt", "a\n");
+    let work = head(&repo);
+    // The board member went back to main in between; the next run is on its branch again.
+    run(&repo, &["switch", "--quiet", "main"]);
+    ensure_own_branch(&repo, OWN, false).unwrap();
+    assert_eq!((branch_in(&repo), head(&repo)), (OWN.to_owned(), work), "an existing branch keeps its commits");
+}
+
+#[test]
+fn a_folder_already_on_the_own_branch_is_left_alone_even_when_busy_or_changed() {
+    let (_dir, repo, _) = repo();
+    ensure_own_branch(&repo, OWN, false).unwrap();
+    fs::write(repo.join("readme.md"), "changed\n").unwrap();
+    ensure_own_branch(&repo, OWN, true).unwrap();
+    assert_eq!(fs::read_to_string(repo.join("readme.md")).unwrap(), "changed\n");
+}
+
+#[test]
+fn an_own_branch_is_not_checked_out_while_another_run_works_in_the_folder() {
+    let (_dir, repo, _) = repo();
+    let refused = ensure_own_branch(&repo, OWN, true).unwrap_err();
+    assert!(refused.contains("another run works") && refused.contains("on main"), "{refused}");
+    assert_eq!(branch_in(&repo), "main");
+    assert!(!branch_exists(&repo, OWN), "nothing made");
+}
+
+#[test]
+fn an_own_branch_is_not_checked_out_over_uncommitted_changes() {
+    let (_dir, repo, _) = repo();
+    fs::write(repo.join("readme.md"), "half done\n").unwrap();
+    let refused = ensure_own_branch(&repo, OWN, false).unwrap_err();
+    assert!(refused.contains("uncommitted changes on main"), "{refused}");
+    assert_eq!(branch_in(&repo), "main");
+    assert_eq!(fs::read_to_string(repo.join("readme.md")).unwrap(), "half done\n", "the changes stay");
+    // A new file git does not track yet is no reason to refuse.
+    run(&repo, &["checkout", "--", "readme.md"]);
+    fs::write(repo.join("notes.md"), "mine\n").unwrap();
+    ensure_own_branch(&repo, OWN, false).unwrap();
+    assert_eq!(branch_in(&repo), OWN);
+}

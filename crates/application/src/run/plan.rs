@@ -184,8 +184,9 @@ pub const DESIGN_SESSION_GUIDANCE: &str = "\n\n## This is a design session\nThe 
 /// The section of a work session (feature `work_sessions`): no ticket, the board member
 /// directly, in the project's folder or the session's own worktree. A design session
 /// (`design`) also gets `DESIGN_SESSION_GUIDANCE`.
-pub fn work_session_guidance(worktree: Option<(&str, &str)>, design: bool) -> String {
+pub fn work_session_guidance(worktree: Option<(&str, &str)>, own_branch: bool, design: bool) -> String {
     let place = match worktree {
+        Some((folder, branch)) if own_branch => format!("You work in the project's folder {folder} on your own branch {branch}, which Aurelius checked out for you: commit your changes on that branch yourself; never switch branches, never touch main, never merge and never push unless the board member asks."),
         Some((folder, branch)) => format!("You work only in your own worktree {folder} on the branch {branch}: commit your changes there yourself; never touch the project's main branch or its folder, never merge and never push unless the board member asks."),
         None => "You work in the project's folder itself, on whatever branch it has checked out; commit only when the board member asks.".to_owned(),
     };
@@ -586,7 +587,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                     None => match aurelius_storage::work_sessions::of_conversation(conn, conversation_id)? {
                         Some(session) => {
                             let worktree = session.worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str()));
-                            Some(format!("{}{}", system.unwrap_or_default(), work_session_guidance(worktree, session.design)).trim().to_string())
+                            Some(format!("{}{}", system.unwrap_or_default(), work_session_guidance(worktree, session.own_branch, session.design)).trim().to_string())
                         }
                         None => system,
                     },

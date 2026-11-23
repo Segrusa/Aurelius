@@ -3,7 +3,8 @@
 //! conversation of its own (kind `session`), without a ticket, triage or review.
 //! It works in the project's folder itself, or, when asked, in a worktree of its
 //! own on the branch `session/<last 8 of its id>` that the daemon makes before the first
-//! run. Later messages go in with `chat.send`; `work_session.list` lists them.
+//! run, or in the project's folder on that branch of its own (`own_branch`), which the
+//! daemon checks out before each run. Later messages go in with `chat.send`; `work_session.list` lists them.
 //! With `work_session.dispatch` the dispatcher chooses the employee first.
 
 use crate::task::RunSettings;
@@ -27,6 +28,13 @@ pub struct StartWorkSession {
     /// project folder that is a git repository with a main branch.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub worktree: bool,
+    /// Work in the project's folder itself, on a branch of its own that the daemon
+    /// makes from what the folder has checked out (feature `session_own_branch`). Needs
+    /// a project folder that is a git repository; not with `worktree`. Each run is
+    /// refused while the folder has uncommitted changes on another branch, or while
+    /// another run works in it, because checking out changes the folder for everyone.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own_branch: bool,
     /// Mode, model and effort it starts with (empty: the employee's defaults).
     #[serde(default)]
     pub run: RunSettings,
@@ -57,6 +65,9 @@ pub struct DispatchWorkSession {
     /// See `StartWorkSession::worktree`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub worktree: bool,
+    /// See `StartWorkSession::own_branch`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own_branch: bool,
     /// See `StartWorkSession::run`; it applies to the chosen employee's runs.
     #[serde(default)]
     pub run: RunSettings,
@@ -133,10 +144,15 @@ pub struct WorkSessionView {
     /// replaces it after the first answer.
     pub title: String,
     /// Its own worktree and branch; none when it works in the project's folder.
+    /// With `own_branch` the worktree is the project's folder itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// It works in the project's folder on its own `branch` (feature
+    /// `session_own_branch`); older servers leave it out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub own_branch: bool,
     pub created_at_ms: i64,
     pub last_activity_ms: i64,
     /// Whether a run of it is queued or working now.
@@ -247,7 +263,7 @@ mod tests {
         let employee = EmployeeId::new();
         let json = serde_json::json!({ "project_id": project, "employee_id": employee, "text": "fix the login" });
         let start: StartWorkSession = serde_json::from_value(json).unwrap();
-        assert!(!start.worktree && start.images.is_empty() && start.run.is_empty() && !start.confirm_secret);
+        assert!(!start.worktree && !start.own_branch && start.images.is_empty() && start.run.is_empty() && !start.confirm_secret);
     }
 
     #[test]
