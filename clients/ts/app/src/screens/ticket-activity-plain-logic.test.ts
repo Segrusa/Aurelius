@@ -8,6 +8,7 @@ import {
   cut,
   factsOf,
   firstSentence,
+  holdNew,
   intentOf,
   minutes,
   nowSentence,
@@ -323,6 +324,14 @@ describe("workBlocks", () => {
 
   it("leaves out answers without calls and without words", () => {
     expect(workBlocks([work([answer("m1", 100, "", [])])])).toEqual([]);
+  });
+});
+
+describe("holdNew", () => {
+  it("keeps the rows the reader saw and counts the new ones", () => {
+    const rows = [{ id: "new" }, { id: "b" }, { id: "a" }];
+    expect(holdNew(rows, (r) => r.id, new Set(["a", "b"]))).toEqual({ shown: [{ id: "b" }, { id: "a" }], fresh: 1 });
+    expect(holdNew(rows, (r) => r.id, null)).toEqual({ shown: rows, fresh: 0 });
   });
 });
 

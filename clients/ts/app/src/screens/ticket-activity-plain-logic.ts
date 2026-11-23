@@ -387,6 +387,8 @@ export function optionLabel(label: string): { label: string; pick: boolean } {
 export interface TaskWork {
   taskId: string;
   who: string | null;
+  /** The employee's id, for the colour of its mark. */
+  employeeId?: string | null;
   messages: readonly Pick<MessageView, "id" | "role" | "run_id" | "text" | "activity" | "created_at_ms" | "update">[];
   /** What streams in the task's conversation now; it is newer than the message it belongs to. */
   live: readonly { message_id: string; run_id: string; text: string; activity: ActivityView[] }[];
@@ -397,6 +399,7 @@ export interface WorkBlock {
   id: string;
   taskId: string;
   who: string | null;
+  employeeId: string | null;
   /** When it started and when its latest answer was; a block that only streams is +Infinity. */
   atMs: number;
   endMs: number;
@@ -464,6 +467,7 @@ export function workBlocks(tasks: readonly TaskWork[]): WorkBlock[] {
           id: `${answer.id}:${key}`,
           taskId: t.taskId,
           who: t.who,
+          employeeId: t.employeeId ?? null,
           atMs: answer.atMs,
           endMs: answer.atMs,
           title: todo?.text ?? "",
@@ -552,6 +556,20 @@ export function stepResult(a: ActivityView): { text: string; tone: "plain" | "go
   }
   if (intentOf(a) === "test" || intentOf(a) === "build") return { text: "passed", tone: "good" };
   return null;
+}
+
+/**
+ * While the reader is scrolled away from the top of a newest-first list, its rows stay as they
+ * were (with fresh content) and new rows are only counted, so nothing jumps under the reader.
+ */
+export function holdNew<T>(
+  rows: readonly T[],
+  idOf: (row: T) => string,
+  held: ReadonlySet<string> | null,
+): { shown: T[]; fresh: number } {
+  if (!held) return { shown: [...rows], fresh: 0 };
+  const shown = rows.filter((r) => held.has(idOf(r)));
+  return { shown, fresh: rows.length - shown.length };
 }
 
 /** Whether a message of the ticket's talk belongs to an employee picked in the Timeline. */
