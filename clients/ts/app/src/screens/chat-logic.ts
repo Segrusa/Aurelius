@@ -866,6 +866,16 @@ export function mentionsMe(text: string, me: string | null): boolean {
 }
 
 /**
+ * The line under a queued message: why its answer has not started. A server that does not say
+ * (`queued_for` left out) means it waits for the answer before it.
+ */
+export function queuedLine(m: Pick<MessageView, "queued_for">): string {
+  return m.queued_for === "machine"
+    ? "Waiting · the machine is busy, starts when there is room"
+    : "Waiting · sends after the current answer";
+}
+
+/**
  * The line under an answer that is still being written. Compacting comes first: while
  * the context is summarised nothing else moves, and it can take minutes.
  */

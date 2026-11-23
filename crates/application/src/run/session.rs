@@ -771,6 +771,7 @@ mod tests {
             files: vec![],
             uploads: vec![],
             queued: false,
+            queued_for: None,
             usage: None,
             mode: None,
             author_user: None,

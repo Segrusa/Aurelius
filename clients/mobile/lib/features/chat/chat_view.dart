@@ -80,6 +80,11 @@ FileScope? chatFileScope(BuildContext context) {
   }
 }
 
+/// The line under a queued message: why its answer has not started. A server that does not
+/// say (`queuedFor` left out) means it waits for the answer before it. Same words as the desktop.
+String queuedLine(String? queuedFor) =>
+    queuedFor == 'machine' ? 'Waiting · the machine is busy, starts when there is room' : 'Waiting · sends after the current answer';
+
 /// Whether a long press on [message] offers Copy link (§6.1): the server can
 /// find it again (`message_locate`, only in a channel or a ticket's discussion),
 /// and it is a finished message of someone, not a queued or streaming one.
@@ -988,7 +993,7 @@ class _UserBubble extends StatelessWidget {
                 children: [
                   Padding(
                     padding: const EdgeInsets.only(right: 2),
-                    child: Text('Waiting · sends after the current answer', style: TextStyle(fontSize: 12, color: Tokens.muted)),
+                    child: Text(queuedLine(message?.queuedFor), style: TextStyle(fontSize: 12, color: Tokens.muted)),
                   ),
                   _GlassPill(key: const Key('queued-send-now'), label: 'Send now', accent: true, onTap: () => context.read<ChatBloc>().add(ChatQueuedSentNow(queuedId!))),
                   _GlassPill(key: const Key('queued-delete'), label: 'Delete', danger: true, onTap: () => context.read<ChatBloc>().add(ChatQueuedDeleted(queuedId!))),

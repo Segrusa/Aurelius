@@ -3762,6 +3762,12 @@ export interface MessageView {
    */
   queued: boolean;
   /**
+   * Why a queued message waits when it is not for the answer before it:
+   * `machine` (the machine's load holds new runs; `QUEUED_FOR_MACHINE`). Left
+   * out otherwise and by older servers, which read as "after the current answer".
+   */
+  queued_for?: string | null;
+  /**
    * The reactions on the message (feature `chat_reactions`), one entry per
    * emoji, in the order each emoji was first used. Left out when there are
    * none and by older servers.

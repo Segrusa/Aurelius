@@ -20,6 +20,7 @@ const STOP_GRACE: Duration = Duration::from_secs(10);
 /// terminal outcome. Every write is fenced by the lease epoch.
 pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     let epoch = job.lease_epoch;
+    let claimed_at = tokio::time::Instant::now();
     let mut driver = super::Driver::new(&shared, &job.id, epoch);
     let s = shared.clone();
     let payload = job.payload.clone();
@@ -243,7 +244,10 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
         map.insert(plan.run_id, handle.canceller());
     }
     match blocking(move || s.service.start_chat_run(&p, epoch)).await {
-        Some(Ok(Some(notices))) => shared.publish(notices),
+        Some(Ok(Some(notices))) => {
+            tracing::info!(run = %plan.run_id, conversation = %plan.conversation_id, prepare_ms = claimed_at.elapsed().as_millis() as u64, "chat run started");
+            shared.publish(notices);
+        }
         Some(Ok(None)) => {
             // Lease lost before we started: abandon this turn without writing.
             handle.canceller().cancel();
@@ -290,6 +294,8 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
     let mut open_tools: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut last_progress = tokio::time::Instant::now();
     let mut last_draft: Option<tokio::time::Instant> = None;
+    let started_at = tokio::time::Instant::now();
+    let mut first_output = true;
     let outcome = loop {
         let limit = if open_tools.is_empty() { idle } else { idle * TOOL_IDLE_FACTOR };
         let next = tokio::select! {
@@ -336,6 +342,10 @@ pub(super) async fn run_chat(shared: Arc<Shared>, job: queries::JobRow) {
                 handle.canceller().cancel();
                 return;
             }
+        }
+        if first_output && matches!(event, RuntimeEvent::Progress { .. } | RuntimeEvent::TextDelta(_) | RuntimeEvent::Activity(_)) {
+            first_output = false;
+            tracing::info!(run = %plan.run_id, first_output_ms = started_at.elapsed().as_millis() as u64, "chat run first output");
         }
         match event {
             RuntimeEvent::Started => {}

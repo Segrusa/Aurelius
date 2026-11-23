@@ -354,6 +354,20 @@ pub fn claim(tx: &Transaction<'_>, items: &[String], run: RunId) -> Result<(), S
     Ok(())
 }
 
+/// When the oldest of `items` was put in the mailbox: how long a run waited for its
+/// start is read from it (the daemon log's timing).
+pub fn queued_since(conn: &Connection, items: &[String]) -> Result<Option<i64>, StorageError> {
+    let mut oldest: Option<i64> = None;
+    for item in items {
+        let at: Option<i64> = conn.query_row("SELECT created_at_ms FROM employee_inbox WHERE id = ?1", [item], |r| r.get(0)).optional()?;
+        oldest = match (oldest, at) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+    }
+    Ok(oldest)
+}
+
 /// The run ended: what it answered is done.
 pub fn finish_run(tx: &Transaction<'_>, run: RunId) -> Result<(), StorageError> {
     tx.execute("UPDATE employee_inbox SET state = 'done' WHERE run_id = ?1 AND state = 'claimed'", [run.to_string()])?;
@@ -408,6 +422,22 @@ pub fn is_queued(conn: &Connection, run: RunId) -> Result<bool, StorageError> {
 /// The marking of a group-chat wake, from an item (cancelled or queued) of `run`.
 pub fn group_marking(conn: &Connection, run: RunId) -> Result<Option<String>, StorageError> {
     Ok(conn.query_row("SELECT json_extract(payload_json, '$.group') FROM employee_inbox WHERE run_id = ?1 ORDER BY rowid DESC LIMIT 1", [run.to_string()], |r| r.get(0)).optional()?.flatten())
+}
+
+/// The messages answered by queued items of `conversation` that the machine's load holds back.
+pub fn held_by_machine_in(conn: &Connection, conversation: ConversationId) -> Result<Vec<String>, StorageError> {
+    if !conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'employee_inbox')", [], |r| r.get::<_, bool>(0))? {
+        return Ok(Vec::new());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT json_extract(payload_json, '$.reply_to') FROM employee_inbox WHERE conversation_id = ?1 AND state = 'queued' AND last_error_code LIKE 'load:%'",
+    )?;
+    let rows = stmt.query_map([conversation.to_string()], |r| r.get::<_, Option<String>>(0))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.extend(row?);
+    }
+    Ok(out)
 }
 
 /// Queued items of a conversation, the id its run will have with the message it answers.

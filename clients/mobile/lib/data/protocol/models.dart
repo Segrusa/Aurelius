@@ -11009,6 +11009,7 @@ final class MessageView {
     required this.ordinal,
     this.producedBy,
     required this.queued,
+    this.queuedFor,
     this.reactions = const [],
     this.replyTo,
     required this.role,
@@ -11071,6 +11072,10 @@ final class MessageView {
   /// answer running in its conversation. Such a message can be deleted
   /// (`DeleteQueuedMessage`) or sent now (`SendQueuedNow`). Left out when false.
   final bool queued;
+  /// Why a queued message waits when it is not for the answer before it:
+  /// `machine` (the machine's load holds new runs; `QUEUED_FOR_MACHINE`). Left
+  /// out otherwise and by older servers, which read as "after the current answer".
+  final String? queuedFor;
   /// The reactions on the message (feature `chat_reactions`), one entry per
   /// emoji, in the order each emoji was first used. Left out when there are
   /// none and by older servers.
@@ -11140,6 +11145,7 @@ final class MessageView {
     ordinal: (json['ordinal'] as num).toInt(),
     producedBy: (json['produced_by'] == null ? null : (json['produced_by'] as String)),
     queued: (json['queued'] as bool),
+    queuedFor: (json['queued_for'] == null ? null : (json['queued_for'] as String)),
     reactions: (json['reactions'] == null ? const [] : (json['reactions'] as List<dynamic>).map((x0) => ReactionView.fromJson(x0 as Map<String, dynamic>)).toList()),
     replyTo: (json['reply_to'] == null ? null : (json['reply_to'] as String)),
     role: MessageRole.fromJson(json['role'] as String),
@@ -11176,6 +11182,7 @@ final class MessageView {
     'ordinal': ordinal,
     if (producedBy != null) 'produced_by': producedBy,
     'queued': queued,
+    if (queuedFor != null) 'queued_for': queuedFor,
     'reactions': reactions.map((x0) => x0.toJson()).toList(),
     if (replyTo != null) 'reply_to': replyTo,
     'role': role.toJson(),

@@ -26,6 +26,7 @@ import {
   newMessagesAt,
   planTitle,
   prefill,
+  queuedLine,
   quickReplies,
   reactionOn,
   readOnlyBar,
@@ -377,6 +378,16 @@ describe("@Everyone", () => {
       "Wakes 1 employee and tells 1 board member",
     );
     expect(audienceLine({ employees: 0, paused: 2, board_members: 0 })).toBe("Wakes no employees (2 paused)");
+  });
+});
+
+describe("queuedLine", () => {
+  it("says the machine holds it when the server says so", () => {
+    expect(queuedLine({ queued_for: "machine" })).toBe("Waiting · the machine is busy, starts when there is room");
+  });
+  it("waits for the current answer otherwise, also on a server that does not say", () => {
+    expect(queuedLine({})).toBe("Waiting · sends after the current answer");
+    expect(queuedLine({ queued_for: null })).toBe("Waiting · sends after the current answer");
   });
 });
 

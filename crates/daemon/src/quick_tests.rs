@@ -229,3 +229,13 @@ fn an_own_branch_is_not_checked_out_over_uncommitted_changes() {
     ensure_own_branch(&repo, OWN, false).unwrap();
     assert_eq!(branch_in(&repo), OWN);
 }
+
+#[test]
+fn an_own_branch_session_in_the_project_folder_still_gets_its_branch_checked_out() {
+    let (_dir, repo, _) = repo();
+    // The stored worktree of an own-branch session is the project's folder, which has `.git`.
+    assert_eq!(session_folder_step(true, &repo), SessionFolderStep::OwnBranch);
+    assert_eq!(session_folder_step(false, &repo), SessionFolderStep::Ready);
+    let missing = repo.parent().unwrap().join("data/worktrees/session-1a2b3c4d");
+    assert_eq!(session_folder_step(false, &missing), SessionFolderStep::MakeWorktree);
+}

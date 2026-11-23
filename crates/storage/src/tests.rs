@@ -217,6 +217,29 @@ fn claims_respect_per_conversation_and_global_limits() {
 }
 
 #[test]
+fn a_load_hold_also_holds_background_model_jobs_but_not_triage() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    for (id, kind) in [("title", "ticket.title"), ("extract", "memory.extract"), ("triage", "ticket.triage"), ("run", "run.chat")] {
+        store
+            .write(move |tx| {
+                let appended = append(tx, event(id, 1, &format!("k-{id}")))?;
+                events::insert_job(tx, id, kind, appended.id, &format!("d-{id}"), &serde_json::json!({ "conversation_id": id }))
+            })
+            .unwrap();
+    }
+    let now = now_ms() + 1;
+    let held = || store.write(move |tx| queries::claim_due_job_with(tx, "w", now, 45_000, 0, false)).unwrap().map(|j| j.id);
+
+    // Held by the load: only the triage, which starts someone's work, goes.
+    assert_eq!(held().as_deref(), Some("triage"));
+    assert_eq!(held(), None, "titles, memory and runs wait for the machine");
+    // No hold any more: the background jobs go again.
+    let free = store.write(move |tx| queries::claim_due_job_with(tx, "w", now, 45_000, 0, true)).unwrap().map(|j| j.id);
+    assert!(matches!(free.as_deref(), Some("title" | "extract")), "{free:?}");
+}
+
+#[test]
 fn task_starts_count_as_runs_and_a_zero_limit_holds_runs_only() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
