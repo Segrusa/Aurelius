@@ -9,13 +9,14 @@ use serde_json::{Value, json};
 /// down by Claude anyway; this keeps them small and fast).
 const MAX_EDGE: u32 = 1568;
 const MAX_PIXELS: u32 = 1_150_000;
-const JPEG_QUALITY: u8 = 80;
+/// JPEG quality of every shot sent to the model (screenshots and rendered designs).
+pub const JPEG_QUALITY: u8 = 80;
 
 /// Where screenshots are kept under the data folder; the daemon serves them
 /// from here (`screenshot.get`), so it must match the protocol's `SCREENSHOT_DIR`.
 const SCREENSHOT_DIR: &str = "screenshots";
 
-/// A screenshot ready for MCP: a caption plus the JPEG.
+/// A screenshot (or a rendered design) ready for MCP: a caption plus the JPEG.
 pub struct Shot {
     pub caption: String,
     pub jpeg: Vec<u8>,

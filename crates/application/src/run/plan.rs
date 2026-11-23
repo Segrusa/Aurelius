@@ -160,6 +160,9 @@ pub struct ChatRunPlan {
     pub design: DesignLinks,
     /// The run is offered Claude Code's Artifact tool for those links.
     pub artifact_tool: bool,
+    /// The run answers in a design session (feature `design_sessions`) with a work folder: its
+    /// bridge offers `view_design`, which renders its pages and needs no question.
+    pub design_session: bool,
 }
 
 /// The answer may end with ready-made replies (chats with the user).
@@ -179,7 +182,7 @@ pub fn quick_task_guidance(number: u32, worktree: &std::path::Path) -> String {
 
 /// What an employee is told in a design session (feature `design_sessions`), after the
 /// work session's section: how to make the pages so the app keeps and shows them.
-pub const DESIGN_SESSION_GUIDANCE: &str = "\n\n## This is a design session\nThe board member asked for a design: make it as HTML pages and show them, not as a description. Each page is one self-contained HTML file in design/<kebab-name>.html in your work folder: <!doctype html>, a short <title> that names the page for the board member (e.g. <title>Pricing page</title>; the app shows it instead of the file name), all CSS in <style> and all JS in inline <script>, nothing loaded from the internet (images as data: URIs or inline SVG, system fonts). One file per page; to change a page, overwrite the same file and keep its name. Name the full path of every page you made or changed in your answer: Aurelius keeps it with your answer and the board member sees it beside the conversation. Follow the project's design system, make it responsive, and use realistic content.";
+pub const DESIGN_SESSION_GUIDANCE: &str = "\n\n## This is a design session\nThe board member asked for a design: make it as HTML pages and show them, not as a description. Each page is one self-contained HTML file in design/<kebab-name>.html in your work folder: <!doctype html>, a short <title> that names the page for the board member (e.g. <title>Pricing page</title>; the app shows it instead of the file name), all CSS in <style> and all JS in inline <script>, nothing loaded from the internet (images as data: URIs or inline SVG, system fonts). One file per page; to change a page, overwrite the same file and keep its name. After you write or change a page, look at it with view_design (no question needed): check it at the desktop width and at a phone width (390), and fix what looks wrong before you answer. Name the full path of every page you made or changed in your answer: Aurelius keeps it with your answer and the board member sees it beside the conversation. Follow the project's design system, make it responsive, and use realistic content.";
 
 /// The section of a work session (feature `work_sessions`): no ticket, the board member
 /// directly, in the project's folder or the session's own worktree. A design session
@@ -564,6 +567,12 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                     },
                     _ => false,
                 };
+                // A work session (outside a task); a design session renders its own pages (view_design).
+                let work_session = match own_task {
+                    Some(_) => None,
+                    None => aurelius_storage::work_sessions::of_conversation(conn, conversation_id)?,
+                };
+                let design_session = work_session.as_ref().is_some_and(|s| s.design) && work.is_some();
                 let system = match own_task {
                     Some(task) => {
                         let mut text = system.unwrap_or_default();
@@ -584,7 +593,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                         }
                         Some(text.trim().to_string())
                     }
-                    None => match aurelius_storage::work_sessions::of_conversation(conn, conversation_id)? {
+                    None => match &work_session {
                         Some(session) => {
                             let worktree = session.worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str()));
                             Some(format!("{}{}", system.unwrap_or_default(), work_session_guidance(worktree, session.own_branch, session.design)).trim().to_string())
@@ -862,7 +871,7 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                 // Its answer in the group shows the mode it started in.
                 let group = conv::group_run(conn, run_id)?.map(|g| conv::GroupRun { mode: Some(mode), ..g });
                 let guidelines = guidelines.run;
-                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, tool_policy, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), management_mode, session, group, discussion, testing, report, guidelines, design, artifact_tool }))
+                Ok(Some(ChatRunPlan { config, run_id, conversation_id, message_id, reply_to, turns, system, notices: vec![], manifest, context_error, work, access, tool_policy, browser, browser_session, playwright, screen, project_assistant: project_conv.is_some(), management_mode, session, group, discussion, testing, report, guidelines, design, artifact_tool, design_session }))
             })
             .map_err(storage_error)
     }

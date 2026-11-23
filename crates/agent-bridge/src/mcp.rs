@@ -23,6 +23,9 @@
 //! `assign_ticket` and `recall`; `--session-dispatch` (the dispatcher of a work
 //! session choosing who takes it) only `assign_session` and `recall`.
 //!
+//! `--design <folder>` (a design session) adds `view_design`: one of its own HTML pages in
+//! that folder, rendered headless and shown to the agent; it asks nobody (see `design.rs`).
+//!
 //! It also gives the agent eyes: `screenshot` and `list_windows`. Claude Code
 //! never asks for these; the bridge asks the service itself, which allows them
 //! at once when the employee's Screen is on and otherwise puts the question in
@@ -55,6 +58,8 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
     let testing = args.iter().any(|a| a == "--testing");
     // The owner's run of a ticket's main task: report_ready.
     let report = args.iter().any(|a| a == "--report");
+    // A design session: view_design renders the pages in this folder (its work folder).
+    let design = arg("--design").map(PathBuf::from);
     // What this employee's tool list switches off.
     let without: Vec<String> = arg("--without").map(|list| list.split(',').map(str::to_owned).collect()).unwrap_or_default();
     let mut client: Option<BridgeClient> = None;
@@ -73,13 +78,16 @@ pub async fn serve(args: &[String]) -> anyhow::Result<()> {
             "ping" => Ok(json!({})),
             "tools/list" => {
                 let mut tools = if session_dispatch { session_dispatch_tool_definitions() } else if triage { triage_tool_definitions() } else { tool_definitions(project, set_mode, discussion, testing, report) };
+                if design.is_some() && !session_dispatch && !triage {
+                    tools.push(crate::design::tool_definition());
+                }
                 switch_off(&mut tools, &without);
                 Ok(json!({ "tools": tools }))
             }
             "tools/call" => {
                 let name = msg["params"]["name"].as_str().unwrap_or("").to_owned();
                 let args = msg["params"]["arguments"].clone();
-                let call = if without.contains(&name) { None } else if session_dispatch { session_dispatch_call(&mut client, &root, run_id, &name, args).await } else if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing, report }, &mut screen_granted, &name, args).await };
+                let call = if without.contains(&name) { None } else if let (Some(folder), "view_design", false, false) = (&design, name.as_str(), session_dispatch, triage) { Some(design_call(folder, args).await) } else if session_dispatch { session_dispatch_call(&mut client, &root, run_id, &name, args).await } else if triage { triage_call(&mut client, &root, run_id, &name, args).await } else { call_tool(&mut client, &root, run_id, Offered { project, set_mode, discussion, testing, report }, &mut screen_granted, &name, args).await };
                 match call {
                     Some(result) => Ok(result),
                     None => Err(json!({ "code": -32601, "message": "Method not found" })),
@@ -501,6 +509,29 @@ async fn connected<'a>(client: &'a mut Option<BridgeClient>, root: &Path) -> Res
 
 fn reply(ok: bool, text: String) -> Value {
     json!({ "content": [{ "type": "text", "text": text }], "isError": !ok })
+}
+
+/// `view_design`: render one of the session's pages and show it; no question (only its own file).
+async fn design_call(folder: &Path, args: Value) -> Value {
+    let failed = |text: String| json!({ "content": [{ "type": "text", "text": text }], "isError": true });
+    let raw = args["path"].as_str().unwrap_or("").to_owned();
+    let file = match crate::design::design_file(folder, &raw) {
+        Ok(file) => file,
+        Err(e) => return failed(e),
+    };
+    let (width, height) = crate::design::viewport(args["width"].as_u64(), args["height"].as_u64());
+    let shown_as = raw.trim().to_owned();
+    match tokio::task::spawn_blocking(move || crate::design::render(&file, &shown_as, width, height)).await {
+        Ok(Ok(shot)) => {
+            use base64::Engine;
+            json!({ "content": [
+                { "type": "text", "text": shot.caption },
+                { "type": "image", "data": base64::engine::general_purpose::STANDARD.encode(&shot.jpeg), "mimeType": "image/jpeg" }
+            ] })
+        }
+        Ok(Err(e)) => failed(format!("Could not render the page: {e}")),
+        Err(e) => failed(format!("Could not render the page: {e}")),
+    }
 }
 
 /// A screen tool: ask first unless already allowed in this run, then look.
