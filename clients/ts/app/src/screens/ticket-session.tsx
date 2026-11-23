@@ -271,8 +271,7 @@ function PageTop({ t }: { t: TicketView }) {
 function ticketPeople(tasks: readonly TaskView[]): Person[] {
   const out: Person[] = [];
   for (const task of tasks)
-    if (task.employee_name && !out.some((p) => p.name === task.employee_name))
-      out.push({ name: task.employee_name, id: task.employee_id ?? null });
+    if (task.employee_name && !out.some((p) => p.name === task.employee_name)) out.push({ name: task.employee_name });
   return out;
 }
 

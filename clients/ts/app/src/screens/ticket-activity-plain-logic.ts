@@ -387,8 +387,6 @@ export function optionLabel(label: string): { label: string; pick: boolean } {
 export interface TaskWork {
   taskId: string;
   who: string | null;
-  /** The employee's id, for the colour of its mark. */
-  employeeId?: string | null;
   messages: readonly Pick<MessageView, "id" | "role" | "run_id" | "text" | "activity" | "created_at_ms" | "update">[];
   /** What streams in the task's conversation now; it is newer than the message it belongs to. */
   live: readonly { message_id: string; run_id: string; text: string; activity: ActivityView[] }[];
@@ -399,7 +397,6 @@ export interface WorkBlock {
   id: string;
   taskId: string;
   who: string | null;
-  employeeId: string | null;
   /** When it started and when its latest answer was; a block that only streams is +Infinity. */
   atMs: number;
   endMs: number;
@@ -467,7 +464,6 @@ export function workBlocks(tasks: readonly TaskWork[]): WorkBlock[] {
           id: `${answer.id}:${key}`,
           taskId: t.taskId,
           who: t.who,
-          employeeId: t.employeeId ?? null,
           atMs: answer.atMs,
           endMs: answer.atMs,
           title: todo?.text ?? "",

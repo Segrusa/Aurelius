@@ -534,7 +534,8 @@ function PlanCard({
   t: TicketView;
 }) {
   const todos = live.todos;
-  const segs = segments(todos, ask !== null);
+  // On a Done ticket nothing is at work any more, whatever the last list said.
+  const segs = segments(todos, ask !== null).map((x) => (done && x === "now" ? "open" : x));
   const who = root.employee_name ?? "The owner";
   const said = live.latest ? nowSentence(live.latest.text, live.latest.activity) : null;
   const meta = [
@@ -633,7 +634,7 @@ function CardTop({ task, state, extra }: { task: TaskView; state: CardState; ext
   const name = task.employee_name ?? "An employee";
   return (
     <div {...stylex.props(styles.top)}>
-      <Mark letter={initial(name)} color={markColor(task.employee_id ?? name)} size={28} radius={8} />
+      <Mark letter={initial(name)} color={markColor(name)} size={28} radius={8} />
       <div>
         <div {...stylex.props(styles.name)}>{name}</div>
         {e ? <div {...stylex.props(styles.role)}>{e.title ?? e.role}</div> : null}
@@ -792,7 +793,7 @@ function DoneRow({ card, now, onTimeline }: { card: Card; now: number; onTimelin
   const said = firstSentence(card.task.result) ?? card.task.title;
   return (
     <div {...stylex.props(styles.doneRow)}>
-      <Mark letter={initial(name)} color={markColor(card.task.employee_id ?? name)} size={20} radius={5} />
+      <Mark letter={initial(name)} color={markColor(name)} size={20} radius={5} />
       <span {...stylex.props(styles.doneText)}>
         <b {...stylex.props(styles.taskName)}>{name}</b> · {said}
       </span>
@@ -856,7 +857,7 @@ function AskBox({ ask, who, t, now }: { ask: Ask; who: string; t: TicketView; no
         at={ask.approval.requested_at_ms}
         now={now}
         title={only.text}
-        text={only.header && only.header !== only.text ? only.header : null}
+        tag={only.header && only.header !== only.text ? only.header : null}
         options={only.options}
         send={approvalAnswer(ask.approval, only.text)}
       />
@@ -897,7 +898,7 @@ function QuestionBox({
   at,
   now,
   title,
-  text = null,
+  tag = null,
   markdown = null,
   options,
   send,
@@ -906,7 +907,8 @@ function QuestionBox({
   at: number;
   now: number;
   title: string | null;
-  text?: string | null;
+  /** The question's short tag ("Build"), beside the label. */
+  tag?: string | null;
   markdown?: string | null;
   options: { label: string; description: string }[];
   send: Send;
@@ -943,9 +945,10 @@ function QuestionBox({
   const offline = status !== "online";
   return (
     <div {...stylex.props(styles.q)}>
-      <div {...stylex.props(styles.qLabel)}>{`? Question for you · ${ago(now - at)}`}</div>
+      <div {...stylex.props(styles.qLabel)}>
+        {["? Question for you", tag, ago(now - at)].filter(Boolean).join(" · ")}
+      </div>
       {title ? <h3 {...stylex.props(styles.qTitle)}>{title}</h3> : null}
-      {text ? <p {...stylex.props(styles.qText)}>{text}</p> : null}
       {markdown ? (
         <div {...stylex.props(styles.qText)}>
           <Markdown text={markdown} />

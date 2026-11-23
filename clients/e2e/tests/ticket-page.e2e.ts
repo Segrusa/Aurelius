@@ -1,15 +1,16 @@
-// The ticket page (ticket #74): the description and what every task does now above the talk, the
-// talk as Activity with a filter, what runs this second above the composer, and the plan of the main
-// task with its delegations on the right. A ticket with a main task and a delegation at work at once,
-// against a scripted server; the screenshot goes into `AURELIUS_SHOTS`, else target/ticket-74.
+// The ticket page after the plain design (ticket #83, design/ticket-activity-plain.html): a ticket
+// opens on Activity (the main task's plan, one card per delegation, a question inside the card of the
+// employee who asks it); Timeline is the talk newest first with the composer on top and the work as
+// plain blocks. A ticket with a main task, a delegation that asks and one that is done, against a
+// scripted server; the screenshots go into `AURELIUS_SHOTS`, else target/ticket-83.
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { REPO, serveStatic, WEB_DIST } from "./daemon";
-import { boardOf, channel, message, messages, scriptServer, task, ticket } from "./fake-server";
+import { approval, boardOf, channel, message, messages, scriptServer, task, ticket } from "./fake-server";
 
-const SHOTS = process.env.AURELIUS_SHOTS ?? join(REPO, "target/ticket-76");
+const SHOTS = process.env.AURELIUS_SHOTS ?? join(REPO, "target/ticket-83");
 const FEATURES = ["ticket_channels", "ticket_discussion", "chat_threads", "ticket_responsible", "run_cards"];
 const flux = { id: "e1", name: "Flux", role: "engineer", title: "Frontend Developer", status: "active", agents: [] };
 const nexus = { id: "e2", name: "Nexus", role: "engineer", title: "API Engineer", status: "active", agents: [] };
@@ -34,8 +35,8 @@ const LONG = [
   "The last line of the description.",
 ].join("\n\n");
 
-function script(description = SHORT) {
-  const t = ticket("t73", 73, "doing", {
+function script(description = SHORT, column = "doing") {
+  const t = ticket("t73", 73, column, {
     owner_employee_id: "e1",
     owner_name: "Flux",
     root_task_id: "k73",
@@ -53,7 +54,8 @@ function script(description = SHORT) {
     employee_name: "Flux",
     conversation_id: "c73",
     ticket_id: "t73",
-    status: "running",
+    status: column === "done" ? "succeeded" : "running",
+    result: "Made the whole tile take the click. Tested on both platforms.",
   });
   const sub = task("s73", {
     title: "Check the hit area on Windows",
@@ -62,8 +64,9 @@ function script(description = SHORT) {
     parent_task_id: "k73",
     conversation_id: "cs73",
     ticket_id: "t73",
-    status: "running",
-    pending_approvals: 1,
+    status: column === "done" ? "succeeded" : "running",
+    pending_approvals: column === "done" ? 0 : 1,
+    result: "Every corner of every tile takes the click on Windows 11. Checked twice.",
   });
   const done = task("d1", {
     title: "Reproduce on macOS",
@@ -73,9 +76,30 @@ function script(description = SHORT) {
     conversation_id: "cd1",
     ticket_id: "t73",
     status: "succeeded",
+    result: "Reproduced it on macOS in two clicks. The second click is the one that is lost.",
+  });
+  const asks = approval("q1", {
+    tool: "claude.AskUserQuestion",
+    task_id: "s73",
+    run_id: "r2",
+    requester: "Nexus",
+    arguments: {
+      questions: [
+        {
+          question: "Which Windows build should I check?",
+          header: "Build",
+          multiSelect: false,
+          options: [
+            { label: "Windows 11 (Recommended)", description: "The build most of the team uses." },
+            { label: "Windows 10", description: "Still on two machines." },
+          ],
+        },
+      ],
+    },
   });
   return {
     features: FEATURES,
+    approvals: column === "done" ? [] : [asks],
     employees: [flux, nexus],
     projects: [project],
     company: { company: {}, members: [] },
@@ -198,31 +222,77 @@ test.describe("the ticket page", () => {
   });
   test.afterAll(() => site.close());
 
-  test("shows the description and what each task of the ticket does now", async ({ page }) => {
+  const timeline = (page: Page) => page.getByRole("tab", { name: "Timeline" }).click();
+
+  test("opens on Activity with the main task's plan; the properties keep Properties and Files", async ({ page }) => {
     await scriptServer(page, script());
     await page.goto(`${site.origin}/ticket/73`);
-    await expect(page.getByRole("region", { name: "Description" })).toContainText("Is it the radius animation?");
-    const now = page.getByRole("region", { name: "Current status" });
-    // The main task first, then the delegation that is at work; the finished one stays out.
-    const main = now.locator("[data-now-task=k73]");
-    await expect(main).toContainText("Flux · Fixing the hit area of the tiles");
-    await expect(main).toContainText("Main task");
-    await expect(main).toContainText("Step 3 of 4");
-    await expect(main).toContainText("2 files read");
-    await expect(main).toContainText("1 file changed +10 −2");
-    await expect(main).toContainText("2 commands run");
-    await expect(main.getByRole("progressbar", { name: "Plan progress" })).toHaveAttribute("aria-valuenow", "2");
-    const sub = now.locator("[data-now-task=s73]");
-    await expect(sub).toContainText("Nexus · Open the app on Windows");
-    await expect(sub).toContainText("Delegated task");
-    await expect(sub.getByRole("button", { name: "1 question for you" })).toBeVisible();
-    await expect(now.locator("[data-now-task=d1]")).toHaveCount(0);
+    const activity = page.getByRole("tab", { name: /Activity/ });
+    await expect(activity).toHaveAttribute("aria-selected", "true");
+    await expect(activity).toContainText("1");
+    const plan = page.getByRole("region", { name: "Plan" });
+    await expect(plan).toContainText("Main task · Flux · step 3 of 4");
+    await expect(plan).toContainText("Reproduce the missed clicks");
+    await expect(plan).toContainText("Verify in the desktop app");
+    // The step at work says in plain words what runs: a test run, not the command.
+    await expect(plan).toContainText("Fixing the hit area of the tiles");
+    await expect(plan).toContainText("Running the tests…");
+    await expect(plan).not.toContainText("pnpm test rail --run");
+    const aside = page.getByRole("complementary", { name: "Ticket properties" });
+    await expect(aside.getByRole("region", { name: "Plan" })).toHaveCount(0);
+    await expect(aside.getByRole("tab")).toHaveCount(2);
+    await expect(aside.getByRole("tab", { name: "Activity" })).toHaveCount(0);
+  });
+
+  test("the employee who asks you comes first, with the question in its card", async ({ page }) => {
+    const { writes } = await scriptServer(page, script());
+    await page.goto(`${site.origin}/ticket/73`);
+    const cards = page.getByRole("article");
+    await expect(cards.first()).toHaveAttribute("aria-label", "Nexus, needs your answer");
+    const card = page.getByRole("article", { name: "Nexus, needs your answer" });
+    await expect(card).toContainText("API Engineer");
+    await expect(card).toContainText("Working on Check the hit area on Windows");
+    await expect(card).toContainText("Step 1 of 2");
+    await expect(card).toContainText("Which Windows build should I check?");
+    const answer = card.getByRole("group", { name: "Answer Nexus" });
+    // The employee's own pick is labelled, without "(Recommended)".
+    await expect(answer.getByRole("button", { name: /Windows 11/ })).toContainText("Nexus's pick");
+    await expect(answer).not.toContainText("(Recommended)");
+    await answer.getByRole("button", { name: /Windows 11/ }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "approval.answer")?.params)
+      .toEqual({ approval_id: "q1", answers: { "Which Windows build should I check?": "Windows 11" } });
+    await expect(card.getByRole("status")).toContainText("You answered: Windows 11. Nexus goes on.");
+  });
+
+  test("the question can be answered in your own words", async ({ page }) => {
+    const { writes } = await scriptServer(page, script());
+    await page.goto(`${site.origin}/ticket/73`);
+    const card = page.getByRole("article", { name: "Nexus, needs your answer" });
+    await card.getByLabel("Or answer in your own words").fill("Both, Windows 11 first");
+    await card.getByRole("button", { name: "Send" }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "approval.answer")?.params)
+      .toEqual({ approval_id: "q1", answers: { "Which Windows build should I check?": "Both, Windows 11 first" } });
+  });
+
+  test("a finished delegation is one row, and opens the Timeline of its employee", async ({ page }) => {
+    await scriptServer(page, script());
+    await page.goto(`${site.origin}/ticket/73`);
+    await expect(page.getByText("Reproduced it on macOS in two clicks.")).toBeVisible();
+    await page.getByRole("button", { name: "Timeline of Nexus" }).click();
+    await expect(page.getByRole("tab", { name: "Timeline" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("button", { name: "Nexus", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("article", { name: "Nexus · Open the app on Windows" })).toBeVisible();
+    await expect(page.getByRole("article", { name: /^Flux · / })).toHaveCount(0);
+    await expect(page.getByText("@Flux is it the radius animation?")).toHaveCount(0);
   });
 
   test("folds a long description to three lines until Show more", async ({ page }) => {
     await scriptServer(page, script(LONG));
     await page.goto(`${site.origin}/ticket/73`);
     const region = page.getByRole("region", { name: "Description" });
+    await region.scrollIntoViewIfNeeded();
     const more = region.getByRole("button", { name: "Show more" });
     await expect(more).toHaveAttribute("aria-expanded", "false");
     const text = region.getByRole("button", { name: "Edit Description" });
@@ -233,13 +303,10 @@ test.describe("the ticket page", () => {
     // Three lines (with the paragraphs' spacing inside them), never all six paragraphs.
     expect(folded).toBeGreaterThan(line * 2.5);
     expect(folded).toBeLessThan(line * 5);
-    mkdirSync(SHOTS, { recursive: true });
-    await region.screenshot({ path: join(SHOTS, "description-folded.png") });
     await more.click();
     const less = region.getByRole("button", { name: "Show less" });
     await expect(less).toHaveAttribute("aria-expanded", "true");
     expect((await text.boundingBox())?.height ?? 0).toBeGreaterThan(folded * 1.5);
-    await region.screenshot({ path: join(SHOTS, "description-unfolded.png") });
     await less.click();
     await expect(region.getByRole("button", { name: "Show more" })).toBeVisible();
   });
@@ -252,111 +319,67 @@ test.describe("the ticket page", () => {
     await expect(region.getByRole("button", { name: /Show (more|less)/ })).toHaveCount(0);
   });
 
-  test("the live bar names the call each task runs, and Live output opens the task", async ({ page }) => {
+  test("the Timeline reads newest first, with the composer on top", async ({ page }) => {
     await scriptServer(page, script());
     await page.goto(`${site.origin}/ticket/73`);
-    const live = page.getByRole("region", { name: "Running now" });
-    await expect(live).toContainText("Flux");
-    await expect(live).toContainText("Running a command");
-    await expect(live).toContainText("pnpm test rail --run");
-    await expect(live).toContainText("Nexus");
-    await live.getByRole("button", { name: "Live output" }).first().click();
-    await expect(page).toHaveURL(/\/tasks\/k73$/);
+    await timeline(page);
+    const top = async (text: string) => (await page.getByText(text).first().boundingBox())?.y ?? -1;
+    const box = page.getByRole("textbox", { name: /^Message/ });
+    await expect(box).toBeVisible();
+    const composer = (await box.boundingBox())?.y ?? -1;
+    const answer = await top("Likely: the corners fall outside the hit area");
+    const asked = await top("@Flux is it the radius animation?");
+    const moved = await top("Ticket moved from Todo to Doing.");
+    expect(composer).toBeLessThan(answer);
+    expect(answer).toBeLessThan(asked);
+    expect(asked).toBeLessThan(moved);
+    const order = await page.getByRole("article").evaluateAll((rows) => rows.map((r) => r.getAttribute("aria-label")));
+    expect(order).toEqual(["Nexus · Open the app on Windows", "Flux · Fixing the hit area of the tiles"]);
   });
 
-  test("Stop stops the task's run", async ({ page }) => {
-    const { writes } = await scriptServer(page, script());
-    await page.goto(`${site.origin}/ticket/73`);
-    await page.locator("[data-now-task=k73]").getByRole("button", { name: "Stop" }).click();
-    await expect.poll(() => writes.find((w) => w.method === "run.stop")?.params).toEqual({ run_id: "r1" });
-  });
-
-  test("the Activity filter shows changes or messages", async ({ page }) => {
+  test("a work block says what was done in plain words; its steps open on request", async ({ page }) => {
     await scriptServer(page, script());
     await page.goto(`${site.origin}/ticket/73`);
+    await timeline(page);
+    const block = page.getByRole("article", { name: "Flux · Fixing the hit area of the tiles" });
+    await expect(block).toContainText("Found the likely cause");
+    const facts = block.getByRole("list", { name: "What it did" });
+    await expect(facts.getByRole("listitem")).toHaveText(["Changed 1 file +10 −2", "Builds"]);
+    // No file names or commands until the steps are opened.
+    await expect(block).not.toContainText("pnpm test rail --run");
+    await block.getByRole("button", { name: "› Show the 5 steps" }).click();
+    const steps = block.getByRole("list", { name: "Steps" });
+    await expect(steps.getByRole("listitem")).toHaveCount(5);
+    await expect(steps).toContainText("pnpm test rail --run");
+    await expect(steps).toContainText("running…");
+    await expect(steps).toContainText("+10 −2");
+  });
+
+  test("the Timeline filter shows changes or messages", async ({ page }) => {
+    await scriptServer(page, script());
+    await page.goto(`${site.origin}/ticket/73`);
+    await timeline(page);
     const said = page.getByText("@Flux is it the radius animation?");
     const moved = page.getByText("Ticket moved from Todo to Doing.");
+    const block = page.getByRole("article", { name: "Flux · Fixing the hit area of the tiles" });
     await expect(said).toBeVisible();
     await expect(moved).toBeVisible();
-    const filter = page.getByRole("group", { name: "Filter activity" });
-    await filter.getByRole("button", { name: "Changes" }).click();
+    const show = page.getByRole("group", { name: "Show" });
+    await show.getByRole("button", { name: "Changes" }).click();
     await expect(said).toHaveCount(0);
     await expect(moved).toBeVisible();
-    await filter.getByRole("button", { name: "Messages" }).click();
+    await expect(block).toBeVisible();
+    await show.getByRole("button", { name: "Messages" }).click();
     await expect(moved).toHaveCount(0);
+    await expect(block).toHaveCount(0);
     await expect(said).toBeVisible();
-    await expect(filter.getByRole("button", { name: "Messages" })).toHaveAttribute("aria-pressed", "true");
-  });
-
-  test("Activity shows what the tasks read, edited and ran, and what the owner found", async ({ page }) => {
-    await scriptServer(page, script());
-    await page.goto(`${site.origin}/ticket/73`);
-    const read = page.getByRole("article", { name: "Flux · Read 2 files" });
-    const files = read.getByRole("list", { name: "Files" });
-    await expect(files.getByRole("listitem")).toHaveText(["sidebar.tsx", "rail.css"]);
-    const found = page.getByRole("article", { name: "Flux · Note" });
-    await expect(found).toContainText("Found the likely cause");
-    const edit = page.getByRole("article", { name: "Flux · Edited 1 file" });
-    const diff = edit.getByRole("figure", { name: "Diff" });
-    await expect(diff).toContainText("- radius: 50%;");
-    await expect(diff).toContainText("+ line 1");
-    await expect(diff).not.toContainText("+ line 10");
-    await expect(edit).toContainText("+10");
-    await edit.getByRole("button", { name: "View diff" }).click();
-    await expect(diff).toContainText("+ line 10");
-    const ran = page.getByRole("article", { name: "Flux · Ran a command" });
-    await expect(ran).toContainText("$ pnpm tsc --noEmit");
-    await expect(ran).toContainText("Found 0 errors.");
-    const running = page.getByRole("article", { name: "Flux · Running a command" });
-    await expect(running).toContainText("pnpm test rail --run");
-    // The work is in time order, after what was said before it.
-    const order = await page.getByRole("article").evaluateAll((rows) => rows.map((r) => r.getAttribute("aria-label")));
-    expect(order).toEqual([
-      "Flux · Read 2 files",
-      "Flux · Note",
-      "Flux · Edited 1 file",
-      "Flux · Ran a command",
-      "Flux · Running a command",
-    ]);
-  });
-
-  test("the work counts as Changes and stays out of Messages", async ({ page }) => {
-    await scriptServer(page, script());
-    await page.goto(`${site.origin}/ticket/73`);
-    const read = page.getByRole("article", { name: "Flux · Read 2 files" });
-    await expect(read).toBeVisible();
-    const filter = page.getByRole("group", { name: "Filter activity" });
-    await filter.getByRole("button", { name: "Changes" }).click();
-    await expect(read).toBeVisible();
-    await expect(page.getByText("Ticket moved from Todo to Doing.")).toBeVisible();
-    await expect(page.getByText("@Flux is it the radius animation?")).toHaveCount(0);
-    await filter.getByRole("button", { name: "Messages" }).click();
-    await expect(page.getByText("@Flux is it the radius animation?")).toBeVisible();
-    await expect(page.getByRole("article")).toHaveCount(0);
-  });
-
-  test("the plan shows the main task's steps and every delegation, each opening to its own plan", async ({ page }) => {
-    await scriptServer(page, script());
-    await page.goto(`${site.origin}/ticket/73`);
-    const plan = page.getByRole("complementary", { name: "Ticket properties" }).getByRole("region", { name: "Plan" });
-    await expect(plan).toContainText("Main task · Flux");
-    await expect(plan).toContainText("2 / 4");
-    await expect(plan).toContainText("Verify in the desktop app");
-    // The step at work is open on its latest calls.
-    await expect(plan.getByRole("list", { name: "Latest steps" })).toContainText("pnpm test rail --run");
-    const tasks = plan.getByRole("region", { name: "Delegated tasks" });
-    await expect(tasks).toContainText("Tasks (2)");
-    await tasks.getByRole("button", { name: /Check the hit area on Windows/ }).click();
-    await expect(tasks).toContainText("Click every corner");
-    await expect(tasks.getByRole("link", { name: "Open the task's conversation" })).toHaveAttribute(
-      "href",
-      "/tasks/s73",
-    );
+    await expect(show.getByRole("button", { name: "Messages" })).toHaveAttribute("aria-pressed", "true");
   });
 
   test("a message goes to the ticket's talk, where the owner answers", async ({ page }) => {
     const { writes } = await scriptServer(page, script());
     await page.goto(`${site.origin}/ticket/73`);
+    await timeline(page);
     const box = page.getByRole("textbox", { name: /^Message/ });
     await expect(box).toHaveAttribute("placeholder", "Message Flux (owner)… · @ to mention");
     await box.fill("@Nexus which Windows build?");
@@ -366,13 +389,35 @@ test.describe("the ticket page", () => {
       .toMatchObject({ text: "@Nexus which Windows build?", channel: "d73" });
   });
 
-  test("shot", async ({ page }) => {
+  test("a Done ticket shows who did what", async ({ page }) => {
+    await scriptServer(page, script(SHORT, "done"));
+    await page.goto(`${site.origin}/ticket/73`);
+    await expect(page.getByRole("heading", { name: "Who did what" })).toBeVisible();
+    const flux = page.getByRole("article", { name: "Flux, done" });
+    await expect(flux).toContainText("Made the whole tile take the click.");
+    await expect(flux).not.toContainText("Tested on both platforms.");
+    await expect(flux).toContainText("✓ Done");
+    await expect(page.getByRole("article", { name: "Nexus, done" })).toHaveCount(2);
+    await expect(page.getByRole("tab", { name: /Activity/ })).not.toContainText("1");
+  });
+
+  test("shots", async ({ page }) => {
     mkdirSync(SHOTS, { recursive: true });
     await scriptServer(page, script());
     await page.goto(`${site.origin}/ticket/73`);
-    await expect(page.getByRole("region", { name: "Current status" })).toBeVisible();
-    await expect(page.getByText("Likely: the corners fall outside the hit area")).toBeVisible();
-    await expect(page.getByRole("article", { name: "Flux · Running a command" })).toBeVisible();
-    await page.screenshot({ path: join(SHOTS, "ticket-page.png"), fullPage: true });
+    await expect(page.getByRole("article", { name: "Nexus, needs your answer" })).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await page.screenshot({ path: join(SHOTS, "activity.png"), animations: "disabled" });
+    await timeline(page);
+    await expect(page.getByRole("article", { name: "Flux · Fixing the hit area of the tiles" })).toBeVisible();
+    await page.screenshot({ path: join(SHOTS, "timeline.png"), animations: "disabled" });
+    await page.setViewportSize({ width: 720, height: 900 });
+    await page.getByRole("tab", { name: /Activity/ }).click();
+    await page.screenshot({ path: join(SHOTS, "activity-narrow.png"), animations: "disabled" });
+    await scriptServer(page, script(SHORT, "done"));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${site.origin}/ticket/73`);
+    await expect(page.getByRole("heading", { name: "Who did what" })).toBeVisible();
+    await page.screenshot({ path: join(SHOTS, "activity-done.png"), animations: "disabled" });
   });
 });

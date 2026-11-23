@@ -256,7 +256,7 @@ export function useTicketWork(tasks: readonly TaskView[]): TicketWork {
       const messages = byConversation.get(t.conversation_id) ?? [];
       const own = live.filter((u) => u.conversation_id === t.conversation_id);
       byTask.set(t.id, taskLive(messages, own));
-      work.push({ taskId: t.id, who: t.employee_name ?? null, employeeId: t.employee_id ?? null, messages, live: own });
+      work.push({ taskId: t.id, who: t.employee_name ?? null, messages, live: own });
     }
     return { live: (id: string) => byTask.get(id) ?? EMPTY, blocks: workBlocks(work) };
   }, [stamp, ids, tasks, live]);
@@ -275,7 +275,6 @@ export function PageSection({ title, children }: { title: string; children: Reac
 /** One employee of the Timeline's filter. */
 export interface Person {
   name: string;
-  id: string | null;
 }
 
 /** The Timeline's head: All / Changes / Messages, one chip per employee, and the order it reads in. */
@@ -319,7 +318,7 @@ export function ActivityHead({
               onClick={() => onWho(who === p.name ? null : p.name)}
               {...stylex.props(styles.person, who === p.name && styles.personOn)}
             >
-              <Mark letter={initial(p.name)} color={markColor(p.id ?? p.name)} size={16} radius={4} />
+              <Mark letter={initial(p.name)} color={markColor(p.name)} size={16} radius={4} />
               {p.name}
             </button>
           ))}
@@ -372,9 +371,7 @@ export function WorkBlockItem({ block }: { block: WorkBlock }) {
   const live = block.state === "live";
   return (
     <article aria-label={block.who ? `${block.who} · ${block.title}` : block.title} {...stylex.props(styles.ev)}>
-      {block.who ? (
-        <Mark letter={initial(block.who)} color={markColor(block.employeeId ?? block.who)} size={28} radius={8} />
-      ) : null}
+      {block.who ? <Mark letter={initial(block.who)} color={markColor(block.who)} size={28} radius={8} /> : null}
       <div {...stylex.props(styles.body)}>
         <div {...stylex.props(styles.who)}>
           {block.who ?? "An employee"} <span {...stylex.props(styles.time)}>{blockTime(block)}</span>
