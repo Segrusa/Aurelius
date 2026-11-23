@@ -22,6 +22,8 @@ export interface SidebarItem {
   at: number;
   /** A ticket on Done: the row shows a check instead of a dot. */
   done?: boolean;
+  /** A design session: the row shows the design mark instead of the employee's. */
+  design?: boolean;
 }
 
 export type Bucket = "running" | "today" | "earlier";

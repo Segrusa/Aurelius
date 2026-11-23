@@ -21,6 +21,7 @@ const design = (over: Partial<DesignView> = {}): DesignView => ({
 describe("designPlace", () => {
   it("opens a session, a ticket by number and a task where they live", () => {
     expect(designPlace(design())).toEqual({ label: "Session", to: "/session/c1" });
+    expect(designPlace(design({ design: true }))).toEqual({ label: "Design", to: "/session/c1" });
     expect(designPlace(design({ kind: "ticket", ticket_number: 12 }))).toEqual({
       label: "Ticket #12",
       to: "/ticket/12",

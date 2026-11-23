@@ -87,3 +87,11 @@ On the board member's notes about the design editor:
 - **Tweaks and Compare are removed** (B2 and B3 above), with their IPC (`artifact:tweaks`, `artifact:tweak`, `artifact:tweaks-reset`) and main's tweak checks; what checks a pick moved to `artifact-pick.ts`. Main still has the `compare` view slot.
 - **A design being written grows in one view.** The first draft loads a view; every later draft is morphed into that same document (`artifact:update` → `morphInWorld` in the tools world: equal nodes stay, a text gets its new text, an element of the same tag keeps itself and gets its attributes and children, a script is always replaced). So nothing flashes and the scroll stays. A finished design with a `<script>` is loaded once more, because scripts put in by an update do not run (`liveStep`). Main refuses an update that is not a string within `ARTIFACT_BYTES_MAX`.
 
+
+# Phase E: Design as a type of its own (2026-11-23)
+
+On the board member's choice, a design is a type next to a session and a ticket:
+- **New session** offers Ticket / Session / Design (where the server has `design_sessions`). A design is a work session with `design: true` (migration 0048, `work_sessions.design`); the choice is remembered like the kind.
+- The run of a design session gets `DESIGN_SESSION_GUIDANCE` after the work session's section (`plan.rs`): self-contained HTML pages in `design/<kebab-name>.html`, one file per page, the full path of each page named in the answer so it is kept.
+- `work_session.list` and `design.list` say which sessions are designs; `design.list` lists a design session from its start, also before its first page.
+- The desktop shows a design session with a Design mark in its head and the design icon in the sidebar, and opens it with its newest page in the panel. The Designs page labels it Design; a click on any design opens its conversation with the page beside it (`?design=<file id>` on the session, ticket and task screens).

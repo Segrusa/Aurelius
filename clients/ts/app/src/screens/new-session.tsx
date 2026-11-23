@@ -29,7 +29,9 @@ import {
   composerRows,
   continueTickets,
   createDrafts,
+  DESIGN_SESSIONS_FEATURE,
   DISPATCHER,
+  defaultDesign,
   defaultKind,
   defaultProject,
   defaultWho,
@@ -195,6 +197,10 @@ export function NewSessionScreen() {
     defaultKind(storage.get(sessionKey("kind", hostId)), true, other === "session"),
   );
   const kind: SessionKind = other && (chosenKind === "ticket" || chosenKind === other) ? chosenKind : "ticket";
+  // A design is a session whose employee makes HTML pages, where the server has design sessions.
+  const designsOn = other === "session" && features.includes(DESIGN_SESSIONS_FEATURE);
+  const [chosenDesign, setDesign] = useState(() => defaultDesign(storage.get(sessionKey("kind", hostId)), true));
+  const design = designsOn && kind === "session" && chosenDesign;
   const [worktree, setWorktree] = useState(false);
   // A ticket takes files of any type; a session's first message where the server has `chat_files`.
   const sessionFiles = features.includes(CHAT_FILES_FEATURE);
@@ -291,6 +297,7 @@ export function NewSessionScreen() {
           mode,
           images: attach.images,
           files: attach.files,
+          design,
         };
         const dispatched = whoId === DISPATCHER;
         const receipt = dispatched
@@ -303,12 +310,17 @@ export function NewSessionScreen() {
               { retry: false },
             );
         startedTo.current = startedSession(receipt);
-        for (const [key, value] of remembered(hostId, { kind, projectId: project.id, who: whoId, run }, recent)) {
+        for (const [key, value] of remembered(
+          hostId,
+          { kind, design, projectId: project.id, who: whoId, run },
+          recent,
+        )) {
           storage.set(key, value);
         }
+        const what = design ? "Design" : "Session";
         return dispatched
-          ? "Session started: the dispatcher chooses who takes it."
-          : `Session started with ${startWho.name}.`;
+          ? `${what} started: the dispatcher chooses who takes it.`
+          : `${what} started with ${startWho.name}.`;
       }
       const { params, done } = sessionRequest(
         {
@@ -459,7 +471,7 @@ export function NewSessionScreen() {
               <PromptTextarea
                 ref={composer}
                 aria-label="What needs doing"
-                placeholder={placeholderOf(kind)}
+                placeholder={placeholderOf(kind, design)}
                 rows={composerRows(text)}
                 value={text}
                 onChange={(e) => write(e.target.value)}
@@ -543,11 +555,15 @@ export function NewSessionScreen() {
                   <SegmentedControl
                     label="Kind"
                     size="sm"
-                    value={kind}
-                    onChange={(next) => setKind(next === other ? other : "ticket")}
+                    value={design ? "design" : kind}
+                    onChange={(next) => {
+                      setDesign(next === "design");
+                      setKind(next === "design" ? "session" : next === other ? other : "ticket");
+                    }}
                   >
                     <SegmentedControlItem value="ticket" label="Ticket" />
                     <SegmentedControlItem value={other} label={other === "session" ? "Session" : "Quick task"} />
+                    {designsOn ? <SegmentedControlItem value="design" label="Design" /> : null}
                   </SegmentedControl>
                 ) : null}
                 <Menu

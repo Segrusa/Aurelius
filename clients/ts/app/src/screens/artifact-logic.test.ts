@@ -13,6 +13,7 @@ import {
   isArtifact,
   keptDesign,
   liveStep,
+  newestDesignFile,
   OVERLAY_SELECTOR,
   type Overlay,
   overlaysOver,
@@ -331,5 +332,17 @@ describe("designFile", () => {
     expect(designFile(messages, "nope")).toBeNull();
     expect(designFile(messages, "p")).toBeNull();
     expect(designFile(messages, "gone")).toBeNull();
+  });
+});
+
+describe("newestDesignFile", () => {
+  it("is the kept HTML file of the newest message, the last one in it", () => {
+    const messages = [msg("b", 2, [html("p", "pricing.html")]), msg("a", 1, [html("l")]), msg("c", 3, [])];
+    expect(newestDesignFile(messages)?.id).toBe("p");
+    expect(newestDesignFile([msg("a", 1, [html("x"), html("y", "about.html")])])?.id).toBe("y");
+  });
+  it("is nothing before the first page, or when it was deleted", () => {
+    expect(newestDesignFile([])).toBeNull();
+    expect(newestDesignFile([msg("a", 1, [html("l")], { deleted_at_ms: 3 })])).toBeNull();
   });
 });

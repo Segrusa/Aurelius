@@ -274,6 +274,18 @@ export function liveStep(
   return "update";
 }
 
+/** The page a design session opens with: the newest kept HTML file of the conversation. */
+export function newestDesignFile(messages: readonly MessageView[]): FileRef | null {
+  let newest: { ordinal: number; file: FileRef } | null = null;
+  for (const m of messages) {
+    if (m.deleted_at_ms || (newest && m.ordinal < newest.ordinal)) continue;
+    const pages = (m.files ?? []).filter(isArtifact);
+    const last = pages[pages.length - 1];
+    if (last) newest = { ordinal: m.ordinal, file: last };
+  }
+  return newest?.file ?? null;
+}
+
 /** The kept HTML file `id` of the conversation, to open it as a design; null when it is not there. */
 export function designFile(messages: readonly MessageView[], id: string): FileRef | null {
   for (const m of messages) {

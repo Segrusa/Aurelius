@@ -8,7 +8,7 @@ import type { DesignPage } from "./artifact-logic";
 export function designPlace(design: DesignView): { label: string; to: string | null } {
   switch (design.kind) {
     case "session":
-      return { label: "Session", to: `/session/${design.conversation_id}` };
+      return { label: design.design ? "Design" : "Session", to: `/session/${design.conversation_id}` };
     case "ticket":
       return design.ticket_number
         ? { label: `Ticket #${design.ticket_number}`, to: `/ticket/${design.ticket_number}` }

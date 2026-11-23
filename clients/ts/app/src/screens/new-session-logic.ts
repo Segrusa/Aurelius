@@ -12,6 +12,8 @@ export type SessionKind = "ticket" | "quick" | "session";
 export const SESSIONS_FEATURE = "work_sessions";
 /** The server's dispatcher chooses who takes a session (`work_session.dispatch`). */
 export const SESSION_DISPATCH_FEATURE = "session_dispatch";
+/** The server has design sessions: a session whose employee makes HTML pages (`design`). */
+export const DESIGN_SESSIONS_FEATURE = "design_sessions";
 /** The server makes a ticket's title from its description when the title is empty. */
 export const MADE_TITLE_FEATURE = "ticket_made_title";
 
@@ -97,8 +99,13 @@ export function noteRecent(recent: string[], id: string): string[] {
  * sessions (a quick task chosen before counts as one), else a Quick task.
  */
 export function defaultKind(stored: string | null, quickOn: boolean, sessionsOn = false): SessionKind {
-  if (sessionsOn) return stored === "session" || stored === "quick" ? "session" : "ticket";
+  if (sessionsOn) return stored === "session" || stored === "quick" || stored === "design" ? "session" : "ticket";
   return quickOn && stored === "quick" ? "quick" : "ticket";
+}
+
+/** Whether the last start was a design, so New session chooses Design again (where the server has them). */
+export function defaultDesign(stored: string | null, designsOn: boolean): boolean {
+  return designsOn && stored === "design";
 }
 
 /** The kinds a server offers next to Ticket: Session where it has them, else Quick task, else none. */
@@ -144,13 +151,13 @@ export function keptChoice(stored: string | null, offered: readonly string[], lo
 /** What a successful start remembers, as storage writes. The dialogs' own last choice goes along. */
 export function remembered(
   hostId: string | null,
-  start: { kind: SessionKind; projectId: string; who: string; run?: RunChoices },
+  start: { kind: SessionKind; design?: boolean; projectId: string; who: string; run?: RunChoices },
   recent: string[],
 ): [string, string][] {
   const writes: [string, string][] = [
     [sessionKey("project", hostId), start.projectId],
     [sessionKey("recent", hostId), JSON.stringify(noteRecent(recent, start.projectId))],
-    [sessionKey("kind", hostId), start.kind],
+    [sessionKey("kind", hostId), start.design ? "design" : start.kind],
   ];
   if (start.run) {
     for (const what of ["model", "effort", "mode"] as const) writes.push([sessionKey(what, hostId), start.run[what]]);
@@ -273,7 +280,9 @@ export function startProblem(state: {
   return null;
 }
 
-export function placeholderOf(kind: SessionKind): string {
+export function placeholderOf(kind: SessionKind, design = false): string {
+  if (kind === "session" && design)
+    return "What should it look like? The pages show beside the conversation as they are made";
   if (kind === "session") return "What do you want to work on? Starts right away, without a ticket";
   return kind === "quick" ? "What needs doing? Starts right away on its own branch" : "Describe a ticket or give work…";
 }
@@ -318,6 +327,8 @@ export function sessionStartParams(
     images?: string[];
     /** Only on a server with `chat_files`, and not with a worktree of its own. */
     files?: string[];
+    /** A design session (`design_sessions`). */
+    design?: boolean;
   },
   worktree: boolean,
   confirmSecret: boolean,
@@ -337,6 +348,7 @@ export function sessionStartParams(
       effort: pick(start.effort),
     },
     confirm_secret: confirmSecret,
+    ...(start.design ? { design: true } : {}),
   };
 }
 
