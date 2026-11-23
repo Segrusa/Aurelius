@@ -84,7 +84,7 @@ async function open(page: Page, path: string, workspace?: string) {
   return site;
 }
 
-test("a workspace and a ticket show their Claude Design link, and an older server shows no field", async ({ page }) => {
+test("a ticket shows its Claude Design link, and an older server shows no field", async ({ page }) => {
   const link = "https://claude.ai/artifact/9sfwWLbDbQerBZ3jmBSkXS";
   const linkedTicket = ticket("t1", 21, "backlog", {
     title: "Atlas ticket",
@@ -102,11 +102,10 @@ test("a workspace and a ticket show their Claude Design link, and an older serve
   const site = await serveStatic(WEB_DIST);
   try {
     await scriptServer(page, linked);
+    // Workspace settings has no styleguide field since ticket #81; the link stays on the server.
     await page.goto(`${site.origin}/projects/${ATLAS}`);
-    await expect(page.getByText("Styleguide", { exact: true })).toBeVisible();
-    await expect(page.getByLabel("Styleguide link")).toHaveValue(link);
-    await expect(page.getByRole("button", { name: "Open", exact: true }).first()).toBeVisible();
-    await expect(page.getByText("The link only works for people the artifact is shared with.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible();
+    await expect(page.getByText("Styleguide", { exact: true })).toBeHidden();
 
     // The old Board link opens the ticket's session; the design link is in its properties.
     await page.goto(`${site.origin}/board?ticket=t1`);
@@ -122,6 +121,71 @@ test("a workspace and a ticket show their Claude Design link, and an older serve
     await page.goto(`${site.origin}/board?ticket=t1`);
     await expect(page.getByRole("complementary", { name: "Ticket properties" })).toBeVisible();
     await expect(page.getByText("The link only works for people the artifact is shared with.")).toBeHidden();
+  } finally {
+    await site.close();
+  }
+});
+
+test("workspace settings saves each field on its own, shows a save conflict and archives only by name", async ({
+  page,
+}) => {
+  const site = await serveStatic(WEB_DIST);
+  try {
+    const { writes } = await scriptServer(page, {
+      ...script,
+      features: [...script.features, "project_description"],
+      projects: [
+        { ...project(ATLAS, "Atlas"), description: "The old one", folder: "/srv/atlas" },
+        project(ZEPHYR, "Zephyr"),
+      ],
+      refuse: (request) =>
+        request.method === "project.rename" ? { code: "version_conflict", message: "Changed elsewhere." } : null,
+    });
+    await page.goto(`${site.origin}/projects/${ATLAS}`);
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { level: 1, name: "Workspace settings" })).toBeVisible();
+    for (const title of ["General", "Folder", "Work", "Memory and export", "Archive"]) {
+      await expect(main.getByRole("heading", { level: 2, name: title, exact: true })).toBeVisible();
+    }
+    await expect(main.getByText("/srv/atlas")).toBeVisible();
+    await expect(
+      main.getByText("◆ No dispatcher. Started tickets wait in Todo until you choose an owner."),
+    ).toBeVisible();
+
+    // The description is sent with the version it was edited on.
+    const description = main.getByLabel("Description");
+    await description.fill("A new one");
+    await expect(main.getByText("9 / 2000")).toBeVisible();
+    await main.getByRole("button", { name: "Save", exact: true }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "project.set_description")?.params)
+      .toEqual({ project_id: ATLAS, description: "A new one" });
+
+    // A rename the server refuses as stale says so, with a way to load the other version.
+    // (The fake server keeps the old description, so its Save still shows: Enter saves the name.)
+    await main.getByLabel("Name", { exact: true }).fill("Atlas 2");
+    await main.getByLabel("Name", { exact: true }).press("Enter");
+    await expect(main.getByText("Someone else changed this workspace while you typed.")).toBeVisible();
+    await expect(main.getByRole("button", { name: "Load their version" })).toBeVisible();
+
+    // Status saves at once.
+    await main.getByRole("radio", { name: "Paused" }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "project.set_status")?.params)
+      .toEqual({ project_id: ATLAS, status: "paused" });
+
+    // Archive stays off until the exact name is typed.
+    await main.getByRole("button", { name: "Archive…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Archive Atlas?" });
+    const archive = dialog.getByRole("button", { name: "Archive", exact: true });
+    await expect(archive).toBeDisabled();
+    await dialog.getByLabel("Type the workspace name to confirm").fill("atlas");
+    await expect(archive).toBeDisabled();
+    await dialog.getByLabel("Type the workspace name to confirm").fill("Atlas");
+    await archive.click();
+    await expect
+      .poll(() => writes.filter((w) => w.method === "project.set_status").map((w) => w.params))
+      .toContainEqual({ project_id: ATLAS, status: "archived" });
   } finally {
     await site.close();
   }
