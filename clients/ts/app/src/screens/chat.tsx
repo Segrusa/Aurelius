@@ -1389,6 +1389,11 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
                         if (newest) setHeld(top ? null : new Set(shown.map(rowKey)));
                       }}
                       followOutput={newest ? false : (bottom) => (bottom ? "auto" : false)}
+                      // followOutput only follows new rows; an answer that grows while it
+                      // streams keeps its end in view too, unless the reader scrolled up.
+                      totalListHeightChanged={() => {
+                        if (!newest && atBottom.current) handle.current?.scrollToIndex({ index: "LAST", align: "end" });
+                      }}
                       computeItemKey={(_, row) => rowKey(row)}
                       components={FEED_PARTS}
                       context={feedContext}
