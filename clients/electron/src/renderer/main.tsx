@@ -3,7 +3,6 @@ import {
   type ArtifactBounds,
   type ArtifactPick,
   type ArtifactSlot,
-  type ArtifactTweak,
   adoptDesktopPrefs,
   type DesktopPrefs,
   guardStrayDrops,
@@ -61,9 +60,6 @@ interface Bridge {
   updateArtifact(html: string): Promise<boolean>;
   pickInArtifact(): Promise<ArtifactPick | null>;
   stopArtifactPick(): Promise<void>;
-  artifactTweaks(): Promise<ArtifactTweak[]>;
-  tweakArtifact(name: string, value: string): Promise<string | null>;
-  resetArtifactTweaks(): Promise<void>;
   exportArtifact(url: string, kind: "pdf" | "png", name: string, width: number): Promise<string | null>;
 }
 
@@ -160,9 +156,6 @@ const platform: Platform = {
     update: (html) => bridge.updateArtifact(html),
     pick: () => bridge.pickInArtifact(),
     stopPick: () => bridge.stopArtifactPick(),
-    tweaks: () => bridge.artifactTweaks(),
-    tweak: (name, value) => bridge.tweakArtifact(name, value),
-    resetTweaks: () => bridge.resetArtifactTweaks(),
     export: (url, kind, name, width) => bridge.exportArtifact(url, kind, name, width),
   },
   quit: () => void bridge.quit(),

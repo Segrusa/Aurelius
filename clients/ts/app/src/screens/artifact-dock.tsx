@@ -6,7 +6,7 @@ import type { FileRef } from "@aurelius/protocol";
 import { useCallback, useState } from "react";
 import { usePlatform } from "../platform";
 import { DesignViewer } from "./artifact-live";
-import { designsOf, versionsFor } from "./artifact-logic";
+import { designPages, designsOf } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 import { useLive } from "./chat-live";
 import type { ChatContext } from "./chat-message";
@@ -69,8 +69,8 @@ export function DockedArtifact({
     return <DockedDesign ctx={ctx} messageId={target.messageId} path={target.path} onClose={onClose} />;
   return (
     <ArtifactViewer
-      versions={versionsFor(ctx.messages, target.file, Date.now())}
-      openId={target.file.id}
+      pages={designPages(ctx.messages, target.file, Date.now())}
+      openName={target.file.name}
       artifacts={artifacts}
       messages={ctx.messages}
       conversationId={ctx.conversationId}

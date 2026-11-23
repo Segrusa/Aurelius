@@ -1,5 +1,5 @@
 // Design artifacts: an HTML file a run kept with its message, opened as a live design instead of
-// a download. Its versions are the kept HTML files with the same name in the same conversation.
+// a download. A design's pages are the kept HTML files of a conversation, each at its newest.
 
 import type { ActivityView, FileRef, MessageView } from "@aurelius/protocol";
 
@@ -8,59 +8,29 @@ export function isArtifact(file: Pick<FileRef, "media_type">): boolean {
   return file.media_type.split(";")[0]?.trim().toLowerCase() === "text/html";
 }
 
-export interface ArtifactVersion {
-  /** 1 for the first message that kept this name, counting up in message order. */
-  version: number;
+/** One page of a design: the newest kept HTML file with this name in the conversation. */
+export interface DesignPage {
+  name: string;
   file: FileRef;
   messageId: string;
   atMs: number;
 }
 
 /**
- * All versions of the artifact called `name`, newest first. A deleted message no longer offers
- * its file. Two files with the same name in one message are two versions, in the message's order.
+ * The pages of the designs in `messages`: one per file name, the newest kept HTML file of each
+ * (a deleted message no longer offers its file), in the order the pages first came. `opened`, a
+ * file whose message is not in the list (yet), is a page of its own.
  */
-export function artifactVersions(messages: readonly MessageView[], name: string): ArtifactVersion[] {
-  const kept = messages
-    .filter((m) => !m.deleted_at_ms)
-    .toSorted((a, b) => a.ordinal - b.ordinal)
-    .flatMap((m) =>
-      (m.files ?? [])
-        .filter((f) => f.name === name && isArtifact(f))
-        .map((file) => ({ file, messageId: m.id, atMs: m.created_at_ms })),
-    );
-  return kept.map((v, i) => ({ ...v, version: i + 1 })).reverse();
+export function designPages(messages: readonly MessageView[], opened?: FileRef, atMs = 0): DesignPage[] {
+  const pages = new Map<string, DesignPage>();
+  for (const m of messages.filter((x) => !x.deleted_at_ms).toSorted((a, b) => a.ordinal - b.ordinal))
+    for (const file of (m.files ?? []).filter(isArtifact))
+      pages.set(file.name, { name: file.name, file, messageId: m.id, atMs: m.created_at_ms });
+  if (opened && !pages.has(opened.name))
+    pages.set(opened.name, { name: opened.name, file: opened, messageId: "", atMs });
+  return [...pages.values()];
 }
 
-/**
- * The versions the viewer offers for a file that was opened: those of the conversation, or the
- * file alone when its message is not in the list (yet).
- */
-export function versionsFor(messages: readonly MessageView[], file: FileRef, atMs: number): ArtifactVersion[] {
-  const versions = artifactVersions(messages, file.name);
-  return versions.some((v) => v.file.id === file.id) ? versions : [{ version: 1, file, messageId: "", atMs }];
-}
-
-/** "v2 of 3" for the card of a file; null when there is only one. */
-export function versionOf(versions: readonly ArtifactVersion[], fileId: string): string | null {
-  const own = versions.find((v) => v.file.id === fileId);
-  return own && versions.length > 1 ? `v${own.version} of ${versions.length}` : null;
-}
-
-const sameDay = (a: Date, b: Date) =>
-  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-
-/** "v3 · 14:05", with the date when it was not today. */
-export function versionLabel(v: ArtifactVersion, nowMs: number): string {
-  const at = new Date(v.atMs);
-  const time = at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
-  const when = sameDay(at, new Date(nowMs))
-    ? time
-    : `${at.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${time}`;
-  return `v${v.version} · ${when}`;
-}
-
-/** The widths the viewer shows an artifact at; an export is made at the same width. */
 export const VIEWPORTS = [
   { value: "desktop", label: "Desktop", width: 1280 },
   { value: "tablet", label: "Tablet", width: 768 },

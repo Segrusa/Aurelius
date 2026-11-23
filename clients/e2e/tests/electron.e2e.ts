@@ -42,7 +42,6 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
     expect(reach.require).toBe("undefined");
     expect(reach.process).toBe("undefined");
     expect(reach.bridge).toEqual([
-      "artifactTweaks",
       "cancelPairing",
       "closeLink",
       "copy",
@@ -69,7 +68,6 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
       "placeArtifact",
       "quit",
       "releaseArtifact",
-      "resetArtifactTweaks",
       "saveSecretFile",
       "sendLink",
       "serveArtifact",
@@ -81,7 +79,7 @@ test("runs over the local socket: first board member, Inbox, reconnect, and no w
       "stopArtifactPick",
       "storeFile",
       "takeLink",
-      "tweakArtifact",
+      "updateArtifact",
       "useServer",
     ]);
 

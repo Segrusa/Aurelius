@@ -582,7 +582,7 @@ export interface ChatContext {
   /** The message a link led to, marked for a moment. */
   flash: string | null;
   /**
-   * Where an artifact's comments, tweaks and requests go: the conversation's one employee, through
+   * Where an artifact's comments and requests go: the conversation's one employee, through
    * its composer's send. None in a channel.
    */
   artifactSend?: ArtifactSend | null;

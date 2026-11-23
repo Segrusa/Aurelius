@@ -1,4 +1,4 @@
-// The code main runs in an isolated world of an artifact's view, for comments and tweaks. That
+// The code main runs in an isolated world of an artifact's view, for comments and live designs. That
 // world shares the page's DOM but not its JavaScript: the artifact cannot reach its globals or
 // change its prototypes (an `EventTarget.prototype.addEventListener` the page replaced is the
 // page's own). Main sends each function as source with JSON arguments and only reads the promise's
@@ -149,49 +149,6 @@ export function stopPickInWorld(): boolean {
   const on = scope.__aureliusPick !== undefined;
   scope.__aureliusPick?.stop(null);
   return on;
-}
-
-/**
- * The tweaks the author declared: the text of `<script type="application/json" id=…>`, at most
- * `max` + 1 characters (main refuses more). Null when there is no such element.
- */
-export function readTweaksInWorld(id: string, max: number): string | null {
-  const element = document.getElementById(id);
-  if (!(element instanceof HTMLScriptElement)) return null;
-  if (element.type.trim().toLowerCase() !== "application/json") return null;
-  return (element.textContent ?? "").slice(0, max + 1);
-}
-
-/** The computed value of each custom property on the document element. */
-export function valuesInWorld(names: string[]): string[] {
-  const style = getComputedStyle(document.documentElement);
-  return names.map((name) => style.getPropertyValue(name));
-}
-
-/**
- * Sets custom properties on the document element; the first time a property is set, its own inline
- * value is kept, for a reset. True once they are set, so main can tell a call that never ended.
- */
-export function setTweaksInWorld(values: [string, string][]): boolean {
-  const scope = globalThis as unknown as { __aureliusTweaks?: Map<string, string> };
-  scope.__aureliusTweaks ??= new Map();
-  const style = document.documentElement.style;
-  for (const [name, value] of values) {
-    if (!scope.__aureliusTweaks.has(name)) scope.__aureliusTweaks.set(name, style.getPropertyValue(name));
-    style.setProperty(name, value);
-  }
-  return true;
-}
-
-/** Puts back what every tweak set: the inline value the document element had, or none. */
-export function resetTweaksInWorld(): void {
-  const scope = globalThis as unknown as { __aureliusTweaks?: Map<string, string> };
-  const style = document.documentElement.style;
-  for (const [name, before] of scope.__aureliusTweaks ?? []) {
-    if (before === "") style.removeProperty(name);
-    else style.setProperty(name, before);
-  }
-  scope.__aureliusTweaks?.clear();
 }
 
 /** The parts of a DOM node morphChildren reads and changes, so it can be tested without a DOM. */

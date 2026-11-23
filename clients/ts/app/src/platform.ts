@@ -33,14 +33,6 @@ export interface ArtifactPick {
   rect: ArtifactBounds;
 }
 
-/** A tweak an artifact declares (authoring.md), as the desktop checked it, with its value now. */
-export type ArtifactTweak = { var: string; label: string; value: string } & (
-  | { type: "color" }
-  | { type: "length"; unit: string; min?: number; max?: number; step?: number }
-  | { type: "number"; min?: number; max?: number; step?: number }
-  | { type: "choice"; options: string[] }
-);
-
 export interface Platform {
   kind: "electron" | "web";
   openLink: OpenLink;
@@ -121,10 +113,6 @@ export interface Platform {
      */
     pick(): Promise<ArtifactPick | null>;
     stopPick(): Promise<void>;
-    /** The tweaks the artifact in the viewer's own view declares; `tweak` gives the value set, null if refused. */
-    tweaks(): Promise<ArtifactTweak[]>;
-    tweak(name: string, value: string): Promise<string | null>;
-    resetTweaks(): Promise<void>;
     /** Asks where to save and makes the file; null: cancelled. */
     export(url: string, kind: "pdf" | "png", name: string, width: number): Promise<string | null>;
   } | null;
