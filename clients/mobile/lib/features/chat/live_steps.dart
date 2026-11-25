@@ -133,8 +133,13 @@ Map<String, List<TodoItem>> todosByAnswer(List<MessageView> messages) {
   return out;
 }
 
-/// The row in progress of a checklist, for the live status line.
-String? currentStep(List<TodoItem>? todos) => todos?.where((t) => t.status == TodoStatus.inProgress).firstOrNull?.label;
+/// The row in progress of a checklist, for the live status line. Steps that run at
+/// the same time (delegated parts) are all in progress: the first shows, with "+N" for the rest.
+String? currentStep(List<TodoItem>? todos) {
+  final doing = todos?.where((t) => t.status == TodoStatus.inProgress).toList() ?? const <TodoItem>[];
+  if (doing.isEmpty) return null;
+  return doing.length == 1 ? doing.first.label : '${doing.first.label} +${doing.length - 1}';
+}
 
 /// What AnswerBody draws, in order: text, runs of steps and the checklist.
 sealed class AnswerBlock {

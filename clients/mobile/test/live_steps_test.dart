@@ -91,6 +91,16 @@ void main() {
       expect(currentStep(todos), 'B…');
     });
 
+    test('steps that run at the same time show the first and how many more', () {
+      final two = todosAcross([
+        [create(1, 'A'), create(2, 'B', 1), create(3, 'C', 2)],
+        [update(1, 'completed'), update(2, 'in_progress', 1), update(3, 'in_progress', 2)],
+      ]);
+      expect(currentStep(two), 'B… +1');
+      final three = todosAcross([[act('t', todoWriteTool, todos([('A', 'in_progress'), ('B', 'pending'), ('C', 'in_progress'), ('D', 'in_progress')]))]]);
+      expect(currentStep(three), 'A… +2');
+    });
+
     test('items added in a later answer join the earlier list, deleted ones go', () {
       final todos = todosAcross([
         [create(1, 'A'), create(2, 'B', 1)],

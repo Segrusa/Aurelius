@@ -293,12 +293,15 @@ export function cardGroups<T extends { task: TaskView; state: CardState }>(
 /** One segment of a status line: done, at work now, asking you, or still open. */
 export type Segment = "done" | "now" | "ask" | "open";
 
-/** One segment per plan step; the step at work turns amber while its employee asks you. */
+/**
+ * One segment per plan step. Every step at work is lit, since parts delegated in parallel run at
+ * once; while the employee asks you, the first of them (or the next open step) turns amber.
+ */
 export function segments(todos: readonly Todo[] | null, asking: boolean): Segment[] {
   if (!todos || todos.length === 0) return [];
   const doing = todos.findIndex((t) => t.state === "doing");
-  const at = doing >= 0 ? doing : asking ? todos.findIndex((t) => t.state !== "done") : -1;
-  return todos.map((t, i) => (t.state === "done" ? "done" : i === at ? (asking ? "ask" : "now") : "open"));
+  const ask = !asking ? -1 : doing >= 0 ? doing : todos.findIndex((t) => t.state !== "done");
+  return todos.map((t, i) => (t.state === "done" ? "done" : i === ask ? "ask" : t.state === "doing" ? "now" : "open"));
 }
 
 /** How many plan steps a card lists before it folds the rest away. */
@@ -316,13 +319,21 @@ export function stepWindow(
   return { shown: todos.slice(first, first + max), first, earlier: first, later: todos.length - first - max };
 }
 
-/** "Step 3 of 4", or "Getting started" before there is a plan. */
+/**
+ * "Step 3 of 4"; "Steps 2–4 of 7" when a run of steps is at work at once, "Steps 2, 5 of 7" when
+ * they are apart; or "Getting started" before there is a plan.
+ */
 export function stepText(todos: readonly Todo[] | null): string {
   if (!todos || todos.length === 0) return "Getting started";
   const done = todos.filter((t) => t.state === "done").length;
   if (done === todos.length) return `${done} of ${done} done`;
-  const doing = todos.findIndex((t) => t.state === "doing");
-  return `Step ${doing >= 0 ? doing + 1 : done + 1} of ${todos.length}`;
+  const doing = todos.flatMap((t, i) => (t.state === "doing" ? [i + 1] : []));
+  const first = doing[0];
+  const last = doing.at(-1);
+  if (first === undefined || last === undefined) return `Step ${done + 1} of ${todos.length}`;
+  if (doing.length === 1) return `Step ${first} of ${todos.length}`;
+  const run = last - first + 1 === doing.length;
+  return `Steps ${run ? `${first}–${last}` : doing.join(", ")} of ${todos.length}`;
 }
 
 /** "<1 min", "38 min", "2 h 5 min": time on a task. */

@@ -11,6 +11,7 @@ import { REPO, serveStatic, WEB_DIST } from "./daemon";
 import { approval, boardOf, channel, message, messages, scriptServer, task, ticket } from "./fake-server";
 
 const SHOTS = process.env.AURELIUS_SHOTS ?? join(REPO, "target/ticket-83");
+const PARALLEL_SHOTS = process.env.AURELIUS_SHOTS ?? join(REPO, "target/ticket-90");
 const FEATURES = ["ticket_channels", "ticket_discussion", "chat_threads", "ticket_responsible", "run_cards"];
 const flux = { id: "e1", name: "Flux", role: "engineer", title: "Frontend Developer", status: "active", agents: [] };
 const nexus = { id: "e2", name: "Nexus", role: "engineer", title: "API Engineer", status: "active", agents: [] };
@@ -35,7 +36,17 @@ const LONG = [
   "The last line of the description.",
 ].join("\n\n");
 
-function script(description = SHORT, column = "doing") {
+const PLAN = {
+  states: ["completed", "completed", "in_progress", "pending"],
+  words: [
+    "Reproduce the missed clicks",
+    "Find the cause in WorkspaceRail",
+    "Fix the hit area of the tiles",
+    "Verify in the desktop app",
+  ],
+};
+
+function script(description = SHORT, column = "doing", plan = PLAN) {
   const t = ticket("t73", 73, column, {
     owner_employee_id: "e1",
     owner_name: "Flux",
@@ -134,15 +145,7 @@ function script(description = SHORT, column = "doing") {
               offset: 0,
               ok: true,
               input: {
-                todos: todos(
-                  ["completed", "completed", "in_progress", "pending"],
-                  [
-                    "Reproduce the missed clicks",
-                    "Find the cause in WorkspaceRail",
-                    "Fix the hit area of the tiles",
-                    "Verify in the desktop app",
-                  ],
-                ),
+                todos: todos(plan.states, plan.words),
               },
             },
             { call_id: "r1", tool: "Read", offset: 0, ok: true, input: { file_path: "src/sidebar.tsx" } },
@@ -242,6 +245,20 @@ test.describe("the ticket page", () => {
     await expect(aside.getByRole("region", { name: "Plan" })).toHaveCount(0);
     await expect(aside.getByRole("tab")).toHaveCount(2);
     await expect(aside.getByRole("tab", { name: "Activity" })).toHaveCount(0);
+  });
+
+  test("steps delegated at the same time are all lit, and the meta line names them as a run", async ({ page }) => {
+    const parallel = {
+      states: ["completed", "in_progress", "in_progress", "in_progress", "pending", "pending", "pending"],
+      words: ["Plan the cleanup", "Fix OPR-1", "Fix OPR-2", "Fix OPR-3", "Merge the parts", "Run the tests", "Report"],
+    };
+    await scriptServer(page, script(SHORT, "doing", parallel));
+    await page.goto(`${site.origin}/ticket/73`);
+    const plan = page.getByRole("region", { name: "Plan" });
+    await expect(plan).toContainText("Main task · Flux · steps 2–4 of 7");
+    await expect(plan).toContainText("Fixing OPR-3");
+    mkdirSync(PARALLEL_SHOTS, { recursive: true });
+    await plan.screenshot({ path: join(PARALLEL_SHOTS, "plan-parallel.png"), animations: "disabled" });
   });
 
   test("the employee who asks you comes first, with the question in its card", async ({ page }) => {

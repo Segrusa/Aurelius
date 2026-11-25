@@ -74,9 +74,9 @@ import { FileChips } from "./run-tools";
 import { SideQuestionButton } from "./side-question";
 import { taskStateLine } from "./tasks-logic";
 import { ActivityPanel, type TicketTab, TicketTabs, useTicketAsks } from "./ticket-activity";
+import { stepText } from "./ticket-activity-plain-logic";
 import { branchOf, latestTodos } from "./ticket-overview-logic";
 import { PageSection, type Person, useTicketWork } from "./ticket-page";
-import { planStep } from "./ticket-page-logic";
 import {
   Box,
   Editable,
@@ -883,11 +883,13 @@ function FilesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: TicketVi
 /** The main task's state with the step of its plan: "Running · step 3 of 4". */
 function RootState({ task }: { task: TaskView }) {
   const messages = useMessages(task.conversation_id ?? null);
-  const step = planStep(latestTodos([], messages.data?.messages ?? []));
+  const todos = latestTodos([], messages.data?.messages ?? []);
   const state = taskStateLine(task);
   return (
     <span style={{ color: state.color }}>
-      {step && state.text === "Running" ? `${state.text} · step ${step.at} of ${step.total}` : state.text}
+      {todos && todos.length > 0 && state.text === "Running"
+        ? `${state.text} · ${stepText(todos).replace(/^Step/, "step")}`
+        : state.text}
     </span>
   );
 }

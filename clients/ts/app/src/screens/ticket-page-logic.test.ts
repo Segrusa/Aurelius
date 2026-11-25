@@ -1,7 +1,6 @@
 import type { ActivityView, TaskView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import type { Todo } from "./chat-logic";
-import { busy, inFilter, planStep } from "./ticket-page-logic";
+import { busy, inFilter } from "./ticket-page-logic";
 
 const call = (
   tool: string,
@@ -34,8 +33,6 @@ const task = (id: string, over: Partial<TaskView> = {}): TaskView => ({
   ...over,
 });
 
-const todos = (...states: Todo["state"][]): Todo[] => states.map((state, i) => ({ text: `Step ${i + 1}`, state }));
-
 describe("inFilter", () => {
   const talk = { role: "user" as const, activity: [] };
   const line = { role: "assistant" as const, activity: [], system: { action: "moved" } as never };
@@ -62,22 +59,6 @@ describe("inFilter", () => {
 
   it("does not count a failed edit as a change", () => {
     expect(inFilter({ role: "assistant", activity: [call("Edit", { file_path: "a" }, false)] }, "changes")).toBe(false);
-  });
-});
-
-describe("planStep", () => {
-  it("points at the step at work", () => {
-    expect(planStep(todos("done", "done", "doing", "open"))).toEqual({ at: 3, done: 2, total: 4 });
-  });
-
-  it("points at the next step when none is at work, and stays on the last when all are done", () => {
-    expect(planStep(todos("done", "open"))).toEqual({ at: 2, done: 1, total: 2 });
-    expect(planStep(todos("done", "done"))).toEqual({ at: 2, done: 2, total: 2 });
-  });
-
-  it("has no step without a plan", () => {
-    expect(planStep(null)).toBeNull();
-    expect(planStep([])).toBeNull();
   });
 });
 

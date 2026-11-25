@@ -193,6 +193,32 @@ describe("segments, steps and time", () => {
     expect(segments(todos, true)).toEqual(["done", "ask", "open"]);
     expect(segments(null, false)).toEqual([]);
   });
+  it("lights every step at work when parts run in parallel, and asks on the first", () => {
+    const parallel = [
+      { text: "A", state: "done" as const },
+      { text: "B", state: "doing" as const },
+      { text: "C", state: "doing" as const },
+      { text: "D", state: "doing" as const },
+      { text: "E", state: "open" as const },
+    ];
+    expect(segments(parallel, false)).toEqual(["done", "now", "now", "now", "open"]);
+    expect(segments(parallel, true)).toEqual(["done", "ask", "now", "now", "open"]);
+    expect(
+      segments(
+        [
+          { text: "A", state: "done" as const },
+          { text: "B", state: "open" as const },
+        ],
+        true,
+      ),
+    ).toEqual(["done", "ask"]);
+  });
+  it("names a run of steps at work, or each one when they are apart", () => {
+    const at = (...states: ("done" | "doing" | "open")[]) => states.map((state, i) => ({ text: `${i}`, state }));
+    expect(stepText(at("done", "doing", "doing", "doing", "open", "open", "open"))).toBe("Steps 2–4 of 7");
+    expect(stepText(at("done", "doing", "open", "open", "doing"))).toBe("Steps 2, 5 of 5");
+    expect(stepText(at("done", "open"))).toBe("Step 2 of 2");
+  });
   it("says the step, or that it is getting started", () => {
     expect(stepText(todos)).toBe("Step 2 of 3");
     expect(stepText(null)).toBe("Getting started");
