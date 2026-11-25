@@ -62,7 +62,8 @@ impl CommandContext {
     }
 }
 
-/// Why `employee.open_chat` is refused: chatting with an employee is gone.
+/// Why `employee.open_chat`, `employee.chat` and `employee.chats` answer "gone" (`not_found`):
+/// chatting with an employee is gone. The methods stay for older clients (protocol 5).
 pub const EMPLOYEE_CHAT_GONE: &str = "Chatting with an employee is no longer available.";
 
 pub const CHAT_RUN_KIND: &str = "run.chat";
@@ -216,7 +217,7 @@ impl CommandService {
             Command::RetryReply(cmd) => self.retry_reply(ctx, &envelope, hash, cmd),
             Command::StopRun(cmd) => self.stop_run(ctx, &envelope, hash, cmd),
             Command::CreateEmployee(cmd) => self.create_employee(ctx, &envelope, hash, cmd),
-            Command::OpenEmployeeChat(_) => Err(domain_error(DomainError::Memory(EMPLOYEE_CHAT_GONE.into()))),
+            Command::OpenEmployeeChat(_) => Err(AppError::new(ErrorCode::NotFound, EMPLOYEE_CHAT_GONE)),
             Command::CancelScheduledMessage(cmd) => self.cancel_scheduled_message(ctx, &envelope, hash, cmd),
             Command::UpdateEmployee(cmd) => self.update_employee(ctx, &envelope, hash, cmd),
             Command::SetEmployeeStatus(cmd) => self.set_employee_status(ctx, &envelope, hash, cmd),

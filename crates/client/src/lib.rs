@@ -568,16 +568,6 @@ impl Client {
         self.read(Method::EmployeeList, body!(Employees)).await
     }
 
-    /// An employee's persistent chat with the user (no project).
-    pub async fn employee_chat(&self, employee_id: aurelius_domain::EmployeeId) -> Result<MessagesSnapshot, ClientError> {
-        self.read(Method::EmployeeChat { employee_id }, body!(Messages)).await
-    }
-
-    /// The signed-in board member's chats with employees, the latest first.
-    pub async fn employee_chats(&self) -> Result<aurelius_domain::views::EmployeeChatsSnapshot, ClientError> {
-        self.read(Method::EmployeeChats, body!(EmployeeChats)).await
-    }
-
     /// Messages employees scheduled: what waits, then what went out.
     pub async fn scheduled_messages(&self) -> Result<aurelius_domain::views::ScheduledMessagesSnapshot, ClientError> {
         self.read(Method::ScheduledMessageList { project_id: None }, body!(ScheduledMessages)).await

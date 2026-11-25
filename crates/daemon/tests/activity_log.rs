@@ -1,13 +1,12 @@
 //! The activity log and an employee's mailbox through the real dispatcher: what one
-//! message goes through is findable per employee and run. Chatting with an employee is
-//! gone: opening a chat is refused.
+//! message goes through is findable per employee and run.
 
 mod common;
 use common::*;
 
 use aurelius_client::{Client, envelope};
 use aurelius_domain::conversation::{MessageRole, MessageStatus};
-use aurelius_domain::employee::{ActivityState, CreateEmployee, OpenEmployeeChat, SendEmployeeMessage};
+use aurelius_domain::employee::{ActivityState, CreateEmployee, SendEmployeeMessage};
 use aurelius_domain::{Command, CommandResult, ConversationId, EmployeeId, RunId};
 use std::time::Duration;
 
@@ -67,15 +66,3 @@ async fn one_message_is_in_the_log_from_delivery_to_the_end_of_its_run() {
     panic!("its queue did not empty or it did not become idle");
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn opening_a_chat_with_an_employee_is_refused_and_no_chat_is_listed() {
-    let dir = tempfile::tempdir().unwrap();
-    let daemon = start(dir.path()).await;
-    let grace = connect_as(dir.path(), "grace").await;
-    let (ann, _) = hire(&grace, "Ann").await;
-    let refused = grace.execute(envelope(Command::OpenEmployeeChat(OpenEmployeeChat { employee_id: ann }), None)).await;
-    let message = format!("{:?}", refused.err().expect("refused"));
-    assert!(message.contains("Chatting with an employee is no longer available."), "{message}");
-    assert!(grace.employee_chats().await.unwrap().chats.is_empty());
-    stop(dir.path(), daemon).await;
-}

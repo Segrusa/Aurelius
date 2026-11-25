@@ -51,15 +51,8 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             Ok(body)
         }
         Method::EmployeeList => employees(shared).await,
-        Method::EmployeeChat { employee_id } => {
-            let store = shared.store().clone();
-            let chat = storage_task(move || store.read(|c| aurelius_storage::employees::main_chat(c, employee_id))).await?;
-            match chat {
-                Some(conversation_id) => messages(shared, conversation_id, reader).await,
-                None => Err(ProtocolError::new(ErrorCode::NotFound, format!("employee {employee_id} does not exist"))),
-            }
-        }
-        Method::EmployeeChats => employee_chats(shared).await,
+        // Chatting with an employee is gone; the methods stay for older clients.
+        Method::EmployeeChat { .. } | Method::EmployeeChats => Err(ProtocolError::new(ErrorCode::NotFound, aurelius_application::EMPLOYEE_CHAT_GONE)),
         Method::WorkSessionList { project_id } => work_sessions(shared, reader, project_id).await,
         Method::DesignList { project_id } => designs(shared, project_id).await,
         Method::ScheduledMessageList { project_id } => scheduled_messages(shared, reader, project_id).await,
@@ -377,13 +370,6 @@ async fn jobs(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
         })
         .collect();
     Ok(ResponseBody::Jobs(JobsSnapshot { as_of_seq, jobs }))
-}
-
-/// The lasting chats with employees are gone: always an empty list (the method stays for older clients).
-async fn employee_chats(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
-    let store = shared.store().clone();
-    let as_of_seq = storage_task(move || store.read(queries::last_seq)).await?;
-    Ok(ResponseBody::EmployeeChats(aurelius_domain::views::EmployeeChatsSnapshot { as_of_seq, chats: Vec::new() }))
 }
 
 /// The designs of a project, or of all (`design.list`).
