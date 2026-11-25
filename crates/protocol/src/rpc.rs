@@ -412,6 +412,12 @@ pub mod feature {
     /// answering the view as it is after it. Never a push. A client without this
     /// feature does not show the Code tab.
     pub const CODE_VIEW: &str = "code_view";
+    /// Reviewing a branch in the Code tab (protocol 5, additive, ticket #84): the read
+    /// `code.diff`, `CodeBranch.conflicts` in `code.get`, the read `code.review` and the
+    /// writes `code.comment`, `code.resolve_thread`, `code.set_viewed` and
+    /// `code.submit_review`, with the event `code.review_changed`. A client without it
+    /// shows no diff and keeps no line comments.
+    pub const CODE_REVIEW: &str = "code_review";
     /// Work sessions (protocol 5, additive): `work_session.start` starts one employee in one
     /// project's folder without a ticket (optionally in a worktree of its own), later messages
     /// go in with `chat.send`, and `work_session.list` lists the reader's sessions. A client
@@ -541,6 +547,7 @@ pub const FEATURES: &[&str] = &[
     feature::COMMAND_APPLIED,
     feature::TICKET_MADE_TITLE,
     feature::CODE_VIEW,
+    feature::CODE_REVIEW,
     feature::ARTIFACT_DRAFTS,
     feature::DESIGNS,
     feature::DESIGN_SESSIONS,
@@ -684,6 +691,8 @@ pub enum ResponseBody {
     SessionHistory(aurelius_domain::history::SessionHistoryPage),
     /// `code.get`.
     Code(aurelius_domain::code::CodeView),
+    /// `code.diff`.
+    CodeDiff(aurelius_domain::code::CodeDiff),
     /// `message.locate`.
     MessageLocation(aurelius_domain::views::MessageLocation),
     /// `message.history`.

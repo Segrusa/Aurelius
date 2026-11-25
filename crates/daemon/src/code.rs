@@ -11,7 +11,10 @@ use crate::api::{app_task, internal, storage_task};
 use crate::quick::{self, ok};
 use aurelius_application::ticket::quick::MergeOutcome;
 use aurelius_domain::ProjectId;
-use aurelius_domain::code::{CODE_BRANCH_COMMITS_MAX, CODE_BRANCHES_MAX, CODE_COMMITS_MAX, CODE_FILES_MAX, CODE_SUBJECT_MAX_CHARS, CodeBranch, CodeCommit, CodeCommitLine, CodeView, CodeWorktree};
+use aurelius_domain::code::{
+    CODE_BRANCH_COMMITS_MAX, CODE_BRANCHES_MAX, CODE_COMMITS_MAX, CODE_DIFF_FILE_LINES_MAX, CODE_DIFF_FILES_MAX, CODE_DIFF_LINE_MAX_CHARS, CODE_DIFF_LINES_MAX, CODE_FILES_MAX, CODE_SUBJECT_MAX_CHARS, CodeBranch, CodeCommit, CodeCommitLine, CodeDiff, CodeDiffFile,
+    CodeFileStatus, CodeHunk, CodeView, CodeWorktree,
+};
 use aurelius_protocol::{ErrorCode, HostWrite, ProtocolError};
 use aurelius_storage::code::{BranchLink, SessionWorktree};
 use std::collections::HashMap;
@@ -29,6 +32,10 @@ const RECORD: char = '\u{1e}';
 const REFS_FORMAT: &str = "--format=%(refname)%00%(objectname)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)%00%(authorname)%00%(subject)";
 /// The fields of a commit of the graph (see `parse_log`).
 const LOG_FORMAT: &str = "--format=%H%x00%P%x00%ct%x00%an%x00%s%x1e";
+/// The prefixes `parse_diff` reads, whatever the user's config says (`diff.mnemonicPrefix`
+/// writes `c/` and `w/` for a worktree diff, `diff.noprefix` none at all).
+const DIFF_SRC: &str = "--src-prefix=a/";
+const DIFF_DST: &str = "--dst-prefix=b/";
 /// The fields of a branch's own commit (see `parse_lines`).
 const LINES_FORMAT: &str = "--format=%H%x00%s%x1e";
 /// How long `code.fetch` may take before its git is stopped: a remote that accepts the
@@ -81,6 +88,64 @@ pub async fn view(shared: &Arc<Shared>, project: ProjectId) -> Result<CodeView, 
         };
     }
     Ok(view)
+}
+
+/// `code.diff` (feature `code_review`, ticket #84): what merging `branch` would bring into
+/// main, and what its worktree has not committed yet. An unknown branch is `NotFound`.
+pub async fn diff(shared: &Arc<Shared>, project: ProjectId, branch: String) -> Result<CodeDiff, ProtocolError> {
+    let folder = folder_of(shared, project).await?.ok_or_else(|| invalid("This project has no folder, so there is no repository to read."))?;
+    let repo = PathBuf::from(folder);
+    app_task(move || Ok(read_diff(project, &repo, &branch))).await?
+}
+
+/// The git half of `code.diff` (blocking).
+fn read_diff(project: ProjectId, repo: &Path, branch: &str) -> Result<CodeDiff, ProtocolError> {
+    let state = repo_state(repo).map_err(invalid)?;
+    let head = known_branch(&state, branch)?.head.clone();
+    let main = format!("{HEADS}{}", state.main);
+    let theirs = format!("{HEADS}{branch}");
+    let base = read(repo, &["merge-base", "--end-of-options", &main, &theirs]).map_err(|why| invalid(format!("{branch} shares no history with {}: {why}", state.main)))?;
+    let committed = read(repo, &["-c", "core.quotePath=false", "diff", DIFF_SRC, DIFF_DST, "--no-color", "--no-ext-diff", "-M", "--end-of-options", &base, &theirs, "--"]).map_err(invalid)?;
+    let mut files = parse_diff(&aurelius_runtime::redact::text(&committed));
+    // What its worktree changed on top of the branch and did not commit yet (tracked files).
+    let worktree = state.worktrees.iter().find(|w| w.branch.as_deref() == Some(branch) && !w.prunable && Path::new(&w.path).is_dir());
+    if let Some(w) = worktree {
+        let open = read(Path::new(&w.path), &["-c", "core.quotePath=false", "diff", DIFF_SRC, DIFF_DST, "--no-color", "--no-ext-diff", "-M", "HEAD", "--"]).unwrap_or_default();
+        files.extend(parse_diff(&aurelius_runtime::redact::text(&open)).into_iter().map(|mut f| {
+            f.uncommitted = true;
+            f
+        }));
+    }
+    let truncated = limit_diff(&mut files);
+    Ok(CodeDiff { project_id: project, branch: branch.to_owned(), base, head, files, truncated })
+}
+
+/// Keep the diff under `CODE_DIFF_FILES_MAX` files and `CODE_DIFF_LINES_MAX` lines (each file
+/// at most `CODE_DIFF_FILE_LINES_MAX`). Whether anything was left out.
+fn limit_diff(files: &mut Vec<CodeDiffFile>) -> bool {
+    let mut truncated = files.len() > CODE_DIFF_FILES_MAX;
+    files.truncate(CODE_DIFF_FILES_MAX);
+    let mut left = CODE_DIFF_LINES_MAX;
+    for file in files.iter_mut() {
+        let mut room = left.min(CODE_DIFF_FILE_LINES_MAX);
+        let mut kept = Vec::new();
+        for mut hunk in std::mem::take(&mut file.hunks) {
+            if room == 0 {
+                file.truncated = true;
+                break;
+            }
+            if hunk.lines.len() > room {
+                hunk.lines.truncate(room);
+                file.truncated = true;
+            }
+            room -= hunk.lines.len();
+            left -= hunk.lines.len();
+            kept.push(hunk);
+        }
+        file.hunks = kept;
+        truncated |= file.truncated;
+    }
+    truncated
 }
 
 /// A `code.*` host write, then the view as it is after it.
@@ -266,8 +331,9 @@ fn branch_of(repo: &Path, main: &str, r: &RefEntry, worktree_path: Option<&str>)
     } else {
         read(repo, &["rev-list", "--left-right", "--count", &format!("{HEADS}{main}...{HEADS}{}", r.name), "--"]).ok().and_then(|t| parse_left_right(&t)).unwrap_or((0, 0))
     };
-    let (mut files_changed, mut insertions, mut deletions, mut commits) = (0, 0, 0, vec![]);
+    let (mut files_changed, mut insertions, mut deletions, mut commits, mut conflicts) = (0, 0, 0, vec![], None);
     if ahead > 0 {
+        conflicts = if behind == 0 { Some(vec![]) } else { merge_conflicts(repo, main, &r.name) };
         (files_changed, insertions, deletions) = parse_shortstat(&read(repo, &["diff", "--shortstat", &format!("{HEADS}{main}...{HEADS}{}", r.name), "--"]).unwrap_or_default());
         let max = format!("--max-count={CODE_BRANCH_COMMITS_MAX}");
         let range = format!("{HEADS}{main}..{HEADS}{}", r.name);
@@ -295,6 +361,19 @@ fn branch_of(repo: &Path, main: &str, r: &RefEntry, worktree_path: Option<&str>)
         owner: None,
         working: false,
         open: false,
+        conflicts,
+    }
+}
+
+/// What merging `branch` into `main` would conflict on, from `git merge-tree --write-tree`
+/// (it writes objects only, never a worktree or a ref): empty when it merges cleanly, None
+/// when git could not tell (git before 2.38, or another error).
+fn merge_conflicts(repo: &Path, main: &str, branch: &str) -> Option<Vec<String>> {
+    let out = reader(repo, &["merge-tree", "--write-tree", "--name-only", "--no-messages", &format!("{HEADS}{main}"), &format!("{HEADS}{branch}")]).output().ok()?;
+    match out.status.code() {
+        Some(0) => Some(vec![]),
+        Some(1) => Some(parse_conflicts(&String::from_utf8_lossy(&out.stdout))),
+        _ => None,
     }
 }
 
@@ -711,6 +790,95 @@ fn parse_lines(text: &str) -> Vec<CodeCommitLine> {
             (!hash.is_empty()).then(|| CodeCommitLine { hash: hash.to_owned(), subject: shown(subject) })
         })
         .collect()
+}
+
+/// The files `git merge-tree --write-tree --name-only` names after its tree line, each once.
+fn parse_conflicts(text: &str) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    for line in text.lines().skip(1).map(str::trim).filter(|l| !l.is_empty()) {
+        if !files.iter().any(|f| f == line) {
+            files.push(line.to_owned());
+        }
+    }
+    files
+}
+
+/// The files of a unified `git diff` (with `-M` and `core.quotePath=false`), in git's order.
+fn parse_diff(text: &str) -> Vec<CodeDiffFile> {
+    let mut files: Vec<CodeDiffFile> = Vec::new();
+    let mut in_hunk = false;
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("diff --git a/") {
+            // "a/x b/x": the new path after the last " b/"; the ---/+++ lines refine it.
+            let path = rest.rsplit_once(" b/").map_or(rest, |(_, b)| b).to_owned();
+            files.push(CodeDiffFile { path, old_path: None, status: CodeFileStatus::Modified, additions: 0, deletions: 0, binary: false, uncommitted: false, hunks: vec![], truncated: false });
+            in_hunk = false;
+            continue;
+        }
+        let Some(file) = files.last_mut() else { continue };
+        if line.starts_with("@@ ") {
+            let (old_start, new_start) = parse_hunk_header(line);
+            file.hunks.push(CodeHunk { header: line.to_owned(), old_start, new_start, lines: vec![] });
+            in_hunk = true;
+            continue;
+        }
+        if in_hunk {
+            let Some(hunk) = file.hunks.last_mut() else { continue };
+            match line.chars().next() {
+                Some('+') => file.additions += 1,
+                Some('-') => file.deletions += 1,
+                Some(' ') => {}
+                // "\ No newline at end of file" and anything else is not a line of the file.
+                _ => continue,
+            }
+            hunk.lines.push(cut_line(line));
+            continue;
+        }
+        if line.starts_with("new file mode") {
+            file.status = CodeFileStatus::Added;
+        } else if line.starts_with("deleted file mode") {
+            file.status = CodeFileStatus::Deleted;
+        } else if let Some(from) = line.strip_prefix("rename from ") {
+            file.status = CodeFileStatus::Renamed;
+            file.old_path = Some(from.to_owned());
+        } else if let Some(to) = line.strip_prefix("rename to ") {
+            file.path = to.to_owned();
+        } else if line.starts_with("Binary files ") || line == "GIT binary patch" {
+            file.binary = true;
+        } else if let Some(to) = line.strip_prefix("+++ b/") {
+            file.path = to.to_owned();
+        } else if let Some(from) = line.strip_prefix("--- a/")
+            && file.status == CodeFileStatus::Deleted
+        {
+            file.path = from.to_owned();
+        }
+    }
+    files
+}
+
+/// `@@ -12,7 +12,9 @@ fn x()`: the first line on each side (a missing count means 1 line).
+fn parse_hunk_header(header: &str) -> (u32, u32) {
+    let mut old = 0;
+    let mut new = 0;
+    for part in header.split_whitespace().skip(1).take(2) {
+        let start = |p: &str| p.split(',').next().and_then(|n| n.parse().ok()).unwrap_or(0);
+        if let Some(p) = part.strip_prefix('-') {
+            old = start(p);
+        } else if let Some(p) = part.strip_prefix('+') {
+            new = start(p);
+        }
+    }
+    (old, new)
+}
+
+/// A diff line as it travels: at most `CODE_DIFF_LINE_MAX_CHARS`, an ellipsis when cut.
+fn cut_line(line: &str) -> String {
+    if line.chars().count() <= CODE_DIFF_LINE_MAX_CHARS {
+        return line.to_owned();
+    }
+    let mut cut: String = line.chars().take(CODE_DIFF_LINE_MAX_CHARS - 1).collect();
+    cut.push('…');
+    cut
 }
 
 /// `git rev-list --left-right --count main...branch`: (behind, ahead) of the branch.

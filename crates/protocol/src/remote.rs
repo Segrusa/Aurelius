@@ -123,6 +123,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::TicketHistory { .. }
         // The Code tab shows what the board's tickets did in the project's folder (B3).
         | Method::CodeGet { .. }
+        // A branch's diff and its review: what the Code tab shows, the same right.
+        | Method::CodeDiff { .. }
         // Sessions in the History: the same right as the tickets next to them.
         | Method::WorkSessionHistory { .. }
         // The vault: every own device of a board member lists it and its audit log

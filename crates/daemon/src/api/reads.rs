@@ -130,6 +130,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         }
         Method::MessageHistory { message_id } => message_history(shared, reader, message_id).await,
         Method::CodeGet { project_id } => Ok(ResponseBody::Code(crate::code::view(shared, project_id).await?)),
+        Method::CodeDiff { project_id, branch } => Ok(ResponseBody::CodeDiff(crate::code::diff(shared, project_id, branch).await?)),
         Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
         Method::ApprovalList { project_id } => approvals(shared, project_id).await,
         Method::ProviderList => connections(shared).await,
