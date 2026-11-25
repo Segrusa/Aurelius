@@ -414,8 +414,8 @@ pub mod feature {
     pub const CODE_VIEW: &str = "code_view";
     /// Reviewing a branch in the Code tab (protocol 5, additive, ticket #84): the read
     /// `code.diff`, `CodeBranch.conflicts` in `code.get`, the read `code.review` and the
-    /// writes `code.comment`, `code.resolve_thread`, `code.set_viewed` and
-    /// `code.submit_review`, with the event `code.review_changed`. A client without it
+    /// writes `code.start_thread`, `code.reply`, `code.resolve_thread`, `code.set_viewed`
+    /// and `code.submit_review`, with the event `code.review_changed`. A client without it
     /// shows no diff and keeps no line comments.
     pub const CODE_REVIEW: &str = "code_review";
     /// Work sessions (protocol 5, additive): `work_session.start` starts one employee in one
@@ -693,6 +693,8 @@ pub enum ResponseBody {
     Code(aurelius_domain::code::CodeView),
     /// `code.diff`.
     CodeDiff(aurelius_domain::code::CodeDiff),
+    /// `code.review`.
+    CodeReview(aurelius_domain::code_review::CodeReviewView),
     /// `message.locate`.
     MessageLocation(aurelius_domain::views::MessageLocation),
     /// `message.history`.

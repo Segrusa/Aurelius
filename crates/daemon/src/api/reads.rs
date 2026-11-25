@@ -131,6 +131,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::MessageHistory { message_id } => message_history(shared, reader, message_id).await,
         Method::CodeGet { project_id } => Ok(ResponseBody::Code(crate::code::view(shared, project_id).await?)),
         Method::CodeDiff { project_id, branch } => Ok(ResponseBody::CodeDiff(crate::code::diff(shared, project_id, branch).await?)),
+        Method::CodeReview { project_id, branch, head } => code_review(shared, reader, project_id, branch, head).await,
         Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
         Method::ApprovalList { project_id } => approvals(shared, project_id).await,
         Method::ProviderList => connections(shared).await,
@@ -916,6 +917,14 @@ async fn my_tickets(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId
     })
     .await
     .map(ResponseBody::MyTickets)
+}
+
+/// `code.review`: a branch's review as the board member of the session sees it. An app
+/// reviews nothing.
+async fn code_review(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, project: aurelius_domain::ProjectId, branch: String, head: Option<String>) -> Result<ResponseBody, ProtocolError> {
+    let Some(user) = reader else { return Err(ProtocolError::new(ErrorCode::BoardMemberRequired, "Only a board member reviews code.")) };
+    let store = shared.store().clone();
+    storage_task(move || store.read(|c| aurelius_storage::code_review::view(c, user, project, &branch, head.as_deref()))).await.map(ResponseBody::CodeReview)
 }
 
 /// `user.rail_pins`: the rail of the board member of the session, never of one

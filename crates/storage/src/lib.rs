@@ -58,6 +58,7 @@ pub mod guidelines;
 pub mod history;
 pub mod server_name;
 pub mod rail_pins;
+pub mod code_review;
 
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use std::path::{Path, PathBuf};
@@ -304,6 +305,8 @@ mod schema49_tests;
 mod schema50_tests;
 #[cfg(test)]
 mod schema51_tests;
+#[cfg(test)]
+mod schema53_tests;
 #[cfg(test)]
 mod session_history_tests;
 #[cfg(test)]

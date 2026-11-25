@@ -125,6 +125,7 @@ fn method_needs(method: &Method) -> Needs {
         | Method::CodeGet { .. }
         // A branch's diff and its review: what the Code tab shows, the same right.
         | Method::CodeDiff { .. }
+        | Method::CodeReview { .. }
         // Sessions in the History: the same right as the tickets next to them.
         | Method::WorkSessionHistory { .. }
         // The vault: every own device of a board member lists it and its audit log
@@ -374,6 +375,10 @@ fn command_needs(command: &Command) -> Needs {
         Command::SetServerName(_) => Needs::Owner,
         // One's own rail, like marking one's own notifications read: it changes nothing for others.
         Command::SetRailPins(_) => Needs::Cap(Read),
+        // Reviewing a branch is talking about it, as posting in a ticket's discussion.
+        Command::StartCodeThread(_) | Command::ReplyCodeThread(_) | Command::ResolveCodeThread(_) | Command::SubmitCodeReview(_) => Needs::Cap(Chat),
+        // One's own viewed marks, like marking one's own notifications read.
+        Command::SetCodeViewed(_) => Needs::Cap(Read),
     }
 }
 

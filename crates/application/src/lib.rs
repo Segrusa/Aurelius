@@ -78,6 +78,7 @@ pub mod run;
 pub mod task;
 pub mod server_name;
 pub mod rail_pins;
+pub mod code_review;
 pub mod ticket;
 pub(crate) mod ticket_follow;
 pub mod user;
@@ -302,6 +303,11 @@ impl CommandService {
             Command::EditMessage(cmd) => self.edit_message(ctx, &envelope, hash, cmd),
             Command::DeleteMessage(cmd) => self.delete_message(ctx, &envelope, hash, cmd),
             Command::SetRailPins(cmd) => self.set_rail_pins(ctx, &envelope, hash, cmd),
+            Command::StartCodeThread(cmd) => self.start_code_thread(ctx, &envelope, hash, cmd),
+            Command::ReplyCodeThread(cmd) => self.reply_code_thread(ctx, &envelope, hash, cmd),
+            Command::ResolveCodeThread(cmd) => self.resolve_code_thread(ctx, &envelope, hash, cmd),
+            Command::SetCodeViewed(cmd) => self.set_code_viewed(ctx, &envelope, hash, cmd),
+            Command::SubmitCodeReview(cmd) => self.submit_code_review(ctx, &envelope, hash, cmd),
         };
         COMMAND_METHOD.set("");
         result
