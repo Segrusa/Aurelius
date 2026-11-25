@@ -772,3 +772,56 @@ fn own_run_defaults_need_a_board_member_and_the_same_ones_again_are_no_change() 
     let alex = s.alex;
     assert_eq!(s.service.store().read(move |c| aurelius_storage::user_run_defaults::get(c, alex)).unwrap(), UserRunDefaults::default(), "Alex's stay their own");
 }
+
+/// The mode of the conversation `run` answers in.
+fn mode_of(s: &Setup, run: RunId) -> aurelius_domain::autonomy::AgentMode {
+    s.service.store().read(move |c| aurelius_storage::conversations::mode_for_run(c, run)).unwrap()
+}
+
+#[test]
+fn a_ticket_task_and_a_session_start_in_their_board_members_default_mode() {
+    use aurelius_domain::autonomy::AgentMode;
+    use aurelius_domain::user::UserRunDefaults;
+    let s = setup();
+    set_defaults(&s, s.robin, UserRunDefaults { mode: Some(AgentMode::AcceptEdits), ..Default::default() });
+    // The employee's own mode (its main chat) no longer counts.
+    // Iris and Otto are no management (Ada, the oldest root, is the CEO), so no Plan rule.
+    exec(&s, s.alex, Command::SetAgentMode(aurelius_domain::autonomy::SetAgentMode { conversation_id: s.iris.1, mode: AgentMode::Plan }));
+    let (_, root) = ticket_of(&s, s.robin, s.iris.0);
+    let main = start_task(&s, root, s.iris.0);
+    assert_eq!(mode_of(&s, main), AgentMode::AcceptEdits, "Robin's, the ticket's creator");
+    let (_, part) = delegate(&s, main, "Otto", s.otto.0);
+    assert_eq!(mode_of(&s, part), AgentMode::AcceptEdits, "a part runs on Robin's login too");
+    // Alex chose no mode: Ask, not Robin's and not the employee's Plan.
+    let (_, alexs) = ticket_of(&s, s.alex, s.iris.0);
+    assert_eq!(mode_of(&s, start_task(&s, alexs, s.iris.0)), AgentMode::Ask);
+
+    let session = |by: UserId, run: aurelius_domain::task::RunSettings| {
+        let start = aurelius_domain::work_session::StartWorkSession { project_id: s.project, employee_id: s.otto.0, text: "Look at it".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run, confirm_secret: false, design: false };
+        let CommandResult::WorkSessionStarted { run_id, .. } = exec(&s, by, Command::StartWorkSession(start)) else { panic!() };
+        mode_of(&s, run_id)
+    };
+    assert_eq!(session(s.robin, Default::default()), AgentMode::AcceptEdits, "the starter's default");
+    assert_eq!(session(s.robin, aurelius_domain::task::RunSettings { mode: Some(AgentMode::Plan), ..Default::default() }), AgentMode::Plan, "a choice at the start wins");
+    assert_eq!(session(s.alex, Default::default()), AgentMode::Ask);
+}
+
+#[test]
+fn a_manager_still_starts_in_plan_and_a_tasks_own_mode_still_wins_over_the_default() {
+    use aurelius_domain::autonomy::AgentMode;
+    use aurelius_domain::user::UserRunDefaults;
+    let s = setup();
+    set_defaults(&s, s.robin, UserRunDefaults { mode: Some(AgentMode::AcceptEdits), ..Default::default() });
+    let create = |run: aurelius_domain::task::RunSettings| {
+        let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(s.ada.0), title: "Report".into(), goal: "Write it".into(), acceptance_criteria: vec![], run, files: vec![] };
+        let CommandResult::TaskCreated { task_id } = exec(&s, s.robin, Command::CreateTask(create)) else { panic!() };
+        task_id
+    };
+    let chosen = create(aurelius_domain::task::RunSettings { mode: Some(AgentMode::Auto), ..Default::default() });
+    assert_eq!(mode_of(&s, start_task(&s, chosen, s.ada.0)), AgentMode::Auto);
+    // Ada leads the company and management chooses its own mode: Plan first.
+    exec(&s, s.alex, Command::SetFollowOrgChart(aurelius_domain::employee::SetFollowOrgChart { follow: true }));
+    if s.service.store().read(move |c| aurelius_storage::management_mode::chooses_own_mode(c, s.ada.0)).unwrap() {
+        assert_eq!(mode_of(&s, start_task(&s, create(Default::default()), s.ada.0)), AgentMode::Plan);
+    }
+}

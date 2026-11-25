@@ -13,6 +13,16 @@ use aurelius_storage::events::{self, NewEvent};
 use aurelius_storage::user_run_defaults as store;
 use serde_json::json;
 
+/// The mode a new conversation of `login`'s work starts in when nothing else
+/// chose one: their default, else Ask.
+pub(crate) fn start_mode(conn: &rusqlite::Connection, login: Option<aurelius_domain::UserId>) -> Result<aurelius_domain::autonomy::AgentMode, aurelius_storage::StorageError> {
+    let chosen = match login {
+        Some(user) => store::get(conn, user)?.mode,
+        None => None,
+    };
+    Ok(chosen.unwrap_or(aurelius_domain::autonomy::AgentMode::Ask))
+}
+
 impl CommandService {
     pub(crate) fn set_user_run_defaults(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &SetUserRunDefaults) -> Result<Committed, AppError> {
         let user = require_board_member(ctx)?;
