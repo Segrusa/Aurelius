@@ -24,6 +24,7 @@ import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { cycle, EFFORTS, MODES, titleOfGoal } from "./dialog-logic";
 import { Held, useModels, useOpenCreated, useSend } from "./dialogs";
+import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 import {
   columnLabel,
   composerRows,
@@ -231,6 +232,12 @@ export function NewSessionScreen() {
     models.length > 1,
   );
   const run = { model, effort, mode };
+  // Without a choice: the board member's own default where the server keeps one (My defaults).
+  const defaultMode = features.includes(USER_RUN_DEFAULTS_FEATURE)
+    ? "My default"
+    : kind === "session"
+      ? "Employee's default"
+      : "Owner's default";
 
   const shown = useMemo(() => shownProjects(projects.data ?? [], workspace.id), [projects.data, workspace.id]);
   const recent = parseRecent(storage.get(sessionKey("recent", hostId)));
@@ -520,17 +527,12 @@ export function NewSessionScreen() {
                     value={mode}
                     options={MODES.map((m) => ({
                       key: m.key as string,
-                      label:
-                        m.key === "default" ? (kind === "session" ? "Employee's default" : "Owner's default") : m.label,
+                      label: m.key === "default" ? defaultMode : m.label,
                     }))}
                     onPick={setMode}
                     trigger={
                       <Chip name="Mode" quiet>
-                        {mode === "default"
-                          ? kind === "session"
-                            ? "Employee's default"
-                            : "Owner's default"
-                          : MODES.find((m) => m.key === mode)?.label}
+                        {mode === "default" ? defaultMode : MODES.find((m) => m.key === mode)?.label}
                       </Chip>
                     }
                   />
