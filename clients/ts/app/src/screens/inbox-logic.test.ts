@@ -224,36 +224,37 @@ describe("where a row of the bell leads", () => {
     glyph: "warn",
     source,
   });
+  const sessions = new Set(["s1"]);
   const of = (approvalOver: Partial<ApprovalView>) =>
-    rowPlace(row({ kind: "approval", approval: approval(approvalOver) }), true);
+    rowPlace(row({ kind: "approval", approval: approval(approvalOver) }), true, sessions);
 
   it("takes an approval to its run, else its ticket or conversation; one without a place is decided in the bell", () => {
     expect(of({ task_id: "t1", ticket_id: "k1", conversation_id: "c1" })).toEqual({ kind: "task", id: "t1" });
     expect(of({ ticket_id: "k1", conversation_id: "c1" })).toEqual({ kind: "ticket", id: "k1", number: null });
-    expect(of({ conversation_id: "c1" })).toEqual({ kind: "conversation", id: "c1" });
+    expect(of({ conversation_id: "s1" })).toEqual({ kind: "conversation", id: "s1" });
     expect(of({})).toEqual({ kind: "here" });
   });
 
   it("takes a waiting task to its ticket, else to its run", () => {
-    expect(rowPlace(row({ kind: "task", task: task({ ticket_id: "k1", ticket_number: 7 }) }), true)).toEqual({
+    expect(rowPlace(row({ kind: "task", task: task({ ticket_id: "k1", ticket_number: 7 }) }), true, sessions)).toEqual({
       kind: "ticket",
       id: "k1",
       number: 7,
     });
-    expect(rowPlace(row({ kind: "task", task: task() }), true)).toEqual({ kind: "task", id: "t" });
+    expect(rowPlace(row({ kind: "task", task: task() }), true, sessions)).toEqual({ kind: "task", id: "t" });
   });
 
   it("takes a proposal to Employees and a guideline proposal to its guideline", () => {
     const hire = { id: "p1" } as ProposalView;
-    expect(rowPlace(row({ kind: "proposal", proposal: hire }), true)).toEqual({ kind: "employees" });
+    expect(rowPlace(row({ kind: "proposal", proposal: hire }), true, sessions)).toEqual({ kind: "employees" });
     const change = { id: "g9", guideline_id: "g1" } as GuidelineProposalView;
-    expect(rowPlace(row({ kind: "guideline", proposal: change }), true)).toEqual({
+    expect(rowPlace(row({ kind: "guideline", proposal: change }), true, sessions)).toEqual({
       kind: "guideline",
       id: "g1",
       proposal: "g9",
     });
     const fresh = { id: "g9", guideline_id: null } as GuidelineProposalView;
-    expect(rowPlace(row({ kind: "guideline", proposal: fresh }), true)).toEqual({
+    expect(rowPlace(row({ kind: "guideline", proposal: fresh }), true, sessions)).toEqual({
       kind: "guideline",
       id: "new",
       proposal: "g9",
@@ -262,19 +263,41 @@ describe("where a row of the bell leads", () => {
 
   it("takes a mention to its message where the server can find it, else to its ticket at that message", () => {
     const mention = note({ reason: "mention", ticket_id: "k1", ticket_number: 3, message_id: "m1" });
-    expect(rowPlace(row({ kind: "notification", notification: mention }), true)).toEqual({ kind: "message", id: "m1" });
-    expect(rowPlace(row({ kind: "notification", notification: mention }), false)).toEqual({
+    expect(rowPlace(row({ kind: "notification", notification: mention }), true, sessions)).toEqual({
+      kind: "message",
+      id: "m1",
+    });
+    expect(rowPlace(row({ kind: "notification", notification: mention }), false, sessions)).toEqual({
       kind: "ticket",
       id: "k1",
       number: 3,
       message: "m1",
     });
     const review = note({ reason: "review", ticket_id: "k1", ticket_number: 3, message_id: "m1" });
-    expect(rowPlace(row({ kind: "notification", notification: review }), true)).toMatchObject({ kind: "ticket" });
-    expect(rowPlace(row({ kind: "notification", notification: note({ task_id: "t2" }) }), true)).toEqual({
+    expect(rowPlace(row({ kind: "notification", notification: review }), true, sessions)).toMatchObject({
+      kind: "ticket",
+    });
+    expect(rowPlace(row({ kind: "notification", notification: note({ task_id: "t2" }) }), true, sessions)).toEqual({
       kind: "task",
       id: "t2",
     });
-    expect(rowPlace(row({ kind: "notification", notification: note() }), true)).toEqual({ kind: "here" });
+    expect(rowPlace(row({ kind: "notification", notification: note() }), true, sessions)).toEqual({ kind: "here" });
+  });
+
+  // Regression (OPR-1): a row of a conversation that is no work session (the Team chat, a chat with
+  // an employee) led to "conversation", and the bell only closed itself without opening anything.
+  it("never leads to a conversation that is not a work session", () => {
+    expect(of({ conversation_id: "c-team" })).toEqual({ kind: "here" });
+    const update = note({ conversation_id: "c-team", message_id: "m1" });
+    expect(rowPlace(row({ kind: "notification", notification: update }), false, sessions)).toEqual({ kind: "here" });
+    expect(rowPlace(row({ kind: "notification", notification: update }), true, sessions)).toEqual({
+      kind: "message",
+      id: "m1",
+    });
+    const inSession = note({ conversation_id: "s1" });
+    expect(rowPlace(row({ kind: "notification", notification: inSession }), false, sessions)).toEqual({
+      kind: "conversation",
+      id: "s1",
+    });
   });
 });

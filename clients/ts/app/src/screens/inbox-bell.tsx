@@ -158,7 +158,8 @@ export function InboxBell() {
     if (source.kind === "notification" && !source.notification.read) {
       void write("notification.mark_read", { id: source.notification.id });
     }
-    const place = rowPlace(row, Boolean(hostId && follow && features.includes("message_locate")));
+    const sessionIds = new Set(sessions.map((s) => s.conversation_id));
+    const place = rowPlace(row, Boolean(hostId && follow && features.includes("message_locate")), sessionIds);
     // A plan opens in the dock of the conversation it waits in.
     const plan = source.kind === "approval" && source.approval.tool === PLAN_TOOL ? source.approval.id : null;
     const planSearch = plan ? { plan } : {};
@@ -179,10 +180,8 @@ export function InboxBell() {
         void navigate({ to: "/tasks/$taskId", params: { taskId: place.id }, search: planSearch });
         break;
       case "conversation":
-        // Only a work session is still a place of its own: the Team chat is gone.
-        if (sessions.some((s) => s.conversation_id === place.id)) {
-          void navigate({ to: "/session/$conversationId", params: { conversationId: place.id }, search: planSearch });
-        }
+        // rowPlace gives a conversation only when it is a work session.
+        void navigate({ to: "/session/$conversationId", params: { conversationId: place.id }, search: planSearch });
         break;
       case "message":
         if (hostId && follow) follow(messageLink(hostId, place.id));

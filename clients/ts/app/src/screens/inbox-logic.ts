@@ -340,9 +340,12 @@ export type RowPlace =
 
 /**
  * The place of a row. `canLocate`: the server finds a message by its id (feature `message_locate`), so a
- * mention opens at that message wherever it was written.
+ * mention opens at that message wherever it was written. `sessionIds`: the reader's work sessions, the
+ * only conversations that are still a screen of their own (the Team chat is gone); a row of any other
+ * conversation stays in the bell, where an approval is decided and an update is read.
  */
-export function rowPlace(row: InboxRow, canLocate: boolean): RowPlace {
+export function rowPlace(row: InboxRow, canLocate: boolean, sessionIds: ReadonlySet<string>): RowPlace {
+  const conversation = (id: string): RowPlace => (sessionIds.has(id) ? { kind: "conversation", id } : { kind: "here" });
   const { source } = row;
   switch (source.kind) {
     case "approval": {
@@ -350,7 +353,7 @@ export function rowPlace(row: InboxRow, canLocate: boolean): RowPlace {
       // Its run shows the card in line; a ticket or conversation shows it where the run asked.
       if (a.task_id) return { kind: "task", id: a.task_id };
       if (a.ticket_id) return { kind: "ticket", id: a.ticket_id, number: null };
-      if (a.conversation_id) return { kind: "conversation", id: a.conversation_id };
+      if (a.conversation_id) return conversation(a.conversation_id);
       return { kind: "here" };
     }
     case "proposal":
@@ -376,7 +379,7 @@ export function rowPlace(row: InboxRow, canLocate: boolean): RowPlace {
         };
       }
       if (n.task_id) return { kind: "task", id: n.task_id };
-      if (n.conversation_id) return { kind: "conversation", id: n.conversation_id };
+      if (n.conversation_id) return conversation(n.conversation_id);
       return { kind: "here" };
     }
   }
