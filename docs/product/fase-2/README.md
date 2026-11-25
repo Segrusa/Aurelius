@@ -1,3 +1,5 @@
+> **Historical:** the Team chat, #general and the project channels were removed in migration 0045; this document describes Fase 2 as designed before that.
+
 # AUR-MU-02: Fase 2, ticketdiscussie en kanalen in de Team chat (ter goedkeuring)
 
 *Orion · 2026-10-31 · branch `docs/aur-mu-def` (lokaal) · basis: `docs/product/multi-user.md`, Fase 1 (B1–B10 goedgekeurd)*

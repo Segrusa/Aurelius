@@ -1,3 +1,5 @@
+> **Historical:** the Team chat, #general and the project channels were removed in migration 0045; this document describes Fase 2 as designed before that.
+
 # Technische impactanalyse Fase 2: ticketdiscussie en kanalen in de Team chat
 
 *AUR-MU-DEF-T · Titan (Tech Lead) · 2026-10-31 · basis: `main` 21015fd + `feat/aur-mu-01` @ fad4dd2 (Fase 1, protocol 4 bevroren) · bron: `docs/product/multi-user.md` §2 "Ticketdiscussie", "Team chat: kanalen", "Memory"*
