@@ -156,7 +156,6 @@ describe("following a link", () => {
   it("finds nothing on a plain screen", () => {
     expect(targetOf("/board", {})).toBeNull();
     expect(targetOf("/board", { ticket: "" })).toBeNull();
-    expect(targetOf("/tasks", {})).toBeNull();
     expect(targetOf("/inbox", { ticket: "t1" })).toBeNull();
   });
 
@@ -178,7 +177,9 @@ describe("following a link", () => {
 describe("switching under an open screen", () => {
   it("drops the opened item of the old workspace", () => {
     expect(pathAfterSwitch("/board", "atlas")).toBe("/board");
-    expect(pathAfterSwitch("/tasks/k1", "atlas")).toBe("/tasks");
+    // The Tasks list is gone (OPR-4): a task's run of the old workspace leaves for New session.
+    expect(pathAfterSwitch("/tasks/k1", "atlas")).toBe("/new");
+    expect(pathAfterSwitch("/tasks/k1", null)).toBe("/overview");
     // A ticket's session is of one project: the Board of the new workspace instead.
     expect(pathAfterSwitch("/ticket/70", "atlas")).toBe("/board");
   });
@@ -190,7 +191,6 @@ describe("switching under an open screen", () => {
 
   it("stays on a screen that has no opened item", () => {
     expect(pathAfterSwitch("/inbox", "atlas")).toBeNull();
-    expect(pathAfterSwitch("/tasks", "atlas")).toBeNull();
   });
 
   it("opens the list of workspaces on All workspaces, which has no panel to leave a workspace's screen", () => {

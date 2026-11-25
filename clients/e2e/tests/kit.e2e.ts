@@ -172,9 +172,8 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
     await page.keyboard.press("Control+1");
     await expectNewSession(page);
 
-    // Give work: the top of the org chart by default, a ticket started at once. Its own way in is the
-    // Tasks screen, through the palette.
-    await openGiveWork(page);
+    // Give work: for the employee whose page it is opened on, a ticket started at once.
+    await openGiveWork(page, "Ava");
     const goal = page.getByLabel("What needs doing");
     await expect(goal).toBeFocused();
     await expect(page.getByRole("button", { name: "Ava" })).toHaveAttribute("aria-pressed", "true");
@@ -186,11 +185,11 @@ test("keyboard, palette, New ticket and Give work against a real daemon", async 
 
     // Someone else, through the menu; the next time starts from whom it went to last. Give work opened
     // its ticket's chat too.
-    await openGiveWork(page);
+    await openGiveWork(page, "Ava");
     await page.getByRole("button", { name: "Someone else" }).click();
     await page.getByRole("menuitem", { name: "Ben" }).click();
     await goal.fill("Fix the build");
-    // The Tasks screen behind it has a Give work button of its own.
+    // The employee page behind it has a Give work button of its own.
     await page
       .getByRole("dialog", { name: "Give work" })
       .getByRole("button", { name: /^Give work/ })

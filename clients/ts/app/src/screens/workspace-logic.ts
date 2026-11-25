@@ -147,7 +147,7 @@ export function pathAfterSwitch(pathname: string, next: Workspace): string | nul
   // All workspaces has no panel, so a workspace's screen would leave no way on: its list instead.
   if (next === null && !inSettingsArea(pathname)) return "/overview";
   if (pathname === "/board") return pathname;
-  if (/^\/tasks\/[^/]+$/.test(pathname)) return "/tasks";
+  if (/^\/tasks\/[^/]+$/.test(pathname)) return "/new";
   if (/^\/ticket\/[^/]+$/.test(pathname)) return "/board";
   return null;
 }

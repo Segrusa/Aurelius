@@ -58,7 +58,6 @@ const styles = stylex.create({
 const GO_TO: Record<string, string> = {
   GoDashboard: "/new",
   GoBoard: "/board",
-  GoTasks: "/tasks",
   GoEmployees: "/employees",
   OpenUsage: "/usage",
   GoOrgChart: "/employees/org",

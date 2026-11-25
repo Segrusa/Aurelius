@@ -158,7 +158,7 @@ describe("sessionRedirect (BR6)", () => {
     expect(sessionRedirect("/board", { ticket: "t70" })).toEqual({ ticketId: "t70" });
     expect(sessionRedirect("/history", { ticket: "t70" })).toEqual({ ticketId: "t70" });
     expect(sessionRedirect("/board", {})).toBeNull();
-    expect(sessionRedirect("/tasks", { ticket: "t70" })).toBeNull();
+    expect(sessionRedirect("/new", { ticket: "t70" })).toBeNull();
   });
 });
 

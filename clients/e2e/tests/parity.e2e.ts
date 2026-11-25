@@ -165,9 +165,9 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await page.keyboard.press("Control+n");
     await expectNewSession(page);
 
-    // Give work: an effort and a pasted picture, for an employee. Its own way in is the Tasks screen.
+    // Give work: an effort and a pasted picture, for an employee, from the employee's page.
     await server.write("employee.create", { name: "Ava", role: "CEO" }, { retry: false });
-    await openGiveWork(page);
+    await openGiveWork(page, "Ava");
     const goal = page.getByLabel("What needs doing");
     await goal.fill("Compare hosting");
     await expect(page.getByRole("button", { name: "Ava" })).toBeVisible();
@@ -190,21 +190,18 @@ test("files, responsibles, the card menu and keys from anywhere", async () => {
     await page.getByRole("menuitem", { name: "Pin to the list" }).click();
     await page.getByRole("link", { name: "Back to the app" }).click();
 
-    // A task's conversation can go.
-    await page.keyboard.press("Control+7");
-    const list = page.getByRole("region", { name: "Task list" });
-    await list
-      .getByRole("button", { name: /Compare hosting/ })
+    // A task's conversation can go; its run is opened from the employee's page, and leaves for its ticket.
+    await openCompanyPage(page, "Employees");
+    await page.getByRole("link", { name: /Ava/ }).first().click();
+    await page
+      .getByRole("link", { name: /Compare hosting/ })
       .first()
       .click();
-    await page
-      .getByRole("complementary", { name: "Task preview" })
-      .getByRole("button", { name: /Open conversation/ })
-      .click();
+    await expect(page).toHaveURL(/\/tasks\/[^/]+$/);
     await page.getByRole("button", { name: "Conversation", exact: true }).click();
     await page.getByRole("menuitem", { name: "Delete conversation…" }).click();
     await page.getByRole("button", { name: "Delete", exact: true }).click();
-    await expect(page).toHaveURL(/\/tasks$/);
+    await expect(page).toHaveURL(/\/ticket\/\d+$/);
 
     // Settings: the keys of the page, and they show when asked.
     await openSettings(page);

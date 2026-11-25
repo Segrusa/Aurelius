@@ -4,7 +4,6 @@
 
 export type Feature =
   | "ChatAttachments"
-  | "TasksInSidebar"
   | "ActivityInSidebar"
   | "Trace"
   | "Vault"
@@ -16,7 +15,6 @@ export type Feature =
 /** The one list. */
 export const HIDDEN_FEATURES: readonly Feature[] = [
   "ChatAttachments",
-  "TasksInSidebar",
   "ActivityInSidebar",
   "Trace",
   "Vault",

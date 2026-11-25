@@ -42,7 +42,7 @@ import { RunChips } from "./session";
 import { runChipLabel } from "./session-logic";
 import { modelName } from "./settings-kit";
 import { SubagentsAtWork } from "./subagents";
-import { filesWritten, isActive, subtasksOf, taskStateLine } from "./tasks-logic";
+import { filesWritten, isActive, subtasksOf, taskBackPath, taskStateLine } from "./tasks-logic";
 
 const styles = stylex.create({
   body: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0 },
@@ -129,7 +129,7 @@ export function TaskRunScreen({ taskId, design = null }: { taskId: string; desig
   const navigate = useNavigate();
   const tasks = useAllTasks();
   const task = tasks.data?.find((t) => t.id === taskId);
-  useAction("Back", () => void navigate({ to: "/tasks" }));
+  useAction("Back", () => void navigate({ href: taskBackPath(task) }));
 
   if (!task) {
     return (
@@ -289,7 +289,7 @@ function TaskConversation({
               .write("conversation.delete", { conversation_id: conversationId }, { retry: false })
               .then(() => {
                 void client.invalidateQueries({ queryKey: ["tasks"] });
-                void navigate({ to: "/tasks" });
+                void navigate({ href: taskBackPath(task) });
               })
               .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
           }}

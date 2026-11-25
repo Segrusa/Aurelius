@@ -46,7 +46,6 @@ import { ProjectPage, ProjectsScreen, projectTabShown } from "./screens/projects
 import { SessionScreen } from "./screens/session";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
-import { TasksScreen } from "./screens/tasks";
 import { TicketRedirect, TicketSessionScreen } from "./screens/ticket-session";
 import { UsageScreen } from "./screens/usage";
 import { VaultScreen } from "./screens/vault";
@@ -119,7 +118,14 @@ const designSearch = (search: Record<string, unknown>): { design?: string; plan?
   ...(typeof search.plan === "string" ? { plan: search.plan } : {}),
 });
 
-const tasks = createRoute({ getParentRoute: () => root, path: "/tasks", component: () => <TasksScreen /> });
+// The Tasks list is gone (OPR-4); an old link opens New session. A task's run stays at /tasks/$taskId.
+const tasks = createRoute({
+  getParentRoute: () => root,
+  path: "/tasks",
+  beforeLoad: () => {
+    throw redirect({ to: "/new" });
+  },
+});
 const taskRun = createRoute({
   getParentRoute: () => root,
   path: "/tasks/$taskId",

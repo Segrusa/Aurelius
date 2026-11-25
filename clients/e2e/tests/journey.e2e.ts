@@ -242,13 +242,24 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     }
 
     await step("the run in dark", async () => {
-      await act(() => p.keyboard.press("Control+7"));
-      await act(() => p.getByText("Compare three hosting options").first().click());
+      // The Tasks list is gone (OPR-4): the run opens from its employee's page.
+      await act(() => openCompanyPage(p, "Employees"));
+      await act(() =>
+        p
+          .getByRole("link", { name: /Builder/ })
+          .first()
+          .click(),
+      );
+      await act(() =>
+        p
+          .getByRole("link", { name: /Compare three hosting options/ })
+          .first()
+          .click(),
+      );
       await p.waitForTimeout(400);
     });
 
     await step("a message to the run, on a real server", async () => {
-      await act(() => p.getByRole("button", { name: /Open conversation/ }).click());
       await expect(p.getByText("Assignment", { exact: true }).first()).toBeVisible();
       const box = p.getByLabel("Message Builder");
       await act(() => box.fill("Also compare prices"));
