@@ -182,7 +182,7 @@ class AureliusRepository {
   Future<MessageHistoryView> messageEdits(String messageId) async => (await _ask<ResponseBodyMessageHistory>(messageHistory(messageId: messageId))).value;
 
   /// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`):
-  /// [channel] is the project channel's or ticket discussion's conversation; null is General.
+  /// [channel] is the ticket discussion's conversation.
   Future<DiscussionAudience> discussionAudienceOf({String? channel}) async =>
       (await _ask<ResponseBodyDiscussionAudience>(discussionAudience(channel: channel))).value;
 

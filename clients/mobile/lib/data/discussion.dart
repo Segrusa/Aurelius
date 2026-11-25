@@ -127,8 +127,8 @@ Map<String, TicketRef> ticketsFromMessages(List<MessageView> messages) => {
     };
 
 /// Where a chat is, for a ticket made from one of its messages: how the
-/// description names it ("Team chat · #general") and the project the ticket
-/// goes to (none in #general or an employee's chat: the form asks).
+/// description names it ("Discussion of #42") and the project the ticket
+/// goes to (none in an employee's chat: the form asks).
 class TicketSource {
   const TicketSource({required this.from, this.projectId});
 

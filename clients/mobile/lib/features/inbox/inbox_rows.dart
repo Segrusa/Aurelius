@@ -1,6 +1,6 @@
 import '../../data/views.dart';
 
-/// A row of the personal Inbox (A3, freeze §4): one per ticket or channel, what
+/// A row of the personal Inbox (A3, freeze §4): one per ticket or conversation, what
 /// the server says about it. `reason` is text: an unknown one is a plain row.
 extension PersonalRow on NotificationView {
   /// From the personal Inbox, not a result of a task or an announcement.
@@ -12,13 +12,15 @@ extension PersonalRow on NotificationView {
   /// How many more events the row stands for: the `+n`.
   int get more => mergedCount ?? 0;
 
-  /// What the row is about: `#42 Login per board member`, `# general`. The
-  /// server's subject of a ticket row may already start with `#42`; it is not repeated.
+  /// What the row is about: `#42 Login per board member`, or the server's
+  /// subject. The server's subject of a ticket row may already start with `#42`;
+  /// it is not repeated. A conversation row is no channel any more (chat is
+  /// gone), so it gets no `# `.
   String get place => switch ((ticketNumber, subject.isEmpty)) {
         (final number?, false) when subject == '#$number' || subject.startsWith('#$number ') => subject,
         (final number?, false) => '#$number $subject',
         (final number?, true) => '#$number',
-        (null, false) => conversationId != null ? '# $subject' : subject,
+        (null, false) => subject,
         (null, true) => '',
       };
 

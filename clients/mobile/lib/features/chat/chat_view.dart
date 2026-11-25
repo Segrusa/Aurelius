@@ -1055,7 +1055,7 @@ class _AssistantMessage extends StatelessWidget {
   /// The ticket already made from it ("→ #52").
   final TicketRef? ticket;
 
-  /// In the Team chat: the sender shows with their role.
+  /// In a group conversation (a ticket's session): the sender shows with their role.
   final bool group;
   final (int, int)? version;
 
@@ -1614,7 +1614,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
               ),
               const SizedBox(height: 10),
             ],
-            // Team chat: who the `@name` being typed can be, with their role.
+            // A group conversation: who the `@name` being typed can be, with their role.
             if (group)
               ValueListenableBuilder<TextEditingValue>(
                 valueListenable: _text,
