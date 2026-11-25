@@ -766,6 +766,12 @@ export interface CodeBranch {
    * Its own commits (`main..branch`), newest first, at most `CODE_BRANCH_COMMITS_MAX`.
    */
   commits?: CodeCommitLine[];
+  /**
+   * What a merge into main would conflict on (feature `code_review`, ticket #84), from
+   * `git merge-tree` without touching any worktree: empty when it merges cleanly. None:
+   * not checked (nothing ahead, git could not tell, or an older server).
+   */
+  conflicts?: string[] | null;
   deletions?: number;
   /**
    * The size of `main...branch` (what a merge would bring): files, lines added, removed.
@@ -821,6 +827,28 @@ export interface CodeBranch {
 }
 
 /**
+ * One comment of a thread.
+ */
+export interface CodeCommentView {
+  body: string;
+  created_at_ms: number;
+  id: string;
+  /**
+   * Written by the reader.
+   */
+  mine?: boolean;
+  /**
+   * Not sent yet: only its writer sees it, until they finish their review.
+   */
+  pending?: boolean;
+  /**
+   * The review it was sent with.
+   */
+  review_id?: string | null;
+  username: string;
+}
+
+/**
  * One commit of the graph.
  */
 export interface CodeCommit {
@@ -850,11 +878,157 @@ export interface CodeCommitLine {
 }
 
 /**
+ * `code.diff` (feature `code_review`, ticket #84): what merging a branch would bring into
+ * main (`main...branch`), file by file, plus what its worktree changed and did not commit.
+ * The text has passed the vault's redactor.
+ */
+export interface CodeDiff {
+  /**
+   * The commit main and the branch share (`git merge-base`): the left side of the diff.
+   */
+  base: string;
+  branch: string;
+  /**
+   * Committed files first (in git's order), then the worktree's uncommitted ones.
+   */
+  files?: CodeDiffFile[];
+  /**
+   * The branch's newest commit: the right side, and what a line comment is made on.
+   */
+  head: string;
+  project_id: string;
+  /**
+   * Files or lines were left out to stay under `CODE_DIFF_FILES_MAX`/`CODE_DIFF_LINES_MAX`.
+   */
+  truncated?: boolean;
+}
+
+/**
+ * One file of a `CodeDiff`.
+ */
+export interface CodeDiffFile {
+  additions: number;
+  /**
+   * Git shows no lines for it (an image, an archive).
+   */
+  binary?: boolean;
+  deletions: number;
+  hunks?: CodeHunk[];
+  /**
+   * A renamed file's earlier path.
+   */
+  old_path?: string | null;
+  path: string;
+  status: CodeFileStatus;
+  /**
+   * Lines of this file were left out (`CODE_DIFF_FILE_LINES_MAX` or the whole diff's limit).
+   */
+  truncated?: boolean;
+  /**
+   * The change is in the worktree and not committed yet.
+   */
+  uncommitted?: boolean;
+}
+
+/**
+ * How a file changed.
+ */
+export type CodeFileStatus =
+  | "added"
+  | "deleted"
+  | "modified"
+  | "renamed"
+;
+
+/**
+ * One hunk of a file's unified diff (three lines of context).
+ */
+export interface CodeHunk {
+  /**
+   * The `@@ -a,b +c,d @@ …` line as git wrote it.
+   */
+  header: string;
+  /**
+   * Its lines, each starting with ' ' (both sides), '+' (added) or '-' (removed).
+   */
+  lines?: string[];
+  new_start: number;
+  /**
+   * The first line number on the left (main's side) and on the right (the branch's).
+   */
+  old_start: number;
+}
+
+/**
+ * Which side of the diff a line comment is on: the branch's new line, or main's removed one.
+ */
+export type CodeLineSide =
+  | "new"
+  | "old"
+;
+
+/**
  * Who works on a branch.
  */
 export interface CodeOwner {
   employee_id: string;
   name: string;
+}
+
+/**
+ * One finished review.
+ */
+export interface CodeReviewEntry {
+  body?: string;
+  created_at_ms: number;
+  /**
+   * The branch head it was given at: an approval of an older head is not one of this head.
+   */
+  head: string;
+  id: string;
+  mine?: boolean;
+  username: string;
+  verdict: CodeVerdict;
+}
+
+/**
+ * `code.review` (feature `code_review`): a branch's review as the reader sees it. Other
+ * board members' pending comments are left out.
+ */
+export interface CodeReviewView {
+  /**
+   * Finished reviews, oldest first.
+   */
+  reviews?: CodeReviewEntry[];
+  /**
+   * Oldest first.
+   */
+  threads?: CodeThreadView[];
+  /**
+   * The files the reader marked viewed at the asked head.
+   */
+  viewed?: string[];
+}
+
+/**
+ * One line thread.
+ */
+export interface CodeThreadView {
+  /**
+   * Oldest first; never empty for a thread the reader can see.
+   */
+  comments?: CodeCommentView[];
+  /**
+   * The head it was made on: a client marks it Outdated when the head moved on.
+   */
+  commit: string;
+  created_at_ms: number;
+  id: string;
+  line: number;
+  path: string;
+  resolved?: boolean;
+  side: CodeLineSide;
+  snippet?: string[];
 }
 
 /**
@@ -865,6 +1039,24 @@ export interface CodeTicket {
   ticket_id: string;
   title: string;
 }
+
+/**
+ * How a board member finished their review.
+ */
+export type CodeVerdict =
+  /**
+   * The board member agrees with the change; merging stays a separate action.
+   */
+  | "approved"
+  /**
+   * The owner must change it (a ticket goes back to Doing; the client sends it back).
+   */
+  | "changes"
+  /**
+   * Comments only: the owner answers, nothing else changes.
+   */
+  | "comment"
+;
 
 /**
  * The git state of one project's folder.
@@ -1089,6 +1281,16 @@ export type Command =
   | ({ type: "remove_attachment" } & RemoveAttachment)
   | ({ type: "remove_connection" } & RemoveConnection)
   | ({ type: "rename_project" } & RenameProject)
+  /**
+   * `code.reply`: a reply in a thread, pending until its writer finishes their review.
+   * Answers `CodeCommented`.
+   */
+  | ({ type: "reply_code_thread"; body: string; thread_id: string })
+  /**
+   * `code.resolve_thread`: mark a thread resolved (it folds) or open again. Answers
+   * `CodeThreadResolved`; the same state again changes nothing.
+   */
+  | ({ type: "resolve_code_thread"; resolved: boolean; thread_id: string })
   | ({ type: "restore_employee_instructions" } & RestoreEmployeeInstructions)
   /**
    * `guideline.restore`: back from the archive, with its links (B4 and the title are checked again).
@@ -1129,6 +1331,11 @@ export type Command =
    */
   | ({ type: "set_background_login"; enabled: boolean })
   | ({ type: "set_browser_allowed" } & SetBrowserAllowed)
+  /**
+   * `code.set_viewed`: the board member of the session viewed a file of a branch at a head
+   * (or not any more). A new head starts unviewed. Answers `CodeViewedSet`.
+   */
+  | ({ type: "set_code_viewed"; branch: string; head: string; path: string; project_id: string; viewed: boolean })
   | ({ type: "set_conversation_run" } & SetConversationRun)
   | ({ type: "set_employee_folder" } & SetEmployeeFolder)
   | ({ type: "set_employee_reports_to" } & SetEmployeeReportsTo)
@@ -1160,6 +1367,11 @@ export type Command =
    * `UpdateTicket`, where "nobody" and "unchanged" would need two kinds of none.
    */
   | ({ type: "set_ticket_responsible"; responsible_user_id?: string | null; ticket_id: string })
+  /**
+   * `code.start_thread`: a board member's first comment on a line of a branch's diff. It is
+   * pending until they finish their review. Answers `CodeThreadStarted`.
+   */
+  | ({ type: "start_code_thread"; body: string; branch: string; commit: string; line: number; path: string; project_id: string; side: CodeLineSide; snippet?: string[] })
   | ({ type: "start_idea" } & StartIdea)
   | ({ type: "start_project_conversation" } & StartProjectConversation)
   /**
@@ -1169,6 +1381,14 @@ export type Command =
   | ({ type: "start_ticket"; employee_id?: string | null; ticket_id: string })
   | ({ type: "start_work_session" } & StartWorkSession)
   | ({ type: "stop_run" } & StopRun)
+  /**
+   * `code.submit_review`: finish the board member's review of a branch at `head`. Their
+   * pending comments on it are sent with it. A comment or a request for changes needs a
+   * summary or a pending comment; an approval needs neither. Answers `CodeReviewSubmitted`.
+   * Waking the owner is the client's next write (`ticket.post`, `ticket.send_back` or
+   * `chat.send`), with the text it shows the board member.
+   */
+  | ({ type: "submit_code_review"; body?: string | null; branch: string; head: string; project_id: string; verdict: CodeVerdict })
   /**
    * `guideline.unlink`.
    */
@@ -1226,6 +1446,26 @@ export type CommandResult =
   | ({ type: "board_columns_updated"; version: number })
   | ({ type: "browser_allowed_set"; allowed: boolean; conversation_id: string })
   | ({ type: "chat_message_sent"; conversation_id: string; message_id: string; run_id: string })
+  /**
+   * `code.reply`: the pending reply.
+   */
+  | ({ type: "code_commented"; comment_id: string; thread_id: string })
+  /**
+   * `code.submit_review`: the review and how many pending comments went with it.
+   */
+  | ({ type: "code_review_submitted"; comments: number; review_id: string })
+  /**
+   * `code.resolve_thread`; `changed` is false when it already was so.
+   */
+  | ({ type: "code_thread_resolved"; changed: boolean; resolved: boolean; thread_id: string })
+  /**
+   * `code.start_thread` (feature `code_review`): the thread and its first, pending comment.
+   */
+  | ({ type: "code_thread_started"; comment_id: string; thread_id: string })
+  /**
+   * `code.set_viewed`; `changed` is false when it already was so.
+   */
+  | ({ type: "code_viewed_set"; changed: boolean; viewed: boolean })
   | ({ type: "company_updated"; version: number })
   | ({ type: "connection_added"; connection_id: string })
   | ({ type: "connection_removed"; connection_id: string })
@@ -2301,6 +2541,7 @@ export type EventKind =
   | "attachment.removed"
   | "board.columns_updated"
   | "claude_login.updated"
+  | "code.review_changed"
   | "company.converted"
   | "company.updated"
   | "config.changed"
@@ -3962,12 +4203,23 @@ export type Method =
    */
   | ({ method: "claude_login.status" })
   /**
+   * What merging a branch would bring into main, file by file with its hunks, plus what
+   * its worktree has not committed (feature `code_review`, ticket #84). Redacted.
+   */
+  | ({ method: "code.diff"; params: { branch: string; project_id: string } })
+  /**
    * The Code tab of a workspace (feature `code_view`, ticket #77): the git state of
    * the project's folder (worktrees, local branches, recent commits). A folder that is
    * no git repository answers a view with `problem` set, not an error. The same
    * rights as `board.get`.
    */
   | ({ method: "code.get"; params: { project_id: string } })
+  /**
+   * A branch's review as the board member of the session sees it: line threads (with
+   * only their own pending comments), finished reviews, and the files they viewed at
+   * `head` (feature `code_review`, ticket #84). Not for apps.
+   */
+  | ({ method: "code.review"; params: { branch: string; head?: string | null; project_id: string } })
   /**
    * Whether the server committed the write sent with `idempotency_key` (feature
    * `command_applied`), answered with `CommandApplied`. A client asks this after
@@ -4947,6 +5199,14 @@ export type ResponseBody =
    * `code.get`.
    */
   | ({ type: "code"; value: CodeView })
+  /**
+   * `code.diff`.
+   */
+  | ({ type: "code_diff"; value: CodeDiff })
+  /**
+   * `code.review`.
+   */
+  | ({ type: "code_review"; value: CodeReviewView })
   /**
    * `command.applied`.
    */

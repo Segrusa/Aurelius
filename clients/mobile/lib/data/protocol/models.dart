@@ -1431,6 +1431,7 @@ final class CodeBranch {
     required this.author,
     required this.behind,
     this.commits = const [],
+    this.conflicts,
     this.deletions = 0,
     this.filesChanged = 0,
     required this.head,
@@ -1457,6 +1458,10 @@ final class CodeBranch {
   final int behind;
   /// Its own commits (`main..branch`), newest first, at most `CODE_BRANCH_COMMITS_MAX`.
   final List<CodeCommitLine> commits;
+  /// What a merge into main would conflict on (feature `code_review`, ticket #84), from
+  /// `git merge-tree` without touching any worktree: empty when it merges cleanly. None:
+  /// not checked (nothing ahead, git could not tell, or an older server).
+  final List<String>? conflicts;
   final int deletions;
   /// The size of `main...branch` (what a merge would bring): files, lines added, removed.
   final int filesChanged;
@@ -1494,6 +1499,7 @@ final class CodeBranch {
     author: (json['author'] as String),
     behind: (json['behind'] as num).toInt(),
     commits: (json['commits'] == null ? const [] : (json['commits'] as List<dynamic>).map((x0) => CodeCommitLine.fromJson(x0 as Map<String, dynamic>)).toList()),
+    conflicts: (json['conflicts'] == null ? null : (json['conflicts'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
     deletions: (json['deletions'] == null ? 0 : (json['deletions'] as num).toInt()),
     filesChanged: (json['files_changed'] == null ? 0 : (json['files_changed'] as num).toInt()),
     head: (json['head'] as String),
@@ -1518,6 +1524,7 @@ final class CodeBranch {
     'author': author,
     'behind': behind,
     'commits': commits.map((x0) => x0.toJson()).toList(),
+    if (conflicts != null) 'conflicts': conflicts,
     'deletions': deletions,
     'files_changed': filesChanged,
     'head': head,
@@ -1534,6 +1541,50 @@ final class CodeBranch {
     'upstream_behind': upstreamBehind,
     'working': working,
     if (worktreePath != null) 'worktree_path': worktreePath,
+  };
+}
+
+/// One comment of a thread.
+final class CodeCommentView {
+  const CodeCommentView({
+    required this.body,
+    required this.createdAtMs,
+    required this.id,
+    this.mine = false,
+    this.pending = false,
+    this.reviewId,
+    required this.username,
+  });
+
+  final String body;
+  final int createdAtMs;
+  final String id;
+  /// Written by the reader.
+  final bool mine;
+  /// Not sent yet: only its writer sees it, until they finish their review.
+  final bool pending;
+  /// The review it was sent with.
+  final String? reviewId;
+  final String username;
+
+  factory CodeCommentView.fromJson(Map<String, dynamic> json) => CodeCommentView(
+    body: (json['body'] as String),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    id: (json['id'] as String),
+    mine: (json['mine'] == null ? false : (json['mine'] as bool)),
+    pending: (json['pending'] == null ? false : (json['pending'] as bool)),
+    reviewId: (json['review_id'] == null ? null : (json['review_id'] as String)),
+    username: (json['username'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'body': body,
+    'created_at_ms': createdAtMs,
+    'id': id,
+    'mine': mine,
+    'pending': pending,
+    if (reviewId != null) 'review_id': reviewId,
+    'username': username,
   };
 }
 
@@ -1598,6 +1649,170 @@ final class CodeCommitLine {
   };
 }
 
+/// `code.diff` (feature `code_review`, ticket #84): what merging a branch would bring into
+/// main (`main...branch`), file by file, plus what its worktree changed and did not commit.
+/// The text has passed the vault's redactor.
+final class CodeDiff {
+  const CodeDiff({
+    required this.base,
+    required this.branch,
+    this.files = const [],
+    required this.head,
+    required this.projectId,
+    this.truncated = false,
+  });
+
+  /// The commit main and the branch share (`git merge-base`): the left side of the diff.
+  final String base;
+  final String branch;
+  /// Committed files first (in git's order), then the worktree's uncommitted ones.
+  final List<CodeDiffFile> files;
+  /// The branch's newest commit: the right side, and what a line comment is made on.
+  final String head;
+  final String projectId;
+  /// Files or lines were left out to stay under `CODE_DIFF_FILES_MAX`/`CODE_DIFF_LINES_MAX`.
+  final bool truncated;
+
+  factory CodeDiff.fromJson(Map<String, dynamic> json) => CodeDiff(
+    base: (json['base'] as String),
+    branch: (json['branch'] as String),
+    files: (json['files'] == null ? const [] : (json['files'] as List<dynamic>).map((x0) => CodeDiffFile.fromJson(x0 as Map<String, dynamic>)).toList()),
+    head: (json['head'] as String),
+    projectId: (json['project_id'] as String),
+    truncated: (json['truncated'] == null ? false : (json['truncated'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'base': base,
+    'branch': branch,
+    'files': files.map((x0) => x0.toJson()).toList(),
+    'head': head,
+    'project_id': projectId,
+    'truncated': truncated,
+  };
+}
+
+/// One file of a `CodeDiff`.
+final class CodeDiffFile {
+  const CodeDiffFile({
+    required this.additions,
+    this.binary = false,
+    required this.deletions,
+    this.hunks = const [],
+    this.oldPath,
+    required this.path,
+    required this.status,
+    this.truncated = false,
+    this.uncommitted = false,
+  });
+
+  final int additions;
+  /// Git shows no lines for it (an image, an archive).
+  final bool binary;
+  final int deletions;
+  final List<CodeHunk> hunks;
+  /// A renamed file's earlier path.
+  final String? oldPath;
+  final String path;
+  final CodeFileStatus status;
+  /// Lines of this file were left out (`CODE_DIFF_FILE_LINES_MAX` or the whole diff's limit).
+  final bool truncated;
+  /// The change is in the worktree and not committed yet.
+  final bool uncommitted;
+
+  factory CodeDiffFile.fromJson(Map<String, dynamic> json) => CodeDiffFile(
+    additions: (json['additions'] as num).toInt(),
+    binary: (json['binary'] == null ? false : (json['binary'] as bool)),
+    deletions: (json['deletions'] as num).toInt(),
+    hunks: (json['hunks'] == null ? const [] : (json['hunks'] as List<dynamic>).map((x0) => CodeHunk.fromJson(x0 as Map<String, dynamic>)).toList()),
+    oldPath: (json['old_path'] == null ? null : (json['old_path'] as String)),
+    path: (json['path'] as String),
+    status: CodeFileStatus.fromJson(json['status'] as String),
+    truncated: (json['truncated'] == null ? false : (json['truncated'] as bool)),
+    uncommitted: (json['uncommitted'] == null ? false : (json['uncommitted'] as bool)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'additions': additions,
+    'binary': binary,
+    'deletions': deletions,
+    'hunks': hunks.map((x0) => x0.toJson()).toList(),
+    if (oldPath != null) 'old_path': oldPath,
+    'path': path,
+    'status': status.toJson(),
+    'truncated': truncated,
+    'uncommitted': uncommitted,
+  };
+}
+
+/// How a file changed.
+enum CodeFileStatus {
+  added('added'),
+  deleted('deleted'),
+  modified('modified'),
+  renamed('renamed');
+
+  const CodeFileStatus(this.wire);
+
+  final String wire;
+
+  static CodeFileStatus fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown CodeFileStatus value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
+/// One hunk of a file's unified diff (three lines of context).
+final class CodeHunk {
+  const CodeHunk({
+    required this.header,
+    this.lines = const [],
+    required this.newStart,
+    required this.oldStart,
+  });
+
+  /// The `@@ -a,b +c,d @@ …` line as git wrote it.
+  final String header;
+  /// Its lines, each starting with ' ' (both sides), '+' (added) or '-' (removed).
+  final List<String> lines;
+  final int newStart;
+  /// The first line number on the left (main's side) and on the right (the branch's).
+  final int oldStart;
+
+  factory CodeHunk.fromJson(Map<String, dynamic> json) => CodeHunk(
+    header: (json['header'] as String),
+    lines: (json['lines'] == null ? const [] : (json['lines'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    newStart: (json['new_start'] as num).toInt(),
+    oldStart: (json['old_start'] as num).toInt(),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'header': header,
+    'lines': lines,
+    'new_start': newStart,
+    'old_start': oldStart,
+  };
+}
+
+/// Which side of the diff a line comment is on: the branch's new line, or main's removed one.
+enum CodeLineSide {
+  new_('new'),
+  old('old');
+
+  const CodeLineSide(this.wire);
+
+  final String wire;
+
+  static CodeLineSide fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown CodeLineSide value: $value'),
+      );
+
+  String toJson() => wire;
+}
+
 /// Who works on a branch.
 final class CodeOwner {
   const CodeOwner({
@@ -1616,6 +1831,128 @@ final class CodeOwner {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'employee_id': employeeId,
     'name': name,
+  };
+}
+
+/// One finished review.
+final class CodeReviewEntry {
+  const CodeReviewEntry({
+    this.body = '',
+    required this.createdAtMs,
+    required this.head,
+    required this.id,
+    this.mine = false,
+    required this.username,
+    required this.verdict,
+  });
+
+  final String body;
+  final int createdAtMs;
+  /// The branch head it was given at: an approval of an older head is not one of this head.
+  final String head;
+  final String id;
+  final bool mine;
+  final String username;
+  final CodeVerdict verdict;
+
+  factory CodeReviewEntry.fromJson(Map<String, dynamic> json) => CodeReviewEntry(
+    body: (json['body'] == null ? '' : (json['body'] as String)),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    head: (json['head'] as String),
+    id: (json['id'] as String),
+    mine: (json['mine'] == null ? false : (json['mine'] as bool)),
+    username: (json['username'] as String),
+    verdict: CodeVerdict.fromJson(json['verdict'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'body': body,
+    'created_at_ms': createdAtMs,
+    'head': head,
+    'id': id,
+    'mine': mine,
+    'username': username,
+    'verdict': verdict.toJson(),
+  };
+}
+
+/// `code.review` (feature `code_review`): a branch's review as the reader sees it. Other
+/// board members' pending comments are left out.
+final class CodeReviewView {
+  const CodeReviewView({
+    this.reviews = const [],
+    this.threads = const [],
+    this.viewed = const [],
+  });
+
+  /// Finished reviews, oldest first.
+  final List<CodeReviewEntry> reviews;
+  /// Oldest first.
+  final List<CodeThreadView> threads;
+  /// The files the reader marked viewed at the asked head.
+  final List<String> viewed;
+
+  factory CodeReviewView.fromJson(Map<String, dynamic> json) => CodeReviewView(
+    reviews: (json['reviews'] == null ? const [] : (json['reviews'] as List<dynamic>).map((x0) => CodeReviewEntry.fromJson(x0 as Map<String, dynamic>)).toList()),
+    threads: (json['threads'] == null ? const [] : (json['threads'] as List<dynamic>).map((x0) => CodeThreadView.fromJson(x0 as Map<String, dynamic>)).toList()),
+    viewed: (json['viewed'] == null ? const [] : (json['viewed'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'reviews': reviews.map((x0) => x0.toJson()).toList(),
+    'threads': threads.map((x0) => x0.toJson()).toList(),
+    'viewed': viewed,
+  };
+}
+
+/// One line thread.
+final class CodeThreadView {
+  const CodeThreadView({
+    this.comments = const [],
+    required this.commit,
+    required this.createdAtMs,
+    required this.id,
+    required this.line,
+    required this.path,
+    this.resolved = false,
+    required this.side,
+    this.snippet = const [],
+  });
+
+  /// Oldest first; never empty for a thread the reader can see.
+  final List<CodeCommentView> comments;
+  /// The head it was made on: a client marks it Outdated when the head moved on.
+  final String commit;
+  final int createdAtMs;
+  final String id;
+  final int line;
+  final String path;
+  final bool resolved;
+  final CodeLineSide side;
+  final List<String> snippet;
+
+  factory CodeThreadView.fromJson(Map<String, dynamic> json) => CodeThreadView(
+    comments: (json['comments'] == null ? const [] : (json['comments'] as List<dynamic>).map((x0) => CodeCommentView.fromJson(x0 as Map<String, dynamic>)).toList()),
+    commit: (json['commit'] as String),
+    createdAtMs: (json['created_at_ms'] as num).toInt(),
+    id: (json['id'] as String),
+    line: (json['line'] as num).toInt(),
+    path: (json['path'] as String),
+    resolved: (json['resolved'] == null ? false : (json['resolved'] as bool)),
+    side: CodeLineSide.fromJson(json['side'] as String),
+    snippet: (json['snippet'] == null ? const [] : (json['snippet'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'comments': comments.map((x0) => x0.toJson()).toList(),
+    'commit': commit,
+    'created_at_ms': createdAtMs,
+    'id': id,
+    'line': line,
+    'path': path,
+    'resolved': resolved,
+    'side': side.toJson(),
+    'snippet': snippet,
   };
 }
 
@@ -1642,6 +1979,27 @@ final class CodeTicket {
     'ticket_id': ticketId,
     'title': title,
   };
+}
+
+/// How a board member finished their review.
+enum CodeVerdict {
+  /// The board member agrees with the change; merging stays a separate action.
+  approved('approved'),
+  /// The owner must change it (a ticket goes back to Doing; the client sends it back).
+  changes('changes'),
+  /// Comments only: the owner answers, nothing else changes.
+  comment('comment');
+
+  const CodeVerdict(this.wire);
+
+  final String wire;
+
+  static CodeVerdict fromJson(String value) => values.firstWhere(
+        (e) => e.wire == value,
+        orElse: () => throw FormatException('Unknown CodeVerdict value: $value'),
+      );
+
+  String toJson() => wire;
 }
 
 /// The git state of one project's folder.
@@ -1948,6 +2306,16 @@ sealed class Command {
         return CommandRemoveConnection(value: RemoveConnection.fromJson(json as Map<String, dynamic>));
       case 'rename_project':
         return CommandRenameProject(value: RenameProject.fromJson(json as Map<String, dynamic>));
+      case 'reply_code_thread':
+        return CommandReplyCodeThread(
+          body: (json['body'] as String),
+          threadId: (json['thread_id'] as String),
+        );
+      case 'resolve_code_thread':
+        return CommandResolveCodeThread(
+          resolved: (json['resolved'] as bool),
+          threadId: (json['thread_id'] as String),
+        );
       case 'restore_employee_instructions':
         return CommandRestoreEmployeeInstructions(value: RestoreEmployeeInstructions.fromJson(json as Map<String, dynamic>));
       case 'restore_guideline':
@@ -2001,6 +2369,14 @@ sealed class Command {
         );
       case 'set_browser_allowed':
         return CommandSetBrowserAllowed(value: SetBrowserAllowed.fromJson(json as Map<String, dynamic>));
+      case 'set_code_viewed':
+        return CommandSetCodeViewed(
+          branch: (json['branch'] as String),
+          head: (json['head'] as String),
+          path: (json['path'] as String),
+          projectId: (json['project_id'] as String),
+          viewed: (json['viewed'] as bool),
+        );
       case 'set_conversation_run':
         return CommandSetConversationRun(value: SetConversationRun.fromJson(json as Map<String, dynamic>));
       case 'set_employee_folder':
@@ -2038,6 +2414,17 @@ sealed class Command {
           responsibleUserId: (json['responsible_user_id'] == null ? null : (json['responsible_user_id'] as String)),
           ticketId: (json['ticket_id'] as String),
         );
+      case 'start_code_thread':
+        return CommandStartCodeThread(
+          body: (json['body'] as String),
+          branch: (json['branch'] as String),
+          commit: (json['commit'] as String),
+          line: (json['line'] as num).toInt(),
+          path: (json['path'] as String),
+          projectId: (json['project_id'] as String),
+          side: CodeLineSide.fromJson(json['side'] as String),
+          snippet: (json['snippet'] == null ? const [] : (json['snippet'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+        );
       case 'start_idea':
         return CommandStartIdea(value: StartIdea.fromJson(json as Map<String, dynamic>));
       case 'start_project_conversation':
@@ -2051,6 +2438,14 @@ sealed class Command {
         return CommandStartWorkSession(value: StartWorkSession.fromJson(json as Map<String, dynamic>));
       case 'stop_run':
         return CommandStopRun(value: StopRun.fromJson(json as Map<String, dynamic>));
+      case 'submit_code_review':
+        return CommandSubmitCodeReview(
+          body: (json['body'] == null ? null : (json['body'] as String)),
+          branch: (json['branch'] as String),
+          head: (json['head'] as String),
+          projectId: (json['project_id'] as String),
+          verdict: CodeVerdict.fromJson(json['verdict'] as String),
+        );
       case 'unlink_guideline':
         return CommandUnlinkGuideline(
           guidelineId: (json['guideline_id'] as String),
@@ -2911,6 +3306,44 @@ final class CommandRenameProject extends Command {
     };
 }
 
+/// `code.reply`: a reply in a thread, pending until its writer finishes their review.
+/// Answers `CodeCommented`.
+final class CommandReplyCodeThread extends Command {
+  const CommandReplyCodeThread({
+    required this.body,
+    required this.threadId,
+  });
+
+  final String body;
+  final String threadId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'reply_code_thread',
+      'body': body,
+      'thread_id': threadId,
+    };
+}
+
+/// `code.resolve_thread`: mark a thread resolved (it folds) or open again. Answers
+/// `CodeThreadResolved`; the same state again changes nothing.
+final class CommandResolveCodeThread extends Command {
+  const CommandResolveCodeThread({
+    required this.resolved,
+    required this.threadId,
+  });
+
+  final bool resolved;
+  final String threadId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'resolve_code_thread',
+      'resolved': resolved,
+      'thread_id': threadId,
+    };
+}
+
 final class CommandRestoreEmployeeInstructions extends Command {
   const CommandRestoreEmployeeInstructions({
     required this.value,
@@ -3192,6 +3625,34 @@ final class CommandSetBrowserAllowed extends Command {
     };
 }
 
+/// `code.set_viewed`: the board member of the session viewed a file of a branch at a head
+/// (or not any more). A new head starts unviewed. Answers `CodeViewedSet`.
+final class CommandSetCodeViewed extends Command {
+  const CommandSetCodeViewed({
+    required this.branch,
+    required this.head,
+    required this.path,
+    required this.projectId,
+    required this.viewed,
+  });
+
+  final String branch;
+  final String head;
+  final String path;
+  final String projectId;
+  final bool viewed;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'set_code_viewed',
+      'branch': branch,
+      'head': head,
+      'path': path,
+      'project_id': projectId,
+      'viewed': viewed,
+    };
+}
+
 final class CommandSetConversationRun extends Command {
   const CommandSetConversationRun({
     required this.value,
@@ -3416,6 +3877,47 @@ final class CommandSetTicketResponsible extends Command {
     };
 }
 
+/// `code.start_thread`: a board member's first comment on a line of a branch's diff. It is
+/// pending until they finish their review. Answers `CodeThreadStarted`.
+final class CommandStartCodeThread extends Command {
+  const CommandStartCodeThread({
+    required this.body,
+    required this.branch,
+    required this.commit,
+    required this.line,
+    required this.path,
+    required this.projectId,
+    required this.side,
+    this.snippet = const [],
+  });
+
+  final String body;
+  final String branch;
+  /// The branch head the diff was read at (`CodeDiff.head`).
+  final String commit;
+  /// The line number on `side` (1 is the first line).
+  final int line;
+  final String path;
+  final String projectId;
+  final CodeLineSide side;
+  /// The diff lines the comment is about, as shown (' ', '+' or '-' first), the last
+  /// one the commented line. Kept so the thread still shows its code after the line changes.
+  final List<String> snippet;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'start_code_thread',
+      'body': body,
+      'branch': branch,
+      'commit': commit,
+      'line': line,
+      'path': path,
+      'project_id': projectId,
+      'side': side.toJson(),
+      'snippet': snippet,
+    };
+}
+
 final class CommandStartIdea extends Command {
   const CommandStartIdea({
     required this.value,
@@ -3488,6 +3990,37 @@ final class CommandStopRun extends Command {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'stop_run',
       ...value.toJson(),
+    };
+}
+
+/// `code.submit_review`: finish the board member's review of a branch at `head`. Their
+/// pending comments on it are sent with it. A comment or a request for changes needs a
+/// summary or a pending comment; an approval needs neither. Answers `CodeReviewSubmitted`.
+/// Waking the owner is the client's next write (`ticket.post`, `ticket.send_back` or
+/// `chat.send`), with the text it shows the board member.
+final class CommandSubmitCodeReview extends Command {
+  const CommandSubmitCodeReview({
+    this.body,
+    required this.branch,
+    required this.head,
+    required this.projectId,
+    required this.verdict,
+  });
+
+  final String? body;
+  final String branch;
+  final String head;
+  final String projectId;
+  final CodeVerdict verdict;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'submit_code_review',
+      if (body != null) 'body': body,
+      'branch': branch,
+      'head': head,
+      'project_id': projectId,
+      'verdict': verdict.toJson(),
     };
 }
 
@@ -3771,6 +4304,32 @@ sealed class CommandResult {
           conversationId: (json['conversation_id'] as String),
           messageId: (json['message_id'] as String),
           runId: (json['run_id'] as String),
+        );
+      case 'code_commented':
+        return CommandResultCodeCommented(
+          commentId: (json['comment_id'] as String),
+          threadId: (json['thread_id'] as String),
+        );
+      case 'code_review_submitted':
+        return CommandResultCodeReviewSubmitted(
+          comments: (json['comments'] as num).toInt(),
+          reviewId: (json['review_id'] as String),
+        );
+      case 'code_thread_resolved':
+        return CommandResultCodeThreadResolved(
+          changed: (json['changed'] as bool),
+          resolved: (json['resolved'] as bool),
+          threadId: (json['thread_id'] as String),
+        );
+      case 'code_thread_started':
+        return CommandResultCodeThreadStarted(
+          commentId: (json['comment_id'] as String),
+          threadId: (json['thread_id'] as String),
+        );
+      case 'code_viewed_set':
+        return CommandResultCodeViewedSet(
+          changed: (json['changed'] as bool),
+          viewed: (json['viewed'] as bool),
         );
       case 'company_updated':
         return CommandResultCompanyUpdated(
@@ -4209,6 +4768,99 @@ final class CommandResultChatMessageSent extends CommandResult {
       'conversation_id': conversationId,
       'message_id': messageId,
       'run_id': runId,
+    };
+}
+
+/// `code.reply`: the pending reply.
+final class CommandResultCodeCommented extends CommandResult {
+  const CommandResultCodeCommented({
+    required this.commentId,
+    required this.threadId,
+  });
+
+  final String commentId;
+  final String threadId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'code_commented',
+      'comment_id': commentId,
+      'thread_id': threadId,
+    };
+}
+
+/// `code.submit_review`: the review and how many pending comments went with it.
+final class CommandResultCodeReviewSubmitted extends CommandResult {
+  const CommandResultCodeReviewSubmitted({
+    required this.comments,
+    required this.reviewId,
+  });
+
+  final int comments;
+  final String reviewId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'code_review_submitted',
+      'comments': comments,
+      'review_id': reviewId,
+    };
+}
+
+/// `code.resolve_thread`; `changed` is false when it already was so.
+final class CommandResultCodeThreadResolved extends CommandResult {
+  const CommandResultCodeThreadResolved({
+    required this.changed,
+    required this.resolved,
+    required this.threadId,
+  });
+
+  final bool changed;
+  final bool resolved;
+  final String threadId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'code_thread_resolved',
+      'changed': changed,
+      'resolved': resolved,
+      'thread_id': threadId,
+    };
+}
+
+/// `code.start_thread` (feature `code_review`): the thread and its first, pending comment.
+final class CommandResultCodeThreadStarted extends CommandResult {
+  const CommandResultCodeThreadStarted({
+    required this.commentId,
+    required this.threadId,
+  });
+
+  final String commentId;
+  final String threadId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'code_thread_started',
+      'comment_id': commentId,
+      'thread_id': threadId,
+    };
+}
+
+/// `code.set_viewed`; `changed` is false when it already was so.
+final class CommandResultCodeViewedSet extends CommandResult {
+  const CommandResultCodeViewedSet({
+    required this.changed,
+    required this.viewed,
+  });
+
+  final bool changed;
+  final bool viewed;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'code_viewed_set',
+      'changed': changed,
+      'viewed': viewed,
     };
 }
 
@@ -7123,6 +7775,7 @@ enum EventKind {
   attachmentRemoved('attachment.removed'),
   boardColumnsUpdated('board.columns_updated'),
   claudeLoginUpdated('claude_login.updated'),
+  codeReviewChanged('code.review_changed'),
   companyConverted('company.converted'),
   companyUpdated('company.updated'),
   configChanged('config.changed'),
@@ -11417,10 +12070,27 @@ sealed class Method {
         return MethodClaudeLoginInput(params: ClaudeLoginInputParams.fromJson(json['params'] as Map<String, dynamic>));
       case 'claude_login.status':
         return const MethodClaudeLoginStatus();
+      case 'code.diff':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodCodeDiff(
+          branch: (src['branch'] as String),
+          projectId: (src['project_id'] as String),
+        );
+        }
       case 'code.get':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
           return MethodCodeGet(
+          projectId: (src['project_id'] as String),
+        );
+        }
+      case 'code.review':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodCodeReview(
+          branch: (src['branch'] as String),
+          head: (src['head'] == null ? null : (src['head'] as String)),
           projectId: (src['project_id'] as String),
         );
         }
@@ -12117,6 +12787,27 @@ final class MethodClaudeLoginStatus extends Method {
     };
 }
 
+/// What merging a branch would bring into main, file by file with its hunks, plus what
+/// its worktree has not committed (feature `code_review`, ticket #84). Redacted.
+final class MethodCodeDiff extends Method {
+  const MethodCodeDiff({
+    required this.branch,
+    required this.projectId,
+  });
+
+  final String branch;
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'code.diff',
+      'params': <String, dynamic>{
+      'branch': branch,
+      'project_id': projectId,
+    },
+    };
+}
+
 /// The Code tab of a workspace (feature `code_view`, ticket #77): the git state of
 /// the project's folder (worktrees, local branches, recent commits). A folder that is
 /// no git repository answers a view with `problem` set, not an error. The same
@@ -12132,6 +12823,31 @@ final class MethodCodeGet extends Method {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'code.get',
       'params': <String, dynamic>{
+      'project_id': projectId,
+    },
+    };
+}
+
+/// A branch's review as the board member of the session sees it: line threads (with
+/// only their own pending comments), finished reviews, and the files they viewed at
+/// `head` (feature `code_review`, ticket #84). Not for apps.
+final class MethodCodeReview extends Method {
+  const MethodCodeReview({
+    required this.branch,
+    this.head,
+    required this.projectId,
+  });
+
+  final String branch;
+  final String? head;
+  final String projectId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'code.review',
+      'params': <String, dynamic>{
+      'branch': branch,
+      if (head != null) 'head': head,
       'project_id': projectId,
     },
     };
@@ -14904,6 +15620,10 @@ sealed class ResponseBody {
         return ResponseBodyClaudeLogin(value: ClaudeLoginView.fromJson(json['value'] as Map<String, dynamic>));
       case 'code':
         return ResponseBodyCode(value: CodeView.fromJson(json['value'] as Map<String, dynamic>));
+      case 'code_diff':
+        return ResponseBodyCodeDiff(value: CodeDiff.fromJson(json['value'] as Map<String, dynamic>));
+      case 'code_review':
+        return ResponseBodyCodeReview(value: CodeReviewView.fromJson(json['value'] as Map<String, dynamic>));
       case 'command_applied':
         return ResponseBodyCommandApplied(value: CommandApplied.fromJson(json['value'] as Map<String, dynamic>));
       case 'compaction_setting':
@@ -15274,6 +15994,36 @@ final class ResponseBodyCode extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'code',
+      'value': value.toJson(),
+    };
+}
+
+/// `code.diff`.
+final class ResponseBodyCodeDiff extends ResponseBody {
+  const ResponseBodyCodeDiff({
+    required this.value,
+  });
+
+  final CodeDiff value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'code_diff',
+      'value': value.toJson(),
+    };
+}
+
+/// `code.review`.
+final class ResponseBodyCodeReview extends ResponseBody {
+  const ResponseBodyCodeReview({
+    required this.value,
+  });
+
+  final CodeReviewView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'code_review',
       'value': value.toJson(),
     };
 }
