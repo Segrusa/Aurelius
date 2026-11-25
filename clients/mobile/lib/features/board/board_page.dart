@@ -286,7 +286,7 @@ class _BoardPageState extends State<BoardPage> {
     final Widget content;
     if (board.board == null && board.error != null) {
       content = board.unsupported
-          ? EmptyState('This server does not have the Board yet.', detail: 'Update the server.', action: FilledButton(onPressed: () => context.push('/updates'), child: const Text('Updates')))
+          ? const EmptyState('This server does not have the Board yet.', detail: 'Update the server.')
           : EmptyState(
               'Could not load the Board.',
               detail: board.error,

@@ -291,14 +291,14 @@ void main() {
       expect(find.text(invalidLinkText), findsOneWidget);
     });
 
-    testWidgets('an older server reads a neutral word and offers Updates', (tester) async {
+    testWidgets('an older server reads a neutral word and stays where it is (no update screen, OPR-2)', (tester) async {
       final repo = repoFor(link: onlineLink);
       final router = await tapShown(tester, repo, 'See $_ticketLink', 'Aurelius link', link: onlineLink);
-      expect(find.text("This server can't open links yet."), findsOneWidget);
+      final before = router.state.uri.toString();
+      expect(find.text("This server can't open links yet. Update the server."), findsOneWidget);
+      expect(find.text('Updates'), findsNothing);
       verifyNever(() => repo.ticket(any()));
-      await tester.tap(find.text('Updates'));
-      await settleBoard(tester);
-      expect(router.state.uri.path, '/updates');
+      expect(router.state.uri.toString(), before);
     });
 
     testWidgets('a link for a server this phone does not know points at the paired servers', (tester) async {

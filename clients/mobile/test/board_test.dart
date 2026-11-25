@@ -346,6 +346,7 @@ void main() {
       when(() => old.board(projectId: any(named: 'projectId'))).thenThrow(const ProtocolException(ErrorCode.unknownMethod, 'unknown'));
       await pumpBoardPage(tester, old, boardPage(old));
       expect(find.text('This server does not have the Board yet.'), findsOneWidget);
+      expect(find.text('Updates'), findsNothing, reason: 'there is no update screen to open (OPR-2)');
     });
 
     testWidgets('without projects: create one first', (tester) async {
