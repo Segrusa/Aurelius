@@ -154,7 +154,7 @@ void main() {
         refreshListenable: step,
         redirect: (_, state) => boardMemberRedirect(step.value, state.matchedLocation),
         routes: [
-          GoRoute(path: '/chat', builder: (_, _) => const TicketPage(ticketId: 'k1', discussion: true)),
+          GoRoute(path: '/chat', builder: (_, _) => const TicketPage(ticketId: 'k1')),
           GoRoute(path: '/onboarding', builder: (_, _) => const Scaffold(body: Text('You were signed out on this device.'))),
         ],
       );

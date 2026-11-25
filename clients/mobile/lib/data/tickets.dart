@@ -110,9 +110,9 @@ MoveRule moveRule(ColumnKind from, ColumnKind to) {
   };
 }
 
-/// Where a ticket just made opens: its discussion, the ticket's chat
-/// (ticket #58). A server without discussions shows the ticket tab instead.
-String ticketChatPlace(String ticketId) => '/ticket/$ticketId?tab=discussion';
+/// Where a ticket just made opens: the ticket, whose session is its
+/// discussion (ticket #58, ticket #71).
+String ticketChatPlace(String ticketId) => '/ticket/$ticketId';
 
 /// Where a card lands relative to its neighbours: `before_ticket_id` of
 /// `ticket.move` (null: at the bottom). [cards] is the target column in order;

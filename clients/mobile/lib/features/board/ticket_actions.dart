@@ -215,10 +215,10 @@ Future<bool> moveTicket(BuildContext context, TicketView ticket, BoardColumnView
       context.push('/ticket/${ticket.id}/plan');
       return false;
     case MoveAllowed(kind: MoveKind.sendBack):
-      // Phase 2: the feedback is a message of the discussion (MU2-06 AC1, MU2-05 AC4).
+      // Phase 2: the feedback is a message of the ticket's session (MU2-06 AC1, MU2-05 AC4).
       if (_discussed(context, ticket)) {
         toast(context, 'Write what needs to change, then Send back.');
-        context.push('/ticket/${ticket.id}?tab=discussion');
+        context.push('/ticket/${ticket.id}');
         return false;
       }
       return showSendBack(context, ticket);

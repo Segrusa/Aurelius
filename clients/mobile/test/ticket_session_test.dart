@@ -264,9 +264,9 @@ void main() {
       expect(find.text('A board member started it'), findsOneWidget);
     });
 
-    testWidgets('the old ?tab=discussion lands in the session', (tester) async {
+    testWidgets('a ticket opens on its session, not on the properties sheet', (tester) async {
       final ticket = _ticket();
-      await open(tester, ticket, page: TicketPage(ticketId: ticket.id, discussion: true));
+      await open(tester, ticket, page: TicketPage(ticketId: ticket.id));
       expect(find.byKey(const Key('composer-send')), findsOneWidget);
       expect(find.text('Ticket properties'), findsNothing);
     });

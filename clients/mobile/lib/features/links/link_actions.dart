@@ -87,7 +87,7 @@ Future<void> openMessageAt(BuildContext context, AureliusRepository repository, 
     final at = await repository.messageLocation(messageId);
     if (!context.mounted) return;
     if (at.ticketId != null) {
-      context.push('/ticket/${at.ticketId}?tab=discussion&message=$messageId');
+      context.push('/ticket/${at.ticketId}?message=$messageId');
     } else {
       context.go(inboxRoute);
     }

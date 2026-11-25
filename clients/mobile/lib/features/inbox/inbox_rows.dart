@@ -52,8 +52,7 @@ String? inboxPlace({String? reason, String? ticketId, String? conversationId, St
   if (ticketId != null) {
     return switch (reason) {
       'plan_review' => '/ticket/$ticketId/plan',
-      'sent_back' => '/ticket/$ticketId?tab=discussion',
-      'mention' when messageId != null => '/ticket/$ticketId?tab=discussion&message=$messageId',
+      'mention' when messageId != null => '/ticket/$ticketId?message=$messageId',
       _ => '/ticket/$ticketId',
     };
   }

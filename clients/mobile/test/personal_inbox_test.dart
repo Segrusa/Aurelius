@@ -114,8 +114,8 @@ void main() {
       expect(inboxPlace(reason: 'failed', ticketId: 't'), '/ticket/t');
       expect(inboxPlace(reason: 'login', ticketId: 't'), '/ticket/t');
       expect(inboxPlace(reason: 'plan_review', ticketId: 't'), '/ticket/t/plan');
-      expect(inboxPlace(reason: 'sent_back', ticketId: 't'), '/ticket/t?tab=discussion');
-      expect(inboxPlace(reason: 'mention', ticketId: 't', messageId: 'm'), '/ticket/t?tab=discussion&message=m');
+      expect(inboxPlace(reason: 'sent_back', ticketId: 't'), '/ticket/t');
+      expect(inboxPlace(reason: 'mention', ticketId: 't', messageId: 'm'), '/ticket/t?message=m');
     });
 
     test('outside a ticket (chat is gone) it opens the Inbox, never a channel', () {
@@ -489,7 +489,7 @@ void main() {
   group('a push (iOS)', () {
     test('of a ticket opens it at its place; of a channel the Inbox', () {
       expect(pushPlace({'target_type': 'ticket.plan_review', 'reason': 'plan_review', 'ticket_id': 'k42', 'task_id': 't1', 'project_id': 'p', 'notification_id': 'n'}), '/ticket/k42/plan');
-      expect(pushPlace({'reason': 'mention', 'ticket_id': 'k42', 'message_id': 'm'}), '/ticket/k42?tab=discussion&message=m');
+      expect(pushPlace({'reason': 'mention', 'ticket_id': 'k42', 'message_id': 'm'}), '/ticket/k42?message=m');
       expect(pushPlace({'reason': 'mention', 'conversation_id': 'c7', 'message_id': 'm'}), '/inbox');
     });
 

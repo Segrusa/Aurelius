@@ -120,7 +120,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('new-owner-forge')));
       await settleBoard(tester);
       await tapKey(tester, 'new-ticket-create');
-      expect(router.state.uri.toString(), '/ticket/k53?tab=discussion');
+      expect(router.state.uri.toString(), '/ticket/k53');
     });
 
     testWidgets('the employee last given a quick task is filled in', (tester) async {

@@ -69,7 +69,7 @@ void main() {
     when(() => repo.loadChanges).thenAnswer((_) => const Stream.empty());
     when(() => repo.load()).thenAnswer((_) async => loadOf());
     when(() => repo.boardMembers()).thenAnswer((_) async => const [testUser, bo]);
-    await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id, discussion: true), link: link);
+    await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id), link: link);
   }
 
   Future<void> longPress(WidgetTester tester, String text) async {

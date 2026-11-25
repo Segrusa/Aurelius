@@ -125,7 +125,8 @@ class AppRouter {
       GoRoute(
         parentNavigatorKey: _root,
         path: '/ticket/:tid',
-        pageBuilder: (context, state) => routePage(state, TicketPage(ticketId: state.pathParameters['tid']!, discussion: state.uri.queryParameters['tab'] == 'discussion', activity: state.uri.queryParameters['tab'] == 'activity', message: state.uri.queryParameters['message'])),
+        // An old `?tab=discussion` opens the ticket as is: its session is the discussion.
+        pageBuilder: (context, state) => routePage(state, TicketPage(ticketId: state.pathParameters['tid']!, activity: state.uri.queryParameters['tab'] == 'activity', message: state.uri.queryParameters['message'])),
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'plan', pageBuilder: (context, state) => routePage(state, TicketPlanPage(ticketId: state.pathParameters['tid']!))),
           GoRoute(parentNavigatorKey: _root, path: 'report', pageBuilder: (context, state) => routePage(state, TicketReportPage(ticketId: state.pathParameters['tid']!))),

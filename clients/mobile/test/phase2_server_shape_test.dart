@@ -81,7 +81,7 @@ void main() {
       when(() => repo.loadChanges).thenAnswer((_) => const Stream.empty());
       when(() => repo.load()).thenAnswer((_) async => loadOf());
       when(() => repo.boardMembers()).thenAnswer((_) async => const [testUser, _lena]);
-      await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id, discussion: true), link: _phase2, size: size);
+      await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id), link: _phase2, size: size);
     }
 
     testWidgets('the server\'s sentences show as they are, the feedback once as ada\'s message', (tester) async {

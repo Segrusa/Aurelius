@@ -39,12 +39,9 @@ import 'ticket_text_dialog.dart';
 /// the input, and the ticket's data is in a sheet behind the head's button.
 /// [tid] is the ticket's id or its number (`/ticket/70`).
 class TicketPage extends StatelessWidget {
-  const TicketPage({super.key, required this.ticketId, this.discussion = false, this.activity = false, this.message});
+  const TicketPage({super.key, required this.ticketId, this.activity = false, this.message});
 
   final String ticketId;
-
-  /// An old `?tab=discussion`: the session is the discussion, so nothing changes.
-  final bool discussion;
 
   /// An old `?tab=activity` (the `+n` of a row in the Inbox): opens the Activity sheet.
   final bool activity;
@@ -374,7 +371,7 @@ class _PlanViewState extends State<_PlanView> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: OutlinedButton(
               key: const ValueKey('ticket-plan-discuss'),
-              onPressed: can ? () => context.canPop() ? context.pop('discussion') : context.pushReplacement('/ticket/${ticket.id}?tab=discussion') : null,
+              onPressed: can ? () => context.canPop() ? context.pop() : context.pushReplacement('/ticket/${ticket.id}') : null,
               child: const Text('Request changes in the discussion'),
             ),
           ),

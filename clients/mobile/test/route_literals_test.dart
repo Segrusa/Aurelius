@@ -1,7 +1,10 @@
 import 'dart:io';
 
 import 'package:aurelius_mobile/app/router.dart';
+import 'package:aurelius_mobile/features/board/ticket_page.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 import 'support/fake_daemon.dart' show testHost;
 
@@ -79,5 +82,22 @@ void main() {
         if (router.config.configuration.findMatch(Uri.parse(sampleLocation(p.literal))).isError) p,
     ];
     expect(unknown, isEmpty, reason: 'these open the go_router error page');
+  });
+
+  testWidgets('an old ?tab=discussion link still opens the ticket, at its message (OPR-2)', (tester) async {
+    final router = AppRouter(testHost);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(const SizedBox());
+    final context = tester.element(find.byType(SizedBox));
+    for (final (old, message) in [('/ticket/k1?tab=discussion', null), ('/ticket/k1?tab=discussion&message=m7', 'm7')]) {
+      final match = router.config.configuration.findMatch(Uri.parse(old));
+      expect(match.isError, isFalse, reason: old);
+      final route = match.matches.last.route as GoRoute;
+      expect(route.path, '/ticket/:tid', reason: old);
+      final state = GoRouterState(router.config.configuration, uri: Uri.parse(old), matchedLocation: '/ticket/k1', fullPath: '/ticket/:tid', pathParameters: const {'tid': 'k1'}, pageKey: const ValueKey('k'));
+      final page = route.pageBuilder!(context, state) as MaterialPage<void>;
+      final ticket = page.child as TicketPage;
+      expect((ticket.ticketId, ticket.message, ticket.activity), ('k1', message, false), reason: old);
+    }
   });
 }
