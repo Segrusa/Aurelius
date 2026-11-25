@@ -211,6 +211,8 @@ const styles = stylex.create({
 export interface Crumb {
   label: string;
   to: string;
+  /** A page with unsaved work asks first: it calls preventDefault to stay. */
+  onClick?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
 }
 
 /** The bar on top of a Settings page: "Settings › Employees › Flux", with actions at the right. */
@@ -229,7 +231,7 @@ export function SettingsHead({
         Settings<span>›</span>
         {crumbs.map((c) => (
           <span key={c.to} {...stylex.props(styles.toolbar)}>
-            <Link to={c.to} {...stylex.props(styles.crumb)}>
+            <Link to={c.to} {...(c.onClick ? { onClick: c.onClick } : {})} {...stylex.props(styles.crumb)}>
               {c.label}
             </Link>
             <span>›</span>

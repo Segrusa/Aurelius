@@ -26,10 +26,10 @@ import {
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { Markdown } from "../ui/markdown";
+import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import {
-  ABOUT,
   affectedLine,
   appliesTo,
   approveProblem,
@@ -48,6 +48,7 @@ import {
   EMPTY_PROPOSE,
   editorMessage,
   employeeBlock,
+  employeeName,
   failureText,
   GROUP_NOTE,
   groups,
@@ -67,29 +68,20 @@ import {
   safeMarkdown,
   saveProblem,
   shown,
+  sortedTargets,
   sourceLabel,
   stale,
   stored,
   TEXT_LIMIT,
   targetKey,
+  targetName,
   tokens,
   tri,
   wanted,
 } from "./guideline-logic";
-import {
-  Confirm,
-  Empty,
-  Eyebrow,
-  FormDialog,
-  failureOf,
-  Hint,
-  KnowledgeTabs,
-  Loading,
-  Page,
-  PageHead,
-  Problem,
-  shortDay,
-} from "./org-kit";
+import { Confirm, Empty, Eyebrow, FormDialog, failureOf, Hint, Loading, Problem, shortDay } from "./org-kit";
+import { FindField, Grow, Lede, Segments, SettingsHead, SettingsPage, Toolbar } from "./settings-frame";
+import { Chip } from "./settings-kit";
 import { guidelineReach, guidelinesIn } from "./workspace-logic";
 
 const enter = stylex.keyframes({ from: { opacity: 0, transform: "translateY(4px)" } });
@@ -98,7 +90,7 @@ const styles = stylex.create({
   sub: { margin: 0, color: "var(--color-text-secondary)" },
   message: { margin: 0, padding: 24, color: "var(--color-text-secondary)" },
   empty: { margin: 0, padding: 24, color: "var(--precision-text3)" },
-  buttons: { display: "flex", gap: 8 },
+  buttons: { display: "flex", justifyContent: "flex-end", gap: 8 },
   bannerSlot: { marginBlockStart: 14, marginInline: 18 },
   readOnly: { margin: 0, paddingInline: 18, paddingBlockStart: 12, color: "var(--color-text-secondary)" },
   scroll: { minHeight: 0, flex: 1, overflow: "auto" },
@@ -115,7 +107,53 @@ const styles = stylex.create({
     fontSize: 12,
     color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
   },
-  row: { height: 42 },
+  row: { height: 42, cursor: "pointer" },
+  card: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 12,
+    backgroundColor: "var(--color-background-card)",
+    boxShadow: "var(--precision-card-shadow)",
+  },
+  sec: { display: "flex", flexDirection: "column", gap: 8 },
+  secHead: { display: "flex", minHeight: 28, alignItems: "center", gap: 8, paddingInline: 2 },
+  secTitle: { margin: 0, fontSize: 12.5, fontWeight: 600, color: "var(--color-text-secondary)" },
+  waitDot: { width: 8, height: 8, flexShrink: 0, borderRadius: "50%", backgroundColor: "var(--color-warning)" },
+  titleCell: { display: "flex", minWidth: 0, flexWrap: "wrap", alignItems: "center", gap: 8 },
+  pills: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 },
+  pill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 999,
+    paddingBlock: 2,
+    paddingInlineStart: 3,
+    paddingInlineEnd: 8,
+    backgroundColor: "var(--precision-sunk)",
+    fontSize: 12,
+    fontWeight: 500,
+    whiteSpace: "nowrap",
+  },
+  pillProject: { paddingInlineStart: 8 },
+  prop: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    paddingBlock: 14,
+    paddingInline: 16,
+    borderBlockStartWidth: { default: 1, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--precision-line2)",
+  },
+  propTop: { display: "flex", alignItems: "center", gap: 10 },
+  propText: { minWidth: 0, flex: 1 },
+  propHead: { fontWeight: 600 },
+  propWhy: { color: "var(--color-text-secondary)" },
   link: {
     display: "block",
     overflow: "hidden",
@@ -223,8 +261,8 @@ const styles = stylex.create({
     flexDirection: "column",
     gap: 14,
     overflowY: "auto",
-    paddingInline: 22,
-    paddingBlock: 20,
+    paddingInline: "max(28px, calc((100% - 1080px) / 2 + 28px))",
+    paddingBlock: "28px 64px",
   },
   notice: { display: "flex", flexDirection: "column", gap: 8 },
   reason: { margin: 0, color: "var(--color-text-secondary)" },
@@ -418,14 +456,14 @@ export function GuidelinesScreen() {
 
   if (!features.includes("guidelines")) {
     return (
-      <Page>
-        <PageHead title="Knowledge" tabs={<KnowledgeTabs />} />
+      <SettingsPage title="Guidelines" width="wide">
         <p {...stylex.props(styles.message)}>This server does not have guidelines yet. Update the server.</p>
-      </Page>
+      </SettingsPage>
     );
   }
 
   const pending = (g: GuidelineView) => (proposals.data ?? []).filter((p) => p.guideline_id === g.id);
+  const waitingAll = (proposals.data ?? []).filter((p) => p.status === "pending");
   const showBanner = !archived && writable && bannerDue(active.data ?? [], user?.id ?? null, done);
   const head = (key: Sort, label: string) => (
     <button type="button" onClick={() => setSort(key)} {...stylex.props(styles.sort)}>
@@ -444,150 +482,242 @@ export function GuidelinesScreen() {
   };
 
   return (
-    <Page>
-      <PageHead title="Knowledge" tabs={<KnowledgeTabs />}>
-        <TextInput
-          ref={search}
-          label="Find a guideline"
-          isLabelHidden
-          size="sm"
-          width={220}
-          placeholder="Find… (@Forge, ▸project)"
+    <SettingsPage title="Guidelines" width="wide">
+      <Lede>
+        Rules every linked run gets on top of its instructions. At most {count(TEXT_LIMIT)} characters each,{" "}
+        {count(RUN_LIMIT)} per run.
+      </Lede>
+      {showBanner ? (
+        <Banner
+          status="info"
+          title={BANNER}
+          endContent={
+            <Button
+              size="sm"
+              label="Got it"
+              onClick={() => {
+                const next = [...done, user?.id ?? ""];
+                setDone(next);
+                platform.storage.set("guidelines_banner_done", JSON.stringify(next));
+              }}
+            />
+          }
+        />
+      ) : null}
+      {!archived && waitingAll.length > 0 ? (
+        <section {...stylex.props(styles.sec)}>
+          <div {...stylex.props(styles.secHead)}>
+            <span {...stylex.props(styles.waitDot)} />
+            <h2 {...stylex.props(styles.secTitle)}>Waiting for you</h2>
+            <span {...stylex.props(styles.small)}>{waitingAll.length}</span>
+          </div>
+          <div {...stylex.props(styles.card)}>
+            {waitingAll.map((p) => (
+              <ProposalRow
+                key={p.id}
+                proposal={p}
+                current={(active.data ?? []).find((g) => g.id === p.guideline_id) ?? null}
+                names={names}
+                writable={writable}
+              />
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {!writable ? <p {...stylex.props(styles.readOnly)}>{READ_ONLY}</p> : null}
+      <Toolbar>
+        <FindField
+          label="Find guidelines"
+          placeholder="Find… (@Forge, ▸Aurelius)"
           value={query}
           onChange={setQuery}
+          grow
         />
-        <ToggleButton size="sm" label="Archived" isPressed={archived} onPressedChange={setArchived} />
+        <Segments
+          label="Show"
+          options={[
+            { value: "in_use", label: `In use ${active.data?.length ?? 0}` },
+            { value: "archived", label: archived ? `Archived ${gone.data?.length ?? 0}` : "Archived" },
+          ]}
+          value={archived ? "archived" : "in_use"}
+          onChange={(v) => setArchived(v === "archived")}
+        />
+        <Grow />
         {writable ? <Button size="sm" variant="primary" label="New guideline" onClick={() => open("new")} /> : null}
-      </PageHead>
-      {showBanner ? (
-        <div {...stylex.props(styles.bannerSlot)}>
-          <Banner
-            status="info"
-            title={BANNER}
-            endContent={
-              <Button
-                size="sm"
-                label="Got it"
-                onClick={() => {
-                  const next = [...done, user?.id ?? ""];
-                  setDone(next);
-                  platform.storage.set("guidelines_banner_done", JSON.stringify(next));
-                }}
-              />
+      </Toolbar>
+      {source.isPending ? (
+        <Loading />
+      ) : (source.data ?? []).length === 0 ? (
+        archived ? (
+          <p {...stylex.props(styles.empty)}>Nothing is archived.</p>
+        ) : (
+          <Empty title="No guidelines yet" description={`${EMPTY_ABOUT} ${EMPTY_PROPOSE}`}>
+            {writable ? (
+              <div {...stylex.props(styles.buttons)}>
+                <Button variant="primary" label="+ New guideline" onClick={() => open("new")} />
+                <Button label="Add starter set…" onClick={() => setStarter(true)} />
+              </div>
+            ) : null}
+          </Empty>
+        )
+      ) : (
+        <div {...stylex.props(styles.card)}>
+          <Table density="compact" hasHover xstyle={styles.table}>
+            <TableHeader>
+              <TableRow isHeaderRow>
+                <TableHeaderCell xstyle={styles.headCell}>{head("title", "Title")}</TableHeaderCell>
+                <TableHeaderCell xstyle={styles.headCell}>Applies to</TableHeaderCell>
+                <TableHeaderCell xstyle={[styles.headCell, styles.sizeColumn]}>{head("size", "Size")}</TableHeaderCell>
+                <TableHeaderCell xstyle={[styles.headCell, styles.updatedColumn]}>
+                  {head("updated", "Updated")}
+                </TableHeaderCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {list.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4}>
+                    <span {...stylex.props(styles.small)}>No guideline matches.</span>
+                  </TableCell>
+                </TableRow>
+              ) : null}
+              {list.map((g) => {
+                const waiting = Math.max(g.open_proposals ?? 0, pending(g).length);
+                const targets = sortedTargets(g.links, names);
+                return (
+                  <TableRow key={g.id} onClick={() => open(g.id)} {...stylex.props(styles.row)}>
+                    <TableCell>
+                      <span {...stylex.props(styles.titleCell)}>
+                        <Link
+                          to="/knowledge/guidelines/$id"
+                          params={{ id: g.id }}
+                          onClick={(e) => e.stopPropagation()}
+                          {...stylex.props(styles.link)}
+                        >
+                          {g.title}
+                        </Link>
+                        {workspace !== null && guidelineReach(g, workspace, names.employees) === "company" ? (
+                          <Chip>Company</Chip>
+                        ) : null}
+                        {waiting > 0 ? (
+                          <Chip tone="warn">{waiting === 1 ? "1 proposal" : `${waiting} proposals`}</Chip>
+                        ) : null}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {targets.length === 0 ? (
+                        <span {...stylex.props(styles.dim)}>Not linked</span>
+                      ) : (
+                        <span title={appliesTo(g.links, names).all} {...stylex.props(styles.pills)}>
+                          {targets.slice(0, 3).map((t) => (
+                            <span
+                              key={`${t.kind}:${t.id}`}
+                              {...stylex.props(styles.pill, t.kind === "project" && styles.pillProject)}
+                            >
+                              {t.kind === "employee" ? (
+                                <Mark
+                                  letter={initial(employeeName(names, t.id))}
+                                  color={markColor(t.id)}
+                                  size={18}
+                                  radius={9}
+                                />
+                              ) : null}
+                              {t.kind === "employee" ? employeeName(names, t.id) : targetName(names, t)}
+                            </span>
+                          ))}
+                          {targets.length > 3 ? <span {...stylex.props(styles.dim)}>+{targets.length - 3}</span> : null}
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span {...stylex.props(styles.size)}>{count(g.chars)}</span>
+                    </TableCell>
+                    <TableCell>
+                      {archived && writable ? (
+                        <Button
+                          size="sm"
+                          label="Restore"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void restore(g);
+                          }}
+                        />
+                      ) : (
+                        <span {...stylex.props(styles.updated)}>
+                          {g.updated_by
+                            ? g.updated_by.id === user?.id
+                              ? "You"
+                              : g.updated_by.username
+                            : "Starter set"}{" "}
+                          · v{g.version} · {shortDay(g.updated_at_ms)}
+                        </span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+      {starter ? <StarterDialog onClose={() => setStarter(false)} /> : null}
+    </SettingsPage>
+  );
+}
+
+/** A guideline proposal under Waiting for you: who proposes what and why, then Reject or Review. */
+function ProposalRow({
+  proposal,
+  current,
+  names,
+  writable,
+}: {
+  proposal: GuidelineProposalView;
+  current: GuidelineView | null;
+  names: Names;
+  writable: boolean;
+}) {
+  const navigate = useNavigate();
+  const [rejecting, setRejecting] = useState(false);
+  const who = employeeName(names, proposal.proposed_by);
+  const delta = proposal.text.length - (current?.chars ?? 0);
+  const meta = [
+    shortDay(proposal.created_at_ms),
+    proposal.guideline_id && current ? `v${current.version} → v${current.version + 1}` : "New guideline",
+    proposal.guideline_id && current ? `${delta >= 0 ? "+" : "−"}${count(Math.abs(delta))} characters` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div {...stylex.props(styles.prop)}>
+      <div {...stylex.props(styles.propTop)}>
+        <Mark letter={initial(who)} color={markColor(proposal.proposed_by)} size={24} radius={6} />
+        <div {...stylex.props(styles.propText)}>
+          <div {...stylex.props(styles.propHead)}>{proposalHeadline(proposal, current, names)}</div>
+          <div {...stylex.props(styles.small)}>{meta}</div>
+        </div>
+        <Chip tone="warn">Guideline</Chip>
+      </div>
+      {proposal.reason ? <div {...stylex.props(styles.propWhy)}>{proposal.reason}</div> : null}
+      {writable ? (
+        <div {...stylex.props(styles.buttons)}>
+          <Button size="sm" variant="ghost" label="Reject" onClick={() => setRejecting(true)} />
+          <Button
+            size="sm"
+            variant="primary"
+            label="Review…"
+            onClick={() =>
+              void navigate({
+                to: "/knowledge/guidelines/$id",
+                params: { id: proposal.guideline_id ?? "new" },
+                search: { proposal: proposal.id },
+              })
             }
           />
         </div>
       ) : null}
-      {!writable ? <p {...stylex.props(styles.readOnly)}>{READ_ONLY}</p> : null}
-      <div {...stylex.props(styles.scroll)}>
-        {source.isPending ? (
-          <Loading />
-        ) : (source.data ?? []).length === 0 ? (
-          archived ? (
-            <p {...stylex.props(styles.empty)}>Nothing is archived.</p>
-          ) : (
-            <Empty title="No guidelines yet" description={`${EMPTY_ABOUT} ${EMPTY_PROPOSE}`}>
-              {writable ? (
-                <div {...stylex.props(styles.buttons)}>
-                  <Button variant="primary" label="+ New guideline" onClick={() => open("new")} />
-                  <Button label="Add starter set…" onClick={() => setStarter(true)} />
-                </div>
-              ) : null}
-            </Empty>
-          )
-        ) : (
-          <>
-            <Table density="compact" hasHover xstyle={styles.table}>
-              <TableHeader>
-                <TableRow isHeaderRow>
-                  <TableHeaderCell xstyle={styles.headCell}>{head("title", "Title")}</TableHeaderCell>
-                  <TableHeaderCell xstyle={styles.headCell}>Applies to</TableHeaderCell>
-                  <TableHeaderCell xstyle={[styles.headCell, styles.sizeColumn]}>
-                    {head("size", "Size")}
-                  </TableHeaderCell>
-                  <TableHeaderCell xstyle={[styles.headCell, styles.versionColumn]}>Version</TableHeaderCell>
-                  <TableHeaderCell xstyle={[styles.headCell, styles.updatedColumn]}>
-                    {head("updated", "Updated")}
-                  </TableHeaderCell>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {list.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5}>
-                      <span {...stylex.props(styles.small)}>No guideline matches.</span>
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-                {list.map((g) => {
-                  const applies = appliesTo(g.links, names);
-                  const waiting = Math.max(g.open_proposals ?? 0, pending(g).length);
-                  return (
-                    <TableRow key={g.id} {...stylex.props(styles.row)}>
-                      <TableCell>
-                        <Link to="/knowledge/guidelines/$id" params={{ id: g.id }} {...stylex.props(styles.link)}>
-                          {g.title}
-                          {workspace !== null && guidelineReach(g, workspace, names.employees) === "company" ? (
-                            <span
-                              title="For the whole company, not only this workspace"
-                              {...stylex.props(styles.company)}
-                            >
-                              Company
-                            </span>
-                          ) : null}
-                          {waiting > 0 ? (
-                            <span
-                              title={waiting === 1 ? "1 proposal waits for you" : `${waiting} proposals wait for you`}
-                              {...stylex.props(styles.waiting)}
-                            >
-                              ◆{waiting}
-                            </span>
-                          ) : null}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          title={applies.all}
-                          {...stylex.props(styles.applies, g.links.length === 0 ? styles.dim : styles.appliesOn)}
-                        >
-                          {applies.shown}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <span {...stylex.props(styles.size)}>{count(g.chars)}</span>
-                      </TableCell>
-                      <TableCell>
-                        <span {...stylex.props(styles.small)}>v{g.version}</span>
-                      </TableCell>
-                      <TableCell>
-                        {archived && writable ? (
-                          <Button size="sm" label="Restore" onClick={() => void restore(g)} />
-                        ) : (
-                          <span {...stylex.props(styles.updated)}>
-                            {g.updated_by
-                              ? g.updated_by.id === user?.id
-                                ? "You"
-                                : g.updated_by.username
-                              : "Starter set"}{" "}
-                            · {shortDay(g.updated_at_ms)}
-                          </span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-            <p {...stylex.props(styles.footnote)}>
-              {archived
-                ? `${list.length} archived · no run gets these; Restore puts one back`
-                : `${list.length} guideline${list.length === 1 ? "" : "s"} · ${ABOUT.charAt(0).toLowerCase()}${ABOUT.slice(1, -1)}. Size in characters (max ${count(TEXT_LIMIT)} each)`}
-            </p>
-          </>
-        )}
-      </div>
-      {starter ? <StarterDialog onClose={() => setStarter(false)} /> : null}
-    </Page>
+      {rejecting ? <RejectDialog proposal={proposal} who={who} onClose={() => setRejecting(false)} /> : null}
+    </div>
   );
 }
 
@@ -1065,42 +1195,34 @@ export function GuidelineEditor({ id, proposalId }: { id: string; proposalId: st
 
   if (!isNew && detail.error) {
     return (
-      <Page>
-        <PageHead
-          title={
-            <Link to="/knowledge/$tab" params={{ tab: "guidelines" }} {...stylex.props(styles.back)}>
-              ‹ Guidelines
-            </Link>
-          }
-        />
+      <SettingsPage title="Not found" crumbs={[{ label: "Guidelines", to: "/knowledge/guidelines" }]} width="wide">
         <Problem>{detail.error.message}</Problem>
-      </Page>
+      </SettingsPage>
     );
   }
 
   return (
     <div {...stylex.props(styles.editorShell)}>
       <div {...stylex.props(styles.editorMain)}>
-        <PageHead
+        <SettingsHead
           title={
             <>
-              <Link
-                to="/knowledge/$tab"
-                params={{ tab: "guidelines" }}
-                onClick={(e) => {
-                  if (dirty) {
-                    e.preventDefault();
-                    setConfirm("leave");
-                  }
-                }}
-                {...stylex.props(styles.back)}
-              >
-                ‹ Guidelines
-              </Link>
-              <span {...stylex.props(styles.truncate)}>· {heading}</span>
-              {current ? <span {...stylex.props(styles.versionTag)}>v{current.version}</span> : null}
+              {heading}
+              {current ? <span {...stylex.props(styles.versionTag)}> v{current.version}</span> : null}
             </>
           }
+          crumbs={[
+            {
+              label: "Guidelines",
+              to: "/knowledge/guidelines",
+              onClick: (e) => {
+                if (dirty) {
+                  e.preventDefault();
+                  setConfirm("leave");
+                }
+              },
+            },
+          ]}
         >
           {!isNew && !proposal ? (
             <Button
@@ -1124,7 +1246,7 @@ export function GuidelineEditor({ id, proposalId }: { id: string; proposalId: st
               xstyle={problem || busy ? styles.blocked : undefined}
             />
           ) : null}
-        </PageHead>
+        </SettingsHead>
         <div {...stylex.props(styles.editor)}>
           {archived ? (
             <p {...stylex.props(styles.reason)}>

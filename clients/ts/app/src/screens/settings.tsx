@@ -4,6 +4,7 @@ import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
+import { useGuidelineProposals } from "../data";
 import { type Feature, shown } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
@@ -321,7 +322,7 @@ function companyPageOn(section: Section, path: string): boolean {
   return [section.to ?? "", ...(section.also ?? [])].some((root) => root !== "" && under(root));
 }
 
-/** A dot on an entry that needs you: no login for background jobs, or a server update. */
+/** A dot on an entry that needs you: no login for background jobs, a guideline proposal, or a server update. */
 function useFlags(): Record<string, Flag> {
   const connection = useConnection();
   const company = useSetting("company", async () => expectBody(await connection.call("company.get"), "company").value);
@@ -329,9 +330,11 @@ function useFlags(): Record<string, Flag> {
     "update",
     async () => expectBody(await connection.call("update.get", { check: false }), "update").value,
   );
+  const proposals = useGuidelineProposals();
   const flags: Record<string, Flag> = {};
   if (company.data && !company.data.background_login) flags.company = "warn";
   if (update.data?.enabled && (update.data.available || update.data.staged)) flags.server = "info";
+  if ((proposals.data ?? []).some((p) => p.status === "pending")) flags.guidelines = "warn";
   return flags;
 }
 
