@@ -215,7 +215,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
     final link = context.read<ConnectionBloc>().state;
     final dispatchOn = link.has(sessionDispatchFeature);
     final ownBranch = link.has(ownBranchFeature);
-    final problem = startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: link.has(chatFilesFeature), ownBranch: ownBranch);
+    final problem = startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: link.has(chatFilesFeature), ownBranch: ownBranch, worktreesOnly: link.has(worktreesOnlyFeature));
     final project = _project;
     final who = _who;
     if (problem != null || _busy || _uploading || project == null || who == null) return;
@@ -408,7 +408,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
     final whoName = _who == dispatcherWho ? 'Dispatcher' : company.employee(_who ?? '')?.name;
     final problem = kind == StartKind.ticket
         ? null
-        : startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: filesOn, ownBranch: ownBranch);
+        : startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: filesOn, ownBranch: ownBranch, worktreesOnly: link.has(worktreesOnlyFeature));
     final note = kind == StartKind.ticket
         ? 'Opens New ticket with this text, to add an owner, labels and more.'
         : _who == dispatcherWho
