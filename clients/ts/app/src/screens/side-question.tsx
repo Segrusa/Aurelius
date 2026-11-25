@@ -25,6 +25,13 @@ import {
 } from "./side-question-logic";
 
 const styles = stylex.create({
+  // The popover opens over the docked properties card; a border and a high shadow keep it apart.
+  surface: {
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    boxShadow: "var(--shadow-high)",
+  },
   panel: { display: "flex", flexDirection: "column", gap: 12, maxHeight: "min(70vh, 560px)" },
   head: { display: "flex", flexDirection: "column", gap: 2 },
   title: { margin: 0, fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)" },
@@ -66,6 +73,7 @@ export function SideQuestionButton({ conversationId }: { conversationId: string 
       width={420}
       placement="below"
       alignment="end"
+      xstyle={styles.surface}
       content={open ? <SidePanel conversationId={conversationId} /> : null}
     >
       <IconButton variant="ghost" size="sm" label="Ask a side question" icon={<Icon name="aside" size={16} />} />
