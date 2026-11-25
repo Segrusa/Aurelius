@@ -462,6 +462,8 @@ test("All workspaces reaches its settings from the list, without a panel", async
   try {
     await page.getByRole("main").getByRole("button", { name: "All workspaces settings" }).click();
     await expect(page).toHaveURL(/\/projects$/);
+    // The list of workspaces is titled by what it lists (OPR-1), not "Knowledge".
+    await expect(page.getByRole("heading", { level: 1, name: "Workspaces" })).toBeVisible();
   } finally {
     site.close();
   }

@@ -1,4 +1,4 @@
-import type { ActivityOverview, ActivityWaiting, LoadSnapshot, TicketActivity } from "@aurelius/protocol";
+import type { ActivityOverview, ActivityWaiting, ActivityWork, LoadSnapshot, TicketActivity } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import { areasOf } from "../data";
 import {
@@ -10,6 +10,7 @@ import {
   waitLabel,
   workHref,
   workLabel,
+  workPlaces,
 } from "./activity-bar-logic";
 
 const wait = (waits_for: string): ActivityWaiting => ({
@@ -72,22 +73,61 @@ describe("a ticket's line", () => {
 });
 
 describe("where a row leads", () => {
-  const sessions = new Set(["s1"]);
+  const places = workPlaces(
+    [{ conversation_id: "s1" }],
+    [
+      { conversation_id: "ch7", ticket_id: "k7", ticket_number: 7 },
+      { conversation_id: "ch9", ticket_id: "k9", ticket_number: 9 },
+    ],
+  );
+  // Every kind of row the server sends (storage/activity.rs work_of), each with and without a place.
+  const rows: ActivityWork[] = [
+    { ticket_id: "k7", task_id: "t", chat_id: "c" },
+    { ticket_id: "k7" },
+    { ticket_id: "gone" },
+    { ticket_id: "gone", task_id: "t" },
+    { task_id: "t", chat_id: "c" },
+    { task_id: "t" },
+    { channel_id: "ch9" },
+    { channel_id: "ch-general" },
+    { chat_id: "s1" },
+    { chat_id: "c" },
+    { private: true, chat_id: "c" },
+    { label: "x" },
+  ];
 
-  it("opens the ticket first, then the task, the channel or the chat", () => {
-    expect(workHref({ ticket_id: "k", task_id: "t", chat_id: "c" }, sessions)).toBe("/board?ticket=k");
-    expect(workHref({ task_id: "t", chat_id: "c" }, sessions)).toBe("/tasks/t");
-    expect(workHref({ channel_id: "ch" }, sessions)).toBe("/chat?channel=ch");
-    expect(workHref({ chat_id: "c" }, sessions)).toBe("/talk/c");
+  it("opens a ticket as its session, by the number from the channel list", () => {
+    expect(workHref({ ticket_id: "k7", task_id: "t", chat_id: "c" }, places)).toBe("/ticket/7");
+    expect(workHref({ ticket_id: "k7" }, places)).toBe("/ticket/7");
+  });
+
+  it("opens a ticket's channel as that ticket's session", () => {
+    expect(workHref({ channel_id: "ch9" }, places)).toBe("/ticket/9");
+  });
+
+  it("opens a task as its run, also when its ticket is not known", () => {
+    expect(workHref({ task_id: "t", chat_id: "c" }, places)).toBe("/tasks/t");
+    expect(workHref({ ticket_id: "gone", task_id: "t" }, places)).toBe("/tasks/t");
   });
 
   it("opens a chat that is a work session as that session", () => {
-    expect(workHref({ chat_id: "s1" }, sessions)).toBe("/session/s1");
+    expect(workHref({ chat_id: "s1" }, places)).toBe("/session/s1");
   });
 
-  it("leads nowhere for another board member's chat or work without a place", () => {
-    expect(workHref({ private: true, chat_id: "c" }, sessions)).toBeNull();
-    expect(workHref({ label: "x" }, sessions)).toBeNull();
+  it("leads nowhere for a channel or chat without a screen, a private chat or work without a place", () => {
+    expect(workHref({ channel_id: "ch-general" }, places)).toBeNull();
+    expect(workHref({ chat_id: "c" }, places)).toBeNull();
+    expect(workHref({ ticket_id: "gone" }, places)).toBeNull();
+    expect(workHref({ private: true, chat_id: "c" }, places)).toBeNull();
+    expect(workHref({ label: "x" }, places)).toBeNull();
+  });
+
+  it("gives every row a ticket, session or task run, or nothing, never the removed chat or talk", () => {
+    for (const work of rows) {
+      const href = workHref(work, places);
+      if (href !== null) expect(href).toMatch(/^\/(ticket\/\d+|session\/[^/?]+|tasks\/[^/?]+)$/);
+      expect(href ?? "").not.toMatch(/\/chat|\/talk|\/board/);
+    }
   });
 });
 

@@ -438,7 +438,7 @@ export function ProjectsScreen() {
   });
   return (
     <Page>
-      <PageHead title="Knowledge" tabs={<KnowledgeTabs />}>
+      <PageHead title="Workspaces" tabs={<KnowledgeTabs />}>
         <Button size="sm" variant="primary" label="New project" onClick={() => setAdding(true)} />
       </PageHead>
       <div {...stylex.props(styles.scroll)}>

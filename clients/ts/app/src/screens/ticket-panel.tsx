@@ -1,62 +1,25 @@
 import { Button } from "@astryxdesign/core/Button";
-import { EmptyState } from "@astryxdesign/core/EmptyState";
-import { Heading } from "@astryxdesign/core/Heading";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { LayoutPanel } from "@astryxdesign/core/Layout";
 import { Link } from "@astryxdesign/core/Link";
-import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
-import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { expectBody } from "@aurelius/client";
-import type { AgentMode, TicketPriority, TicketView } from "@aurelius/protocol";
+import type { TicketView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import {
-  useAllTasks,
-  useBoard,
-  useCompany,
-  useEmployees,
-  useKeyed,
-  useMembers,
-  useMessages,
-  useTicket,
-  useTicketActivity,
-} from "../data";
+import { useAllTasks, useBoard, useCompany, useEmployees, useKeyed, useMembers, useMessages } from "../data";
 import { showChord } from "../keys/keymap";
 import { isMac, useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { acceptable, filesFrom } from "../ui/attach";
-import { Chip } from "../ui/chip";
 import { KeyHint } from "../ui/key-hint";
 import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
 import { Menu } from "../ui/menu";
 import { toast } from "../ui/toast";
-import { TicketActivityLine } from "./activity-bar";
-import {
-  activityDetail,
-  activityText,
-  deadlineInput,
-  decideToo,
-  doneCheck,
-  dropEffect,
-  editable,
-  feedbackLabel,
-  latestPlan,
-  loginWait,
-  ownerChoosable,
-  PRIORITIES,
-  priorityLabel,
-  runLocked,
-  suggestedReplies,
-  takeOverOffered,
-  testingNote,
-} from "./board-logic";
-import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
+import { decideToo, dropEffect, loginWait, suggestedReplies, takeOverOffered, testingNote } from "./board-logic";
+import { Held, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
 import { FormDialog, Loading, Problem } from "./org-kit";
 import {
@@ -67,20 +30,10 @@ import {
   doneLine,
   isQuick,
 } from "./quick-logic";
-import { TicketOdometer } from "./run-card";
 import { lastFailure, lastSummaryFailed } from "./run-logic";
-import { FileChips, useRetryAnswer } from "./run-tools";
-import { ThreadWaiting } from "./scheduled";
-import { foldTree, taskStateLine, treeOrder } from "./tasks-logic";
-import { gateKeyAllowed, ticketPlace } from "./ticket-session-logic";
-import {
-  ColumnGlyph,
-  NoConnectionNote,
-  ticketNumber,
-  useNoConnection,
-  useTicketNeeds,
-  useTicketWrite,
-} from "./tickets-kit";
+import { useRetryAnswer } from "./run-tools";
+import { gateKeyAllowed } from "./ticket-session-logic";
+import { NoConnectionNote, ticketNumber, useNoConnection, useTicketNeeds, useTicketWrite } from "./tickets-kit";
 
 export const MODES: { key: string; label: string }[] = [
   { key: "default", label: "Owner's default" },
@@ -89,10 +42,6 @@ export const MODES: { key: string; label: string }[] = [
   { key: "auto", label: "Auto" },
   { key: "plan", label: "Plan" },
 ];
-
-const enter = stylex.keyframes({
-  from: { opacity: 0, transform: "translateY(4px)" },
-});
 
 const styles = stylex.create({
   box: {
@@ -141,7 +90,6 @@ const styles = stylex.create({
   secondary: { color: "var(--color-text-secondary)" },
   third: { color: "var(--precision-text3)" },
   thirdSmall: { fontSize: 12, color: "var(--precision-text3)" },
-  sectionLabel: { fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
   medium: { fontWeight: 500 },
   failed: { fontWeight: 500, color: "var(--color-text-error)" },
   red: { color: "var(--color-text-error)" },
@@ -150,79 +98,6 @@ const styles = stylex.create({
   followers: { display: "inline-flex", alignItems: "center", gap: 4 },
   spaced: { marginTop: 8 },
   summaryLine: { marginTop: 8, display: "flex", alignItems: "center", gap: 8 },
-  // A card clips its content, so in this column it would be squeezed instead of scrolled.
-  // Negative margin: the button may not make a one-line message head taller than its text.
-  activity: { margin: 0, display: "flex", listStyleType: "none", flexDirection: "column", gap: 12, padding: 0 },
-  activityItem: { display: "flex", flexDirection: "column", gap: 2 },
-  pending: { display: "flex", flexDirection: "column", gap: 12, padding: 20 },
-  panel: {
-    display: "flex",
-    height: "100%",
-    minWidth: 0,
-    flexDirection: "column",
-    backgroundColor: "var(--color-background-surface)",
-    animationName: enter,
-    animationDuration: "160ms",
-    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
-  },
-  panelHead: {
-    display: "flex",
-    height: 44,
-    flexShrink: 0,
-    alignItems: "center",
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomStyle: "solid",
-    borderBottomColor: "var(--precision-line2)",
-    paddingInlineStart: 20,
-    paddingInlineEnd: 10,
-    color: "var(--precision-text3)",
-  },
-  number: { fontFamily: "var(--font-family-code)", fontSize: 12 },
-  panelTools: { marginInlineStart: "auto", display: "flex", gap: 2 },
-  top: { display: "flex", flexShrink: 0, flexDirection: "column", gap: 12, paddingInline: 22, paddingTop: 20 },
-  topGate: { display: "flex", flexShrink: 0, flexDirection: "column", gap: 12, paddingInline: 22, paddingTop: 12 },
-  title: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: "-0.015em" },
-  chips: { display: "flex", flexWrap: "wrap", gap: 6 },
-  tabPanel: { display: "flex", minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%", flexDirection: "column" },
-  section: {
-    display: "flex",
-    minHeight: 0,
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: "0%",
-    flexDirection: "column",
-    gap: 18,
-    overflowY: "auto",
-    paddingInline: 22,
-    paddingBlock: 16,
-  },
-  rows: { display: "flex", flexDirection: "column" },
-  files: { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 },
-  tasks: { display: "flex", flexDirection: "column", gap: 4 },
-  task: {
-    display: "flex",
-    height: 32,
-    cursor: "pointer",
-    alignItems: "center",
-    gap: 8,
-    borderRadius: 6,
-    borderWidth: 0,
-    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
-    paddingInlineEnd: 4,
-    textAlign: "left",
-    color: "var(--color-text-primary)",
-  },
-  taskTitle: {
-    minWidth: 0,
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: "0%",
-    overflow: "hidden",
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-  },
-  taskState: { flexShrink: 0, fontSize: 12 },
 });
 
 export function time(ms: number): string {
@@ -379,54 +254,14 @@ function GateKeys({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
   return null;
 }
 
-/** A ticket's plan or report, to decide on where it is read: the Inbox. */
-export function TicketDecision({ id }: { id: string }) {
-  const { status } = useLinkState();
-  const detail = useTicket(id);
-  const t = detail.data?.ticket;
-  const conversation = detail.data?.root_task?.conversation_id;
-  const messages = useMessages(t?.column === "plan_review" ? conversation : null);
-  if (!t) return null;
-  if (t.column === "review") {
-    const check = doneCheck(detail.data);
-    return (
-      <ReviewGate
-        key={t.version}
-        keyed
-        t={t}
-        report={detail.data?.root_task?.result ?? null}
-        ready={check.kind === "ready" && status === "online"}
-        whyNot={check.kind === "working" ? "Still at work: Done waits until that has finished." : null}
-      />
-    );
-  }
-  if (t.column === "plan_review") {
-    return (
-      <PlanGate
-        key={t.version}
-        keyed
-        t={t}
-        plan={messages.isPending ? undefined : latestPlan(messages.data?.messages ?? [])}
-      />
-    );
-  }
-  return null;
-}
-
 export function ReviewGate({
   keyed = false,
-  session = false,
   t,
   report,
   ready,
   whyNot,
 }: {
   keyed?: boolean;
-  /**
-   * In the ticket's session (ticket #70): the composer under it is the reply to the owner and the
-   * timeline above is the discussion, so neither button shows; the report folds.
-   */
-  session?: boolean;
   t: TicketView;
   report: string | null;
   ready: boolean;
@@ -435,19 +270,14 @@ export function ReviewGate({
   const connection = useConnection();
   const write = useTicketWrite();
   const [feedback, setFeedback] = useState("");
-  // "back" asks for changes; "reply" tells the owner what to do next and leaves the ticket in review.
-  const [mode, setMode] = useState<"back" | "reply" | null>(null);
+  // "back" asks for changes; a reply to the owner goes through the session's composer.
+  const [mode, setMode] = useState<"back" | null>(null);
   const [missing, setMissing] = useState(false);
   const { busy, held, error, send, sendAnyway } = useSend((text) => {
     if (text !== "") toast(text);
     setMode(null);
     setFeedback("");
   });
-  const navigate = useNavigate();
-  const { features } = useLinkState();
-  // The discussion is the ticket's channel in the chat; an older server without ticket channels has none to open.
-  const discussion = useMessages(features.includes("ticket_channels") && !session ? t.conversation_id : null);
-  const lastMessage = (discussion.data?.messages ?? []).filter((m) => !m.deleted_at_ms).at(-1);
   const reply = (text: string) =>
     send(async (confirmSecret) => {
       await connection.write("ticket.post", { ticket_id: t.id, text, confirm_secret: confirmSecret });
@@ -463,7 +293,7 @@ export function ReviewGate({
       { done: quick ? `Merging ${ticketNumber(t)} into main…` : `${ticketNumber(t)} is Done.` },
     );
   const accept = acceptLabel(t);
-  const [open, toggle] = useGateOpen(session);
+  const [open, toggle] = useGateOpen();
   return (
     <Box tone="amber">
       {keyed ? (
@@ -474,26 +304,17 @@ export function ReviewGate({
           onNo={() => setMode("back")}
         />
       ) : null}
-      <GateHead session={session} open={open} onToggle={toggle}>
+      <GateHead open={open} onToggle={toggle}>
         In review · your decision
       </GateHead>
       {open && too ? <span {...stylex.props(styles.small)}>{too}</span> : null}
       {!open ? null : report ? (
-        session ? (
-          <Clamped text={report} more="Show the whole report" />
-        ) : (
-          <Markdown text={report} />
-        )
+        <Clamped text={report} more="Show the whole report" />
       ) : (
         <span {...stylex.props(styles.secondary)}>No report text. See the conversation.</span>
       )}
       {mode ? (
-        <Feedback
-          placeholder={mode === "reply" ? "What should happen next?" : "What needs to change?"}
-          value={feedback}
-          onChange={setFeedback}
-          missing={missing}
-        />
+        <Feedback placeholder="What needs to change?" value={feedback} onChange={setFeedback} missing={missing} />
       ) : null}
       {held ? <Held names={held} busy={busy} onSend={sendAnyway} /> : null}
       {error ? <Problem>{error}</Problem> : null}
@@ -512,25 +333,6 @@ export function ReviewGate({
             </>
           ) : null}
         </Button>
-        {session ? null : (
-          <Button
-            label={`Reply to ${t.owner_name ?? "the owner"}`}
-            isDisabled={busy}
-            onClick={() => {
-              if (mode !== "reply") return setMode("reply");
-              if (feedback.trim() === "") return setMissing(true);
-              setMissing(false);
-              send(async (confirmSecret) => {
-                await connection.write("ticket.post", {
-                  ticket_id: t.id,
-                  text: feedback.trim(),
-                  confirm_secret: confirmSecret,
-                });
-                return "";
-              });
-            }}
-          />
-        )}
         <Button
           label="Send back to Doing"
           isDisabled={busy}
@@ -548,9 +350,6 @@ export function ReviewGate({
             });
           }}
         />
-        {lastMessage && !session ? (
-          <Button label="Open discussion" onClick={() => void navigate(ticketPlace(t, { message: lastMessage.id }))} />
-        ) : null}
         {t.root_task_id ? (
           <Link href={`/tasks/${t.root_task_id}`} xstyle={styles.linkEnd}>
             Open run →
@@ -565,19 +364,17 @@ export function PlanGate({
   t,
   plan,
   keyed = false,
-  session = false,
 }: {
   t: TicketView;
   plan: string | null | undefined;
   keyed?: boolean;
-  /** In the ticket's session: the plan folds, and the note opens only when it is wanted. */
-  session?: boolean;
 }) {
   const connection = useConnection();
   const write = useTicketWrite();
   const [feedback, setFeedback] = useState("");
-  const [noting, setNoting] = useState(!session);
-  const [open, toggle] = useGateOpen(session);
+  // The note opens only when it is wanted.
+  const [noting, setNoting] = useState(false);
+  const [open, toggle] = useGateOpen();
   const [missing, setMissing] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const { busy, held, error, send, sendAnyway } = useSend((text) => {
@@ -594,7 +391,7 @@ export function PlanGate({
   return (
     <Box tone="amber">
       {keyed ? <GateKeys onYes={() => void approve("approve")} onNo={() => setRejecting(true)} /> : null}
-      <GateHead session={session} open={open} onToggle={toggle}>
+      <GateHead open={open} onToggle={toggle}>
         Plan review · your decision
       </GateHead>
       {open && too ? <span {...stylex.props(styles.small)}>{too}</span> : null}
@@ -605,10 +402,8 @@ export function PlanGate({
           This agent did not write a plan of its own.{" "}
           {t.root_task_id ? <Link href={`/tasks/${t.root_task_id}`}>Read what it said →</Link> : null}
         </span>
-      ) : session ? (
-        <Clamped text={plan} more="Show the whole plan" />
       ) : (
-        <Markdown text={plan} />
+        <Clamped text={plan} more="Show the whole plan" />
       )}
       {noting ? (
         <Feedback
@@ -662,12 +457,12 @@ export function PlanGate({
   );
 }
 
-/** Whether a gate shows its body; in the session it folds to its head and buttons, remembered. */
+/** Whether a gate shows its body; it folds to its head and buttons, remembered. */
 const GATE_KEY = "ticket-session.gate.open";
 
-function useGateOpen(session: boolean): [boolean, () => void] {
+function useGateOpen(): [boolean, () => void] {
   const { storage } = usePlatform();
-  const [open, setOpen] = useState(() => !session || storage.get(GATE_KEY) !== "0");
+  const [open, setOpen] = useState(() => storage.get(GATE_KEY) !== "0");
   return [
     open,
     () => {
@@ -677,31 +472,19 @@ function useGateOpen(session: boolean): [boolean, () => void] {
   ];
 }
 
-function GateHead({
-  session,
-  open,
-  onToggle,
-  children,
-}: {
-  session: boolean;
-  open: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-}) {
+function GateHead({ open, onToggle, children }: { open: boolean; onToggle: () => void; children: ReactNode }) {
   return (
     <div {...stylex.props(styles.gateHead)}>
       <span {...stylex.props(styles.dot)} />
       <span {...stylex.props(styles.gateTitle)}>{children}</span>
-      {session ? (
-        <IconButton
-          variant="ghost"
-          size="sm"
-          label={open ? "Fold the decision" : "Unfold the decision"}
-          aria-expanded={open}
-          icon={<Icon icon={open ? "chevronDown" : "chevronRight"} />}
-          onClick={onToggle}
-        />
-      ) : null}
+      <IconButton
+        variant="ghost"
+        size="sm"
+        label={open ? "Fold the decision" : "Unfold the decision"}
+        aria-expanded={open}
+        icon={<Icon icon={open ? "chevronDown" : "chevronRight"} />}
+        onClick={onToggle}
+      />
     </div>
   );
 }
@@ -906,16 +689,10 @@ export function StatusBox({
   t,
   choosing,
   dispatcherLine,
-  session = false,
 }: {
   t: TicketView;
   choosing: boolean;
   dispatcherLine: string | null;
-  /**
-   * In the ticket's session: nothing while the owner simply works (the progress says what runs), and
-   * on Done only what there is to do or know: a summary to retry, a quick task's merge.
-   */
-  session?: boolean;
 }) {
   const { user, claudeLogin } = useLinkState();
   const write = useTicketWrite();
@@ -1054,21 +831,8 @@ export function StatusBox({
           </Box>
         );
       }
-      if (session) return null;
-      return (
-        <Box>
-          <div {...stylex.props(styles.buttonsCentered)}>
-            <span {...stylex.props(styles.secondary)}>
-              {t.owner_name ? `${t.owner_name} is working on it.` : "In progress."}
-            </span>
-            {runLink}
-          </div>
-          <div>
-            <Button label="Back to Backlog" onClick={() => setLeaving("backlog")} />
-          </div>
-          {dialogs}
-        </Box>
-      );
+      // Nothing while the owner simply works: the progress says what runs.
+      return null;
     case "testing":
       return (
         <Box>
@@ -1081,7 +845,8 @@ export function StatusBox({
         </Box>
       );
     case "done":
-      if (session && !summaryFailed && !isQuick(t)) return null;
+      // On Done only what there is to do or know: a summary to retry, a quick task's merge.
+      if (!summaryFailed && !isQuick(t)) return null;
       return (
         <Box>
           {doneLine(t, t.done_at_ms ? time(t.done_at_ms) : null)}
@@ -1096,362 +861,4 @@ export function StatusBox({
     default:
       return null;
   }
-}
-
-export function Activity({ id }: { id: string }) {
-  const activity = useTicketActivity(id);
-  if (activity.isPending) return <Loading />;
-  if (activity.error) return <Problem>{activity.error.message}</Problem>;
-  if ((activity.data ?? []).length === 0) return <EmptyState isCompact title="Nothing happened yet." />;
-  return (
-    <ul {...stylex.props(styles.activity)}>
-      {activity.data?.map((card) => {
-        const detail = activityDetail(card);
-        return (
-          <li key={card.seq} {...stylex.props(styles.activityItem)}>
-            <span>{activityText(card)}</span>
-            {detail ? <span {...stylex.props(styles.small)}>{detail}</span> : null}
-            <span {...stylex.props(styles.thirdSmall)}>{time(card.at_ms)}</span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-type Section = "ticket" | "activity";
-
-export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }) {
-  const platform = usePlatform();
-  useKeyContext("TicketPanel");
-  useAction("Back", onClose);
-  const resizable = useResizable({ defaultSize: 460, minSize: 360, maxSize: 720, autoSaveId: "ticket-panel" });
-  const navigate = useNavigate();
-  const { features, status } = useLinkState();
-  const detail = useTicket(id);
-  const board = useBoard(null);
-  const employees = useEmployees();
-  const models = useModels();
-  const write = useTicketWrite();
-  const [tab, setTab] = useState<Section>("ticket");
-  const t = detail.data?.ticket;
-  const list = useMemo(() => (t ? [t] : []), [t]);
-  const need = useTicketNeeds(list);
-  const rootConversation = detail.data?.root_task?.conversation_id;
-  const rootMessages = useMessages(t?.column === "plan_review" ? rootConversation : null);
-  const activity = useTicketActivity(t?.review_feedback ? id : null);
-  const tasks = useMemo(() => foldTree(treeOrder(detail.data?.tasks ?? []), {}), [detail.data?.tasks]);
-  const { choosing, line: dispatcherLine } = useDispatcherLine(t);
-  const menu = useTicketMenu(t, choosing);
-
-  if (!t) {
-    const gone = detail.error && /not.?found/i.test(detail.error.message);
-    return (
-      <>
-        <ResizeHandle resizable={resizable} isReversed hasDivider />
-        <LayoutPanel resizable={resizable} role="complementary" label="Ticket" isScrollable={false} padding={0}>
-          <div {...stylex.props(styles.pending)}>
-            {gone ? (
-              <span {...stylex.props(styles.secondary)}>This ticket is not on this server.</span>
-            ) : detail.error ? (
-              <Problem>{detail.error.message}</Problem>
-            ) : (
-              <Loading />
-            )}
-            <div>
-              <Button label="Close" onClick={onClose} />
-            </div>
-          </div>
-        </LayoutPanel>
-      </>
-    );
-  }
-
-  const can = status === "online";
-  const open = editable(t) && can;
-  const locked = runLocked(t);
-  const choosable = ownerChoosable(t) && can;
-  const check = doneCheck(detail.data);
-  const update = (params: Record<string, unknown>) =>
-    write("ticket.update", { ticket_id: t.id, ...params } as never, { expectedVersion: t.version });
-  const quick = isQuick(t);
-  const addFiles = async (files: { path: string }[]) => {
-    if (files.length === 0) return;
-    await write(
-      "ticket.update",
-      { ticket_id: t.id, add_files: files.map((f) => f.path) },
-      { expectedVersion: t.version, done: "Files added." },
-    );
-  };
-  const addFailed = (e: unknown) => toast(e instanceof Error ? e.message : "This did not work.");
-  // A file copied or dropped on the panel of an open ticket goes on the ticket.
-  const takeFiles = (given: File[]) => {
-    const { fit, problems } = acceptable(given);
-    for (const problem of problems) toast(problem);
-    if (fit.length > 0 && t.column !== "done") platform.keepFiles(fit).then(addFiles).catch(addFailed);
-  };
-  return (
-    <>
-      {menu.dialogs}
-      <ResizeHandle resizable={resizable} isReversed hasDivider />
-      <LayoutPanel
-        resizable={resizable}
-        role="complementary"
-        label={`${ticketNumber(t)} ${t.title}`}
-        isScrollable={false}
-        padding={0}
-        onPaste={(e) => {
-          const given = filesFrom(e.clipboardData);
-          if (given.length === 0) return;
-          e.preventDefault();
-          takeFiles(given);
-        }}
-        onDragOver={(e) => {
-          if (e.dataTransfer.types.includes("Files")) e.preventDefault();
-        }}
-        onDrop={(e) => {
-          const given = filesFrom(e.dataTransfer);
-          if (given.length === 0) return;
-          e.preventDefault();
-          takeFiles(given);
-        }}
-      >
-        <div {...stylex.props(styles.panel)}>
-          <div {...stylex.props(styles.panelHead)}>
-            <span {...stylex.props(styles.number)}>{ticketNumber(t)}</span>
-            <div {...stylex.props(styles.panelTools)}>
-              <Menu
-                label="More"
-                options={menu.options}
-                onPick={menu.pick}
-                trigger={<IconButton variant="ghost" size="sm" label="More" icon={<Icon icon="moreHorizontal" />} />}
-              />
-              <IconButton variant="ghost" size="sm" label="Close" icon={<Icon icon="close" />} onClick={onClose} />
-            </div>
-          </div>
-          <div {...stylex.props(styles.top)}>
-            <Editable
-              label="Title"
-              value={t.title}
-              enabled={open}
-              display={
-                <Heading level={2} xstyle={styles.title}>
-                  {t.title}
-                </Heading>
-              }
-              onSave={(title) => update({ title: title.trim() })}
-            />
-            <TicketActivityLine ticketId={t.id} />
-            <div {...stylex.props(styles.chips)}>
-              <Chip>
-                <ColumnGlyph kind={t.column} />
-                {board.data?.columns.find((c) => c.column.kind === t.column)?.column.name ?? t.column}
-              </Chip>
-              {open ? (
-                <Menu
-                  label="Priority"
-                  value={t.priority}
-                  options={PRIORITIES.map((p) => ({ key: p, label: priorityLabel(p) }))}
-                  onPick={(priority: TicketPriority) => void update({ priority })}
-                  trigger={<Chip>{priorityLabel(t.priority)}</Chip>}
-                />
-              ) : (
-                <Chip disabled>{priorityLabel(t.priority)}</Chip>
-              )}
-              {choosable ? (
-                <Menu
-                  label="Owner"
-                  {...(t.owner_employee_id ? { value: t.owner_employee_id } : {})}
-                  options={(employees.data ?? [])
-                    .filter((e) => e.status === "active")
-                    .map((e) => ({ key: e.id, label: e.name }))}
-                  onPick={(id) => void write("ticket.assign", { ticket_id: t.id, employee_id: id })}
-                  trigger={
-                    <Chip>
-                      {t.owner_name ? (
-                        <Mark
-                          letter={initial(t.owner_name)}
-                          color={markColor(t.owner_employee_id ?? "")}
-                          size={14}
-                          radius={4}
-                        />
-                      ) : null}
-                      {t.owner_name ?? "No owner"}
-                    </Chip>
-                  }
-                />
-              ) : (
-                <Chip disabled>{t.owner_name ?? "No owner"}</Chip>
-              )}
-              {open && !locked && !quick ? (
-                <Menu
-                  label="Mode"
-                  value={t.run.mode ?? "default"}
-                  options={MODES}
-                  onPick={(mode) =>
-                    void update({ run: { ...t.run, mode: mode === "default" ? null : (mode as AgentMode) } })
-                  }
-                  trigger={<Chip name="Mode">{MODES.find((m) => m.key === (t.run.mode ?? "default"))?.label}</Chip>}
-                />
-              ) : null}
-              {open && !locked ? (
-                <Menu
-                  label="Model"
-                  value={t.run.model ?? "default"}
-                  options={models}
-                  onPick={(model) => void update({ run: { ...t.run, model: model === "default" ? null : model } })}
-                  trigger={
-                    <Chip name="Model">
-                      {models.find((m) => m.key === (t.run.model ?? "default"))?.label ?? "Default"}
-                    </Chip>
-                  }
-                />
-              ) : null}
-            </div>
-            <TicketOdometer ticketId={t.id} />
-            <ThreadWaiting ticketId={t.id} />
-          </div>
-          <div {...stylex.props(styles.topGate)}>
-            {t.column === "review" ? (
-              <ReviewGate
-                key={t.version}
-                t={t}
-                report={detail.data?.root_task?.result ?? null}
-                ready={check.kind === "ready" && can}
-                whyNot={check.kind === "working" ? "Still at work: Done waits until that has finished." : null}
-              />
-            ) : t.column === "plan_review" ? (
-              <PlanGate
-                t={t}
-                plan={rootMessages.isPending ? undefined : latestPlan(rootMessages.data?.messages ?? [])}
-              />
-            ) : (
-              <StatusBox t={t} choosing={choosing} dispatcherLine={dispatcherLine} />
-            )}
-            <TabList
-              role="tablist"
-              aria-label="Ticket sections"
-              hasDivider
-              value={tab}
-              onChange={(next) => setTab(next as Section)}
-            >
-              {(
-                [
-                  ["ticket", "Ticket"],
-                  ["activity", "Activity"],
-                ] as [Section, string][]
-              ).map(([key, label]) => (
-                <Tab key={key} value={key} label={label} panelId="ticket-section" />
-              ))}
-            </TabList>
-          </div>
-          <div id="ticket-section" role="tabpanel" aria-label="Ticket section" {...stylex.props(styles.tabPanel)}>
-            <div {...stylex.props(styles.section)}>
-              {tab === "activity" ? (
-                <Activity id={t.id} />
-              ) : (
-                <>
-                  {t.review_feedback && t.column === "doing" ? (
-                    <Box>
-                      <span {...stylex.props(styles.sectionLabel)}>{feedbackLabel(activity.data)}</span>
-                      <span>{t.review_feedback}</span>
-                    </Box>
-                  ) : null}
-                  <Editable
-                    label="Description"
-                    value={t.description ?? ""}
-                    enabled={open}
-                    multiline
-                    display={
-                      t.description?.trim() ? (
-                        <Markdown text={t.description} />
-                      ) : (
-                        <span {...stylex.props(styles.third)}>No description.</span>
-                      )
-                    }
-                    onSave={(description) => update({ description })}
-                  />
-                  <div {...stylex.props(styles.rows)}>
-                    <Row name="Project">{t.project_name}</Row>
-                    <Row name="Labels">
-                      <Editable
-                        label="Labels"
-                        value={t.labels.join(", ")}
-                        enabled={open}
-                        placeholder="backend, ui"
-                        display={
-                          t.labels.length > 0 ? t.labels.join(", ") : <span {...stylex.props(styles.third)}>None</span>
-                        }
-                        onSave={(text) => update({ labels: parseLabels(text) })}
-                      />
-                    </Row>
-                    <Row name="Deadline">
-                      <Editable
-                        label="Deadline"
-                        value={t.deadline_ms ? deadlineInput(t.deadline_ms, -new Date().getTimezoneOffset()) : ""}
-                        enabled={open}
-                        placeholder="2026-11-04 or 2026-11-04 17:00"
-                        display={
-                          t.deadline_ms ? time(t.deadline_ms) : <span {...stylex.props(styles.third)}>None</span>
-                        }
-                        onSave={async (text) => {
-                          try {
-                            const ms = parseDeadline(text, -new Date().getTimezoneOffset());
-                            return await update(ms === null ? { clear_deadline: true } : { deadline_ms: ms });
-                          } catch (e) {
-                            toast((e as Error).message);
-                            return false;
-                          }
-                        }}
-                      />
-                    </Row>
-                    {features.includes("ticket_responsible") ? (
-                      <Row name="Responsible">
-                        {t.responsible_username ?? <span {...stylex.props(styles.third)}>No one</span>}
-                      </Row>
-                    ) : null}
-                    <Row name="Runs on">
-                      {t.login_user === need.me ? "Your Claude login" : `${t.login_username}'s Claude login`}
-                    </Row>
-                    <Row name="Created by">{`${t.created_by_username} · ${time(t.created_at_ms)}`}</Row>
-                    {features.includes("ticket_follow") ? <Followers id={t.id} /> : null}
-                    <Row name="Files">
-                      <span {...stylex.props(styles.files)}>
-                        <FileChips files={t.attachments} />
-                        {t.column === "done" ? null : (
-                          <Button label="Add files…" onClick={() => platform.pickFiles().then(addFiles, addFailed)} />
-                        )}
-                      </span>
-                    </Row>
-                  </div>
-                  {tasks.length > 0 ? (
-                    <div {...stylex.props(styles.tasks)}>
-                      <span {...stylex.props(styles.sectionLabel)}>Tasks ({detail.data?.tasks.length})</span>
-                      {tasks.map(({ task, depth }) => {
-                        const state = taskStateLine(task);
-                        return (
-                          <button
-                            key={task.id}
-                            type="button"
-                            onClick={() => void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } })}
-                            {...stylex.props(styles.task)}
-                            style={{ paddingLeft: 4 + 16 * depth }}
-                          >
-                            <span {...stylex.props(styles.taskTitle)}>{task.title}</span>
-                            <span {...stylex.props(styles.taskState)} style={{ color: state.color }}>
-                              {state.text}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </LayoutPanel>
-    </>
-  );
 }

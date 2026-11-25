@@ -82,29 +82,6 @@ function StartRedirect() {
   const { id, available } = useWorkspace();
   return <Navigate to={startPath(available, id)} replace />;
 }
-// The Inbox page is gone: an old link to it starts on New session too.
-const inbox = createRoute({
-  getParentRoute: () => root,
-  path: "/inbox",
-  beforeLoad: () => {
-    throw redirect({ to: "/new" });
-  },
-});
-// The Team chat and the chat with an employee are gone: their old links start on New session.
-const formerChat = createRoute({
-  getParentRoute: () => root,
-  path: "/chat",
-  beforeLoad: () => {
-    throw redirect({ to: "/new" });
-  },
-});
-const formerTalk = createRoute({
-  getParentRoute: () => root,
-  path: "/talk/$conversationId",
-  beforeLoad: () => {
-    throw redirect({ to: "/new" });
-  },
-});
 const newSession = createRoute({ getParentRoute: () => root, path: "/new", component: NewSessionScreen });
 // The workspace's Overview (ticket #82); a workspace tile in the rail opens it.
 const overview = createRoute({ getParentRoute: () => root, path: "/overview", component: OverviewScreen });
@@ -318,11 +295,8 @@ function ScreenFailed({ reset }: { reset: () => void }) {
 const router = createRouter({
   routeTree: root.addChildren([
     index,
-    formerChat,
-    formerTalk,
     newSession,
     overview,
-    inbox,
     board,
     myTickets,
     history,

@@ -1,15 +1,12 @@
-// A run where its work is talked about: a note under a post, and what the thread used so far.
+// A run where its work is talked about: a note under a post.
 
 import { Button } from "@astryxdesign/core/Button";
-import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
-import { expectBody } from "@aurelius/client";
-import type { MessageView, TokenUsage } from "@aurelius/protocol";
+import type { MessageView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
-import { useConnection, useLinkState } from "../connection";
-import { useKeyed } from "../data";
+import { useConnection } from "../connection";
 import { toast } from "../ui/toast";
 import { TypingDots } from "../ui/typing";
-import { odometerEmpty, odometerItems, runState } from "./run-card-logic";
+import { runState } from "./run-card-logic";
 
 const styles = stylex.create({
   note: { marginTop: 4, display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--precision-text3)" },
@@ -35,37 +32,5 @@ export function RunNote({ m }: { m: MessageView }) {
       <span>Working</span>
       <Button size="sm" variant="ghost" label="Stop" onClick={() => void stop()} />
     </div>
-  );
-}
-
-function useOdometer(place: { ticketId?: string | null; conversationId?: string | null }): TokenUsage | null {
-  const connection = useConnection();
-  const { features } = useLinkState();
-  const { ticketId = null, conversationId = null } = place;
-  const totals = useKeyed(
-    ["usage", "odometer", ticketId, conversationId],
-    async () =>
-      expectBody(
-        await connection.call("usage.get_totals", { ticket_id: ticketId, conversation_id: conversationId }),
-        "usage_totals",
-      ).value,
-    features.includes("run_cards") && Boolean(ticketId || conversationId),
-  );
-  const u = totals.data?.total;
-  return u && !odometerEmpty(u) ? u : null;
-}
-
-/** What a thread used so far: a ticket's, in its head. */
-export function TicketOdometer({ ticketId }: { ticketId: string }) {
-  const u = useOdometer({ ticketId });
-  if (!u) return null;
-  return (
-    <MetadataList orientation="horizontal" columns="multi">
-      {odometerItems(u).map((i) => (
-        <MetadataListItem key={i.label} label={i.label}>
-          {i.value}
-        </MetadataListItem>
-      ))}
-    </MetadataList>
   );
 }
