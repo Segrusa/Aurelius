@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { runnable } from "./open-file";
+import { openCommand, runnable } from "./open-file";
+
+describe("openCommand", () => {
+  it("Linux opens through gio, so a terminal editor gets a terminal", () => {
+    expect(openCommand("/w/notes.md", "linux", true)).toEqual({
+      program: "gio",
+      args: ["open", "--", "/w/notes.md"],
+    });
+  });
+
+  it("without gio, and on Windows and macOS, the shell opens the file", () => {
+    expect(openCommand("/w/notes.md", "linux", false)).toBeNull();
+    expect(openCommand("/w/notes.md", "darwin", true)).toBeNull();
+    expect(openCommand("C:\\w\\notes.md", "win32", true)).toBeNull();
+  });
+});
 
 describe("runnable", () => {
   it("a plain text file opens", () => {

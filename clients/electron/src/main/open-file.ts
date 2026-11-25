@@ -46,6 +46,22 @@ const RUNNABLE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".rpm",
 ]);
 
+/** A program that opens a file in its default app, when the platform needs one instead of `shell.openPath`. */
+export interface OpenCommand {
+  program: string;
+  args: string[];
+}
+
+/**
+ * On Linux, `shell.openPath` goes through `xdg-open`, which outside GNOME and KDE ignores
+ * `Terminal=true`: a terminal editor (nvim, helix) is started without a window and the click
+ * seems to do nothing. `gio open` starts those in a terminal and reports a failure.
+ */
+export function openCommand(path: string, platform: NodeJS.Platform, hasGio: boolean): OpenCommand | null {
+  if (platform !== "linux" || !hasGio) return null;
+  return { program: "gio", args: ["open", "--", path] };
+}
+
 /** Whether opening the file could run something: a runnable extension, or an executable bit outside Windows. */
 export function runnable(path: string, mode: number, platform: NodeJS.Platform): boolean {
   if (RUNNABLE_EXTENSIONS.has(extname(path).toLowerCase())) return true;
