@@ -24,7 +24,7 @@ const _members = [testUser, bo, UserView(id: 'u-3', username: 'Alexandra', creat
 void main() {
   setUpAll(() => registerFallbackValue(<String, dynamic>{}));
 
-  Widget board(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage());
+  Widget board(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage()));
 
   MockRepository repoWith(BoardView shown, {TicketDetail? detail, LinkState link = phaseALink}) {
     final repo = boardRepository(board: shown, detail: detail, link: link);

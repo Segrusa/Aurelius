@@ -52,11 +52,8 @@ Future<void> openAureliusLink(BuildContext context, String raw) async {
   if (link == null) return toast(context, invalidLinkText);
   final repository = context.read<AureliusRepository>();
   if (link.hostId != repository.host.hostId) return _otherServer(context, link, raw);
-  if (!repository.linkState.has(messageLocateFeature)) {
-    final update = await confirm(context, title: "This server can't open links yet.", body: 'Update the server.', action: 'Updates');
-    if (update && context.mounted) context.push('/updates');
-    return;
-  }
+  // There is no update screen on the phone: the notice says what to do.
+  if (!repository.linkState.has(messageLocateFeature)) return toast(context, "This server can't open links yet. Update the server.");
   switch (link) {
     case TicketLink(:final id):
       context.push('/ticket/$id');
@@ -90,7 +87,7 @@ Future<void> openMessageAt(BuildContext context, AureliusRepository repository, 
     final at = await repository.messageLocation(messageId);
     if (!context.mounted) return;
     if (at.ticketId != null) {
-      context.push('/ticket/${at.ticketId}?tab=discussion&message=$messageId');
+      context.push('/ticket/${at.ticketId}?message=$messageId');
     } else {
       context.go(inboxRoute);
     }

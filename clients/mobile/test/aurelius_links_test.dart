@@ -161,7 +161,7 @@ void main() {
 
     testWidgets('the card\'s menu copies the link beside Copy #42; the toast says #42', (tester) async {
       final repo = linkedRepo(ticketOf(id: _ticket, number: 42, column: ColumnKind.doing));
-      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage()), link: phaseALink);
+      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage())), link: phaseALink);
       await openMenu(tester, _ticket);
       expect(find.byKey(const ValueKey('card-menu-item-Copy #42')), findsOneWidget);
       await tester.ensureVisible(find.byKey(const ValueKey('card-menu-item-Copy link')));
@@ -173,7 +173,7 @@ void main() {
 
     testWidgets('an older server\'s menu has no Copy link', (tester) async {
       final repo = linkedRepo(ticketOf(id: _ticket, number: 42, column: ColumnKind.doing), link: onlineLink);
-      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage()));
+      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage())));
       await openMenu(tester, _ticket);
       expect(find.byKey(const ValueKey('card-menu-item-Copy link')), findsNothing);
     });
@@ -236,14 +236,14 @@ void main() {
       final repo = repoFor();
       when(() => repo.messageLocation(_message)).thenAnswer((_) async => const MessageLocation(conversationId: 'c1', messageId: _message, ticketId: _ticket, ticketNumber: 42));
       final router = await tapShown(tester, repo, 'See $_messageLink', 'Message in #42');
-      expect(router.state.uri.toString(), '/ticket/$_ticket?tab=discussion&message=$_message');
+      expect(router.state.uri.toString(), '/ticket/$_ticket?message=$_message');
     });
 
     testWidgets("a reply in a ticket's thread opens the ticket's discussion at it (ticket #71: no ticket channels)", (tester) async {
       final repo = repoFor();
       when(() => repo.messageLocation(_message)).thenAnswer((_) async => const MessageLocation(conversationId: 'c1', messageId: _message, ticketId: _ticket, ticketNumber: 42, threadRoot: 'root'));
       final router = await tapShown(tester, repo, 'See $_messageLink', 'Message in #42');
-      expect(router.state.uri.toString(), '/ticket/$_ticket?tab=discussion&message=$_message');
+      expect(router.state.uri.toString(), '/ticket/$_ticket?message=$_message');
     });
 
     testWidgets('a reply in a thread of a channel that is no ticket (chat is gone) opens the Inbox', (tester) async {
@@ -291,14 +291,14 @@ void main() {
       expect(find.text(invalidLinkText), findsOneWidget);
     });
 
-    testWidgets('an older server reads a neutral word and offers Updates', (tester) async {
+    testWidgets('an older server reads a neutral word and stays where it is (no update screen, OPR-2)', (tester) async {
       final repo = repoFor(link: onlineLink);
       final router = await tapShown(tester, repo, 'See $_ticketLink', 'Aurelius link', link: onlineLink);
-      expect(find.text("This server can't open links yet."), findsOneWidget);
+      final before = router.state.uri.toString();
+      expect(find.text("This server can't open links yet. Update the server."), findsOneWidget);
+      expect(find.text('Updates'), findsNothing);
       verifyNever(() => repo.ticket(any()));
-      await tester.tap(find.text('Updates'));
-      await settleBoard(tester);
-      expect(router.state.uri.path, '/updates');
+      expect(router.state.uri.toString(), before);
     });
 
     testWidgets('a link for a server this phone does not know points at the paired servers', (tester) async {

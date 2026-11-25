@@ -127,8 +127,8 @@ Map<String, TicketRef> ticketsFromMessages(List<MessageView> messages) => {
     };
 
 /// Where a chat is, for a ticket made from one of its messages: how the
-/// description names it ("Team chat · #general") and the project the ticket
-/// goes to (none in #general or an employee's chat: the form asks).
+/// description names it ("Discussion of #42") and the project the ticket
+/// goes to (none in an employee's chat: the form asks).
 class TicketSource {
   const TicketSource({required this.from, this.projectId});
 
@@ -160,19 +160,6 @@ class TicketDraft {
   /// Opens as a quick task (Give work's Quick task, ticket #53); only on a server with `quick_task`.
   final bool quick;
 }
-
-/// The draft for a ticket from [idea]: its title and note, in its project; a bug keeps that word as a label.
-TicketDraft draftFromIdea(IdeaView idea) => TicketDraft(
-      title: idea.title,
-      description: idea.note ?? '',
-      projectId: idea.projectId,
-      fromIdea: idea.id,
-      ideaFiles: idea.attachments.length,
-      labels: idea.kind == IdeaKind.bug ? 'bug' : '',
-    );
-
-/// An idea becomes a ticket once, and not after it became a task (an older client).
-bool ideaCanBecomeTicket(IdeaView idea) => idea.taskId == null && idea.ticketId == null;
 
 /// The longest title a ticket takes (MU1-07).
 const _titleMax = 160;

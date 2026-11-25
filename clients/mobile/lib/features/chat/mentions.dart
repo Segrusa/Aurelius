@@ -4,8 +4,8 @@ import '../../core/theme/tokens.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
 
-/// An employee's name with their role, as the Team chat shows senders and `@`
-/// suggestions: "Orion — Project Manager". Without a role, the name alone.
+/// An employee's name with their role, as a ticket's session shows senders
+/// and `@` suggestions: "Orion — Project Manager". Without a role, the name alone.
 String withRole(String name, String? role) {
   final r = role?.trim() ?? '';
   return r.isEmpty ? name : '$name — $r';
@@ -17,7 +17,7 @@ String? employeeRole(CompanyState company, String? name) {
   return company.employees.where((e) => e.status != LifecycleStatus.archived && e.name == name).firstOrNull?.role;
 }
 
-/// The employees an `@` in the Team chat can mention: not archived, with their role.
+/// The employees an `@` in a ticket's session can mention: not archived, with their role.
 List<(String, String)> mentionables(CompanyState company) => [
       for (final e in company.employees)
         if (e.status != LifecycleStatus.archived) (e.name, e.role),
@@ -43,7 +43,7 @@ List<(String, String)> mentionables(CompanyState company) => [
 /// [text] with the `@name` being typed at its end (from [at]) completed to `@<name> `.
 String completeMention(String text, int at, String name) => '${text.substring(0, at)}@$name ';
 
-/// Above the Team chat's composer: who the `@name` being typed can be, with
+/// Above a ticket session's composer: who the `@name` being typed can be, with
 /// their role; a tap completes it.
 class MentionRow extends StatelessWidget {
   const MentionRow({super.key, required this.found, required this.roles, required this.onPick});

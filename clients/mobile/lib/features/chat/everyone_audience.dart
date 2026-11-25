@@ -10,8 +10,8 @@ import '../../data/protocol/models.dart';
 /// Under the composer: whom the `@Everyone` in the text reaches, before it is
 /// sent ("Orion picks who follows up; 5 employees can read along, 2 board members are told").
 ///
-/// It asks [load] once per thread ([channel]: the channel's or discussion's
-/// conversation, null General) after the text starts to contain `@Everyone`,
+/// It asks [load] once per thread ([channel]: the ticket discussion's
+/// conversation) after the text starts to contain `@Everyone`,
 /// not per keystroke. A failure or an older server shows nothing; sending is
 /// never held up by it.
 class EveryoneAudienceLine extends StatefulWidget {

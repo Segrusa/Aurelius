@@ -37,7 +37,6 @@ void main() {
     when(() => repo.projects()).thenAnswer((_) async => [projectOf(id: 'p', name: 'Launch', description: 'Ship it')]);
     when(() => repo.tasks()).thenAnswer((_) async => []);
     when(() => repo.tasks(projectId: any(named: 'projectId'))).thenAnswer((_) async => []);
-    when(() => repo.ideas(any())).thenAnswer((_) async => []);
     when(() => repo.company()).thenAnswer((_) async => companyOf(employees: []));
     when(() => repo.proposals()).thenAnswer((_) async => []);
     when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))

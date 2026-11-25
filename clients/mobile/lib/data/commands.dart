@@ -157,54 +157,6 @@ abstract final class Commands {
         title: title,
       ));
 
-  /// Recurring tasks.
-  static Map<String, dynamic> createTaskSchedule(
-    String projectId,
-    String employeeId,
-    String title,
-    String goal,
-    List<String> criteria,
-    Recurrence recurrence, {
-    Map<String, String>? run,
-    List<String> files = const [],
-    bool paused = false,
-  }) =>
-      recurringTaskCreate(CreateTaskSchedule(
-        acceptanceCriteria: criteria,
-        files: files,
-        goal: goal,
-        employeeId: employeeId,
-        paused: paused,
-        projectId: projectId,
-        recurrence: recurrence,
-        run: taskRunOf(run),
-        title: title,
-      ));
-
-  /// `removeFiles`: paths of attachments the schedule already has.
-  static Map<String, dynamic> updateTaskSchedule(
-    String scheduleId,
-    String employeeId,
-    String title,
-    String goal,
-    List<String> criteria,
-    Recurrence recurrence, {
-    Map<String, String>? run,
-    List<String> addFiles = const [],
-    List<String> removeFiles = const [],
-  }) =>
-      recurringTaskUpdate(UpdateTaskSchedule(
-        acceptanceCriteria: criteria,
-        addFiles: addFiles,
-        goal: goal,
-        employeeId: employeeId,
-        recurrence: recurrence,
-        removeFiles: removeFiles,
-        run: taskRunOf(run),
-        scheduleId: scheduleId,
-        title: title,
-      ));
-
   /// [files]: upload paths of attached files (feature `idea_attachments`).
   static Map<String, dynamic> addIdea(String projectId, String title, String? note, {IdeaKind? kind, List<String> files = const []}) =>
       ideaAdd(AddIdea(files: files, kind: kind, note: note, projectId: projectId, title: title));

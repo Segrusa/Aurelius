@@ -6,7 +6,6 @@ import 'package:aurelius_mobile/features/company/company_bloc.dart';
 import 'package:aurelius_mobile/features/company/projects_page.dart';
 import 'package:aurelius_mobile/features/company_org/company_org_page.dart';
 import 'package:aurelius_mobile/features/connection/connection_bloc.dart';
-import 'package:aurelius_mobile/features/dashboard/dashboard_page.dart';
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -46,67 +45,6 @@ Future<MockCompanyBloc> show(WidgetTester tester, CompanyState state, Widget pag
 void main() {
   setUpAll(() => registerFallbackValue(const CompanyRefreshed()));
   final project = projectOf(id: 'p', name: 'Atlas');
-
-  group('Home', () {
-    testWidgets('shows Give work with the single root preselected, the management team and who else is at work', (tester) async {
-      tester.view.physicalSize = const Size(1200, 2400);
-      addTearDown(tester.view.resetPhysicalSize);
-      await show(
-        tester,
-        CompanyState(
-          loading: false,
-          projects: [project],
-          employees: [employee('ceo', 'Ada'), employee('b', 'Bo', working: true, reportsTo: 'ceo'), employee('c', 'Cy', reportsTo: 'ceo')],
-          tasks: [task('1', 'b', TaskStatus.running)],
-        ),
-        const DashboardPage(),
-      );
-      expect(find.byKey(const ValueKey('give-work')), findsOneWidget);
-      // The only root leads by default; the only project is the project.
-      expect(find.descendant(of: find.byKey(const ValueKey('give-work-lead')), matching: find.text('Ada')), findsOneWidget);
-      expect(find.descendant(of: find.byKey(const ValueKey('give-work-project')), matching: find.text('Atlas')), findsOneWidget);
-      expect(find.text('MANAGEMENT TEAM'), findsOneWidget);
-      expect(find.byKey(const ValueKey('team-ceo')), findsOneWidget);
-      expect(find.byKey(const ValueKey('team-b')), findsNothing, reason: 'Bo reports to Ada');
-      expect(find.textContaining('AT WORK'), findsOneWidget);
-      expect(find.text('Task 1 · Atlas'), findsOneWidget);
-      expect(find.byKey(const ValueKey('at-work-c')), findsNothing, reason: 'Cy is not working');
-      await tester.tap(find.byKey(const ValueKey('at-work-b')));
-      await tester.pumpAndSettle();
-      expect(find.text('employee b'), findsOneWidget);
-    });
-
-    testWidgets('with several roots nobody is preselected, and Give stays off until there is a title', (tester) async {
-      await show(
-        tester,
-        CompanyState(loading: false, projects: [project], employees: [employee('a', 'Ada'), employee('b', 'Bo')]),
-        const DashboardPage(),
-      );
-      expect(find.text('Choose who leads'), findsOneWidget);
-      FilledButton give() => tester.widget<FilledButton>(find.byKey(const ValueKey('give-work-send')));
-      expect(give().onPressed, isNull);
-      await tester.enterText(find.byKey(const ValueKey('give-work-title')), 'Write the launch post');
-      await tester.pump();
-      expect(give().onPressed, isNotNull);
-    });
-
-    testWidgets('Needs you lists waiting tasks and opens them', (tester) async {
-      await show(
-        tester,
-        CompanyState(
-          loading: false,
-          projects: [project],
-          employees: [employee('a', 'Ada')],
-          tasks: [taskOf(id: 'w', projectId: 'p', employeeId: 'a', title: 'Pick a name', goal: '', status: TaskStatus.waiting, waitingReason: 'input')],
-        ),
-        const DashboardPage(),
-      );
-      expect(find.textContaining('NEEDS YOU'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('home-waiting-w')));
-      await tester.pumpAndSettle();
-      expect(find.text('task w'), findsOneWidget);
-    });
-  });
 
   group('Projects', () {
     testWidgets('rows show status, who works there and counts, and open on tap', (tester) async {

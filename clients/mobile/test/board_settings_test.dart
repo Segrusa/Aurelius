@@ -82,7 +82,7 @@ void main() {
       await tester.enterText(find.byKey(const ValueKey('new-ticket-title')), 'Columns');
       await tester.tap(find.byKey(const ValueKey('new-ticket-create')));
       await settleBoard(tester);
-      expect(router.state.uri.toString(), '/ticket/k52?tab=discussion');
+      expect(router.state.uri.toString(), '/ticket/k52');
       expect(find.text('ticket k52'), findsOneWidget);
       expect(find.text('#52 created in Backlog.'), findsOneWidget);
     });

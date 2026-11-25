@@ -91,7 +91,7 @@ void main() {
   });
 
   group('the Board', () {
-    Widget boardPage(MockRepository repo, {bool inProject = false}) => BlocProvider(create: (_) => BoardBloc(repo, projectId: inProject ? 'p1' : null), child: BoardPage(inProject: inProject));
+    Widget boardPage(MockRepository repo, {bool inProject = false}) => BlocProvider(create: (_) => BoardBloc(repo, projectId: inProject ? 'p1' : null), child: const Scaffold(body: BoardPage()));
 
     testWidgets('a phone: the Testing chip between Plan review and Review; the card says Pulse is testing', (tester) async {
       final repo = boardRepository(board: boardOf([tested], testing: true), link: testingLink);
@@ -109,7 +109,7 @@ void main() {
 
     testWidgets("the project's Board tab shows Testing too", (tester) async {
       final repo = boardRepository(board: boardOf([tested], projectId: 'p1', testing: true), link: testingLink);
-      await pumpBoardPage(tester, repo, Scaffold(body: boardPage(repo, inProject: true)), company: withTester(), link: testingLink);
+      await pumpBoardPage(tester, repo, boardPage(repo, inProject: true), company: withTester(), link: testingLink);
       expect(find.byKey(const ValueKey('board-chip-testing')), findsOneWidget);
       verify(() => repo.board(projectId: 'p1')).called(greaterThan(0));
     });

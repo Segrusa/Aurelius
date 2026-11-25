@@ -150,7 +150,7 @@ void main() {
       boardMembersExist: true,
       user: testUser,
     );
-    await pumpBoardPage(tester, repo, const TicketPage(ticketId: 'k1', discussion: true), link: link);
+    await pumpBoardPage(tester, repo, const TicketPage(ticketId: 'k1'), link: link);
     await tester.enterText(find.byType(TextField).last, 'Deploy with $fakeSecret');
     await tester.pump();
     await tester.tap(find.byKey(const Key('composer-send')));

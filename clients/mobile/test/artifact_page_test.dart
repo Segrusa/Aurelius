@@ -216,7 +216,7 @@ void main() {
         saved.add((name, utf8.decode(bytes)));
         return Uri.parse('content://saved/$name');
       };
-      await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id, discussion: true), link: _link);
+      await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id), link: _link);
       // The chat lists the newest message first in its tree (a reversed list).
       await tester.tap(find.textContaining('pricing.html ·').first);
       await settleBoard(tester);

@@ -8,7 +8,7 @@ import '../../data/discussion.dart';
 
 /// Who an `@name` in the messages below can be (AUR-CHAT-001 §2): a
 /// [MessageMarkdown] under it marks the names of [known], [me] the strongest.
-/// Only the Slack-style Team chat puts one up.
+/// Only a ticket's session (a group conversation) puts one up.
 class MentionScope extends InheritedWidget {
   const MentionScope({super.key, required this.known, this.me, required super.child});
 
