@@ -17,21 +17,17 @@ import 'support/tickets.dart';
 void main() {
   setUpAll(() => registerFallbackValue(<String, dynamic>{}));
 
-  Widget boardPage(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage());
+  Widget boardPage(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage()));
 
   group('BoardBloc', () {
-    test('reads the board for the chosen project (B4) and again on every change (MU1-05 AC3)', () async {
+    test('reads the board of its project (B4) and again on every change (MU1-05 AC3)', () async {
       final changes = StreamController<Event>.broadcast();
       final repo = boardRepository(board: boardOf([ticketOf()]));
       when(() => repo.boardChanges).thenAnswer((_) => changes.stream);
-      final bloc = BoardBloc(repo);
+      final bloc = BoardBloc(repo, projectId: 'p1');
       addTearDown(bloc.close);
       await stateWhere(bloc, (s) => !s.loading);
-      verify(() => repo.board(projectId: null)).called(1);
-
-      bloc.add(const BoardProjectChosen('p1'));
-      await stateWhere(bloc, (s) => s.projectId == 'p1' && !s.loading);
-      await untilCalled(() => repo.board(projectId: 'p1'));
+      verify(() => repo.board(projectId: 'p1')).called(1);
 
       when(() => repo.board(projectId: 'p1')).thenAnswer((_) async => boardOf([ticketOf(column: ColumnKind.todo, version: 4)], projectId: 'p1'));
       changes.add(const Event(aggregateId: 'k1', atMs: 0, kind: EventKind.ticketMoved, seq: 12));
@@ -304,19 +300,19 @@ void main() {
       expect(find.byKey(const ValueKey('card-action-a')), findsNothing);
     });
 
-    testWidgets('the project filter reads the board of that project; an empty filter says so with Clear filter', (tester) async {
+    testWidgets('a project Board has no project filter; an empty filter says so with Clear filter (OPR-2)', (tester) async {
       final repo = boardRepository(board: boardOf([ticketOf()]));
-      when(() => repo.board(projectId: 'p1')).thenAnswer((_) async => boardOf(const [], projectId: 'p1'));
       await pumpBoardPage(tester, repo, boardPage(repo));
-      await tester.tap(find.byKey(const ValueKey('board-filter-project')));
+      expect(find.byKey(const ValueKey('board-filter-project')), findsNothing);
+      expect(find.text('All projects'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('board-filter-owner')));
       await settleBoard(tester);
-      await tester.tap(find.byKey(const ValueKey('board-project-p1')));
+      await tester.tap(find.text('Forge').last);
       await settleBoard(tester);
-      verify(() => repo.board(projectId: 'p1')).called(greaterThanOrEqualTo(1));
-      expect(find.text('No tickets in Atlas.'), findsOneWidget);
+      expect(find.text('No tickets in Forge.'), findsOneWidget);
       await tester.tap(find.text('Clear filter'));
       await settleBoard(tester);
-      expect(find.text('No tickets in Atlas.'), findsNothing);
+      expect(find.text('No tickets in Forge.'), findsNothing);
     });
 
     testWidgets('an empty board after the clean start: "No tickets yet" and New ticket (MU1-19 AC4)', (tester) async {
@@ -346,12 +342,7 @@ void main() {
       when(() => old.board(projectId: any(named: 'projectId'))).thenThrow(const ProtocolException(ErrorCode.unknownMethod, 'unknown'));
       await pumpBoardPage(tester, old, boardPage(old));
       expect(find.text('This server does not have the Board yet.'), findsOneWidget);
-    });
-
-    testWidgets('without projects: create one first', (tester) async {
-      final repo = boardRepository();
-      await pumpBoardPage(tester, repo, boardPage(repo), company: companyWith(projects: const []));
-      expect(find.text('Create a project first; work is done in a project.'), findsOneWidget);
+      expect(find.text('Updates'), findsNothing, reason: 'there is no update screen to open (OPR-2)');
     });
 
     testWidgets('offline the actions are off and the board says it reconnects (§3.3)', (tester) async {

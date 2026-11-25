@@ -83,7 +83,7 @@ void main() {
   });
 
   group('on the Board', () {
-    Widget page(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage());
+    Widget page(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage()));
     final mine = ticketOf(id: 'k-mine', number: 1, column: ColumnKind.review, responsible: testUser);
     final theirs = ticketOf(id: 'k-theirs', number: 2, title: 'Their ticket', column: ColumnKind.review, responsible: bo);
     final nobodys = ticketOf(id: 'k-nobodys', number: 3, title: 'Nobody\'s ticket', column: ColumnKind.review);

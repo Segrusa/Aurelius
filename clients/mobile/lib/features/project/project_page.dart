@@ -75,7 +75,7 @@ class ProjectPage extends StatelessWidget {
                             physics: Theme.of(context).platform == TargetPlatform.iOS ? const NeverScrollableScrollPhysics() : null,
                             children: [
                               _Overview(state: state),
-                              const BoardShownWatcher(child: BoardPage(inProject: true)),
+                              const BoardShownWatcher(child: BoardPage()),
                               const TasksTab(),
                             ],
                           ),

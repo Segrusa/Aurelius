@@ -212,7 +212,6 @@ Future<GoRouter> pumpBoardPage(WidgetTester tester, MockRepository repo, Widget 
     GoRoute(path: '/project/:pid/task/:tid', builder: (_, s) => Scaffold(body: Text('task ${s.pathParameters['tid']}'))),
     GoRoute(path: '/conversation/:cid', builder: (_, s) => Scaffold(body: Text('conversation ${s.pathParameters['cid']}'))),
     GoRoute(path: '/projects', builder: (_, _) => const Scaffold(body: Text('projects'))),
-    GoRoute(path: '/updates', builder: (_, _) => const Scaffold(body: Text('updates'))),
   ]);
   addTearDown(router.dispose);
   await tester.pumpWidget(RepositoryProvider<AureliusRepository>.value(

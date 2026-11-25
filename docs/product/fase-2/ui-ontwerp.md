@@ -1,3 +1,5 @@
+> **Historical:** the Team chat, #general and the project channels were removed in migration 0045; this document describes Fase 2 as designed before that.
+
 # UI-ontwerp Fase 2: ticketdiscussie en kanalen in de Team chat
 
 - **Task:** AUR-MU-DEF-P (Pixel, voor Orion) · **Status:** beknopt concept, ter goedkeuring

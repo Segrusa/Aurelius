@@ -11,15 +11,7 @@ import { usePlatform } from "../platform";
 import { Icon } from "../ui/icons";
 import { ActivitySection } from "./activity";
 import type { ActivityFilters } from "./activity-logic";
-import {
-  BackupsSection,
-  CompactionSection,
-  ConnectionsSection,
-  LoadSection,
-  McpSection,
-  SchedulesSection,
-  TraceSection,
-} from "./settings-advanced";
+import { BackupsSection, CompactionSection, ConnectionsSection, LoadSection, McpSection } from "./settings-advanced";
 import { EmployeeRunsSection } from "./settings-employee-runs";
 import { focusField, HINTS_KEY, pressKeyed, stepRow } from "./settings-kit";
 import { MyDefaultsSection } from "./settings-run-defaults";
@@ -192,11 +184,9 @@ const ALL_GROUPS: { label: string; sections: Section[] }[] = [
     sections: [
       { key: "connections", label: "Connections", body: () => <ConnectionsSection /> },
       { key: "mcp", label: "MCP & tools", body: () => <McpSection /> },
-      { key: "schedules", label: "Recurring schedules", body: () => <SchedulesSection />, feature: "RecurringTasks" },
       { key: "backups", label: "Backups", body: () => <BackupsSection /> },
       { key: "load", label: "Load limits", body: () => <LoadSection /> },
       { key: "compaction", label: "Context compaction", body: () => <CompactionSection /> },
-      { key: "trace", label: "Trace", body: () => <TraceSection />, feature: "Trace" },
       { key: "activity", label: "Activity log", body: (filters) => <ActivitySection filters={filters} />, wide: true },
     ],
   },

@@ -1,8 +1,6 @@
 import type { TicketView, TimelineCard } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
-  activityDetail,
-  activityText,
   beforeFor,
   columnShown,
   columnsProblem,
@@ -240,17 +238,6 @@ describe("the cards of a column", () => {
 });
 
 describe("a ticket's panel", () => {
-  it("words the activity, never a raw event name", () => {
-    expect(activityText(card("ticket.created"))).toBe("A board member created the ticket");
-    expect(activityText(card("ticket.moved", "employee"))).toBe("The owner moved it");
-    expect(activityText(card("ticket.tested", "system", "passed"))).toBe("Tests passed");
-    expect(activityText(card("ticket.updated", "system"))).toMatch(/Nobody chose/);
-    expect(activityText(card("ticket.odd_thing"))).toBe("A board member: odd thing");
-    expect(activityText(card("Handed in the report"))).toBe("Handed in the report");
-    expect(activityDetail(card("x", "user", "ticket"))).toBeNull();
-    expect(activityDetail(card("x", "user", "Some words"))).toBe("Some words");
-  });
-
   it("names the feedback by the newest decision", () => {
     expect(feedbackLabel([card("ticket.sent_back"), card("ticket.plan_approved")])).toBe("Sent back");
     expect(feedbackLabel([card("ticket.plan_revised")])).toBe("New plan asked");

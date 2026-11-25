@@ -5,7 +5,6 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog } from "@astryxdesign/core/Dialog";
 import { List, ListItem } from "@astryxdesign/core/List";
-import { Table } from "@astryxdesign/core/Table";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { arrived, expectBody } from "@aurelius/client";
 import type { DirEntryView, FileRef, FileScope, MessageFileView, MessageView, TokenUsage } from "@aurelius/protocol";
@@ -23,7 +22,7 @@ import type { ArtifactSend } from "./artifact-feedback";
 import { designPages, designTitle, isArtifact } from "./artifact-logic";
 import { ArtifactViewer } from "./artifact-viewer";
 import { FormDialog, Hint, Loading, Problem } from "./org-kit";
-import { markdownPaths, screenshotId, traceSessionText, usageLine, waitingText } from "./run-logic";
+import { markdownPaths, screenshotId, usageLine, waitingText } from "./run-logic";
 import { costText, tokensShort } from "./usage-logic";
 
 const styles = stylex.create({
@@ -46,20 +45,6 @@ const styles = stylex.create({
     padding: 0,
     fontSize: 12,
     color: { default: "var(--precision-text3)", ":hover": "var(--color-text-primary)" },
-  },
-  line: { margin: 0, fontSize: 12, color: "var(--color-text-secondary)" },
-  summary: { cursor: "pointer", fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)" },
-  traceText: {
-    marginTop: 8,
-    marginBottom: 0,
-    maxHeight: 300,
-    overflow: "auto",
-    borderRadius: 6,
-    backgroundColor: "var(--precision-sunk)",
-    padding: 8,
-    fontFamily: "var(--font-family-code)",
-    fontSize: 12,
-    whiteSpace: "pre-wrap",
   },
   shot: { display: "flex", maxHeight: "80vh", justifyContent: "center", overflow: "auto", padding: 16 },
   shotImage: { maxWidth: "100%", borderRadius: 6 },
@@ -167,105 +152,6 @@ export function UsageChip({ conversationId, taskId }: { conversationId?: string 
       {tokensShort(all(t.total))} tokens · {cost}
       {subtasks > 0 ? ` · ${subtasks} subtask${subtasks === 1 ? "" : "s"}` : ""}
     </span>
-  );
-}
-
-/** The whole composed prompt of a run; the server only has it while trace mode is on. */
-export function TraceLink({ run }: { run: string }) {
-  const connection = useConnection();
-  const on = useKeyed(
-    ["settings", "trace"],
-    async () => expectBody(await connection.call("trace.get_setting"), "trace_setting").value,
-  );
-  const [open, setOpen] = useState(false);
-  if (!on.data?.enabled) return null;
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} {...stylex.props(styles.linkish)}>
-        ⌕ Trace
-      </button>
-      {open ? <TraceDialog run={run} onClose={() => setOpen(false)} /> : null}
-    </>
-  );
-}
-
-function TraceDialog({ run, onClose }: { run: string; onClose: () => void }) {
-  const connection = useConnection();
-  const trace = useKeyed(
-    ["settings", "trace", run],
-    async () => expectBody(await connection.call("run.get_trace", { run_id: run }), "run_trace").value,
-  );
-  const t = trace.data;
-  return (
-    <FormDialog title="Trace" width={720} onClose={onClose} footer={<Button label="Close" onClick={onClose} />}>
-      {trace.isPending ? <Loading /> : null}
-      {trace.error ? <Hint>{trace.error.message}</Hint> : null}
-      {t ? (
-        <>
-          <p {...stylex.props(styles.line)}>
-            {[
-              `Model ${t.model}`,
-              t.effort ? `effort ${t.effort}` : null,
-              t.mode ? `mode ${t.mode}` : null,
-              `tools ${t.profile}`,
-              traceSessionText(t.session),
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-          {t.usage ? <p {...stylex.props(styles.line)}>{usageLine(t.usage)}</p> : null}
-          <Table
-            density="compact"
-            idKey="id"
-            columns={[
-              { key: "part", header: "Part" },
-              { key: "chars", header: "Chars", align: "end" },
-              { key: "tokens", header: "≈ tokens", align: "end" },
-            ]}
-            data={t.parts.map((p) => ({
-              id: `${p.area}|${p.label}`,
-              part: `${p.area} · ${p.label}`,
-              chars: p.chars,
-              tokens: p.tokens,
-            }))}
-          />
-          {t.steps.length > 0 ? (
-            <Table
-              density="compact"
-              idKey="step"
-              columns={[
-                { key: "step", header: "Step" },
-                { key: "input", header: "in", align: "end" },
-                { key: "written", header: "cache write", align: "end" },
-                { key: "read", header: "cache read", align: "end" },
-                { key: "output", header: "out", align: "end" },
-                { key: "tools", header: "tools asked" },
-              ]}
-              data={t.steps.map((s, i) => ({
-                step: i + 1,
-                input: tokensShort(s.input_tokens),
-                written: tokensShort(s.cache_creation_tokens),
-                read: tokensShort(s.cache_read_tokens),
-                output: tokensShort(s.output_tokens),
-                tools: `${s.subagent ? "subagent · " : ""}${s.tools.join(", ")}`,
-              }))}
-            />
-          ) : null}
-          <TraceText title="System prompt" text={t.system_text} />
-          <TraceText title="This turn" text={t.user_turn} />
-          <Hint>Token counts per part are estimates (4 characters ≈ 1 token).</Hint>
-        </>
-      ) : null}
-    </FormDialog>
-  );
-}
-
-function TraceText({ title, text }: { title: string; text: string }) {
-  return (
-    <details>
-      <summary {...stylex.props(styles.summary)}>{title}</summary>
-      <pre {...stylex.props(styles.traceText)}>{text}</pre>
-    </details>
   );
 }
 

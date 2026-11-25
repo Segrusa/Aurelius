@@ -182,7 +182,7 @@ class AureliusRepository {
   Future<MessageHistoryView> messageEdits(String messageId) async => (await _ask<ResponseBodyMessageHistory>(messageHistory(messageId: messageId))).value;
 
   /// Whom `@Everyone` would reach in a discussion (feature `everyone_mention`):
-  /// [channel] is the project channel's or ticket discussion's conversation; null is General.
+  /// [channel] is the ticket discussion's conversation.
   Future<DiscussionAudience> discussionAudienceOf({String? channel}) async =>
       (await _ask<ResponseBodyDiscussionAudience>(discussionAudience(channel: channel))).value;
 
@@ -286,8 +286,6 @@ class AureliusRepository {
   /// A screenshot the agent took (JPEG), by the id in its tool output.
   Future<Uint8List> screenshot(String id) async => base64Decode((await _ask<ResponseBodyScreenshot>(screenshotGet(id: id))).jpegBase64);
 
-  /// A project's ideas.
-  Future<List<IdeaView>> ideas(String projectId) async => (await _ask<ResponseBodyIdeas>(ideaList(projectId: projectId))).value.ideas;
 
   /// A file kept with a message.
   Future<Uint8List> file(String id) async => base64Decode((await _ask<ResponseBodyFile>(fileGet(id: id))).dataBase64);

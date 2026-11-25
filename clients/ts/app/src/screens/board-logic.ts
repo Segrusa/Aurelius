@@ -334,62 +334,6 @@ export function isChoosing(t: TicketView, hasDispatcher: boolean, gaveUp: boolea
   return t.column === "todo" && !t.owner_employee_id && hasDispatcher && !gaveUp;
 }
 
-function activityWho(card: TimelineCard): string {
-  if (card.actor === "user") return "A board member";
-  return card.actor === "employee" ? "The owner" : "Aurelius";
-}
-
-const isEventName = (text: string) => /^[a-z._]+$/.test(text);
-
-/** One line of a ticket's Activity. */
-export function activityText(card: TimelineCard): string {
-  const who = activityWho(card);
-  switch (card.title) {
-    case "ticket.created":
-      return `${who} created the ticket`;
-    case "ticket.started":
-      return `${who} started it`;
-    case "ticket.dispatched":
-      return card.actor === "employee" ? "The dispatcher chose an owner" : `${who} chose an owner`;
-    case "ticket.moved":
-      return `${who} moved it`;
-    case "ticket.plan_review":
-      return "A plan was handed in";
-    case "ticket.plan_approved":
-      return `${who} approved the plan`;
-    case "ticket.plan_revised":
-      return `${who} sent the plan back`;
-    case "ticket.review":
-      return "A report was handed in";
-    case "ticket.tested":
-      return card.detail === "passed" ? "Tests passed" : card.detail === "failed" ? "Tests failed" : "The tests ran";
-    case "ticket.sent_back":
-      return `${who} sent it back to Doing`;
-    case "ticket.accepted":
-      return `${who} marked it as Done`;
-    case "ticket.cancelled":
-      return `${who} put it back in Backlog`;
-    case "ticket.archived":
-      return `${who} archived it`;
-    case "ticket.updated":
-      return card.actor === "system" ? "Nobody chose an owner; a board member must" : `${who} changed it`;
-    case "conversation.settings_changed":
-      return "The main task's mode changed";
-    default:
-      if (!isEventName(card.title)) return card.title;
-      return card.title.includes(".")
-        ? `${who}: ${card.title.slice(card.title.lastIndexOf(".") + 1).replaceAll("_", " ")}`
-        : `${who} did something`;
-  }
-}
-
-/** The second line: the detail, unless it only names the kind. */
-export function activityDetail(card: TimelineCard): string | null {
-  if (card.detail === "" || (card.kind === "activity" && isEventName(card.detail)) || card.title === "ticket.tested")
-    return null;
-  return card.detail;
-}
-
 /** Which feedback the Doing bar shows: "Sent back" only after Review. Newest first. */
 export function feedbackLabel(activity: TimelineCard[] | undefined): string {
   const last = activity?.find(

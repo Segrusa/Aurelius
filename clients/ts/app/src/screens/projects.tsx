@@ -10,7 +10,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useEmployees, useOpenTasks, useProjects, useRailRead } from "../data";
-import { type Feature, hidden, shown } from "../hidden";
+import { type Feature, shown } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/marks";
@@ -19,10 +19,8 @@ import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { pinnedFirst, togglePin } from "./employee-logic";
 import { pinKey, usePins, useStoredPins } from "./employees";
-import { IdeasBody } from "./ideas";
 import { Confirm, Empty, FormDialog, failureOf, Hint, KnowledgeTabs, Page, PageHead, Problem } from "./org-kit";
 import { useFolderChooser } from "./run-tools";
-import { ScheduleDialog } from "./settings-advanced";
 import { focusField } from "./settings-kit";
 import { VaultBody } from "./vault";
 import { chosenRail, openProjects, RAIL_PINS, RAIL_PINS_FEATURE, railPins } from "./workspace-logic";
@@ -226,7 +224,6 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
   const platform = usePlatform();
   const navigate = useNavigate();
   const workspace = useWorkspace();
-  const [scheduling, setScheduling] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const refresh = () =>
     client
@@ -242,7 +239,6 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
           : []),
         { key: "edit", label: "Edit…" },
         ...(platform.openFolder && project.folder ? [{ key: "folder", label: "Open folder" }] : []),
-        ...(hidden("RecurringTasks") ? [] : [{ key: "schedule", label: "New recurring task…" }]),
         { key: "export", label: "Export (Markdown + JSON)" },
         { key: "memory", label: "Memory" },
         { key: "pause", label: project.status === "paused" ? "Resume project" : "Pause project" },
@@ -271,7 +267,6 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
         : setStatus("paused", "Project paused."));
     else if (key === "archive") setArchiving(true);
     else if (key === "window" && project) void platform.openProjectWindow?.(project.id, project.name);
-    else if (key === "schedule") setScheduling(true);
     else if (key === "export")
       void connection
         .write("project.export", { project_id: project.id }, { retry: false })
@@ -296,15 +291,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
         }}
       />
     ) : null;
-  const dialogs = (
-    <>
-      {confirm}
-      {scheduling && project ? (
-        <ScheduleDialog schedule={null} projectId={project.id} onClose={() => setScheduling(false)} />
-      ) : null}
-    </>
-  );
-  return { options, pick, confirm: dialogs };
+  return { options, pick, confirm };
 }
 
 const DIM = "var(--precision-text3)";
@@ -438,7 +425,7 @@ export function ProjectsScreen() {
   });
   return (
     <Page>
-      <PageHead title="Knowledge" tabs={<KnowledgeTabs />}>
+      <PageHead title="Workspaces" tabs={<KnowledgeTabs />}>
         <Button size="sm" variant="primary" label="New project" onClick={() => setAdding(true)} />
       </PageHead>
       <div {...stylex.props(styles.scroll)}>
@@ -484,12 +471,11 @@ export function ProjectsScreen() {
   );
 }
 
-type ProjectTab = "overview" | "board" | "tasks" | "ideas" | "vault";
+type ProjectTab = "overview" | "board" | "tasks" | "vault";
 const TABS: { key: ProjectTab; label: string; feature?: Feature }[] = shown([
   { key: "overview", label: "Settings" },
   { key: "board", label: "Board" },
   { key: "tasks", label: "Tasks" },
-  { key: "ideas", label: "Ideas", feature: "Ideas" },
   { key: "vault", label: "Vault", feature: "Vault" },
 ]);
 
@@ -578,7 +564,6 @@ export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab })
           onArchiving={setArchiving}
         />
       ) : null}
-      {tab === "ideas" ? <IdeasBody projectId={project.id} chrome={false} /> : null}
       {tab === "vault" ? (
         <div {...stylex.props(styles.fill)}>
           <VaultBody projectId={project.id} scopeName={project.name} />

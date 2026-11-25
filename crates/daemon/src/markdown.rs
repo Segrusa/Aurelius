@@ -1,26 +1,13 @@
-//! `query/markdown_files` and `query/markdown_file` (1.16): read-only access
-//! to the Markdown files of a work folder, for the in-app viewer on a client
-//! that is not on this computer. Every path is confined to the work folder:
+//! `markdown.get` (1.16): read-only access to a Markdown file of a work folder,
+//! for the in-app viewer on a client that is not on this computer (`markdown.list`
+//! answers gone, OPR-3). Every path is confined to the work folder:
 //! `..` is refused and the real path (symlinks and junctions resolved) must
 //! lie inside the real work folder.
 
 use crate::Shared;
-use aurelius_protocol::{
-    ErrorCode, FileScope, MARKDOWN_MAX_BYTES, MARKDOWN_MAX_FILES, MarkdownFileContent, MarkdownFileEntry, MarkdownFileList, ProtocolError,
-};
+use aurelius_protocol::{ErrorCode, FileScope, MARKDOWN_MAX_BYTES, MarkdownFileContent, ProtocolError};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-
-/// Folders never listed, besides what `.gitignore` ignores.
-const SKIPPED_DIRS: [&str; 4] = ["target", "node_modules", ".git", ".aurelius"];
-/// Where files the user sent with a message are kept (see `message_uploads`).
-const UPLOADS_DIR: &str = ".aurelius/uploads";
-const MAX_DEPTH: usize = 12;
-
-pub async fn list(shared: &Arc<Shared>, scope: FileScope) -> Result<MarkdownFileList, ProtocolError> {
-    let roots = roots_of(shared, scope).await?;
-    spawn(move || list_in(&roots)).await
-}
 
 pub async fn read(shared: &Arc<Shared>, scope: FileScope, path: String) -> Result<MarkdownFileContent, ProtocolError> {
     let roots = roots_of(shared, scope).await?;
@@ -75,63 +62,6 @@ fn modified_ms(meta: &std::fs::Metadata) -> i64 {
 
 fn slashes(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
-}
-
-/// Markdown files of the first work folder (`roots[0]`), `.gitignore` respected.
-fn list_in(roots: &[PathBuf]) -> Result<MarkdownFileList, ProtocolError> {
-    let Some(root) = roots.first() else { return Ok(MarkdownFileList::default()) };
-    let mut files: Vec<MarkdownFileEntry> = Vec::new();
-    let mut truncated = false;
-    let walker = ignore::WalkBuilder::new(root)
-        .hidden(false)
-        .require_git(false)
-        .follow_links(false)
-        .max_depth(Some(MAX_DEPTH))
-        .sort_by_file_name(|a, b| a.cmp(b))
-        .filter_entry(|e| {
-            let is_dir = e.file_type().is_some_and(|t| t.is_dir());
-            !(is_dir && e.depth() > 0 && e.file_name().to_str().is_some_and(|n| SKIPPED_DIRS.contains(&n)))
-        })
-        .build();
-    // false: the cap is reached.
-    let push = |path: &Path, files: &mut Vec<MarkdownFileEntry>| -> bool {
-        let Ok(meta) = std::fs::symlink_metadata(path) else { return true };
-        if !meta.is_file() || !is_markdown(path) {
-            return true;
-        }
-        if files.len() >= MARKDOWN_MAX_FILES {
-            return false;
-        }
-        if let Ok(rel) = path.strip_prefix(root) {
-            files.push(MarkdownFileEntry { path: slashes(rel), byte_length: meta.len(), modified_ms: modified_ms(&meta) });
-        }
-        true
-    };
-    for entry in walker.flatten() {
-        if !push(entry.path(), &mut files) {
-            truncated = true;
-            break;
-        }
-    }
-    // Uploads are kept out of git by their own .gitignore, but they are the user's files.
-    if let Ok(entries) = std::fs::read_dir(root.join(UPLOADS_DIR)) {
-        let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
-        paths.sort();
-        for path in paths {
-            if !push(&path, &mut files) {
-                truncated = true;
-                break;
-            }
-        }
-    }
-    files.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(MarkdownFileList { root: display(root), files, truncated })
-}
-
-/// Paths as the user knows them: without Windows' `\\?\` prefix.
-fn display(path: &Path) -> String {
-    let s = path.to_string_lossy();
-    s.strip_prefix(r"\\?\").unwrap_or(&s).to_owned()
 }
 
 fn refuse(code: ErrorCode, message: impl Into<String>) -> ProtocolError {
@@ -259,36 +189,6 @@ mod tests {
         let p = dir.path().join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, body).unwrap();
-    }
-
-    #[test]
-    fn lists_markdown_but_skips_ignored_and_build_folders() {
-        let d = tempfile::tempdir().unwrap();
-        write(&d, "README.md", b"# hi");
-        write(&d, "docs/a.markdown", b"a");
-        write(&d, "docs/b.txt", b"b");
-        write(&d, "target/x.md", b"x");
-        write(&d, "node_modules/p/y.md", b"y");
-        write(&d, ".git/z.md", b"z");
-        write(&d, "private/secret.md", b"s");
-        write(&d, ".gitignore", b"private/\n");
-        write(&d, ".aurelius/uploads/note.md", b"n");
-        let list = list_in(&root(&d)).unwrap();
-        let paths: Vec<&str> = list.files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(paths, vec![".aurelius/uploads/note.md", "README.md", "docs/a.markdown"]);
-        assert!(!list.truncated);
-        assert_eq!(list.files[1].byte_length, 4);
-    }
-
-    #[test]
-    fn the_list_is_capped() {
-        let d = tempfile::tempdir().unwrap();
-        for i in 0..MARKDOWN_MAX_FILES + 5 {
-            write(&d, &format!("n{i:04}.md"), b"x");
-        }
-        let list = list_in(&root(&d)).unwrap();
-        assert_eq!(list.files.len(), MARKDOWN_MAX_FILES);
-        assert!(list.truncated);
     }
 
     #[test]

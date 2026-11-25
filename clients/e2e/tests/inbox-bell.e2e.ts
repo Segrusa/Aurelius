@@ -1,11 +1,11 @@
 // The Inbox is a bell in the sidebar's rail, and nothing else: its count, its dropdown, a row that
-// leads to where it is decided, and the old /inbox link that now starts on New session.
+// leads to where it is decided, and a row of a chat that is no work session, which stays in the bell.
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { REPO, serveStatic, WEB_DIST } from "./daemon";
-import { notification, scriptServer, task } from "./fake-server";
+import { approval, notification, scriptServer, task } from "./fake-server";
 
 const SHOTS = join(REPO, "target/inbox-bell");
 
@@ -24,9 +24,7 @@ test("the bell counts what needs you, and a row leads to where it is decided", a
       notifications: [notification(1), notification(2)],
     });
     await page.setViewportSize({ width: 1440, height: 900 });
-    // The app starts on New session; an old link to the Inbox does too.
-    await page.goto(`${site.origin}/inbox`);
-    await expect(page).toHaveURL(/\/new$/);
+    await page.goto(`${site.origin}/new`);
     await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
 
     // No Inbox row in the sidebar; the bell in the rail says what needs you.
@@ -64,6 +62,61 @@ test("the bell counts what needs you, and a row leads to where it is decided", a
     // Ctrl+I opens the bell from the keyboard.
     await page.keyboard.press("Control+i");
     await expect(page.getByRole("dialog", { name: "Inbox" })).toBeVisible();
+  } finally {
+    await site.close();
+  }
+});
+
+// Regression (OPR-1): a row of a conversation that is not a work session (the removed Team chat, a
+// chat with an employee) only closed the dropdown and opened nothing.
+test("a row of a chat that is no work session stays in the bell and does something there", async ({ page }) => {
+  mkdirSync(SHOTS, { recursive: true });
+  const site = await serveStatic(WEB_DIST);
+  try {
+    const update = {
+      ...notification(5),
+      title: "A reply in the old team chat",
+      reason: "message",
+      needs_you: false,
+      read: false,
+      target_type: "conversation",
+      ticket_id: null,
+      ticket_number: null,
+      conversation_id: "c-old",
+    };
+    const { writes } = await scriptServer(page, {
+      features: ["work_sessions"],
+      approvals: [approval("a1", { conversation_id: "c-old" })],
+      notifications: [update],
+      reads: {
+        "work_session.list": () => ({ type: "work_sessions", value: { sessions: [], as_of_seq: 1 } }),
+      },
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${site.origin}/new`);
+    await page
+      .getByRole("button", { name: /^Inbox/ })
+      .first()
+      .click();
+    const dropdown = page.getByRole("dialog", { name: "Inbox" });
+
+    // The update is read where it is: marked read, and the dropdown stays open on the same screen.
+    await dropdown.getByRole("button", { name: /^A reply in the old team chat/ }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "notification.mark_read")?.params)
+      .toMatchObject({ id: "n5" });
+    await expect(page).toHaveURL(/\/new$/);
+    await expect(dropdown).toBeVisible();
+
+    // The approval is decided in the bell itself.
+    await dropdown.getByRole("button", { name: /Flux wants to run a command/ }).click();
+    await expect(page).toHaveURL(/\/new$/);
+    await expect(dropdown).toBeVisible();
+    await expect(
+      dropdown.getByRole("group", { name: "Decide" }).getByRole("button", { name: "Allow once" }),
+    ).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await page.screenshot({ path: join(SHOTS, "no-session-rows.png"), animations: "disabled" });
   } finally {
     await site.close();
   }

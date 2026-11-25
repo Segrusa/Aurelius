@@ -14,7 +14,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useConnection } from "../connection";
 import { useAllTasks, useMessages, useProjects } from "../data";
-import { hidden } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
@@ -43,7 +42,7 @@ import { RunChips } from "./session";
 import { runChipLabel } from "./session-logic";
 import { modelName } from "./settings-kit";
 import { SubagentsAtWork } from "./subagents";
-import { filesWritten, isActive, subtasksOf, taskStateLine } from "./tasks-logic";
+import { filesWritten, isActive, subtasksOf, taskBackPath, taskStateLine } from "./tasks-logic";
 
 const styles = stylex.create({
   body: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0 },
@@ -130,7 +129,7 @@ export function TaskRunScreen({ taskId, design = null }: { taskId: string; desig
   const navigate = useNavigate();
   const tasks = useAllTasks();
   const task = tasks.data?.find((t) => t.id === taskId);
-  useAction("Back", () => void navigate({ to: "/tasks" }));
+  useAction("Back", () => void navigate({ href: taskBackPath(task) }));
 
   if (!task) {
     return (
@@ -290,7 +289,7 @@ function TaskConversation({
               .write("conversation.delete", { conversation_id: conversationId }, { retry: false })
               .then(() => {
                 void client.invalidateQueries({ queryKey: ["tasks"] });
-                void navigate({ to: "/tasks" });
+                void navigate({ href: taskBackPath(task) });
               })
               .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."));
           }}
@@ -360,11 +359,7 @@ function TaskDetails({ dock, task, conversationId }: { dock: PropertiesDock; tas
         <SideRow name="Model">{runChipLabel(model, modelName)}</SideRow>
         <SideRow name="Effort">{runChipLabel(effort)}</SideRow>
         {mode ? <SideRow name="Mode">{MODE_LABELS[mode]}</SideRow> : null}
-        {task.schedule_id ? (
-          <SideRow name="From schedule">
-            {hidden("RecurringTasks") ? "Recurring task" : <Link href="/settings/schedules">Recurring task</Link>}
-          </SideRow>
-        ) : null}
+        {task.schedule_id ? <SideRow name="From schedule">Recurring task</SideRow> : null}
         <SideRow name="Created">
           {new Date(task.created_at_ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
         </SideRow>

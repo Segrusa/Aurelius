@@ -117,7 +117,7 @@ class MessageMarkdown extends StatelessWidget {
   Widget _body(BuildContext context, String data) {
     final style = styleSheet ?? markdownStyle(context);
     final mermaid = diagrams ? mermaidMarkdown(style, selectable: selectable) : null;
-    // The Slack-style Team chat marks its @names (AUR-CHAT-001 §2).
+    // A ticket's session marks its @names (AUR-CHAT-001 §2).
     final mentions = MentionScope.maybeOf(context);
     return LinkGestures(
       builder: (context, copied) => MarkdownBody(

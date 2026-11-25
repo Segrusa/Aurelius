@@ -476,21 +476,21 @@ String sessionLine(SessionView s, {DateTime? now}) {
   return 'Signed in ${DateFormat('MMM d').format(since)} · $active';
 }
 
-/// Profile → Sessions (MU3-04): the devices signed in as a board
+/// Profile → Signed in on (MU3-04): the devices signed in as a board
 /// member, newest activity first; this phone is marked and signs out with
 /// Sign out instead. Swipe left (or Revoke) ends another, after a
 /// confirmation. [userId]: another board member's (AC4, one role).
-class SessionsPage extends StatefulWidget {
-  const SessionsPage({super.key, this.userId, this.username});
+class SignedInPage extends StatefulWidget {
+  const SignedInPage({super.key, this.userId, this.username});
 
   final String? userId;
   final String? username;
 
   @override
-  State<SessionsPage> createState() => _SessionsPageState();
+  State<SignedInPage> createState() => _SignedInPageState();
 }
 
-class _SessionsPageState extends State<SessionsPage> {
+class _SignedInPageState extends State<SignedInPage> {
   List<SessionView>? _sessions;
   String? _error;
 
@@ -556,7 +556,7 @@ class _SessionsPageState extends State<SessionsPage> {
     final me = context.select<ConnectionBloc, String?>((b) => b.state.user?.username);
     final who = widget.username ?? me ?? 'you';
     return LargeTitleScaffold(
-      title: 'Sessions',
+      title: 'Signed in on',
       onRefresh: _load,
       fill: sessions == null
           ? Center(

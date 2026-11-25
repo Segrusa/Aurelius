@@ -9,7 +9,7 @@ import '../../core/widgets/widgets.dart';
 import '../../data/company.dart';
 import '../../data/views.dart';
 import '../company/company_bloc.dart';
-import '../dashboard/give_work.dart';
+import 'give_work.dart';
 import '../project/tasks_tab.dart';
 
 /// Which tasks the list shows by state.

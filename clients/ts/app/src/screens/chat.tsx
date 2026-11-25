@@ -10,13 +10,11 @@ import { arrived, ProtocolError } from "@aurelius/client";
 import type { ChannelView, EmployeeSummary, MessageView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useConnection, useLinkState } from "../connection";
 import { useApprovals, useChannelFeed, useChannels, useEmployees, useThread, useTicket } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
-import { usePlatform } from "../platform";
 import { AttachmentTray, usePromptAttachments } from "../ui/attach";
 import { withFolders } from "../ui/attach-logic";
 import { KeyHint } from "../ui/key-hint";
@@ -49,7 +47,6 @@ import {
   newMessagesAt,
   ownerAnswers,
   quickReplies,
-  readOnlyBar,
   replies,
   replyLabel,
   runAuthor,
@@ -71,14 +68,12 @@ import { Held } from "./dialogs";
 import { usePlanDock } from "./plan-dock";
 import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
-import { ThreadWaiting } from "./scheduled";
+import { ThreadWaiting } from "./thread-waiting";
 import { mergeByTime, workInFilter } from "./ticket-activity-logic";
 import { byWho, holdNew, type WorkBlock } from "./ticket-activity-plain-logic";
-import { OVERVIEW_KEY, OverviewPanel, ProgressCard, useTicketProgress } from "./ticket-overview";
+import { ProgressCard, useTicketProgress } from "./ticket-overview";
 import { ActivityHead, type Person, WorkBlockItem } from "./ticket-page";
 import { type ActivityFilter, inFilter } from "./ticket-page-logic";
-import { ticketPlace } from "./ticket-session-logic";
-import { ColumnGlyph } from "./tickets-kit";
 
 const enter = stylex.keyframes({
   from: { opacity: 0, transform: "translateY(4px)" },
@@ -88,7 +83,6 @@ const styles = stylex.create({
   feedTop: { height: 14 },
   feedEmpty: { margin: 0, paddingBlock: 16, fontSize: 13, color: "var(--precision-text3)" },
   feedEnd: { height: 16 },
-  hash: { color: "var(--precision-text3)" },
   composer: {
     marginInline: "auto",
     display: "flex",
@@ -239,61 +233,6 @@ const styles = stylex.create({
   threadComposer: { paddingTop: 8 },
   channel: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0 },
   channelMain: { display: "flex", minWidth: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column" },
-  top: {
-    display: "flex",
-    minHeight: 44,
-    flexShrink: 0,
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: 10,
-    borderBottomWidth: 1,
-    borderBottomStyle: "solid",
-    borderBottomColor: "var(--color-border)",
-    paddingBlock: 6,
-    paddingInlineStart: 18,
-    paddingInlineEnd: 12,
-  },
-  title: { margin: 0, fontSize: 13, fontWeight: 600 },
-  column: {
-    display: "inline-flex",
-    height: 22,
-    alignItems: "center",
-    gap: 6,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--color-border)",
-    paddingInline: 8,
-    fontSize: 12,
-    color: "var(--color-text-secondary)",
-  },
-  subtitle: {
-    minWidth: 0,
-    flexGrow: 1,
-    flexBasis: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    fontSize: 12,
-    color: "var(--precision-text3)",
-  },
-  openTicket: {
-    display: "inline-flex",
-    height: 28,
-    flexShrink: 0,
-    alignItems: "center",
-    borderRadius: 6,
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--color-border-emphasized)",
-    backgroundColor: "var(--color-neutral)",
-    paddingInline: 10,
-    fontSize: 12,
-    fontWeight: 500,
-    color: "var(--color-text-primary)",
-    textDecoration: "none",
-  },
-  pointer: { cursor: "pointer" },
   feedBox: { minHeight: 0, flexGrow: 1, flexBasis: 0 },
   // The ticket's Activity tab, in place of the talk (ticket #83).
   panel: { minHeight: 0, flexGrow: 1, flexBasis: 0, overflowY: "auto" },
@@ -354,7 +293,6 @@ const styles = stylex.create({
     color: "var(--color-text-secondary)",
   },
   readOnlyText: { flexGrow: 1, flexBasis: 0 },
-  readOnlyLink: { fontSize: 12, color: "var(--color-text-accent)", textDecoration: "none" },
 });
 
 /** Worked out once: every visible row uses these. */
@@ -387,7 +325,7 @@ const FEED_PARTS = {
 const drafts = new Map<string, string>();
 const offset = () => -new Date().getTimezoneOffset();
 
-function usePeople(): { people: Mentionable[]; archived: string[]; first: string | null } {
+function usePeople(): { people: Mentionable[]; archived: string[] } {
   const employees = useEmployees();
   return useMemo(() => {
     const all: EmployeeSummary[] = employees.data ?? [];
@@ -397,7 +335,6 @@ function usePeople(): { people: Mentionable[]; archived: string[]; first: string
     return {
       people: [...roots, ...rest].map((e) => ({ name: e.name, kind: e.title ?? e.role, employee: true })),
       archived: all.filter((e) => e.status === "archived").map((e) => e.name),
-      first: roots[0]?.name ?? null,
     };
   }, [employees.data]);
 }
@@ -811,18 +748,6 @@ type Row =
 
 const rowKey = (row: Row) => (row.kind === "message" ? row.m.id : row.id);
 
-interface ChannelProps {
-  channel: string | null;
-  c: ChannelView | null;
-  thread: string | null;
-  onThread: (id: string | null) => void;
-  message?: string | null;
-  /** The ticket, when `c` may not be known yet. */
-  ticketId?: string | null;
-  /** A ticket's session fills these (ticket #70); a channel's own chat leaves them out. */
-  session?: SessionSlots;
-}
-
 /** What a ticket's session puts around the channel's feed and composer. */
 export interface SessionSlots {
   /** In place of the channel's head; a ticket's session puts its own head above the whole body. */
@@ -880,32 +805,18 @@ export function TicketSessionBody({
   onThread: (id: string | null) => void;
   session: SessionSlots;
 }) {
+  const channel = conversationId;
   const channels = useChannels();
   const c = channels.data?.find((x) => x.conversation_id === conversationId) ?? null;
-  return (
-    <ChannelBody
-      channel={conversationId}
-      c={c}
-      ticketId={ticketId}
-      thread={thread}
-      onThread={onThread}
-      message={message}
-      session={session}
-    />
-  );
-}
-
-function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = null, session }: ChannelProps) {
   const { user, features, status } = useLinkState();
   const connection = useConnection();
   const client = useQueryClient();
   const feed = useChannelFeed(channel);
   const approvals = useApprovals();
   const employees = useEmployees();
-  const ticket = useTicket(ticketId ?? c?.ticket_id ?? null);
+  const ticket = useTicket(ticketId);
   const t = ticket.data?.ticket;
-  const isTicket = ticketId !== null || c?.kind === "ticket";
-  const { people: staff, archived, first } = usePeople();
+  const { people: staff, archived } = usePeople();
   const people = useMemo(
     () => [
       ...staff,
@@ -925,25 +836,16 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
   const list = useMemo(() => feed.data?.messages ?? [], [feed.data]);
   useOpenDesign(dock.open, list, session?.design ?? null);
   // What runs and what is still open stays beside the talk, never as posts in it.
-  const progress = useTicketProgress(isTicket ? (ticketId ?? c?.ticket_id ?? null) : null, isTicket ? live : []);
-  const { storage } = usePlatform();
-  const [overviewOpen, setOverviewOpen] = useState(() => storage.get(OVERVIEW_KEY) !== "0");
-  const showOverview = (on: boolean) => {
-    storage.set(OVERVIEW_KEY, on ? "1" : "0");
-    setOverviewOpen(on);
-  };
+  const progress = useTicketProgress(ticketId, live);
   const talk = useMemo(() => list.filter((m) => !m.thread_parent), [list]);
   // On a ticket a row of "moved to Doing" lines folds, so what people said stays in view.
   const [unfolded, setUnfolded] = useState(message !== null);
-  const folded = useMemo(
-    () => (isTicket ? foldUpdates(talk, unfolded) : { shown: talk, earlier: new Map<string, number>() }),
-    [isTicket, talk, unfolded],
-  );
-  // The ticket page's Activity filter; a channel's own chat shows everything.
+  const folded = useMemo(() => foldUpdates(talk, unfolded), [talk, unfolded]);
+  // The ticket page's Activity filter.
   const [filter, setFilter] = useState<ActivityFilter>("all");
-  const filtering = session?.top !== undefined;
-  const newest = session?.newestFirst === true;
-  const who = session?.who ?? null;
+  const filtering = session.top !== undefined;
+  const newest = session.newestFirst === true;
+  const who = session.who ?? null;
   const list2 = useMemo(
     () =>
       filtering && (filter !== "all" || who !== null)
@@ -985,8 +887,8 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
   }, [list, store]);
 
   const pending = useMemo(
-    () => approvalsFor(approvals.data ?? [], { conversationId: openId, ticketId: ticketId ?? c?.ticket_id }),
-    [approvals.data, openId, ticketId, c?.ticket_id],
+    () => approvalsFor(approvals.data ?? [], { conversationId: openId, ticketId }),
+    [approvals.data, openId, ticketId],
   );
   const approvalMap = useMemo(() => new Map(pending.map((a) => [a.id, a])), [pending]);
   const onCard = useMemo(() => new Set(list.flatMap((m) => m.approval_id ?? [])), [list]);
@@ -996,7 +898,7 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
   const rows = useMemo<Row[]>(() => {
     const dayOf = (ms: number) => localDay(ms, offset());
     const work =
-      filtering && workInFilter(filter) ? (session?.work ?? []).filter((w) => who === null || w.who === who) : [];
+      filtering && workInFilter(filter) ? (session.work ?? []).filter((w) => who === null || w.who === who) : [];
     const out: Row[] = mergeByTime(list2, work).map((r, at, all) => {
       if (r.kind === "work") return { kind: "work", id: r.w.id, w: r.w };
       const b = before(list2, r.index, newAt, dayOf);
@@ -1046,7 +948,7 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
     onCard,
     filter,
     filtering,
-    session?.work,
+    session.work,
     who,
     newest,
     employeesList,
@@ -1072,13 +974,13 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
     return () => clearTimeout(timer);
   }, [message, shown]);
 
-  const readOnly = session ? session.readOnly : (c?.archived ?? false) || feed.data?.read_only === true;
+  const readOnly = session.readOnly;
   const caps = useMemo<Caps>(
     () => ({ threads: features.includes("chat_threads"), reactions: features.includes("chat_reactions"), readOnly }),
     [features, readOnly],
   );
   const employeesData = employees.data;
-  const name = c ? bareName(c) : t ? String(t.number) : "general";
+  const name = c ? bareName(c) : String(t?.number ?? "");
   const lastAnswerId = useMemo(
     () => [...list2].reverse().find((m) => !m.update && m.role === "assistant")?.id ?? null,
     [list2],
@@ -1177,19 +1079,6 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
       ? quickReplies(lastAnswer.activity)
       : null;
   const owner = t && t.column !== "done" ? (t.owner_name ?? null) : null;
-  const placeholder = session
-    ? session.placeholder
-    : isTicket && owner
-      ? `Message ${owner} (owner)… · @ to mention`
-      : `Message #${name} · @ to mention`;
-  const hint = session
-    ? session.hint
-    : isTicket
-      ? t
-        ? `@Name asks that employee${ownerAnswers(owner)}.`
-        : "@Name asks that employee about this ticket."
-      : `@Name asks that employee; without a name, ${first ?? "the top of the org chart"} answers.`;
-  const answering = [...new Set(live.flatMap((u) => runAuthor(employeesData ?? [], u.run_id) ?? []))];
   const loading = useDelayed(feed.isPending);
   const feedContext = useMemo<FeedContext>(
     () =>
@@ -1197,10 +1086,10 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
         ? {
             // Newest first, the filter sits above the list and stays in view.
             top: newest ? (
-              session?.top
+              session.top
             ) : (
               <>
-                {session?.top}
+                {session.top}
                 <ActivityHead filter={filter} onFilter={setFilter} />
               </>
             ),
@@ -1212,43 +1101,32 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
                   : "No messages yet.",
           }
         : { top: null, empty: null },
-    [filtering, session?.top, filter, t, owner, newest],
+    [filtering, session.top, filter, t, owner, newest],
   );
 
   const composer = readOnly ? (
     <div {...stylex.props(styles.readOnlyRow)}>
       <div {...stylex.props(styles.readOnlyBar)}>
-        <span {...stylex.props(styles.readOnlyText)}>
-          {session
-            ? session.readOnlyText
-            : c
-              ? readOnlyBar(c, c.ticket_column === "done")
-              : "This channel is read-only."}
-        </span>
-        {session?.readOnlyEnd}
-        {c?.ticket_id && !session ? (
-          <Link {...ticketPlace({ id: c.ticket_id, number: c.ticket_number })} {...stylex.props(styles.readOnlyLink)}>
-            Open ticket
-          </Link>
-        ) : null}
+        <span {...stylex.props(styles.readOnlyText)}>{session.readOnlyText}</span>
+        {session.readOnlyEnd}
       </div>
     </div>
   ) : (
     <Composer
-      key={channel ?? "general"}
-      draftKey={channel ?? "general"}
+      key={channel}
+      draftKey={channel}
       channel={channel}
       threadParent={null}
       waiting={!running && list2.at(-1)?.role === "user"}
-      placeholder={placeholder}
-      hint={hint}
+      placeholder={session.placeholder}
+      hint={session.hint}
       activeRun={running}
       people={people}
       archived={archived}
       quick={quick}
       everyone={everyone}
       prompt={TEAM_PROMPT}
-      {...(session?.chips ? { footer: session.chips } : {})}
+      {...(session.chips ? { footer: session.chips } : {})}
       onSent={() => {
         if (newest) return toTop();
         atBottom.current = true;
@@ -1260,75 +1138,26 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
   return (
     <section aria-label={`#${name}`} {...stylex.props(styles.channel)}>
       <div {...stylex.props(styles.channelMain)}>
-        {session ? (
-          (session.head ?? null)
-        ) : (
-          <header data-titlebar {...stylex.props(styles.top)}>
-            <Heading level={1} xstyle={styles.title}>
-              <span {...stylex.props(styles.hash)}>#</span> {name}
-            </Heading>
-            {t ? (
-              <span {...stylex.props(styles.column)}>
-                <ColumnGlyph kind={t.column} />
-                {t.column.replace("_", " ")}
-              </span>
-            ) : null}
-            <span {...stylex.props(styles.subtitle)}>
-              {answering.length > 0
-                ? `${answering.join(", ")} answering`
-                : t
-                  ? [
-                      t.title,
-                      t.owner_name ? `${t.owner_name} owner` : null,
-                      t.responsible_user_id === user?.id
-                        ? "You responsible"
-                        : t.responsible_username
-                          ? `${t.responsible_username} responsible`
-                          : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
-                  : c?.kind === "project"
-                    ? c.archived
-                      ? "Archived project · read-only"
-                      : `Project channel · you and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`
-                    : `You and ${staff.length} ${staff.length === 1 ? "employee" : "employees"}`}
-            </span>
-            {c?.ticket_id ? (
-              <Link {...ticketPlace({ id: c.ticket_id, number: c.ticket_number })} {...stylex.props(styles.openTicket)}>
-                Open ticket ↗
-              </Link>
-            ) : null}
-            {isTicket && !overviewOpen ? (
-              <button
-                type="button"
-                onClick={() => showOverview(true)}
-                {...stylex.props(styles.openTicket, styles.pointer)}
-              >
-                Overview
-              </button>
-            ) : null}
-          </header>
-        )}
+        {session.head ?? null}
         <ThreadWaiting conversationId={openId} />
         {contextOf ? <ContextDialog run={contextOf} onClose={() => setContextOf(null)} /> : null}
         <ChatProvider value={ctx}>
-          {session?.panel !== undefined ? (
+          {session.panel !== undefined ? (
             // The ticket's Activity tab takes the place of the talk.
             <div {...stylex.props(styles.panel)}>{session.panel}</div>
           ) : (
             <>
               {newest ? (
                 <div {...stylex.props(styles.newestTop)}>
-                  {session?.gate}
+                  {session.gate}
                   {composer}
                   <div {...FEED_COLUMN}>
                     <ActivityHead
                       filter={filter}
                       onFilter={setFilter}
-                      people={session?.people ?? []}
+                      people={session.people ?? []}
                       who={who}
-                      {...(session?.onWho ? { onWho: session.onWho } : {})}
+                      {...(session.onWho ? { onWho: session.onWho } : {})}
                       newestFirst
                     />
                   </div>
@@ -1365,12 +1194,8 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
                     )
                   ) : rows.length === 0 && !filtering ? (
                     <EmptyState
-                      title={isTicket ? "Discuss the ticket here." : "Talk with your whole team here."}
-                      description={
-                        isTicket
-                          ? `Write @Name to ask an employee${t ? ownerAnswers(owner) : " about this ticket"}.`
-                          : `Write @Name to ask an employee; without a name, ${first ?? "the top of the org chart"} answers and brings in whoever is needed.`
-                      }
+                      title="Discuss the ticket here."
+                      description={`Write @Name to ask an employee${t ? ownerAnswers(owner) : " about this ticket"}.`}
                     />
                   ) : (
                     <Virtuoso
@@ -1452,14 +1277,8 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
               </FeedIdsProvider>
               {newest ? null : (
                 <>
-                  {isTicket && !readOnly ? (
-                    session?.live !== undefined ? (
-                      session.live
-                    ) : (
-                      <ProgressCard p={progress} />
-                    )
-                  ) : null}
-                  {session?.gate}
+                  {readOnly ? null : session.live !== undefined ? session.live : <ProgressCard p={progress} />}
+                  {session.gate}
                   {composer}
                 </>
               )}
@@ -1485,11 +1304,9 @@ function ChannelBody({ channel, c, thread, onThread, message = null, ticketId = 
             onClose={() => onThread(null)}
           />
         </ChatProvider>
-      ) : session ? (
+      ) : (
         <DockOpenerProvider value={dock.open}>{session.aside ?? null}</DockOpenerProvider>
-      ) : isTicket && overviewOpen ? (
-        <OverviewPanel p={progress} onClose={() => showOverview(false)} />
-      ) : null}
+      )}
     </section>
   );
 }

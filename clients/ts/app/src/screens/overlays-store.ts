@@ -9,7 +9,6 @@ export interface TicketPrefill {
   title: string;
   description: string;
   fromMessage?: string;
-  fromIdea?: string;
   labels?: string;
   projectId?: string;
   employeeId?: string;

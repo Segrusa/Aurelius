@@ -62,7 +62,8 @@ impl CommandContext {
     }
 }
 
-/// Why `employee.open_chat` is refused: chatting with an employee is gone.
+/// Why `employee.open_chat`, `employee.chat` and `employee.chats` answer "gone" (`not_found`):
+/// chatting with an employee is gone. The methods stay for older clients (protocol 5).
 pub const EMPLOYEE_CHAT_GONE: &str = "Chatting with an employee is no longer available.";
 
 pub const CHAT_RUN_KIND: &str = "run.chat";
@@ -216,7 +217,7 @@ impl CommandService {
             Command::RetryReply(cmd) => self.retry_reply(ctx, &envelope, hash, cmd),
             Command::StopRun(cmd) => self.stop_run(ctx, &envelope, hash, cmd),
             Command::CreateEmployee(cmd) => self.create_employee(ctx, &envelope, hash, cmd),
-            Command::OpenEmployeeChat(_) => Err(domain_error(DomainError::Memory(EMPLOYEE_CHAT_GONE.into()))),
+            Command::OpenEmployeeChat(_) => Err(AppError::new(ErrorCode::NotFound, EMPLOYEE_CHAT_GONE)),
             Command::CancelScheduledMessage(cmd) => self.cancel_scheduled_message(ctx, &envelope, hash, cmd),
             Command::UpdateEmployee(cmd) => self.update_employee(ctx, &envelope, hash, cmd),
             Command::SetEmployeeStatus(cmd) => self.set_employee_status(ctx, &envelope, hash, cmd),
@@ -234,7 +235,7 @@ impl CommandService {
             Command::AddIdea(cmd) => self.add_idea(&envelope, hash, cmd),
             Command::UpdateIdea(cmd) => self.update_idea(&envelope, hash, cmd),
             Command::SetIdeaStatus(cmd) => self.set_idea_status(&envelope, hash, cmd),
-            Command::StartIdea(cmd) => self.start_idea(ctx, &envelope, hash, cmd),
+            Command::StartIdea(_) => Err(AppError::new(ErrorCode::NotFound, task::ideas::IDEA_START_GONE)),
             Command::DeleteIdea(cmd) => self.delete_idea(&envelope, hash, cmd),
             Command::CreateTaskSchedule(cmd) => self.create_task_schedule(ctx, &envelope, hash, cmd),
             Command::UpdateTaskSchedule(cmd) => self.update_task_schedule(ctx, &envelope, hash, cmd),
@@ -258,7 +259,7 @@ impl CommandService {
             Command::SetProjectFolder(cmd) => self.set_project_folder(&envelope, hash, cmd),
             Command::SetEmployeeFolder(cmd) => self.set_employee_folder(&envelope, hash, cmd),
             Command::DeleteConversation(cmd) => self.delete_conversation(ctx, &envelope, hash, cmd),
-            Command::StartProjectConversation(cmd) => self.start_project_conversation(ctx, &envelope, hash, cmd),
+            Command::StartProjectConversation(_) => Err(AppError::new(ErrorCode::NotFound, conversation::project_chat::PROJECT_CONVERSATIONS_GONE)),
             Command::StartWorkSession(cmd) => self.start_work_session(ctx, &envelope, hash, cmd),
             Command::DispatchWorkSession(cmd) => self.dispatch_work_session(ctx, &envelope, hash, cmd),
             Command::AssignWorkSession(cmd) => self.assign_work_session(ctx, &envelope, hash, cmd),

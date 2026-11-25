@@ -11,7 +11,7 @@ import 'package:mocktail/mocktail.dart';
 import 'support/builders.dart';
 import 'support/tickets.dart';
 
-// Freeze §5: Dashboard, Waiting tasks count a ticket's main task only
+// Freeze §5: Inbox, Waiting tasks count a ticket's main task only
 // when it needs me; tasks without a ticket and approvals stay as they are.
 
 const _bo = UserView(id: 'u-2', username: 'bo', createdAtMs: 0);
@@ -45,7 +45,7 @@ void main() {
   group('what counts', () {
     final state = CompanyState(loading: false, tasks: tasks, othersTasks: const {'t-others'});
 
-    test('the Dashboard leaves out the main task of another Responsible', () {
+    test('the Inbox leaves out the main task of another Responsible', () {
       expect(state.waitingTasks.map((t) => t.id), ['t-mine', 't-none', 't-unknown', 't-loose']);
       expect(state.waiting, 4);
     });

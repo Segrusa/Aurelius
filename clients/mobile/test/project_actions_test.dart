@@ -53,7 +53,6 @@ void main() {
     when(() => repo.proposals()).thenAnswer((_) async => proposals);
     when(() => repo.tasks()).thenAnswer((_) async => tasks);
     when(() => repo.tasks(projectId: any(named: 'projectId'))).thenAnswer((_) async => tasks);
-    when(() => repo.ideas(any())).thenAnswer((_) async => []);
     when(() => repo.memory(projectId: any(named: 'projectId'))).thenAnswer((_) async => []);
     when(() => repo.boardChanges).thenAnswer((_) => const Stream.empty());
     when(() => repo.board(projectId: any(named: 'projectId'))).thenAnswer((_) async => boardOf([ticketOf(projectId: 'p')], projectId: 'p'));

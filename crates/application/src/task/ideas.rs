@@ -1,17 +1,16 @@
 //! Ideas per project: noted by the user or by an employee while working; an
-//! idea becomes a ticket (or, from older clients, a task for an employee), is
-//! marked done, or dropped.
+//! idea becomes a ticket, is marked done, or dropped. Ideas that became a task
+//! before `idea.start` went keep that link.
 
 use crate::run::events::{Ev, emit};
 use crate::{CommandService, Committed, domain_error, storage_error};
 use aurelius_domain::{
-    ActorKind, DomainError, IdeaId, EmployeeId, ProjectId, TaskId, TicketId,
-    idea::{self, AddIdea, DeleteIdea, IdeaKind, IdeaStatus, SetIdeaStatus, StartIdea, UpdateIdea},
+    ActorKind, DomainError, IdeaId, EmployeeId, ProjectId, TicketId,
+    idea::{self, AddIdea, DeleteIdea, IdeaKind, SetIdeaStatus, UpdateIdea},
     employee::LifecycleStatus,
-    task::TaskStatus,
 };
 use aurelius_domain::{CommandEnvelope, CommandResult, EventNotice, AppError};
-use aurelius_storage::{StorageError, Tx, blobs, ideas as store, employees, tasks, tasks::TaskAttachments};
+use aurelius_storage::{StorageError, Tx, ideas as store, employees, tasks, tasks::TaskAttachments};
 use std::path::{Path, PathBuf};
 
 fn idea_event(tx: &Tx<'_>, id: IdeaId, project: ProjectId, event_type: &'static str, actor: ActorKind, actor_id: Option<String>, correlation: String, metadata: serde_json::Value) -> Result<EventNotice, StorageError> {
@@ -67,6 +66,10 @@ pub(crate) fn became_ticket(tx: &Tx<'_>, id: IdeaId, project: ProjectId, ticket:
 }
 
 /// Note an idea in a project (by the user, or an employee: `employee`).
+/// Why `idea.start` answers "gone" (`not_found`): an idea becomes a ticket
+/// (`ticket.create` with `from_idea`). The method stays for older clients (protocol 5).
+pub const IDEA_START_GONE: &str = "Starting an idea as a task is no longer available: create a ticket from the idea.";
+
 pub(crate) fn add(tx: &Tx<'_>, project: ProjectId, title: &str, note: Option<&str>, kind: IdeaKind, employee: Option<EmployeeId>, correlation: String) -> Result<(IdeaId, EventNotice), StorageError> {
     let id = IdeaId::new();
     store::insert(tx, id, project, title, note, kind, employee)?;
@@ -186,67 +189,6 @@ impl CommandService {
             let n = idea_event(tx, id, row.project_id, "idea.status_changed", ActorKind::User, None, command_id.to_string(), serde_json::json!({ "status": status, "title": row.title }))?;
             Ok(Ok((CommandResult::IdeaUpdated { idea_id: id }, vec![n])))
         })
-    }
-
-    /// The idea becomes a task for the employee: its title, its note as the goal.
-    pub(crate) fn start_idea(&self, ctx: &crate::CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &StartIdea) -> Result<Committed, AppError> {
-        let login = ctx.login_user();
-        let (id, employee) = (cmd.idea_id, cmd.employee_id);
-        let run = cmd.run.validated().map_err(domain_error)?;
-        let row = self.store.read(|c| store::load(c, id)).map_err(storage_error)?.ok_or_else(|| domain_error(DomainError::IdeaNotFound(id)))?;
-        if let Some(why) = already_became(&row) {
-            return Err(domain_error(DomainError::Memory(why.into())));
-        }
-        let goal = row.note.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| row.title.clone());
-        let goal_blob = self.store.blobs().put(goal.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?;
-        let criteria_blob = self.store.blobs().put_json(&Vec::<String>::new()).map_err(storage_error)?;
-        // The task gets its own copies of the idea's files, in its work folder,
-        // as if the user had attached them to the task (files gone meanwhile are skipped).
-        let sources = files_of(&row);
-        let attachments = self.attach_files(row.project_id, Some(employee), &sources, None)?;
-        let stored = attachments.clone();
-        let command_id = envelope.command_id;
-        let committed = self.commit(command_id, hash, move |tx| {
-            match employees::load_employee(tx, employee)? {
-                Some(m) if m.status != LifecycleStatus::Archived => {}
-                Some(_) => return Ok(Err(domain_error(DomainError::EmployeeArchived))),
-                None => return Ok(Err(domain_error(DomainError::EmployeeNotFound(employee)))),
-            }
-            if let Some(c) = run.connection_id {
-                if aurelius_storage::connections::load(tx, c)?.is_none() {
-                    return Ok(Err(domain_error(DomainError::ProviderNotFound(c))));
-                }
-            }
-            blobs::register(tx, &goal_blob)?;
-            blobs::register(tx, &criteria_blob)?;
-            let task_id = TaskId::new();
-            tasks::insert_task(tx, task_id, row.project_id, Some(employee), &row.title, &goal_blob.id.to_string(), &criteria_blob.id.to_string(), TaskStatus::Queued, None)?;
-            tasks::set_task_run(tx, task_id, &run)?;
-            tasks::set_login_user(tx, task_id, login.as_deref())?;
-            if stored.is_some() {
-                tasks::set_attachments(tx, task_id, stored.as_ref())?;
-            }
-            let (event_id, mut created) = emit(tx, Ev {
-                aggregate_type: "task",
-                aggregate_id: task_id.to_string(),
-                event_type: "task.created",
-                actor: ActorKind::User,
-                actor_id: None,
-                correlation: command_id.to_string(),
-                payload: Some(goal_blob.id.to_string()),
-                metadata: serde_json::json!({ "title": row.title, "employee_id": employee, "idea_id": id }),
-                dedupe: format!("cmd:{command_id}:0"),
-            })?;
-            created.project_id = Some(row.project_id);
-            let mut notices = vec![created];
-            notices.push(crate::task::tasks::task_event(tx, task_id, row.project_id, "task.queued", serde_json::json!({}))?);
-            aurelius_storage::events::insert_job(tx, &task_id.to_string(), crate::task::tasks::TASK_JOB_KIND, event_id, &format!("task:{task_id}"), &serde_json::json!({ "task_id": task_id }))?;
-            store::set_status(tx, id, IdeaStatus::Done, Some(task_id))?;
-            notices.push(idea_event(tx, id, row.project_id, "idea.started", ActorKind::User, None, command_id.to_string(), serde_json::json!({ "task_id": task_id, "title": row.title }))?);
-            Ok(Ok((CommandResult::IdeaStarted { idea_id: id, task_id }, notices)))
-        });
-        self.discard_unused(&attachments, committed.as_ref().map_or(true, |c| c.receipt.replayed));
-        committed
     }
 
     /// The ideas of every project.

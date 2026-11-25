@@ -91,7 +91,7 @@ class NewTaskPage extends StatefulWidget {
   /// The projects to choose from; null when the project is already known.
   final List<ProjectSummary>? projects;
 
-  /// Preselected project and lead, and a title typed elsewhere (Home's Give work).
+  /// Preselected project and lead, and a title typed elsewhere.
   final String? projectId;
   final String? employeeId;
   final String? title;

@@ -1,4 +1,4 @@
-//! Project conversations: made, listed and continued through the protocol; the
+//! Project conversations: made by their first message and continued through the protocol; the
 //! assistant of a project conversation sees the project's employees and tasks,
 //! gives work to an employee (the result comes back in the conversation), cannot
 //! hand over, and uses ideas and the project's memory.
@@ -13,7 +13,7 @@ use aurelius_domain::{
     employee::CreateEmployee,
     memory::EmployeeMemoryOp,
     project::CreateProject,
-    project_conversation::{SendProjectMessage, StartProjectConversation},
+    project_conversation::SendProjectMessage,
 };
 use aurelius_protocol::{CommandResult, EmployeeTaskOp, MessageView};
 use aurelius_runtime::{AgentRuntime, RunHandle, RunRequest, RuntimeCapabilities, RuntimeError, fake};
@@ -65,7 +65,7 @@ async fn answers(client: &Client, conversation: ConversationId, count: usize) ->
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_project_conversation_is_made_listed_and_continued() {
+async fn a_project_conversation_is_made_by_its_first_message_and_continued() {
     let dir = tempfile::tempdir().unwrap();
     let runtime = Arc::new(Recording::default());
     let daemon = start_with(dir.path(), runtime.clone()).await;
@@ -76,48 +76,27 @@ async fn a_project_conversation_is_made_listed_and_continued() {
         panic!()
     };
     employee(&client, project_id, "Alex").await;
-    assert!(client.project_conversations(project_id).await.unwrap().conversations.is_empty());
 
-    // An empty conversation exists at once; its first message names it.
-    let CommandResult::ProjectConversationStarted { project_id: started_in, conversation_id } = client
-        .start_project_conversation(StartProjectConversation { project_id, start: ChatStart::default() })
-        .await
-        .unwrap()
-        .result
-    else {
-        panic!()
-    };
+    // The first message makes the conversation (it is named after it).
+    let CommandResult::ProjectMessageSent { project_id: started_in, conversation_id, .. } = client.send_project_message(send(project_id, None, "Wat staat er open?")).await.unwrap().result else { panic!() };
     assert_eq!(started_in, project_id);
-    let listed = client.project_conversations(project_id).await.unwrap();
-    assert_eq!(listed.project_id, project_id);
-    assert_eq!(listed.conversations.len(), 1);
-    let first = &listed.conversations[0];
-    assert!((first.id, first.message_count, first.working) == (conversation_id, 0, false), "{first:?}");
-
-    let CommandResult::ProjectMessageSent { conversation_id: same, .. } = client.send_project_message(send(project_id, Some(conversation_id), "Wat staat er open?")).await.unwrap().result else { panic!() };
-    assert_eq!(same, conversation_id);
     answers(&client, conversation_id, 1).await;
-    let CommandResult::ProjectMessageSent { .. } = client.send_project_message(send(project_id, Some(conversation_id), "En wie werkt waaraan?")).await.unwrap().result else { panic!() };
+    let CommandResult::ProjectMessageSent { conversation_id: same, .. } = client.send_project_message(send(project_id, Some(conversation_id), "En wie werkt waaraan?")).await.unwrap().result else { panic!() };
+    assert_eq!(same, conversation_id);
     let messages = answers(&client, conversation_id, 2).await;
     assert_eq!(messages.len(), 4, "two questions, two answers");
 
-    // Without a conversation a new one is made; the list is most recent first.
+    // Without a conversation a new one is made.
     let CommandResult::ProjectMessageSent { conversation_id: second, .. } = client.send_project_message(send(project_id, None, "Een ander onderwerp")).await.unwrap().result else { panic!() };
     assert_ne!(second, conversation_id);
     answers(&client, second, 1).await;
-    let listed = client.project_conversations(project_id).await.unwrap().conversations;
-    assert_eq!(listed.len(), 2);
-    assert_eq!(listed[0].id, second);
-    assert_eq!(listed[1].title, "Wat staat er open?");
-    assert_eq!(listed[1].message_count, 4);
 
-    // Other projects do not see them.
+    // Another project does not take them.
     let CommandResult::ProjectCreated { project_id: other, .. } =
         client.execute(envelope(Command::CreateProject(CreateProject { name: "Other".into(), description: None, folder: None }), None)).await.unwrap().result
     else {
         panic!()
     };
-    assert!(client.project_conversations(other).await.unwrap().conversations.is_empty());
     assert!(client.send_project_message(send(other, Some(conversation_id), "Verkeerd project")).await.is_err());
     assert!(client.send_project_message(send(project_id, Some(ConversationId::new()), "Onbekend")).await.is_err());
 

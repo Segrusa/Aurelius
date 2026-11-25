@@ -1,6 +1,6 @@
 import type { TaskView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
-import { filesWritten, filterTasks, foldTree, stepLine, subtasksOf, taskStateLine, treeOrder } from "./tasks-logic";
+import { filesWritten, stepLine, subtasksOf, taskBackPath, taskStateLine, treeOrder } from "./tasks-logic";
 
 const task = (id: string, over: Partial<TaskView> = {}): TaskView => ({
   id,
@@ -17,30 +17,6 @@ const task = (id: string, over: Partial<TaskView> = {}): TaskView => ({
   run: {},
   updated_at_ms: 0,
   ...over,
-});
-
-describe("the task filter", () => {
-  const tasks = [
-    task("run", { updated_at_ms: 1 }),
-    task("wait", { status: "waiting", updated_at_ms: 3 }),
-    task("appr", { pending_approvals: 1, updated_at_ms: 2 }),
-    task("done", { status: "succeeded" }),
-    task("live", { status: "succeeded", live_run: "running" }),
-  ];
-  const ids = (state: "open" | "needs_you" | "ended" | "all") =>
-    filterTasks(tasks, { state, employee: null, project: null }).map((t) => t.id);
-  it("sorts into the states, newest change first", () => {
-    expect(ids("open")).toEqual(["wait", "appr", "run", "live"]);
-    expect(ids("needs_you")).toEqual(["wait", "appr"]);
-    expect(ids("ended")).toEqual(["done"]);
-    expect(ids("all")).toHaveLength(5);
-  });
-
-  it("filters on employee and project", () => {
-    const list = [task("a", { employee_id: "e" }), task("b", { project_id: "q" })];
-    expect(filterTasks(list, { state: "all", employee: "e", project: null }).map((t) => t.id)).toEqual(["a"]);
-    expect(filterTasks(list, { state: "all", employee: null, project: "q" }).map((t) => t.id)).toEqual(["b"]);
-  });
 });
 
 describe("the task tree", () => {
@@ -76,16 +52,6 @@ describe("the task tree", () => {
     expect(subtasksOf(rows, "grandkid")).toEqual([]);
   });
 
-  it("folds what is finished, unless asked otherwise", () => {
-    const rows = [task("top", { status: "succeeded" }), task("kid", { parent_task_id: "top", status: "succeeded" })];
-    const tree = treeOrder(rows);
-    expect(foldTree(tree, {}).map((r) => [r.task.id, r.below, r.open])).toEqual([["top", 1, false]]);
-    expect(foldTree(tree, { top: true }).map((r) => r.task.id)).toEqual(["top", "kid"]);
-    const running = treeOrder([task("top"), task("kid", { parent_task_id: "top" })]);
-    expect(foldTree(running, {}).map((r) => r.task.id)).toEqual(["top", "kid"]);
-    expect(foldTree(running, { top: false }).map((r) => r.task.id)).toEqual(["top"]);
-  });
-
   it("says a task's state", () => {
     expect(taskStateLine(task("a", { pending_approvals: 1 })).text).toBe("Paused · needs approval");
     expect(taskStateLine(task("a", { status: "failed" })).text).toBe("Failed");
@@ -112,5 +78,15 @@ describe("a run's steps", () => {
         },
       ]),
     ).toEqual(["a"]);
+  });
+});
+
+describe("leaving a task's run", () => {
+  it("goes to the ticket the task works for, else to its employee, else to New session", () => {
+    expect(taskBackPath(task("k1", { ticket_id: "t1", ticket_number: 21, employee_id: "e1" }))).toBe("/ticket/21");
+    expect(taskBackPath(task("k1", { ticket_id: "t1", employee_id: "e1" }))).toBe("/board?ticket=t1");
+    expect(taskBackPath(task("k1", { employee_id: "e1" }))).toBe("/employees/e1");
+    expect(taskBackPath(task("k1"))).toBe("/new");
+    expect(taskBackPath(undefined)).toBe("/new");
   });
 });

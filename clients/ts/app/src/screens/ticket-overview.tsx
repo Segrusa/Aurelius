@@ -1,32 +1,19 @@
 // The overview a ticket's chat keeps beside the talk: a card above the composer with what runs now,
-// the owner's todo list and the open tasks, and in the full chat a panel with the whole ticket.
+// the owner's todo list and the open tasks.
 // The posts stay words only; this lives outside the feed.
 
 import type { MessageView, TaskView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { useLinkState } from "../connection";
+import { useEffect, useMemo, useState } from "react";
 import { useActivityOverview, useMessages, useTicket } from "../data";
 import { usePlatform } from "../platform";
 import { Icon, StatusGlyph } from "../ui/icons";
 import { ticketActivityLine } from "./activity-bar-logic";
 import { useLiveAll, useLiveStore } from "./chat-live";
 import type { Todo } from "./chat-logic";
-import { FileChips } from "./run-tools";
 import { taskStateLine } from "./tasks-logic";
-import {
-  branchOf,
-  cardShown,
-  latestTodos,
-  nowLine,
-  openTasks,
-  taskTally,
-  todoTally,
-  workingLine,
-} from "./ticket-overview-logic";
-import { ticketPlace } from "./ticket-session-logic";
-import { ColumnGlyph } from "./tickets-kit";
+import { cardShown, latestTodos, nowLine, openTasks, taskTally, todoTally, workingLine } from "./ticket-overview-logic";
 
 const styles = stylex.create({
   card: {
@@ -101,60 +88,6 @@ const styles = stylex.create({
   taskTitle: { minWidth: 0, flexGrow: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   taskWho: { flexShrink: 0, fontSize: 12, color: "var(--color-text-secondary)" },
   taskState: { flexShrink: 0, fontSize: 12 },
-  panel: {
-    display: "flex",
-    width: 300,
-    flexShrink: 0,
-    flexDirection: "column",
-    overflowY: "auto",
-    borderLeftWidth: 1,
-    borderLeftStyle: "solid",
-    borderLeftColor: "var(--color-border)",
-    backgroundColor: "var(--color-background-surface)",
-  },
-  panelTop: {
-    display: "flex",
-    minHeight: 44,
-    flexShrink: 0,
-    alignItems: "center",
-    gap: 8,
-    paddingInline: 16,
-    borderBottomWidth: 1,
-    borderBottomStyle: "solid",
-    borderBottomColor: "var(--color-border)",
-    fontWeight: 600,
-  },
-  panelTitle: { flexGrow: 1 },
-  close: {
-    display: "flex",
-    width: 24,
-    height: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 0,
-    borderRadius: 6,
-    cursor: "pointer",
-    color: "var(--color-text-secondary)",
-    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
-  },
-  section: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-    paddingBlock: 12,
-    paddingInline: 16,
-    borderBottomWidth: 1,
-    borderBottomStyle: "solid",
-    borderBottomColor: "var(--color-border)",
-    fontSize: 13,
-  },
-  row: { display: "flex", alignItems: "center", gap: 8, minHeight: 22 },
-  rowName: { width: 84, flexShrink: 0, fontSize: 12, color: "var(--color-text-secondary)" },
-  rowValue: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  mono: { fontFamily: "var(--font-family-mono, monospace)", fontSize: 12 },
-  empty: { margin: 0, fontSize: 12, color: "var(--precision-text3)" },
-  link: { fontSize: 13, color: "var(--color-text-accent)", textDecoration: "none" },
-  links: { display: "flex", flexDirection: "column", gap: 6 },
 });
 
 /** Every second while something runs, so the timer moves. */
@@ -332,102 +265,5 @@ export function ProgressCard({ p }: { p: TicketProgress }) {
         </div>
       ) : null}
     </section>
-  );
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section aria-label={title} {...stylex.props(styles.section)}>
-      <p {...stylex.props(styles.label)}>{title}</p>
-      {children}
-    </section>
-  );
-}
-
-function Row({ name, children }: { name: string; children: ReactNode }) {
-  return (
-    <div {...stylex.props(styles.row)}>
-      <span {...stylex.props(styles.rowName)}>{name}</span>
-      <span {...stylex.props(styles.rowValue)}>{children}</span>
-    </div>
-  );
-}
-
-export const OVERVIEW_KEY = "chat.ticket-overview.open";
-
-/** Beside a ticket's full chat: the ticket at a glance, with links to its tasks. */
-export function OverviewPanel({ p, onClose }: { p: TicketProgress; onClose: () => void }) {
-  const detail = useTicket(p.ticketId);
-  const { user } = useLinkState();
-  const t = detail.data?.ticket;
-  if (!t) return null;
-  const branch = branchOf(t);
-  const all = openTasks(p.tasks, p.rootId);
-  const ended = p.tasks.filter((x) => x.id !== p.rootId && !all.some((r) => r.task.id === x.id));
-  const asks = p.tasks.reduce((n, x) => n + x.pending_approvals, 0);
-  const model = [t.run.model, t.run.effort].filter(Boolean).join(" · ");
-  return (
-    <aside aria-label="Ticket overview" {...stylex.props(styles.panel)}>
-      <div {...stylex.props(styles.panelTop)}>
-        <span {...stylex.props(styles.panelTitle)}>Overview</span>
-        <button type="button" aria-label="Close overview" onClick={onClose} {...stylex.props(styles.close)}>
-          <Icon name="back" size={14} />
-        </button>
-      </div>
-      <Section title="Status">
-        <Row name="Column">
-          <span {...stylex.props(styles.row)}>
-            <ColumnGlyph kind={t.column} />
-            {t.column.replace("_", " ")}
-          </span>
-        </Row>
-        <Row name="Now">{p.now ?? p.stateLine ?? "Nothing runs"}</Row>
-        {t.owner_name ? <Row name="Owner">{t.owner_name}</Row> : null}
-        {t.responsible_username ? (
-          <Row name="Responsible">{t.responsible_user_id === user?.id ? "You" : t.responsible_username}</Row>
-        ) : null}
-        {asks > 0 ? <Row name="Waits on you">{asks === 1 ? "1 approval" : `${asks} approvals`}</Row> : null}
-      </Section>
-      <Section title={p.todos ? `Todo list · ${todoTally(p.todos)}` : "Todo list"}>
-        {p.todos ? <TodoList todos={p.todos} /> : <p {...stylex.props(styles.empty)}>No todo list yet.</p>}
-      </Section>
-      <Section title={p.tally ? `Tasks · ${p.tally}` : "Tasks"}>
-        {all.length === 0 && ended.length === 0 ? <p {...stylex.props(styles.empty)}>No delegated tasks.</p> : null}
-        {all.length > 0 ? <TaskLinks rows={all} /> : null}
-        {ended.length > 0 ? <TaskLinks rows={ended.map((task) => ({ task, depth: 0 }))} /> : null}
-      </Section>
-      <Section title="Work">
-        <Row name="Project">{t.project_name}</Row>
-        {branch ? (
-          <Row name="Branch">
-            <span {...stylex.props(styles.mono)}>{branch}</span>
-          </Row>
-        ) : null}
-        {t.merge_commit ? (
-          <Row name="Merged">
-            <span {...stylex.props(styles.mono)}>{t.merge_commit.slice(0, 8)}</span>
-          </Row>
-        ) : null}
-        {model ? <Row name="Model">{model}</Row> : null}
-        <Row name="Runs on">{t.login_user === user?.id ? "Your Claude login" : `${t.login_username}'s login`}</Row>
-      </Section>
-      {t.attachments.length > 0 ? (
-        <Section title="Files">
-          <FileChips files={t.attachments} />
-        </Section>
-      ) : null}
-      <Section title="Links">
-        <div {...stylex.props(styles.links)}>
-          <Link {...ticketPlace(t)} {...stylex.props(styles.link)}>
-            Open ticket
-          </Link>
-          {p.rootId ? (
-            <Link to="/tasks/$taskId" params={{ taskId: p.rootId }} {...stylex.props(styles.link)}>
-              Main task and its run
-            </Link>
-          ) : null}
-        </div>
-      </Section>
-    </aside>
   );
 }

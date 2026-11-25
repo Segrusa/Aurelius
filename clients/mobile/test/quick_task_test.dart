@@ -8,8 +8,6 @@ import 'package:aurelius_mobile/features/board/board_bloc.dart';
 import 'package:aurelius_mobile/features/board/board_page.dart';
 import 'package:aurelius_mobile/features/board/ticket_page.dart';
 import 'package:aurelius_mobile/features/board/new_ticket_page.dart';
-import 'package:aurelius_mobile/features/dashboard/dashboard_page.dart' show GiveWorkBox;
-import 'package:aurelius_mobile/features/dashboard/give_work.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -55,18 +53,6 @@ void main() {
       expect(params['description'], 'Fix the typo\nin the footer');
       expect(params['title'], '');
       expect(params.containsKey('start'), isFalse);
-    });
-
-    test('Give work sends kind only for a quick task', () {
-      final ticket = paramsOf(givenWorkTicket('p1', 'Write the notes', 'forge'));
-      expect(ticket.containsKey('kind'), isFalse);
-      expect(ticket['title'], 'Write the notes');
-      expect(ticket['start'], isTrue);
-      final quick = paramsOf(givenWorkTicket('p1', 'Fix the typo', 'forge', quick: true));
-      expect(quick['kind'], 'quick');
-      expect(quick['description'], 'Fix the typo');
-      expect(quick['title'], '');
-      expect(quick.containsKey('start'), isFalse);
     });
   });
 
@@ -134,7 +120,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('new-owner-forge')));
       await settleBoard(tester);
       await tapKey(tester, 'new-ticket-create');
-      expect(router.state.uri.toString(), '/ticket/k53?tab=discussion');
+      expect(router.state.uri.toString(), '/ticket/k53');
     });
 
     testWidgets('the employee last given a quick task is filled in', (tester) async {
@@ -166,61 +152,8 @@ void main() {
     });
   });
 
-  group('Give work on Home', () {
-    Future<MockRepository> open(WidgetTester tester, {LinkState link = quickLink}) async {
-      final repo = boardRepository(link: link);
-      when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
-          .thenAnswer((_) async => receiptOf(const CommandResultTicketCreated(number: 54, ticketId: 'k54')));
-      await pumpBoardPage(tester, repo, Scaffold(body: GiveWorkBox(state: companyWith())), link: link);
-      return repo;
-    }
-
-    testWidgets('the ticket it makes opens on its discussion right away (ticket #58)', (tester) async {
-      final repo = boardRepository(link: quickLink);
-      when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
-          .thenAnswer((_) async => receiptOf(const CommandResultTicketCreated(number: 54, ticketId: 'k54')));
-      final router = await pumpBoardPage(tester, repo, Scaffold(body: GiveWorkBox(state: companyWith())), link: quickLink);
-      await tester.enterText(find.byKey(const ValueKey('give-work-title')), 'Fix the typo');
-      await tester.pump();
-      await tapKey(tester, 'give-work-lead');
-      await tester.tap(find.byKey(const ValueKey('give-lead-forge')));
-      await settleBoard(tester);
-      await tapKey(tester, 'give-work-send');
-      expect(router.state.uri.toString(), '/ticket/k54?tab=discussion');
-    });
-
-    testWidgets('without the feature there is no Quick task chip', (tester) async {
-      await open(tester, link: onlineLink);
-      expect(find.byKey(const ValueKey('give-work-quick')), findsNothing);
-    });
-
-    testWidgets('a quick task waits for an employee, then sends kind quick with the text as description', (tester) async {
-      final repo = await open(tester);
-      await tapKey(tester, 'give-work-quick');
-      await tester.enterText(find.byKey(const ValueKey('give-work-title')), 'Fix the typo');
-      await tester.pump();
-      expect(tester.widget<FilledButton>(find.byKey(const ValueKey('give-work-send'))).onPressed, isNull);
-      await tapKey(tester, 'give-work-lead');
-      await tester.tap(find.byKey(const ValueKey('give-lead-forge')));
-      await settleBoard(tester);
-      await tapKey(tester, 'give-work-send');
-      final params = paramsOf(writesOf(repo).single);
-      expect(params['kind'], 'quick');
-      expect(params['description'], 'Fix the typo');
-      expect(params['owner_employee_id'], 'forge');
-      expect(LastQuickEmployee.employee, 'forge');
-    });
-
-    testWidgets('the employee last given a quick task is chosen again', (tester) async {
-      SharedPreferences.setMockInitialValues({'quick.last.h': 'forge'});
-      await open(tester);
-      await tapKey(tester, 'give-work-quick');
-      expect(find.descendant(of: find.byKey(const ValueKey('give-work-lead')), matching: find.text('Forge')), findsOneWidget);
-    });
-  });
-
   group('the label and the filter (ST-07)', () {
-    Widget board(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage());
+    Widget board(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage()));
 
     MockRepository repoWith(List<TicketView> tickets, {LinkState link = quickLink}) {
       final repo = boardRepository(board: boardOf(tickets), link: link);
@@ -323,7 +256,7 @@ void main() {
 
     testWidgets('after Done the card shows the short merge commit', (tester) async {
       final repo = boardRepository(board: boardOf([quickIn(ColumnKind.done, mergeCommit: '1a2b3c4d5e6f7a8b9c0d', doneAtMs: 0)]), link: quickLink);
-      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage()), link: quickLink);
+      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage())), link: quickLink);
       await tapKey(tester, 'board-chip-done');
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('card-done-q1')), findsOneWidget);

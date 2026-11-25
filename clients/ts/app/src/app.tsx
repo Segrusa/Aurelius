@@ -38,17 +38,14 @@ import { Gate } from "./screens/gate";
 import { GuidelineEditor, GuidelinesScreen } from "./screens/guidelines";
 import { HistoryScreen } from "./screens/history";
 import { historyFilters } from "./screens/history-logic";
-import { IdeasBody } from "./screens/ideas";
 import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
 import { NewSessionScreen } from "./screens/new-session";
 import { OverviewScreen } from "./screens/overview";
 import { ProjectPage, ProjectsScreen, projectTabShown } from "./screens/projects";
-import { ScheduledScreen } from "./screens/scheduled";
 import { SessionScreen } from "./screens/session";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
-import { TasksScreen } from "./screens/tasks";
 import { TicketRedirect, TicketSessionScreen } from "./screens/ticket-session";
 import { UsageScreen } from "./screens/usage";
 import { VaultScreen } from "./screens/vault";
@@ -82,29 +79,6 @@ function StartRedirect() {
   const { id, available } = useWorkspace();
   return <Navigate to={startPath(available, id)} replace />;
 }
-// The Inbox page is gone: an old link to it starts on New session too.
-const inbox = createRoute({
-  getParentRoute: () => root,
-  path: "/inbox",
-  beforeLoad: () => {
-    throw redirect({ to: "/new" });
-  },
-});
-// The Team chat and the chat with an employee are gone: their old links start on New session.
-const formerChat = createRoute({
-  getParentRoute: () => root,
-  path: "/chat",
-  beforeLoad: () => {
-    throw redirect({ to: "/new" });
-  },
-});
-const formerTalk = createRoute({
-  getParentRoute: () => root,
-  path: "/talk/$conversationId",
-  beforeLoad: () => {
-    throw redirect({ to: "/new" });
-  },
-});
 const newSession = createRoute({ getParentRoute: () => root, path: "/new", component: NewSessionScreen });
 // The workspace's Overview (ticket #82); a workspace tile in the rail opens it.
 const overview = createRoute({ getParentRoute: () => root, path: "/overview", component: OverviewScreen });
@@ -144,7 +118,14 @@ const designSearch = (search: Record<string, unknown>): { design?: string; plan?
   ...(typeof search.plan === "string" ? { plan: search.plan } : {}),
 });
 
-const tasks = createRoute({ getParentRoute: () => root, path: "/tasks", component: () => <TasksScreen /> });
+// The Tasks list is gone (OPR-4); an old link opens New session. A task's run stays at /tasks/$taskId.
+const tasks = createRoute({
+  getParentRoute: () => root,
+  path: "/tasks",
+  beforeLoad: () => {
+    throw redirect({ to: "/new" });
+  },
+});
 const taskRun = createRoute({
   getParentRoute: () => root,
   path: "/tasks/$taskId",
@@ -228,9 +209,16 @@ const knowledge = createRoute({
     if (tab === "memory") {
       return <MemoryBody key={workspace.id ?? start ?? ""} projectId={workspace.id} start={start ?? null} />;
     }
-    if (tab === "ideas" && !hidden("Ideas")) return <IdeasBody projectId={null} />;
     if (tab === "vault" && !hidden("Vault")) return <VaultScreen />;
     return <GuidelinesScreen />;
+  },
+});
+// Ideas are gone (OPR-4); an old link opens Guidelines, the first Knowledge tab.
+const ideas = createRoute({
+  getParentRoute: () => root,
+  path: "/knowledge/ideas",
+  beforeLoad: () => {
+    throw redirect({ to: "/knowledge/$tab", params: { tab: "guidelines" } });
   },
 });
 const guideline = createRoute({
@@ -245,7 +233,7 @@ const guideline = createRoute({
   },
 });
 const projectsList = createRoute({ getParentRoute: () => root, path: "/projects", component: ProjectsScreen });
-const PROJECT_TABS = ["overview", "board", "tasks", "ideas", "vault"] as const;
+const PROJECT_TABS = ["overview", "board", "tasks", "vault"] as const;
 const project = createRoute({
   getParentRoute: () => root,
   path: "/projects/$id",
@@ -277,7 +265,14 @@ const history = createRoute({
 // The Code tab of the current workspace (ticket #77); the screen says so when the server lacks it.
 const code = createRoute({ getParentRoute: () => root, path: "/code", component: CodeScreen });
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
-const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
+// Scheduled is gone (OPR-4); an old link opens New session.
+const scheduled = createRoute({
+  getParentRoute: () => root,
+  path: "/scheduled",
+  beforeLoad: () => {
+    throw redirect({ to: "/new" });
+  },
+});
 // The workspace's designs; the screen says so when the server lacks them.
 const designs = createRoute({ getParentRoute: () => root, path: "/designs", component: DesignsScreen });
 // The log lives in Settings now; an old link keeps what it narrowed on.
@@ -318,11 +313,8 @@ function ScreenFailed({ reset }: { reset: () => void }) {
 const router = createRouter({
   routeTree: root.addChildren([
     index,
-    formerChat,
-    formerTalk,
     newSession,
     overview,
-    inbox,
     board,
     myTickets,
     history,
@@ -341,6 +333,7 @@ const router = createRouter({
     employee,
     employees,
     knowledgeIndex,
+    ideas,
     guideline,
     knowledge,
     projectsList,

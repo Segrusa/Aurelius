@@ -154,7 +154,7 @@ void main() {
         refreshListenable: step,
         redirect: (_, state) => boardMemberRedirect(step.value, state.matchedLocation),
         routes: [
-          GoRoute(path: '/chat', builder: (_, _) => const TicketPage(ticketId: 'k1', discussion: true)),
+          GoRoute(path: '/chat', builder: (_, _) => const TicketPage(ticketId: 'k1')),
           GoRoute(path: '/onboarding', builder: (_, _) => const Scaffold(body: Text('You were signed out on this device.'))),
         ],
       );
@@ -264,7 +264,7 @@ void main() {
   });
 
   group('the Board and the ticket page', () {
-    Widget boardPage(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage());
+    Widget boardPage(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage()));
 
     testWidgets('R3 m4: an expired own login says Reconnect Claude on the card', (tester) async {
       final repo = boardRepository(board: boardOf([ticketOf(column: ColumnKind.doing, needs: TicketNeed.login)]));

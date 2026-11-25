@@ -9,13 +9,12 @@ import type { EmployeeQueueItem, MemoryView, ThreadPlace } from "@aurelius/proto
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useConnection, useLinkState } from "../connection";
+import { useConnection } from "../connection";
 import { useKeyed } from "../data";
 import { toast } from "../ui/toast";
 import { firstInLine, queueState, queueWhat } from "./activity-logic";
 import { Entry, ReviseDialog } from "./memory";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Problem } from "./org-kit";
-import { ScratchpadSection } from "./scratchpad";
 import { when } from "./settings-kit";
 
 const styles = stylex.create({
@@ -45,7 +44,6 @@ function Item({ item, next }: { item: EmployeeQueueItem; next: boolean }) {
 
 export function EmployeeInboxTab({ employeeId, name, logs }: { employeeId: string; name: string; logs: boolean }) {
   const connection = useConnection();
-  const scheduled = useLinkState().features.includes("scheduled_messages");
   const queue = useKeyed(
     ["employees", "queue", employeeId],
     async () =>
@@ -82,7 +80,6 @@ export function EmployeeInboxTab({ employeeId, name, logs }: { employeeId: strin
         </Table>
       ) : null}
       {logs ? <Link href={`/settings/activity?employee=${employeeId}`}>What {name} did: the activity log</Link> : null}
-      {scheduled ? <Link href="/scheduled">Scheduled messages</Link> : null}
     </div>
   );
 }
@@ -115,7 +112,6 @@ export function EmployeeMemoryTab({ employeeId, name }: { employeeId: string; na
     );
   return (
     <div {...stylex.props(styles.column)}>
-      <ScratchpadSection employeeId={employeeId} />
       {memory.isPending ? <Loading rows={2} /> : null}
       {memory.error ? <Problem>{`The memory did not load: ${failureOf(memory.error)}`}</Problem> : null}
       {memory.data && items.length === 0 ? (

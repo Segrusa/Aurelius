@@ -1,3 +1,5 @@
+> **Historical:** the Team chat, #general and the project channels were removed in migration 0045; this document describes Fase 2 as designed before that.
+
 # User stories Fase 2: Ticketdiscussie en kanalen in de Team chat
 
 - **Task:** AUR-MU-DEF-N (Nova, voor Orion)

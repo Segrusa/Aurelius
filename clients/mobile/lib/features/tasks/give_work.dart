@@ -3,15 +3,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../core/widgets/widgets.dart';
 import '../../data/aurelius_repository.dart';
 import '../../data/discussion.dart';
-import '../../data/quick_task.dart';
-import '../../data/secret_write.dart';
-import '../../data/tickets.dart';
-import '../../data/views.dart';
-import '../board/ticket_actions.dart';
-import '../chat/secret_check.dart';
 import '../company/company_bloc.dart';
 
 /// The project and lead work was last given to, kept on this phone per host so
@@ -70,8 +63,8 @@ extension on String {
 
 /// Gives work from anywhere: the New ticket form, the last project and lead
 /// chosen preselected. A task only exists under a ticket.
-/// [title], [employeeId] and [projectId] fill the form (Home's Give work box);
-/// [quick] opens it as a quick task (ticket #53), whose text is the description.
+/// [title], [employeeId] and [projectId] fill the form; [quick] opens it as a
+/// quick task (ticket #53), whose text is the description.
 Future<void> giveWork(BuildContext context, {String? title, String? employeeId, String? projectId, bool quick = false}) async {
   final host = LastGiven.hostOf(context);
   if (host != null && (employeeId == null || projectId == null)) await LastGiven.load(host);
@@ -83,38 +76,4 @@ Future<void> giveWork(BuildContext context, {String? title, String? employeeId, 
       extra: quick
           ? TicketDraft(title: '', description: title ?? '', projectId: projectId ?? lastProject, ownerId: employeeId, quick: true)
           : TicketDraft(title: title ?? '', description: '', projectId: projectId ?? lastProject, ownerId: employeeId ?? lastLead));
-}
-
-/// The ticket of Home's Give work box: for [employeeId] (none: the dispatcher
-/// chooses), started at once. With [quick] a quick task (ticket #53): the text
-/// is its description, the server makes the title, and [employeeId] is required.
-Map<String, dynamic> givenWorkTicket(String projectId, String title, String? employeeId, {String? responsibleUserId, bool quick = false}) => quick && employeeId != null
-    ? quickTaskRequest(projectId: projectId, description: title, employeeId: employeeId, responsibleUserId: responsibleUserId)
-    : ticketCreate(projectId: projectId, title: title, ownerEmployeeId: employeeId, responsibleUserId: responsibleUserId, start: true);
-
-/// Make and open the ticket of Home's Give work box; false when it was not made
-/// (a notice, or the B10 dialog), so the caller can give the typed text back.
-Future<bool> sendGivenWork(BuildContext context, String projectId, String title, String? employeeId, {bool quick = false}) async {
-  final repository = context.read<AureliusRepository>();
-  final router = GoRouter.of(context);
-  final responsible = repository.linkState.has(ticketResponsibleFeature) ? repository.linkState.user?.id : null;
-  try {
-    final receipt = await writeConfirmingSecret(repository, givenWorkTicket(projectId, title, employeeId, responsibleUserId: responsible, quick: quick), sendAnywayDialog(context));
-    if (receipt == null || !context.mounted) return false;
-    if (LastGiven.hostOf(context) case final host?) {
-      if (quick && employeeId != null) {
-        LastQuickEmployee.remember(host, employeeId);
-      } else {
-        LastGiven.remember(host, projectId: projectId, employeeId: employeeId);
-      }
-    }
-    if (receipt.command case CommandResultTicketCreated(:final ticketId, :final number)) {
-      toast(context, quick ? 'Quick task #$number started.' : '#$number created and started.');
-      router.push(ticketChatPlace(ticketId));
-    }
-    return true;
-  } on Object catch (e) {
-    if (context.mounted) toast(context, ticketFailure(e));
-    return false;
-  }
 }

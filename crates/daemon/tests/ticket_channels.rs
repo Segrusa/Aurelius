@@ -316,3 +316,26 @@ async fn the_creator_the_owner_and_the_assignee_are_members_and_a_new_assignee_j
     drop((alex, grace));
     stop(dir.path(), daemon).await;
 }
+
+/// Without `ticket_channels` there is nothing left to list (the Team chat went in
+/// migration 0045): `channel.list` and `channel.search` always answer empty, also with
+/// open and started tickets. The desktop accepts `ticket_channels`, so it gets them (OPR-3).
+#[tokio::test(flavor = "multi_thread")]
+async fn channel_list_without_ticket_channels_is_always_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let atlas = project(&client, "Atlas").await;
+    let alex = employee(&client, "Alex").await;
+    ticket(&client, atlas, "Fix the login page", None, false).await;
+    ticket(&client, atlas, "Dark mode", Some(alex), true).await;
+    for accepts in [&[][..], OLD] {
+        let mut stream = raw(dir.path(), BOARD_MEMBER, accepts).await;
+        assert!(list(&mut stream, Method::ChannelList).await.is_empty(), "{accepts:?}");
+        assert!(list(&mut stream, Method::ChannelSearch { query: "#1".into() }).await.is_empty(), "{accepts:?}");
+    }
+    let mut new = raw(dir.path(), BOARD_MEMBER, NEW).await;
+    assert_eq!(list(&mut new, Method::ChannelList).await.len(), 2, "with ticket_channels both tickets are listed");
+    drop(client);
+    stop(dir.path(), daemon).await;
+}

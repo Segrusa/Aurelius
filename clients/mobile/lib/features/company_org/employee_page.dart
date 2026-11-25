@@ -18,7 +18,7 @@ import '../chat/chat_bloc.dart';
 import '../chat/chat_view.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_banner.dart';
-import '../dashboard/give_work.dart';
+import '../tasks/give_work.dart';
 import '../sessions/session_rules.dart' show workSessionsFeature;
 import 'employee_run_sheet.dart';
 import '../my_defaults/my_defaults_bloc.dart' show userRunDefaultsFeature;

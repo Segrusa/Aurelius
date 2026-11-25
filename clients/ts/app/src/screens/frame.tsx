@@ -58,12 +58,10 @@ const styles = stylex.create({
 const GO_TO: Record<string, string> = {
   GoDashboard: "/new",
   GoBoard: "/board",
-  GoTasks: "/tasks",
   GoEmployees: "/employees",
   OpenUsage: "/usage",
   GoOrgChart: "/employees/org",
   GoGuidelines: "/knowledge/guidelines",
-  GoIdeas: "/knowledge/ideas",
   GoVault: "/knowledge/vault",
   OpenSettings: "/settings",
   OpenBackups: "/settings/backups",
@@ -183,7 +181,7 @@ function useGlobalActions(): void {
   useFallbackAction("OpenMemory", () => void navigate({ to: "/knowledge/$tab", params: { tab: "memory" } }));
   useAction("OpenPalette", () => open("palette"));
   useAction("MakeTicket", () => open("ticket"));
-  // Pages with their own New (projects, memory, ideas…) answer it first; elsewhere it is a new session.
+  // Pages with their own New (projects, memory…) answer it first; elsewhere it is a new session.
   useFallbackAction("NewItem", openNewSession);
   useAction("NavBack", () => window.history.back());
   useAction("NavForward", () => window.history.forward());

@@ -1,7 +1,7 @@
 import type { ScheduledMessageView, ThreadWaiter } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import { areasOf } from "../data";
-import { outcomeText, scheduledLine, shownWaiters, splitScheduled, waiterLine } from "./scheduled-logic";
+import { scheduledLine, shownWaiters, waiterLine } from "./thread-waiting-logic";
 
 const waiter = (over: Partial<ThreadWaiter> = {}): ThreadWaiter => ({
   employee_id: "e1",
@@ -50,29 +50,8 @@ describe("the waiting line", () => {
   });
 });
 
-describe("the Scheduled page", () => {
-  it("keeps what waits apart from what came of it", () => {
-    const { waiting, past } = splitScheduled([
-      message({ id: "a" }),
-      message({ id: "b", state: "delivered" }),
-      message({ id: "c", state: "cancelled" }),
-    ]);
-    expect(waiting.map((m) => m.id)).toEqual(["a"]);
-    expect(past.map((m) => m.id)).toEqual(["b", "c"]);
-  });
-
-  it("says what came of a message, and shows a newer state as it is", () => {
-    expect(outcomeText(message({ state: "delivered" }))).toBe("Delivered");
-    expect(outcomeText(message({ state: "cancelled" }))).toBe("Taken back");
-    expect(outcomeText(message({ state: "not_delivered", outcome: "Bo is paused." }))).toBe(
-      "Not delivered: Bo is paused.",
-    );
-    expect(outcomeText(message({ state: "not_delivered" }))).toBe("Not delivered");
-    expect(outcomeText(message({ state: "newer" }))).toBe("newer");
-  });
-
-  it("refetches on what changes a schedule and on runs", () => {
-    expect(areasOf("recurring_task.changed")).toContain("scheduled");
+describe("the waiting line's data", () => {
+  it("refetches on runs", () => {
     expect(areasOf("run.queued")).toContain("scheduled");
   });
 });

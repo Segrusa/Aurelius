@@ -21,7 +21,7 @@ import { before, localDay, quickReplies, streamTo } from "./chat-logic";
 import { type ChatContext, ChatProvider, DayLine, FeedIdsProvider, LiveRow, MessageRow } from "./chat-message";
 import { usePlanDock } from "./plan-dock";
 import { approvalsFor } from "./run-card-logic";
-import { ThreadWaiting } from "./scheduled";
+import { ThreadWaiting } from "./thread-waiting";
 
 const styles = stylex.create({
   screen: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0, flexDirection: "column" },

@@ -7,7 +7,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { type ButtonHTMLAttributes, forwardRef, type ReactNode, useMemo, useState } from "react";
 import { useLinkState } from "../connection";
-import { useActivityOverview, useMachineLoad, useSubscription, useWorkSessions } from "../data";
+import { useActivityOverview, useChannels, useMachineLoad, useSubscription, useWorkSessions } from "../data";
 import { Icon } from "../ui/icons";
 import {
   activityCounts,
@@ -17,6 +17,7 @@ import {
   waitLabel,
   workHref,
   workLabel,
+  workPlaces,
 } from "./activity-bar-logic";
 import { Eyebrow } from "./org-kit";
 import { when } from "./settings-kit";
@@ -133,14 +134,15 @@ function WaitingRow({ row }: { row: ActivityWaiting }) {
 
 function Details({ overview, onOpen }: { overview: ActivityOverview; onOpen: (href: string) => void }) {
   const sessions = useWorkSessions().data;
-  const sessionIds = useMemo(() => new Set((sessions ?? []).map((s) => s.conversation_id)), [sessions]);
+  const channels = useChannels().data;
+  const places = useMemo(() => workPlaces(sessions ?? [], channels ?? []), [sessions, channels]);
   return (
     <div {...stylex.props(styles.panel)}>
       <section {...stylex.props(styles.section)}>
         <Eyebrow>BUSY</Eyebrow>
         {overview.busy.length === 0 ? <p {...stylex.props(styles.empty)}>Nobody is working right now.</p> : null}
         {overview.busy.map((row) => (
-          <Row key={rowKey(row)} href={workHref(row.work, sessionIds)} onOpen={onOpen}>
+          <Row key={rowKey(row)} href={workHref(row.work, places)} onOpen={onOpen}>
             <BusyRow row={row} />
           </Row>
         ))}
@@ -149,7 +151,7 @@ function Details({ overview, onOpen }: { overview: ActivityOverview; onOpen: (hr
         <Eyebrow>IN LINE</Eyebrow>
         {overview.waiting.length === 0 ? <p {...stylex.props(styles.empty)}>Nothing is waiting.</p> : null}
         {overview.waiting.map((row) => (
-          <Row key={rowKey(row)} href={workHref(row.work, sessionIds)} onOpen={onOpen}>
+          <Row key={rowKey(row)} href={workHref(row.work, places)} onOpen={onOpen}>
             <WaitingRow row={row} />
           </Row>
         ))}

@@ -64,9 +64,9 @@ void main() {
   });
 
   group('a row says', () {
-    test('the place as #42 and title, or # channel', () {
+    test('the place as #42 and title; a conversation row shows its subject without # (OPR-2)', () {
       expect(row('a').place, '#42 Login per board member');
-      expect(row('a', ticket: null, number: null, conversation: 'c1', subject: 'general').place, '# general');
+      expect(row('a', ticket: null, number: null, conversation: 'c1', subject: 'general').place, 'general');
     });
 
     test('the place does not repeat a number the server subject already has', () {
@@ -114,8 +114,8 @@ void main() {
       expect(inboxPlace(reason: 'failed', ticketId: 't'), '/ticket/t');
       expect(inboxPlace(reason: 'login', ticketId: 't'), '/ticket/t');
       expect(inboxPlace(reason: 'plan_review', ticketId: 't'), '/ticket/t/plan');
-      expect(inboxPlace(reason: 'sent_back', ticketId: 't'), '/ticket/t?tab=discussion');
-      expect(inboxPlace(reason: 'mention', ticketId: 't', messageId: 'm'), '/ticket/t?tab=discussion&message=m');
+      expect(inboxPlace(reason: 'sent_back', ticketId: 't'), '/ticket/t');
+      expect(inboxPlace(reason: 'mention', ticketId: 't', messageId: 'm'), '/ticket/t?message=m');
     });
 
     test('outside a ticket (chat is gone) it opens the Inbox, never a channel', () {
@@ -398,7 +398,8 @@ void main() {
 
     testWidgets('a channel row (chat is gone) opens the Inbox; its +n has no Activity to open', (tester) async {
       await show(tester, InboxState(loading: false, personalOn: true, notifications: [row('c', ticket: null, number: null, conversation: 'c7', subject: 'general', merged: 1)]));
-      expect(find.text('# general'), findsOneWidget);
+      expect(find.text('general'), findsOneWidget);
+      expect(find.text('# general'), findsNothing);
       await tester.tap(find.text('+1'));
       await tester.pumpAndSettle();
       expect(find.text('inbox'), findsOneWidget);
@@ -489,7 +490,7 @@ void main() {
   group('a push (iOS)', () {
     test('of a ticket opens it at its place; of a channel the Inbox', () {
       expect(pushPlace({'target_type': 'ticket.plan_review', 'reason': 'plan_review', 'ticket_id': 'k42', 'task_id': 't1', 'project_id': 'p', 'notification_id': 'n'}), '/ticket/k42/plan');
-      expect(pushPlace({'reason': 'mention', 'ticket_id': 'k42', 'message_id': 'm'}), '/ticket/k42?tab=discussion&message=m');
+      expect(pushPlace({'reason': 'mention', 'ticket_id': 'k42', 'message_id': 'm'}), '/ticket/k42?message=m');
       expect(pushPlace({'reason': 'mention', 'conversation_id': 'c7', 'message_id': 'm'}), '/inbox');
     });
 

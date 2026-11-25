@@ -152,7 +152,7 @@ void main() {
       when(() => repo.loadChanges).thenAnswer((_) => const Stream.empty());
       when(() => repo.load()).thenAnswer((_) async => loadOf());
       when(() => repo.boardMembers()).thenAnswer((_) async => const [testUser, _lena]);
-      await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id, discussion: true), link: link);
+      await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id), link: link);
     }
 
     TicketView discussed({ColumnKind column = ColumnKind.doing, int? archivedAtMs, TaskStatus? rootTaskStatus}) => TicketView.fromJson({
@@ -421,7 +421,7 @@ void main() {
       );
       await tester.tap(find.text('drop on Doing'));
       await settleBoard(tester);
-      expect(router.state.uri.toString(), '/ticket/k1?tab=discussion');
+      expect(router.state.uri.toString(), '/ticket/k1');
       expect(find.text('Send #1 back to Doing'), findsNothing);
       verifyNever(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')));
     });
@@ -429,7 +429,7 @@ void main() {
     testWidgets('an older server (no ticket conversation): head, gate and properties, and it says so (ticket #71)', (tester) async {
       final ticket = discussed(column: ColumnKind.review);
       repo = boardRepository(detail: TicketDetail(asOfSeq: 1, ticket: ticket, tasks: const []));
-      await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id, discussion: true));
+      await pumpBoardPage(tester, repo, TicketPage(ticketId: ticket.id));
       expect(find.text('This server has no ticket conversation.'), findsOneWidget);
       expect(find.byKey(const Key('composer-send')), findsNothing);
       expect(find.byKey(const ValueKey('chip-mode')), findsNothing, reason: 'no input, no run chips');

@@ -37,17 +37,12 @@ void main() {
     expect(s.run.choices['mode'], 'plan');
   });
 
-  test('writes carry files, run and recurrence', () {
+  test('a task write carries files and run', () {
     final create = Commands.createTask('p', 't', 'g', const [], files: ['/in/a'], run: {'effort': 'high'});
     expect(create['method'], 'task.create');
     expect(params(create)['files'], ['/in/a']);
     expect(params(create)['run'], {'effort': 'high'});
     expect(params(Commands.createTask('p', 't', 'g', const []))['files'], isEmpty);
-    final schedule = Commands.createTaskSchedule('p', 'm', 't', 'g', const [], const RecurrenceDaily(atMinute: 60), paused: true);
-    expect(schedule['method'], 'recurring_task.create');
-    expect(params(schedule)['recurrence'], {'kind': 'daily', 'at_minute': 60});
-    expect(params(schedule)['paused'], true);
-    expect(params(Commands.updateTaskSchedule('s', 'm', 't', 'g', const [], const RecurrenceDaily(atMinute: 60), removeFiles: ['x']))['remove_files'], ['x']);
   });
 
   test('a task has no repeat of its own any more', () {

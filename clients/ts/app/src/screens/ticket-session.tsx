@@ -597,7 +597,6 @@ export function TicketGate({
       <ReviewGate
         key={t.version}
         keyed
-        session
         t={t}
         report={detail.root_task?.result ?? null}
         ready={check.kind === "ready" && status === "online"}
@@ -607,18 +606,17 @@ export function TicketGate({
       <PlanGate
         key={t.version}
         keyed
-        session
         t={t}
         plan={root.isPending ? undefined : latestPlan(root.data?.messages ?? [])}
       />
     ) : t.archived_at_ms ? null : t.column === "done" && finish && !isQuick(t) ? (
       <>
         <FinishCard detail={detail} t={t} finish={finish} />
-        <StatusBox t={t} choosing={choosing} dispatcherLine={line} session />
+        <StatusBox t={t} choosing={choosing} dispatcherLine={line} />
       </>
     ) : (
       // Status in an open column; on Done only a summary to retry or a quick task's merge.
-      <StatusBox t={t} choosing={choosing} dispatcherLine={line} session />
+      <StatusBox t={t} choosing={choosing} dispatcherLine={line} />
     );
   if (!body) return null;
   return (
