@@ -89,6 +89,9 @@ async fn a_task_takes_files_a_multi_line_goal_and_its_own_model_and_effort() {
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let w = world(&client, dir.path()).await;
+    // The board member's own defaults: what a task without its own settings runs with.
+    let mine = aurelius_domain::user::UserRunDefaults { model: Some("fake-my-model".into()), effort: Some("high".into()), ..Default::default() };
+    client.set_user_run_defaults(mine).await.unwrap();
     let note = dir.path().join("notities.txt");
     std::fs::write(&note, "hallo").unwrap();
     let shot = dir.path().join("scherm.png");
@@ -120,13 +123,13 @@ async fn a_task_takes_files_a_multi_line_goal_and_its_own_model_and_effort() {
     assert!(brief.text.contains("Regel een\n\n  ingesprongen regel\r\nLaatste regel"), "{}", brief.text);
     assert!(brief.text.contains("notities.txt") && brief.text.contains("scherm.png") && brief.text.contains(".aurelius"), "{}", brief.text);
 
-    // The task's own model and effort win over the employee's; without them the employee's apply.
+    // The task's own model and effort win over the board member's; without them the board member's apply.
     let config = run_config(dir.path(), task_id);
     assert_eq!((config["model"].as_str(), config["effort"].as_str()), (Some("fake-task-model"), Some("low")));
     assert_eq!(config["model_origin"], "task Rapport");
     finished(&client, plain_id).await;
     let config = run_config(dir.path(), plain_id);
-    assert_eq!((config["model"].as_str(), config["effort"].as_str()), (Some("fake-employee-model"), Some("high")));
+    assert_eq!((config["model"].as_str(), config["effort"].as_str()), (Some("fake-my-model"), Some("high")));
 
     // Too many files, or one that is missing, is refused and nothing is made.
     let tasks_before = client.tasks(None).await.unwrap().tasks.len();
