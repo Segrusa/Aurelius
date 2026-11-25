@@ -444,6 +444,23 @@ pub fn is_older_employee_chat(conn: &Connection, conversation: ConversationId) -
     )?)
 }
 
+/// (title, project name, employee name) of a conversation, each none when it has none.
+pub type SideHeading = (Option<String>, Option<String>, Option<String>);
+
+/// What a side question says about the conversation it asks about. None for a
+/// conversation that does not exist or is archived.
+pub fn side_heading(conn: &Connection, conversation: ConversationId) -> Result<Option<SideHeading>, StorageError> {
+    Ok(conn
+        .query_row(
+            "SELECT c.title, p.name, e.name FROM conversations c
+             LEFT JOIN projects p ON p.id = c.project_id LEFT JOIN employees e ON e.id = c.employee_id
+             WHERE c.id = ?1 AND c.archived_at_ms IS NULL",
+            [conversation.to_string()],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?)
+}
+
 /// The employee and project of a conversation (each none when it has none).
 pub fn owner_of(conn: &Connection, conversation: ConversationId) -> Result<(Option<aurelius_domain::EmployeeId>, Option<aurelius_domain::ProjectId>), StorageError> {
     let row: Option<(Option<String>, Option<String>)> =

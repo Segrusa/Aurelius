@@ -13,6 +13,7 @@ mod bridge;
 mod host;
 pub mod limits;
 mod reads;
+mod side;
 pub mod sessions;
 mod sql;
 mod subscription;
@@ -224,6 +225,7 @@ pub(crate) fn oversized(message: &ServerMessage, err: &aurelius_host::frame::Fra
         ServerMessage::PowerChanged(_) => "power update",
         ServerMessage::ClaudeLoginPrompt(_) => "claude login prompt",
         ServerMessage::SignedOut { .. } => "sign-out",
+        ServerMessage::SideAnswer(_) => "side answer",
     };
     match message {
         ServerMessage::Response { request_id, .. } => {
@@ -266,6 +268,8 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
     // The tries of `user.login` on this connection, and its new board members (S5-3).
     let mut attempts = users::Attempts::default();
     let mut creates = users::Attempts::default();
+    // The side questions of this connection still answering (feature `side_question`).
+    let sides = side::Sides::default();
     loop {
         // An end of the session goes first: no request of an ended session is answered.
         let request = tokio::select! {
@@ -355,6 +359,12 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
             // The password is checked again and counted like a sign-in (E9).
             Call::Read(Method::VaultKeyExport(params)) => vault::key_export(&shared, &peer, &mut attempts, params).await,
             Call::Read(method @ (Method::VaultList { .. } | Method::VaultReveal { .. } | Method::VaultAudit { .. })) => vault::read(&shared, &peer, method).await,
+            // A side question is answered beside the requests: its text follows to this connection only.
+            Call::Read(Method::ConversationSideAsk(params)) => side::ask(&shared, &peer, &sides, params, out_tx.clone()).await,
+            Call::Read(Method::ConversationSideCancel { side_id }) => {
+                sides.cancel(&shared, &side_id);
+                Ok(ResponseBody::SideAsked(aurelius_protocol::SideAsked { side_id }))
+            }
             Call::Read(Method::EventSubscribe { after_seq }) => match subscription::subscribe(&shared, after_seq, accepts, out_tx.clone()).await {
                 Ok((body, task)) => {
                     if let Some(old) = forwarder.replace(task) {
@@ -400,6 +410,7 @@ pub async fn run(shared: Arc<Shared>, mut peer: Peer, mut requests: mpsc::Receiv
         "client connection ended"
     );
     shared.sessions.forget(peer.conn);
+    sides.cancel_all(&shared);
     // A sign-in to Claude of this connection ends with it (C13).
     shared.claude_links.cancel_conn(peer.conn);
     if let Some(task) = forwarder {

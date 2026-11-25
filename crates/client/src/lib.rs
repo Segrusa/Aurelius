@@ -112,6 +112,8 @@ pub enum SessionPush {
     ClaudeLoginPrompt(aurelius_protocol::ClaudeLoginPrompt),
     /// The session ended; the server closes the connection right after.
     SignedOut(aurelius_domain::user::SignOutReason),
+    /// The answer so far to a side question this connection asked (`conversation.side_ask`).
+    SideAnswer(aurelius_protocol::SideAnswer),
 }
 
 /// Where session pushes go (see `Client::session_pushes`).
@@ -333,6 +335,11 @@ impl Client {
                     ServerMessage::PowerChanged(state) => {
                         if let Some(tx) = power_route.lock().unwrap().as_ref() {
                             let _ = tx.send(state);
+                        }
+                    }
+                    ServerMessage::SideAnswer(answer) => {
+                        if let Some(tx) = session_route.lock().unwrap().as_ref() {
+                            let _ = tx.send(SessionPush::SideAnswer(answer));
                         }
                     }
                     ServerMessage::ClaudeLoginPrompt(prompt) => {

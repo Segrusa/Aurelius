@@ -36,7 +36,7 @@ async fn signed_out(client: &Client, pushes: &mut UnboundedReceiver<SessionPush>
     let reason = loop {
         match tokio::time::timeout(Duration::from_secs(5), pushes.recv()).await.expect("signed out at once").expect("pushes") {
             SessionPush::SignedOut(reason) => break reason,
-            SessionPush::ClaudeLoginPrompt(_) => {}
+            SessionPush::ClaudeLoginPrompt(_) | SessionPush::SideAnswer(_) => {}
         }
     };
     // The connection is closed: the next call fails at once.

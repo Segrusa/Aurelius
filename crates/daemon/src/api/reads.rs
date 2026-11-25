@@ -28,6 +28,8 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         | Method::VaultReveal { .. }
         | Method::VaultAudit { .. }
         | Method::VaultKeyExport(_)
+        | Method::ConversationSideAsk(_)
+        | Method::ConversationSideCancel { .. }
         | Method::UserWhoami => {
             Err(internal("a session method reached the reads"))
         }

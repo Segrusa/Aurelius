@@ -174,6 +174,19 @@ pub fn quick_of_conversation(conn: &Connection, conversation: aurelius_domain::C
     Ok(row.and_then(|(id, n)| Some((TicketId::parse(&id).ok()?, n as u32))))
 }
 
+/// The ticket whose discussion `conversation` is; none for every other conversation.
+pub fn of_discussion(conn: &Connection, conversation: aurelius_domain::ConversationId) -> Result<Option<TicketId>, StorageError> {
+    let id: Option<String> = conn.query_row("SELECT id FROM tickets WHERE conversation_id = ?1", [conversation.to_string()], |r| r.get(0)).optional()?;
+    Ok(id.and_then(|id| TicketId::parse(&id).ok()))
+}
+
+/// The conversations the tasks of a ticket work in, with each task's title, oldest task first.
+pub fn task_conversations(conn: &Connection, ticket: TicketId) -> Result<Vec<(aurelius_domain::ConversationId, String)>, StorageError> {
+    let mut stmt = conn.prepare("SELECT conversation_id, title FROM tasks WHERE ticket_id = ?1 AND conversation_id IS NOT NULL ORDER BY created_at_ms, id")?;
+    let rows = stmt.query_map([ticket.to_string()], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(rows.into_iter().filter_map(|(c, title)| Some((aurelius_domain::ConversationId::parse(&c).ok()?, title))).collect())
+}
+
 /// What a write needs to decide about a ticket.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TicketState {
