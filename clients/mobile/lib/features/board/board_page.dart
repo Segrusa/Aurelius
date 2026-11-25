@@ -64,12 +64,11 @@ class _BoardShownWatcherState extends State<BoardShownWatcher> {
 /// The Board (§4, MU1-05): on a phone one column at a time (chips and a
 /// swipe between them), from [boardWideWidth] all side by side with drag and
 /// drop. Moves without dragging: the card's button, a swipe, Move to….
+///
+/// It is a project's Board tab: the project page has the app bar (and its +
+/// is New ticket), and the project is fixed, so there is no project filter.
 class BoardPage extends StatefulWidget {
-  const BoardPage({super.key, this.inProject = false});
-
-  /// Shown as a project's Board tab: the project page has the app bar (and its
-  /// + is New ticket), and the project is fixed, so there is no project filter.
-  final bool inProject;
+  const BoardPage({super.key});
 
   @override
   State<BoardPage> createState() => _BoardPageState();
@@ -117,23 +116,6 @@ class _BoardPageState extends State<BoardPage> {
     if (index < 0) return;
     context.read<BoardBloc>().add(BoardColumnShown(kind));
     _pages?.animateToPage(index, duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
-  }
-
-  Future<void> _pickProject(BuildContext context, BoardState board, CompanyState company) async {
-    final picked = await showModalBottomSheet<(String?,)>(
-      context: context,
-      useRootNavigator: true,
-      showDragHandle: true,
-      builder: (sheet) => SafeArea(
-        child: ListView(shrinkWrap: true, children: [
-          Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 4), child: Eyebrow('Project')),
-          ListTile(key: const ValueKey('board-project-all'), title: const Text('All projects'), trailing: board.projectId == null ? Icon(Icons.check, color: Tokens.accentText) : null, onTap: () => Navigator.pop(sheet, (null,))),
-          for (final p in company.visibleProjects)
-            ListTile(key: ValueKey('board-project-${p.id}'), title: Text(p.name), trailing: board.projectId == p.id ? Icon(Icons.check, color: Tokens.accentText) : null, onTap: () => Navigator.pop(sheet, (p.id,))),
-        ]),
-      ),
-    );
-    if (picked != null && context.mounted) context.read<BoardBloc>().add(BoardProjectChosen(picked.$1));
   }
 
   Future<void> _pickOwner(BuildContext context, BoardState board, CompanyState company) async {
@@ -278,7 +260,6 @@ class _BoardPageState extends State<BoardPage> {
     final columns = !responsibleOn || !board.needsMeOnly ? board.columns : [for (final c in board.columns) BoardColumnCards(column: c.column, tickets: [for (final t in c.tickets) if (needsMeOf(t, company, board, me: _me)) t])];
     final tickets = [for (final c in columns) ...c.tickets];
     final needYou = tickets.where((t) => needsMeOf(t, company, board, me: _me)).length;
-    final project = company.project(board.projectId ?? '');
     final owner = board.owner == null ? null : board.owner == BoardState.noOwner ? 'No owner yet' : company.employee(board.owner!)?.name;
     final creator = _creatorName(board);
     final responsible = responsibleOn ? _responsibleName(board) : null;
@@ -292,19 +273,17 @@ class _BoardPageState extends State<BoardPage> {
               detail: board.error,
               action: OutlinedButton(key: const ValueKey('board-retry'), onPressed: () => context.read<BoardBloc>().add(const BoardRefreshed()), child: const Text('Try again')),
             );
-    } else if (!company.loading && company.visibleProjects.isEmpty) {
-      content = EmptyState('Create a project first; work is done in a project.', action: FilledButton(onPressed: () => context.push('/projects'), child: const Text('New project')));
     } else if (board.board == null) {
       content = const _Skeleton();
     } else {
-      final filteredEmpty = tickets.isEmpty && ((board.projectId != null && !widget.inProject) || board.owner != null || board.createdBy != null || responsible != null || (responsibleOn && board.needsMeOnly) || (quickOn && board.quickOnly));
+      final filteredEmpty = tickets.isEmpty && (board.owner != null || board.createdBy != null || responsible != null || (responsibleOn && board.needsMeOnly) || (quickOn && board.quickOnly));
       final body = wide ? _wide(context, board, company, columns, online) : _phone(context, board, company, columns, online);
       content = Column(children: [
         if (filteredEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
             child: Row(children: [
-              Expanded(child: Text(responsible != null && responsible != 'No one' && responsible != 'Me' ? 'No tickets for $responsible.' : quickOn && board.quickOnly ? 'No quick tasks.' : 'No tickets in ${(widget.inProject ? null : project?.name) ?? owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
+              Expanded(child: Text(responsible != null && responsible != 'No one' && responsible != 'Me' ? 'No tickets for $responsible.' : quickOn && board.quickOnly ? 'No quick tasks.' : 'No tickets in ${owner ?? (creator == null ? null : 'Created by: $creator') ?? 'this filter'}.', style: TextStyle(color: Tokens.label2))),
               TextButton(
                 onPressed: () {
                   final bloc = context.read<BoardBloc>();
@@ -313,7 +292,6 @@ class _BoardPageState extends State<BoardPage> {
                   bloc.add(const BoardResponsibleChosen(null));
                   bloc.add(const BoardNeedsMeOnly(false));
                   bloc.add(const BoardQuickOnly(false));
-                  if (!widget.inProject) bloc.add(const BoardProjectChosen(null));
                 },
                 child: const Text('Clear filter'),
               ),
@@ -342,7 +320,6 @@ class _BoardPageState extends State<BoardPage> {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(children: [
-              if (!widget.inProject) _FilterPill(key: const ValueKey('board-filter-project'), label: project?.name ?? 'All projects', active: project != null, onTap: () => _pickProject(context, board, company)),
               if (responsibleOn)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
@@ -381,19 +358,7 @@ class _BoardPageState extends State<BoardPage> {
         const SingleActivator(LogicalKeyboardKey.keyN, meta: true): () => _newTicket(context, board),
         const SingleActivator(LogicalKeyboardKey.keyN, control: true): () => _newTicket(context, board),
       },
-      child: widget.inProject
-          ? page
-          : Scaffold(
-              appBar: GlassAppBar(
-                title: const Text('Board'),
-                actions: [
-                  GlassButton(tooltip: 'Board settings', icon: CupertinoIcons.slider_horizontal_3, onPressed: () => context.push('/settings/board')),
-                  const SizedBox(width: 8),
-                  GlassButton(tooltip: 'New ticket', icon: CupertinoIcons.add, onPressed: () => _newTicket(context, board)),
-                ],
-              ),
-              body: page,
-            ),
+      child: page,
     );
   }
 

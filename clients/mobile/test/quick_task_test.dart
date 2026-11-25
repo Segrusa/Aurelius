@@ -153,7 +153,7 @@ void main() {
   });
 
   group('the label and the filter (ST-07)', () {
-    Widget board(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage());
+    Widget board(MockRepository repo) => BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage()));
 
     MockRepository repoWith(List<TicketView> tickets, {LinkState link = quickLink}) {
       final repo = boardRepository(board: boardOf(tickets), link: link);
@@ -256,7 +256,7 @@ void main() {
 
     testWidgets('after Done the card shows the short merge commit', (tester) async {
       final repo = boardRepository(board: boardOf([quickIn(ColumnKind.done, mergeCommit: '1a2b3c4d5e6f7a8b9c0d', doneAtMs: 0)]), link: quickLink);
-      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage()), link: quickLink);
+      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage())), link: quickLink);
       await tapKey(tester, 'board-chip-done');
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('card-done-q1')), findsOneWidget);

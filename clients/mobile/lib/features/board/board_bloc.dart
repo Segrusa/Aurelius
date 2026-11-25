@@ -26,13 +26,6 @@ class BoardShown extends BoardEvent {
   final bool visible;
 }
 
-/// The project filter (B4); null: every project.
-class BoardProjectChosen extends BoardEvent {
-  const BoardProjectChosen(this.projectId);
-
-  final String? projectId;
-}
-
 /// The owner filter: null anyone, [BoardState.noOwner] tickets without one, else an employee.
 class BoardOwnerChosen extends BoardEvent {
   const BoardOwnerChosen(this.owner);
@@ -157,12 +150,12 @@ class BoardState extends Equatable {
 
   TicketView? ticket(String id) => tickets.where((t) => t.id == id).firstOrNull;
 
-  BoardState copyWith({bool? loading, BoardView? board, String? error, bool? unsupported, String? projectId, bool clearProject = false, String? owner, bool clearOwner = false, String? createdBy, bool clearCreatedBy = false, String? responsible, bool clearResponsible = false, bool? needsMeOnly, bool? quickOnly, ColumnKind? column, Set<String>? gaveUp, Set<String>? ownerUnknown}) => BoardState(
+  BoardState copyWith({bool? loading, BoardView? board, String? error, bool? unsupported, String? projectId, String? owner, bool clearOwner = false, String? createdBy, bool clearCreatedBy = false, String? responsible, bool clearResponsible = false, bool? needsMeOnly, bool? quickOnly, ColumnKind? column, Set<String>? gaveUp, Set<String>? ownerUnknown}) => BoardState(
         loading: loading ?? this.loading,
         board: board ?? this.board,
         error: error,
         unsupported: unsupported ?? this.unsupported,
-        projectId: clearProject ? null : projectId ?? this.projectId,
+        projectId: projectId ?? this.projectId,
         owner: clearOwner ? null : owner ?? this.owner,
         createdBy: clearCreatedBy ? null : createdBy ?? this.createdBy,
         responsible: clearResponsible ? null : responsible ?? this.responsible,
@@ -186,10 +179,6 @@ class BoardBloc extends Bloc<BoardEvent, BoardState> {
   /// one); main tasks of the cards are known here.
   BoardBloc(this._repository, {String? projectId, this.timeout = const Duration(seconds: 10), this.retryAfter = const Duration(seconds: 15), this.ticketTask}) : super(BoardState(projectId: projectId)) {
     on<BoardRefreshed>(_refresh, transformer: debounceRestartable());
-    on<BoardProjectChosen>((e, emit) {
-      emit(state.copyWith(projectId: e.projectId, clearProject: e.projectId == null, loading: true));
-      add(const BoardRefreshed());
-    });
     on<BoardOwnerChosen>((e, emit) => emit(state.copyWith(owner: e.owner, clearOwner: e.owner == null)));
     on<BoardCreatorChosen>((e, emit) => emit(state.copyWith(createdBy: e.userId, clearCreatedBy: e.userId == null)));
     on<BoardResponsibleChosen>((e, emit) => emit(state.copyWith(responsible: e.userId, clearResponsible: e.userId == null)));

@@ -161,7 +161,7 @@ void main() {
 
     testWidgets('the card\'s menu copies the link beside Copy #42; the toast says #42', (tester) async {
       final repo = linkedRepo(ticketOf(id: _ticket, number: 42, column: ColumnKind.doing));
-      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage()), link: phaseALink);
+      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage())), link: phaseALink);
       await openMenu(tester, _ticket);
       expect(find.byKey(const ValueKey('card-menu-item-Copy #42')), findsOneWidget);
       await tester.ensureVisible(find.byKey(const ValueKey('card-menu-item-Copy link')));
@@ -173,7 +173,7 @@ void main() {
 
     testWidgets('an older server\'s menu has no Copy link', (tester) async {
       final repo = linkedRepo(ticketOf(id: _ticket, number: 42, column: ColumnKind.doing), link: onlineLink);
-      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage()));
+      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage())));
       await openMenu(tester, _ticket);
       expect(find.byKey(const ValueKey('card-menu-item-Copy link')), findsNothing);
     });

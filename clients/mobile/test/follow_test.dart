@@ -177,7 +177,7 @@ void main() {
     Future<MockRepository> menu(WidgetTester tester, TicketView ticket, Future<TicketFollowersView> Function() followers, {LinkState link = phaseALink}) async {
       final repo = boardRepository(board: boardOf([ticket]), link: link);
       when(() => repo.followers(any())).thenAnswer((_) => followers());
-      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const BoardPage()), link: link);
+      await pumpBoardPage(tester, repo, BlocProvider(create: (_) => BoardBloc(repo), child: const Scaffold(body: BoardPage())), link: link);
       final gesture = await tester.startGesture(tester.getCenter(find.byKey(ValueKey('ticket-${ticket.id}'))));
       await tester.pump(kLongPressTimeout + const Duration(milliseconds: 50));
       await gesture.up();
