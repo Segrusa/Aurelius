@@ -86,9 +86,16 @@ export function withEarlier<T>(
   return { list: ordered.filter((item) => inToday.has(id(item)) || before.has(id(item))), hasEarlier: before.size > 0 };
 }
 
-/** What the Model and Effort chips of a session say: the chosen one, or the employee's own. */
-export function runChipLabel(value: string | null | undefined, labelOf: (v: string) => string = (v) => v): string {
-  return value ? labelOf(value) : "Employee's default";
+/**
+ * What the Model and Effort chips of a session say: the chosen one, else `fallback` ("Your default ·
+ * Opus 5.5"; on an old server the employee's own).
+ */
+export function runChipLabel(
+  value: string | null | undefined,
+  labelOf: (v: string) => string = (v) => v,
+  fallback = "Employee's default",
+): string {
+  return value ? labelOf(value) : fallback;
 }
 
 /**

@@ -35,8 +35,8 @@ import { useRetryAnswer } from "./run-tools";
 import { gateKeyAllowed } from "./ticket-session-logic";
 import { NoConnectionNote, ticketNumber, useNoConnection, useTicketNeeds, useTicketWrite } from "./tickets-kit";
 
+/** The modes of a ticket's run; no choice is "Your default" (on an old server "Owner's default"). */
 export const MODES: { key: string; label: string }[] = [
-  { key: "default", label: "Owner's default" },
   { key: "ask", label: "Ask" },
   { key: "accept_edits", label: "Accept edits" },
   { key: "auto", label: "Auto" },

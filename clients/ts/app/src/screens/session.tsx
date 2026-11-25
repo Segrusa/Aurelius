@@ -10,7 +10,7 @@ import type { AgentMode, MessagesSnapshot, WorkSessionView } from "@aurelius/pro
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { useConnection, useLinkState } from "../connection";
+import { useConnection } from "../connection";
 import { useEmployees, useMessages, useWorkSessions } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { Chip } from "../ui/chip";
@@ -20,7 +20,9 @@ import { designPages } from "./artifact-logic";
 import { EFFORTS } from "./dialog-logic";
 import { useModels } from "./dialogs";
 import { EmployeeChat } from "./employee-chat";
-import { MODE_LABELS, MODES } from "./employee-logic";
+import { effortName, MODE_LABELS, MODES } from "./employee-logic";
+import { RunMenu, useRunDefaults } from "./run-default";
+import type { RunLogin } from "./run-default-logic";
 import { lastRunOf, usageTotals } from "./run-logic";
 import {
   DesignPagesSection,
@@ -35,7 +37,6 @@ import {
 } from "./run-side";
 import { chooserText, runChange, runChipLabel, sessionFolder, sessionStatus } from "./session-logic";
 import { modelName } from "./settings-kit";
-import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 import { SideQuestionButton } from "./side-question";
 import { SubagentsAtWork } from "./subagents";
 import { filesWritten } from "./tasks-logic";
@@ -160,6 +161,8 @@ function SessionDetails({
   const run = feed.data?.run;
   const mode = feed.data?.agent_mode;
   const running = session?.running ?? false;
+  // A work session runs on its starter's login, and only they write in it: the reader's own default.
+  const defaults = useRunDefaults();
   return (
     <PropertiesPanel dock={dock} label="Session properties">
       <SideProperties usage={usage}>
@@ -174,8 +177,8 @@ function SessionDetails({
             </SideRow>
           </>
         ) : null}
-        <SideRow name="Model">{runChipLabel(run?.model, modelName)}</SideRow>
-        <SideRow name="Effort">{runChipLabel(run?.effort)}</SideRow>
+        <SideRow name="Model">{runChipLabel(run?.model, modelName, defaults?.model)}</SideRow>
+        <SideRow name="Effort">{runChipLabel(run?.effort, effortName, defaults?.effort)}</SideRow>
         {mode ? <SideRow name="Mode">{MODE_LABELS[mode]}</SideRow> : null}
         {session ? (
           <SideRow name="Started">
@@ -235,7 +238,16 @@ function Chooser({ session }: { session: WorkSessionView }) {
  * Model, effort and mode of the next run (a session's or a task's); a run under way keeps what it started with.
  * A design always works in Auto (the server refuses another mode), so it shows no Mode chip.
  */
-export function RunChips({ snapshot, design = false }: { snapshot: MessagesSnapshot; design?: boolean }) {
+export function RunChips({
+  snapshot,
+  design = false,
+  login = null,
+}: {
+  snapshot: MessagesSnapshot;
+  design?: boolean;
+  /** Whose login the work runs on (a ticket's task); none: the reader's own session. */
+  login?: RunLogin | null;
+}) {
   const connection = useConnection();
   const client = useQueryClient();
   const models = useModels();
@@ -249,40 +261,34 @@ export function RunChips({ snapshot, design = false }: { snapshot: MessagesSnaps
       toast(e instanceof Error ? e.message : "This did not work.");
     }
   };
-  const modelOf = (key: string) => models.find((m) => m.key === key)?.label ?? key;
-  // Where each board member keeps their own defaults, a run without a choice uses theirs.
-  const { features } = useLinkState();
-  const fallback = features.includes(USER_RUN_DEFAULTS_FEATURE) ? "Board member's default" : "Employee's default";
+  // Where each board member keeps their own defaults, a run without a choice uses the starter's.
+  const labels = useRunDefaults(login);
   const [modelOpen, setModelOpen] = useState(false);
   useAction("CycleModel", () => setModelOpen(true));
   return (
     <>
-      <Menu
+      <RunMenu
         label="Model"
+        quiet
         open={modelOpen}
         onOpenChange={setModelOpen}
-        value={run.model ?? "default"}
-        options={models.map((m) => (m.key === "default" ? { ...m, label: fallback } : m))}
+        value={run.model}
+        options={models}
+        fallback={labels?.model ?? "Employee's default"}
+        labels={labels}
         onPick={(model) =>
           void write(connection.write("conversation.set_run", runChange(id, run, { model }), { retry: false }))
         }
-        trigger={
-          <Chip name="Model" quiet>
-            {runChipLabel(run.model, modelOf)}
-          </Chip>
-        }
       />
-      <Menu
+      <RunMenu
         label="Effort"
-        value={run.effort ?? "default"}
-        options={EFFORTS.map((e) => ({ key: e, label: e === "default" ? fallback : e }))}
+        quiet
+        value={run.effort}
+        options={EFFORTS.map((e) => ({ key: e, label: effortName(e) }))}
+        fallback={labels?.effort ?? "Employee's default"}
+        labels={labels}
         onPick={(effort) =>
           void write(connection.write("conversation.set_run", runChange(id, run, { effort }), { retry: false }))
-        }
-        trigger={
-          <Chip name="Effort" quiet>
-            {runChipLabel(run.effort)}
-          </Chip>
         }
       />
       {design ? null : (

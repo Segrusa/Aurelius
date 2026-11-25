@@ -24,6 +24,7 @@ import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { cycle, EFFORTS, MODES, titleOfGoal } from "./dialog-logic";
 import { Held, useModels, useOpenCreated, useSend } from "./dialogs";
+import { effortName } from "./employee-logic";
 import {
   columnLabel,
   composerRows,
@@ -62,7 +63,7 @@ import {
 import { Empty, Loading, Page, PageHead } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { LAST_QUICK, quickEnabled } from "./quick-logic";
-import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
+import { RunMenu, useRunDefaults } from "./run-default";
 import { ticketPlace } from "./ticket-session-logic";
 import { NoConnectionNote, useNoConnection } from "./tickets-kit";
 
@@ -239,12 +240,9 @@ export function NewSessionScreen() {
     models.length > 1,
   );
   const run = { model, effort, mode };
-  // Without a choice: the board member's own default where the server keeps one (My defaults).
-  const defaultMode = features.includes(USER_RUN_DEFAULTS_FEATURE)
-    ? "My default"
-    : kind === "session"
-      ? "Employee's default"
-      : "Owner's default";
+  // Without a choice: the starter's own default (My defaults); an old server says whose it was.
+  const labels = useRunDefaults();
+  const defaultMode = kind === "session" ? "Employee's default" : "Owner's default";
 
   const shown = useMemo(() => shownProjects(projects.data ?? [], workspace.id), [projects.data, workspace.id]);
   const recent = parseRecent(storage.get(sessionKey("recent", hostId)));
@@ -506,42 +504,33 @@ export function NewSessionScreen() {
             }
             chips={
               <>
-                <Menu
+                <RunMenu
                   label="Model"
+                  quiet
                   value={model}
                   options={models}
+                  fallback={labels?.model ?? "Default"}
+                  labels={labels}
                   onPick={setModel}
-                  trigger={
-                    <Chip name="Model" quiet>
-                      {models.find((m) => m.key === model)?.label ?? "Default"}
-                    </Chip>
-                  }
                 />
-                <Menu
+                <RunMenu
                   label="Effort"
+                  quiet
                   value={effort}
-                  options={EFFORTS.map((e) => ({ key: e, label: e === "default" ? "Default" : e }))}
+                  options={EFFORTS.map((e) => ({ key: e, label: labels ? effortName(e) : e }))}
+                  fallback={labels?.effort ?? "Default"}
+                  labels={labels}
                   onPick={setEffort}
-                  trigger={
-                    <Chip name="Effort" quiet>
-                      {effort === "default" ? "Default" : effort}
-                    </Chip>
-                  }
                 />
                 {kind !== "quick" && !design ? (
-                  <Menu
+                  <RunMenu
                     label="Mode"
+                    quiet
                     value={mode}
-                    options={MODES.map((m) => ({
-                      key: m.key as string,
-                      label: m.key === "default" ? defaultMode : m.label,
-                    }))}
+                    options={MODES.map((m) => ({ key: m.key as string, label: m.label }))}
+                    fallback={labels?.mode ?? defaultMode}
+                    labels={labels}
                     onPick={setMode}
-                    trigger={
-                      <Chip name="Mode" quiet>
-                        {mode === "default" ? defaultMode : MODES.find((m) => m.key === mode)?.label}
-                      </Chip>
-                    }
                   />
                 ) : null}
               </>
