@@ -56,7 +56,6 @@ import {
   takeOverOffered,
   testingNote,
 } from "./board-logic";
-import { ARTIFACT_HINT, ARTIFACT_PLACEHOLDER, artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { Held, parseDeadline, parseLabels, useModels, useSend } from "./dialogs";
 import { ticketLink } from "./links-logic";
 import { FormDialog, Loading, Problem } from "./org-kit";
@@ -124,7 +123,6 @@ const styles = stylex.create({
     color: "inherit",
   },
   stack: { display: "flex", flexDirection: "column", gap: 8 },
-  designLink: { color: "var(--color-text-accent)", textDecoration: "none" },
   designChange: {
     cursor: "pointer",
     borderWidth: 0,
@@ -342,51 +340,6 @@ export function Editable({
         <Button label="Cancel" onClick={() => setDraft(null)} />
       </div>
     </div>
-  );
-}
-
-/** A ticket's design: only an Open link when it has one; "None" (click to edit) otherwise. */
-export function DesignRow({
-  url,
-  enabled,
-  onSave,
-}: {
-  url: string | null;
-  enabled: boolean;
-  onSave: (text: string) => Promise<boolean>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const field =
-    url && !editing ? (
-      <span {...stylex.props(styles.buttonsCentered)}>
-        <a href={url} target="_blank" rel="noreferrer" {...stylex.props(styles.designLink)}>
-          Open
-        </a>
-        {enabled ? (
-          <button type="button" onClick={() => setEditing(true)} {...stylex.props(styles.designChange)}>
-            Change
-          </button>
-        ) : null}
-      </span>
-    ) : (
-      <Editable
-        value={url ?? ""}
-        enabled={enabled}
-        opened={editing}
-        onClose={() => setEditing(false)}
-        label="Design"
-        placeholder={ARTIFACT_PLACEHOLDER}
-        display={<span {...stylex.props(styles.third)}>None</span>}
-        onSave={onSave}
-      />
-    );
-  return (
-    <Row name="Design">
-      <div {...stylex.props(styles.stack)}>
-        {field}
-        <span {...stylex.props(styles.thirdSmall)}>{ARTIFACT_HINT}</span>
-      </div>
-    </Row>
   );
 }
 
@@ -1452,20 +1405,6 @@ export function TicketPanel({ id, onClose }: { id: string; onClose: () => void }
                         }}
                       />
                     </Row>
-                    {features.includes(DESIGN_FEATURE) ? (
-                      <DesignRow
-                        url={t.design_url ?? null}
-                        enabled={open}
-                        onSave={async (text) => {
-                          const problem = artifactProblem(text);
-                          if (problem) {
-                            toast(problem);
-                            return false;
-                          }
-                          return update({ design_url: text.trim() });
-                        }}
-                      />
-                    ) : null}
                     {features.includes("ticket_responsible") ? (
                       <Row name="Responsible">
                         {t.responsible_username ?? <span {...stylex.props(styles.third)}>No one</span>}
