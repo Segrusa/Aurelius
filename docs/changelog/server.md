@@ -11,6 +11,7 @@ see [CHANGELOG.md](../../CHANGELOG.md).
 
 ## Unreleased
 
+- **Every employee can create a ticket** (ticket #87, no protocol change, no migration): `create_ticket` no longer requires management. Any employee's run makes a ticket in Backlog, wherever it runs: a work session, a ticket's discussion or a task (the project comes from that place, or the employee names it). The other rules stay: not in Plan mode, a board member's login must stand behind the run, and the new ticket starts nothing; starting it (`move_ticket` to Todo) is still for management or a board member.
 - **Updates on Linux and macOS** (ticket #78): the in-app update is only offered on Windows, the only platform with release packages. On Linux it used to copy the Windows programs (`aurelius-daemon.exe` and the others) beside the installed ones and restart the same old server, so nothing changed and the update came back. `update.get` now answers `enabled: false` there, with a `reason` that names the script to run. The new `scripts/update-linux.sh` updates the server and then the app in one go; `install-linux.sh` run again now closes and reopens a running app, restarts only its own server (without a signed-in board member) and records what it installed, so a later update knows. The scripts remove the Windows programs an earlier update left behind.
 
 ## v0.9.5
