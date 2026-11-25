@@ -132,11 +132,15 @@ TaskView? testTaskOf(List<TaskView> tasks, {required String? testerId}) {
   return (mode: !locked && !quick, model: !locked);
 }
 
-/// The Mode chip: the ticket's mode, "Default" when unset (the owner's own).
-String modeChipLabel(TaskRun run) => run.mode?.label ?? 'Default';
+/// The Mode chip: the ticket's mode, else [fallback] ("Your default · Ask";
+/// "Default" on an older server).
+String modeChipLabel(TaskRun run, [String fallback = 'Default']) => run.mode?.label ?? fallback;
 
-/// The Model chip: the friendly name, "Default" when unset.
-String modelChipLabel(TaskRun run) => run.model == null ? 'Default' : ModelCatalog.friendly(run.model!);
+/// The Model chip: the friendly name, else [fallback] ("Your default · Opus 5.5").
+String modelChipLabel(TaskRun run, [String fallback = 'Default']) => run.model == null ? fallback : ModelCatalog.friendly(run.model!);
+
+/// The Effort chip: the chosen level, else [fallback] ("Your default · High").
+String effortChipLabel(TaskRun run, String fallback) => run.effort == null ? fallback : ModelCatalog.effortLabel(run.effort);
 
 /// The models the Model chip offers: every connection's, once each, in order.
 List<String> modelChoices(List<List<String>> perConnection) {

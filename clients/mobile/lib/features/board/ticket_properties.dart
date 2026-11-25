@@ -14,12 +14,14 @@ import '../../data/views.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../markdown/links.dart';
+import '../my_defaults/run_default_chips.dart';
 import 'detail_row.dart';
 import 'ticket_actions.dart';
 import 'ticket_bloc.dart';
 import 'ticket_card.dart' show priorityColor;
 import 'ticket_gate.dart' show chooseTicketMode;
 import 'ticket_page.dart' show parseLabels, ticketFileRoom, ticketTextUpdate;
+import 'ticket_session_rules.dart' show effortChipLabel, modelChipLabel;
 import 'ticket_text_dialog.dart';
 
 // The sheet "Ticket properties" of a ticket's session (ticket #71, TS-05.3):
@@ -105,6 +107,8 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
     final root = page.root;
     final editable = online && ticket.column != ColumnKind.done;
     final running = root != null && (root.status == TaskStatus.running || root.hasLiveRun);
+    // The ticket runs on its login user's defaults; null on an older server (the old labels stay).
+    final runDefaults = watchRunDefaultLabels(context, loginId: ticket.loginUser, loginName: ticket.loginUsername);
     final tree = ticketTaskTree(page.detail!.tasks);
     final deadline = deadlineOf(ticket);
     final project = company.project(ticket.projectId);
@@ -140,7 +144,7 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
         DetailRow(
           key: const ValueKey('ticket-row-mode'),
           label: 'Mode',
-          value: switch ((ticket.run.mode, page.modeNow)) { (final from?, final now?) => '${from.label} → ${now.label}', (final from, _) => from?.label ?? 'Default' },
+          value: switch ((ticket.run.mode, page.modeNow)) { (final from?, final now?) => '${from.label} → ${now.label}', (final from, _) => from?.label ?? runDefaults?.mode ?? 'Default' },
           locked: running,
           onTap: !editable
               ? null
@@ -148,7 +152,8 @@ class _PropertiesSheetState extends State<_PropertiesSheet> {
                   ? () => toast(context, 'Locked while the main task runs.')
                   : () => chooseTicketMode(context, ticket),
         ),
-        DetailRow(label: 'Model', value: ticket.run.model ?? 'Default', locked: running),
+        DetailRow(key: const ValueKey('ticket-row-model'), label: 'Model', value: modelChipLabel(ticket.run, runDefaults?.model ?? 'Default'), locked: running),
+        if (runDefaults != null) DetailRow(key: const ValueKey('ticket-row-effort'), label: 'Effort', value: effortChipLabel(ticket.run, runDefaults.effort), locked: running),
         DetailRow(key: const ValueKey('ticket-row-labels'), label: 'Labels', value: ticket.labels.isEmpty ? 'None' : ticket.labels.join(', '), onTap: editable ? () => _editLabels(context, ticket) : null),
         DetailRow(key: const ValueKey('ticket-row-deadline'), label: 'Deadline', value: deadline?.text ?? 'None', color: deadline?.late ?? false ? Tokens.negative : null, onTap: editable ? () => _editDeadline(context, ticket) : null),
         DetailRow(key: const ValueKey('ticket-row-project'), label: 'Project', value: ticket.projectName, onTap: () => context.push('/project/${ticket.projectId}')),

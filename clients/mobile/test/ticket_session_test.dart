@@ -4,6 +4,7 @@ import 'package:aurelius_mobile/data/channels.dart';
 import 'package:aurelius_mobile/data/discussion.dart';
 import 'package:aurelius_mobile/data/views.dart';
 import 'package:aurelius_mobile/features/board/ticket_page.dart';
+import 'package:aurelius_mobile/features/runtime/runtime_bloc.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -64,13 +65,29 @@ TicketView _ticket({int number = 42, ColumnKind column = ColumnKind.doing, int? 
       'conversation_id': 'disc-1',
     });
 
+/// [_session] on a server where each board member keeps their own defaults.
+const _ownDefaults = LinkState(
+  status: LinkStatus.online,
+  capabilities: ['read', 'chat', 'task_control', 'approve'],
+  features: [ticketDiscussionFeature, ticketChannelsFeature, 'ticket_responsible', 'user_run_defaults', 'run_defaults_of'],
+  boardMembersExist: true,
+  user: testUser,
+  claudeLogin: testLogin,
+);
+
+/// My defaults: none chosen, so the connection's Opus at its own High.
+const _opusHigh = UserRunDefaultsView(defaults: UserRunDefaults(), model: 'claude-opus-5-5', modelDefaultEffort: 'high');
+
+/// bo's defaults: Sonnet, Low, Plan.
+const _sonnetLow = UserRunDefaultsView(defaults: UserRunDefaults(effort: 'low', mode: AgentMode.plan), model: 'claude-sonnet-5-5');
+
 void main() {
   setUpAll(() => registerFallbackValue(<String, dynamic>{}));
 
   late MockRepository repo;
 
   /// The session of [ticket] with [messages] in its conversation and [rootMessages] in its main task's.
-  Future<void> open(WidgetTester tester, TicketView ticket, {List<MessageView> messages = const [], TaskView? root, List<MessageView>? rootMessages, LinkState link = _session, Widget? page, List<TimelineCard> activity = const []}) async {
+  Future<void> open(WidgetTester tester, TicketView ticket, {List<MessageView> messages = const [], TaskView? root, List<MessageView>? rootMessages, LinkState link = _session, Widget? page, List<TimelineCard> activity = const [], RuntimeState runtime = const RuntimeState()}) async {
     final main = root ?? taskOf(id: 'root', status: TaskStatus.running, employeeId: 'forge', employeeName: 'Forge', conversationId: 'c-root');
     repo = boardRepository(detail: TicketDetail(asOfSeq: 1, ticket: ticket, rootTask: main, tasks: [main]), link: link, activity: activity);
     when(() => repo.messages(any())).thenAnswer((i) async => i.positionalArguments.first == 'c-root' ? snapshotOf('c-root', messages: rootMessages ?? const []) : snapshotOf('disc-1', messages: messages));
@@ -79,7 +96,7 @@ void main() {
     when(() => repo.loadChanges).thenAnswer((_) => const Stream.empty());
     when(() => repo.load()).thenAnswer((_) async => loadOf());
     when(() => repo.boardMembers()).thenAnswer((_) async => const [testUser, bo]);
-    await pumpBoardPage(tester, repo, page ?? TicketPage(ticketId: ticket.id), link: link);
+    await pumpBoardPage(tester, repo, page ?? TicketPage(ticketId: ticket.id), link: link, runtimeState: runtime);
   }
 
   Future<void> tapKey(WidgetTester tester, String key) async {
@@ -141,6 +158,38 @@ void main() {
       await settleBoard(tester);
       final model = verify(() => repo.write(captureAny(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: 3, retry: true)).captured.single as Map<String, dynamic>;
       expect(paramsOf(model)['run'], {'model': 'claude-opus-5-5'});
+    });
+
+    testWidgets('on a server with My defaults the chips say Your default with its value, and a choice only the value', (tester) async {
+      await open(tester, _ticket(rootTaskStatus: TaskStatus.queued, run: const TaskRun(effort: 'max')), link: _ownDefaults, runtime: const RuntimeState(loading: false, mine: _opusHigh));
+      expect(find.text('Mode · Your default · Ask'), findsOneWidget);
+      expect(find.text('Model · Your default · Opus 5.5'), findsOneWidget);
+      expect(find.text('Effort · Max'), findsOneWidget, reason: 'a choice for this ticket shows just the value');
+      expect(find.textContaining("Owner's default"), findsNothing);
+
+      // "Use your default" resets the choice; "Change my defaults" is the last row.
+      await tapKey(tester, 'chip-effort');
+      expect(find.text('Use your default'), findsOneWidget);
+      expect(find.byKey(const Key('change-my-defaults')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('effort-default')));
+      await settleBoard(tester);
+      final reset = verify(() => repo.write(captureAny(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: 3, retry: true)).captured.single as Map<String, dynamic>;
+      expect(paramsOf(reset)['run'], <String, dynamic>{});
+    });
+
+    testWidgets('on another board member\'s ticket the chips say their default, read once with run_defaults_of', (tester) async {
+      final ticket = TicketView.fromJson({..._ticket(rootTaskStatus: TaskStatus.queued).toJson(), 'login_user': bo.id, 'login_username': bo.username});
+      await open(tester, ticket, link: _ownDefaults, runtime: const RuntimeState(loading: false, mine: _opusHigh, others: {'u-2': _sonnetLow}));
+      expect(find.text("Model · bo's default · Sonnet 5.5"), findsOneWidget);
+      expect(find.text("Effort · bo's default · Low"), findsOneWidget);
+      expect(find.text("Mode · bo's default · Plan"), findsOneWidget);
+    });
+
+    testWidgets('an old server keeps its labels', (tester) async {
+      await open(tester, _ticket(rootTaskStatus: TaskStatus.queued));
+      expect(find.text('Mode · Default'), findsOneWidget);
+      expect(find.text('Model · Default'), findsOneWidget);
+      expect(find.byKey(const ValueKey('chip-effort')), findsNothing);
     });
 
     testWidgets('while the main task runs the run chips are hidden (runLocked)', (tester) async {

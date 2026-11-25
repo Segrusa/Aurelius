@@ -186,7 +186,7 @@ MockRepository boardRepository({BoardView? board, TicketDetail? detail, List<Tim
 
 /// [page] under a router that also knows the pages a ticket leads to (as text);
 /// [companyStates] are what the company bloc emits after [company].
-Future<GoRouter> pumpBoardPage(WidgetTester tester, MockRepository repo, Widget page, {CompanyState? company, Stream<CompanyState> companyStates = const Stream.empty(), MockCompanyBloc? companyBloc, LinkState link = onlineLink, Size size = const Size(390, 844)}) async {
+Future<GoRouter> pumpBoardPage(WidgetTester tester, MockRepository repo, Widget page, {CompanyState? company, Stream<CompanyState> companyStates = const Stream.empty(), MockCompanyBloc? companyBloc, LinkState link = onlineLink, Size size = const Size(390, 844), RuntimeState runtimeState = const RuntimeState()}) async {
   tester.view.physicalSize = size * 3;
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.reset);
@@ -198,7 +198,7 @@ Future<GoRouter> pumpBoardPage(WidgetTester tester, MockRepository repo, Widget 
   final inbox = MockInboxBloc();
   whenListen(inbox, const Stream<InboxState>.empty(), initialState: const InboxState(loading: false));
   final runtime = MockRuntimeBloc();
-  whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: const RuntimeState());
+  whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: runtimeState);
   final router = GoRouter(initialLocation: '/', routes: [
     GoRoute(path: '/', builder: (_, _) => page),
     GoRoute(path: '/ticket/:tid', builder: (_, s) => Scaffold(body: Text('ticket ${s.pathParameters['tid']}'))),
