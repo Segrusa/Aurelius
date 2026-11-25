@@ -206,7 +206,7 @@ test.describe("settings actions", () => {
       },
       "/projects",
     );
-    await page.getByRole("button", { name: "New project" }).first().click();
+    await page.getByRole("button", { name: "New workspace" }).first().click();
     await page.getByRole("button", { name: "Choose…" }).click();
     await expect(page.getByRole("button", { name: "Use this folder" })).toBeDisabled();
     await page.getByRole("button", { name: "home" }).click();

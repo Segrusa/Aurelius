@@ -40,9 +40,8 @@ test("employees, projects, guidelines, memory and the vault over a real daemon",
     await expect(page.getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
 
     // A project, opened on creation.
-    await openCompanyPage(page, "Guidelines");
-    await page.getByRole("link", { name: "Projects", exact: true }).click();
-    await page.getByRole("button", { name: "New project" }).first().click();
+    await openCompanyPage(page, "Workspaces");
+    await page.getByRole("button", { name: "New workspace" }).first().click();
     await page.getByPlaceholder("Name, for example Atlas").fill("Atlas");
     await page.getByLabel("Project folder (required)").fill(folder);
     await page.getByRole("button", { name: "Create project" }).click();
@@ -55,25 +54,24 @@ test("employees, projects, guidelines, memory and the vault over a real daemon",
     await page.getByPlaceholder(/Free-form role/).fill("Lead");
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Orion", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Edit", exact: true }).click();
-    await page.getByPlaceholder(/Optional, e.g./).fill("Head of things");
-    await page.getByLabel("Description").fill("Plans the work and reviews it.");
+    // Profile is edited in place; the save bar saves it.
+    await page.getByRole("tab", { name: "Profile" }).click();
+    await page.getByLabel("Title on the org chart").fill("Head of things");
+    await page.getByRole("textbox", { name: "Description" }).fill("Plans the work and reviews it.");
+    await expect(page.getByText("You changed the profile of Orion.")).toBeVisible();
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Head of things · Lead")).toBeVisible();
-    await page.getByRole("tab", { name: "Settings" }).click();
-    await expect(page.getByText("Plans the work and reviews it.")).toBeVisible();
+    await expect(page.getByText("You changed the profile of Orion.")).toBeHidden();
+    await expect(page.getByRole("textbox", { name: "Description" })).toHaveValue("Plans the work and reviews it.");
 
-    // A provider, model and effort of its own, and a level of access.
-    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    // A provider of its own and a level of access; model and effort are each board member's (My defaults).
+    await page.getByRole("tab", { name: "Access" }).click();
     await page.getByRole("combobox", { name: "Provider" }).click();
     await page.getByRole("option", { name: /^Inherit/ }).click();
-    await page.getByRole("radio", { name: "High", exact: true }).click();
-    await page.getByRole("radio", { name: "Read only" }).click();
+    await page.getByRole("button", { name: "Read only", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Read only", exact: true })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByText(/No edits, commands, web/)).toBeVisible();
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeHidden();
-    await expect(page.getByText("Read only", { exact: true })).toBeVisible();
-    await expect(page.getByText("High", { exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "My defaults ›" })).toBeVisible();
 
     await openCompanyPage(page, "Employees");
     await page.getByRole("button", { name: "Add employee" }).click();
@@ -86,7 +84,7 @@ test("employees, projects, guidelines, memory and the vault over a real daemon",
     await page.keyboard.press("Control+Enter");
     await expect(page.getByText("Designer · reports to Orion")).toBeVisible();
     await page.getByRole("link", { name: "Employees", exact: true }).first().click();
-    await page.getByRole("link", { name: "Org chart" }).click();
+    await page.getByRole("button", { name: "Org chart" }).click();
     await expect(page.getByRole("link", { name: /Pixel/ })).toBeVisible();
 
     // A start profile fills in the dialog; what the daemon stored comes back on the page.
@@ -98,7 +96,7 @@ test("employees, projects, guidelines, memory and the vault over a real daemon",
     await expect(page.getByLabel("Instructions")).toHaveValue(/You are QA/);
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Quinn", exact: true })).toBeVisible();
-    await page.getByRole("tab", { name: "Settings" }).click();
+    await page.getByRole("tab", { name: "Profile" }).click();
 
     // The profile says it was hired, and its name is not offered twice.
     await openCompanyPage(page, "Employees");
@@ -127,11 +125,11 @@ test("employees, projects, guidelines, memory and the vault over a real daemon",
     await expect(page.getByText("v2")).toBeVisible();
 
     // A memory, in the context of the project.
-    await page.getByRole("link", { name: "Memory" }).click();
-    await page.getByLabel("Remember for this project").fill("Publishing needs a review first");
+    await openCompanyPage(page, "Memory");
     await page.getByRole("button", { name: "Remember", exact: true }).click();
-    await expect(toast(page, /Saved to project memory/)).toBeVisible();
-    await page.getByRole("tab", { name: "In context" }).click();
+    await page.getByRole("dialog").getByLabel("Text").fill("Publishing needs a review first");
+    await page.getByRole("dialog").getByRole("button", { name: "Remember", exact: true }).click();
+    await expect(toast(page, /Remembered/)).toBeVisible();
     await expect(page.getByText("Publishing needs a review first").first()).toBeVisible();
 
     // A vault secret: never in the page until asked, hidden again on Hide, and it copies.
@@ -520,12 +518,12 @@ test.describe("scripted organisation", () => {
       },
       "/employees",
     );
-    await expect(page.getByRole("row", { name: /Orion/ }).getByText("Waiting for you")).toBeVisible();
-    await expect(page.getByRole("row", { name: /Pixel/ }).getByText("Available")).toBeVisible();
+    await expect(page.getByRole("group", { name: "Orion" }).getByText("Waiting for you")).toBeVisible();
+    await expect(page.getByRole("group", { name: "Pixel" }).getByText("Available")).toBeVisible();
 
     await page.getByRole("link", { name: "Orion", exact: true }).click();
     const tabs = page.getByRole("tablist", { name: "About Orion" });
-    await expect(tabs.getByRole("tab", { name: "Inbox" })).toHaveAttribute("aria-selected", "true");
+    await expect(tabs.getByRole("tab", { name: /^Work/ })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByRole("row", { name: /#21 Fix the login/ })).toContainText("Working on it");
     await expect(page.getByRole("row", { name: /#22 Write the docs/ })).toContainText("Message from a colleague");
     await expect(page.getByRole("row", { name: /#22 Write the docs/ })).toContainText("Next");
@@ -533,9 +531,9 @@ test.describe("scripted organisation", () => {
     await tabs.getByRole("tab", { name: "Memory" }).click();
     await expect(page.getByText("Orion has no memories of its own yet.", { exact: false })).toBeVisible();
 
-    await tabs.getByRole("tab", { name: "Settings" }).click();
-    await expect(page.getByText("sonnet", { exact: false }).first()).toBeVisible();
-    await expect(page).toHaveURL(/tab=settings/);
+    await tabs.getByRole("tab", { name: "Access" }).click();
+    await expect(page.getByRole("link", { name: "My defaults ›" })).toBeVisible();
+    await expect(page).toHaveURL(/tab=access/);
     await stop();
   });
 

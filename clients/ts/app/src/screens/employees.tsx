@@ -1,11 +1,13 @@
 import { Button } from "@astryxdesign/core/Button";
-import type { EmployeeSummary, TaskView } from "@aurelius/protocol";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { ProtocolError } from "@aurelius/client";
+import type { EmployeeSummary, ProposalView, TaskView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { type DragEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useEffectiveSets, useEmployees, useOpenTasks } from "../data";
+import { useEffectiveSets, useEmployees, useOpenTasks, useProposals } from "../data";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/marks";
@@ -26,12 +28,71 @@ import {
   togglePin,
   workOf,
 } from "./employee-logic";
-import { failureOf } from "./org-kit";
+import { lineDiff } from "./guideline-logic";
+import { Eyebrow, FormDialog, failureOf, Hint, Problem } from "./org-kit";
 import { FindField, Grow, Segments, SettingsPage, Status, type StatusTone, Toolbar } from "./settings-frame";
 
 const LINE = "var(--color-border-emphasized)";
 
 const styles = stylex.create({
+  proposal: {
+    display: "flex",
+    maxWidth: 720,
+    flexDirection: "column",
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--precision-acc-line)",
+    backgroundColor: "var(--color-background-surface)",
+    paddingInline: 18,
+    paddingBlock: 16,
+  },
+  proposalTitle: { margin: 0, fontSize: 15, fontWeight: 600 },
+  secondary: { margin: 0, lineHeight: 1.5, color: "var(--color-text-secondary)" },
+  clamp: {
+    display: "-webkit-box",
+    overflow: "hidden",
+    whiteSpace: "pre-wrap",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 4,
+  },
+  diff: {
+    margin: 0,
+    maxHeight: 240,
+    overflow: "auto",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    backgroundColor: "var(--precision-sunk)",
+    padding: 10,
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+    lineHeight: "17px",
+    whiteSpace: "pre-wrap",
+  },
+  added: { color: "var(--color-text-accent)" },
+  removed: { color: "var(--color-text-error)" },
+  same: { color: "var(--color-text-secondary)" },
+  warning: { margin: 0, color: "var(--color-text-warning)" },
+  buttons: { display: "flex", justifyContent: "flex-end", gap: 8 },
+  scroll: { minHeight: 0, flex: 1, overflow: "auto" },
+  note: { margin: 0, padding: 24, color: "var(--precision-text3)" },
+  table: { minWidth: 560 },
+  headCell: { fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
+  // A cell has max-width: 0 for truncating, which would close these columns.
+
+  // A cell has max-width: 0 for truncating, which would close these columns.
+  statusColumn: { width: 150, minWidth: 150, maxWidth: 150 },
+  guidelinesColumn: { width: 90, minWidth: 90, maxWidth: 90 },
+  groupCell: {
+    height: 30,
+    backgroundColor: "var(--precision-sunk)",
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--color-text-secondary)",
+  },
   card: {
     overflow: "hidden",
     borderWidth: 1,
@@ -201,6 +262,7 @@ const styles = stylex.create({
     whiteSpace: "nowrap",
     color: "var(--precision-text3)",
   },
+  proposals: { display: "flex", flexDirection: "column", alignItems: "stretch", gap: 12 },
   legend: {
     display: "flex",
     flexWrap: "wrap",
@@ -257,6 +319,136 @@ export function useStoredPins(key: string) {
 }
 
 export const pinKey = (server: string | null, what: string) => `${what}:${server ?? ""}`;
+
+function ProposalCard({ proposal, all }: { proposal: ProposalView; all: EmployeeSummary[] }) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(proposal.instructions);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const isInstructions = proposal.kind === "instructions";
+  const by = proposal.proposed_by_name ?? "An employee";
+  const target =
+    proposal.target_employee_name ?? all.find((e) => e.id === proposal.target_employee_id)?.name ?? "this employee";
+  const self = proposal.target_employee_id === proposal.proposed_by;
+  const stale =
+    isInstructions &&
+    proposal.base_version != null &&
+    proposal.current_version != null &&
+    proposal.current_version !== proposal.base_version;
+  const decide = async (approve: boolean, instructions?: string) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await connection.write(
+        "proposal.decide",
+        { proposal_id: proposal.id, approve, ...(instructions === undefined ? {} : { instructions }) },
+        { retry: false },
+      );
+      await client.invalidateQueries({ queryKey: ["proposals"] });
+      await client.invalidateQueries({ queryKey: ["employees"] });
+      setEditing(false);
+    } catch (e) {
+      setProblem(
+        e instanceof ProtocolError && e.code === "version_conflict"
+          ? "The instructions changed since this was proposed, so it can't be approved as it is. Decline it, or edit the instructions in Edit employee."
+          : failureOf(e),
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <article {...stylex.props(styles.proposal)}>
+      <Eyebrow>{isInstructions ? "INSTRUCTIONS PROPOSED" : "COLLEAGUE PROPOSED"} · WAITING FOR YOU</Eyebrow>
+      <h2 {...stylex.props(styles.proposalTitle)}>
+        {isInstructions
+          ? self
+            ? `${by} proposes new instructions for itself`
+            : `${by} proposes new instructions for ${target}`
+          : `${by} proposes ${proposal.name}`}
+      </h2>
+      {isInstructions ? null : (
+        <p {...stylex.props(styles.secondary)}>
+          {[proposal.title, proposal.role, proposal.reports_to_name ? `reports to ${proposal.reports_to_name}` : null]
+            .filter(Boolean)
+            .join(" · ")}
+        </p>
+      )}
+      {proposal.reason ? (
+        <>
+          <Eyebrow>WHY</Eyebrow>
+          <p {...stylex.props(styles.secondary)}>{proposal.reason}</p>
+        </>
+      ) : null}
+      {isInstructions ? (
+        <>
+          <Eyebrow>CHANGE · NOW → PROPOSED</Eyebrow>
+          <pre {...stylex.props(styles.diff)}>
+            {lineDiff(proposal.current_instructions ?? "", proposal.instructions).map((l, i) => (
+              <div
+                // biome-ignore lint/suspicious/noArrayIndexKey: a diff is drawn whole.
+                key={i}
+                {...stylex.props(l.mark === "+" ? styles.added : l.mark === "-" ? styles.removed : styles.same)}
+              >
+                {l.mark} {l.line}
+              </div>
+            ))}
+          </pre>
+        </>
+      ) : (
+        <>
+          <Eyebrow>INSTRUCTIONS</Eyebrow>
+          <p {...stylex.props(styles.secondary, styles.clamp)}>{proposal.instructions}</p>
+        </>
+      )}
+      {stale ? (
+        <Problem>
+          {target}'s instructions changed since this was proposed (version {proposal.base_version} →{" "}
+          {proposal.current_version}), so it can't be approved. Decline it; the proposer can propose again on the new
+          text.
+        </Problem>
+      ) : null}
+      {problem ? <Problem>{problem}</Problem> : null}
+      <div {...stylex.props(styles.buttons)}>
+        <Button size="sm" label="Decline" isDisabled={busy} onClick={() => void decide(false)} />
+        {isInstructions && !stale ? (
+          <Button size="sm" label="Edit and approve…" isDisabled={busy} onClick={() => setEditing(true)} />
+        ) : null}
+        {stale ? null : (
+          <Button size="sm" variant="primary" label="Approve" isDisabled={busy} onClick={() => void decide(true)} />
+        )}
+      </div>
+      {editing ? (
+        <FormDialog
+          title="Edit and approve instructions"
+          width={620}
+          onClose={() => setEditing(false)}
+          footer={
+            <>
+              <Button label="Cancel" onClick={() => setEditing(false)} />
+              <Button
+                variant="primary"
+                label="Approve these"
+                isDisabled={busy || text.trim() === ""}
+                onClick={() => void decide(true, text)}
+              />
+            </>
+          }
+        >
+          <TextArea hasAutoFocus label="Instructions" rows={12} value={text} onChange={setText} />
+          <Hint>
+            This text replaces the employee's instructions as a new version; the proposer is told it was edited.
+          </Hint>
+          {text.trim() === "" ? (
+            <p {...stylex.props(styles.warning)}>Write the instructions to approve, or decline the proposal instead.</p>
+          ) : null}
+        </FormDialog>
+      ) : null}
+    </article>
+  );
+}
 
 /** How an employee's state reads in a list: the word, and the tone of its dot. */
 function statusOf(e: EmployeeSummary): { tone: StatusTone; label: string } {
@@ -378,9 +570,11 @@ function EmployeeList({
             const pinned = pins.includes(e.id);
             return (
               // biome-ignore lint/a11y/useKeyWithClickEvents: the name inside is the link; the row is a larger target.
-              // biome-ignore lint/a11y/noStaticElementInteractions: as above.
+              // biome-ignore lint/a11y/useSemanticElements: one employee as a named group of cells; a fieldset is for form controls.
               <div
                 key={e.id}
+                role="group"
+                aria-label={e.name}
                 onClick={() => {
                   setSelected(e.id);
                   void navigate({ to: "/employees/$id", params: { id: e.id } });
@@ -571,24 +765,35 @@ function OrgChart({ all, shown }: { all: EmployeeSummary[]; shown: Set<string> }
       setOver(null);
     },
   };
+  const proposals = useProposals();
+  const pending = (proposals.data ?? []).filter((p) => p.status === "pending");
   return (
-    <div {...stylex.props(styles.card)}>
-      <div {...stylex.props(styles.org)}>
-        {tree.length === 0 ? <p {...stylex.props(styles.none)}>Nobody matches.</p> : null}
-        <ul {...stylex.props(styles.roots)}>
-          {tree.map((n) => (
-            <OrgBranch key={n.employee.id} node={n} tasks={open} drag={drag} />
+    <>
+      {pending.length > 0 ? (
+        <div {...stylex.props(styles.proposals)}>
+          {pending.map((p) => (
+            <ProposalCard key={p.id} proposal={p} all={all} />
           ))}
-        </ul>
+        </div>
+      ) : null}
+      <div {...stylex.props(styles.card)}>
+        <div {...stylex.props(styles.org)}>
+          {tree.length === 0 ? <p {...stylex.props(styles.none)}>Nobody matches.</p> : null}
+          <ul {...stylex.props(styles.roots)}>
+            {tree.map((n) => (
+              <OrgBranch key={n.employee.id} node={n} tasks={open} drag={drag} />
+            ))}
+          </ul>
+        </div>
+        <div {...stylex.props(styles.legend)}>
+          <Status tone="work" label="Working" />
+          <Status tone="you" label="Waiting for you" />
+          <Status tone="paused" label="Paused" />
+          <Grow />
+          <span>Drag a card onto another employee to change who it reports to.</span>
+        </div>
       </div>
-      <div {...stylex.props(styles.legend)}>
-        <Status tone="work" label="Working" />
-        <Status tone="you" label="Waiting for you" />
-        <Status tone="paused" label="Paused" />
-        <Grow />
-        <span>Drag a card onto another employee to change who it reports to.</span>
-      </div>
-    </div>
+    </>
   );
 }
 

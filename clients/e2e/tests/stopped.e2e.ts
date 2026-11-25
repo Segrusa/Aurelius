@@ -33,7 +33,7 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
     await p.getByLabel("Name").fill("sam");
     await p.getByLabel("Password").fill("correct horse battery");
     await p.getByRole("button", { name: "Create" }).click();
-    await expect(p.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
+    await expect(p.getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
 
     await openCompanyPage(p, "Employees");
     await p.getByRole("button", { name: "Add employee" }).click();
@@ -45,9 +45,8 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
       .click();
     await expect(p.getByRole("dialog")).toHaveCount(0);
 
-    await openCompanyPage(p, "Guidelines");
-    await p.getByRole("link", { name: "Projects", exact: true }).click();
-    await p.getByRole("button", { name: "New project" }).first().click();
+    await openCompanyPage(p, "Workspaces");
+    await p.getByRole("button", { name: "New workspace" }).first().click();
     await p.getByRole("dialog").getByLabel("Name").fill("Atlas");
     await p.getByRole("dialog").getByLabel("Project folder (required)").fill(join(daemon.dir, "atlas"));
     await p
