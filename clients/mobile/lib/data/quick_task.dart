@@ -46,7 +46,6 @@ Map<String, dynamic> quickTaskRequest({
   List<String> labels = const [],
   List<String> files = const [],
   int? deadlineMs,
-  String? fromIdea,
   String? fromMessage,
 }) =>
     ticketCreate(
@@ -60,7 +59,6 @@ Map<String, dynamic> quickTaskRequest({
       labels: labels,
       files: files,
       deadlineMs: deadlineMs,
-      fromIdea: fromIdea,
       fromMessage: fromMessage,
     );
 

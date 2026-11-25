@@ -63,9 +63,6 @@ String claudeLimitReached(SubscriptionUsage usage) {
   return resets.isEmpty ? 'Limit reached.' : 'Limit reached until ${resets.last}.';
 }
 
-/// B1-2: a schedule runs on the login of whoever makes it.
-const ownSubscriptionNote = 'Tasks of this app run on your own Claude subscription.';
-
 const claudeNoSubscription = 'This login has no Claude subscription (API usage only).';
 
 /// The account rule of B1: one subscription or seat per real person.

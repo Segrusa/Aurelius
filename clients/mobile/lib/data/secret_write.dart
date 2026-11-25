@@ -15,8 +15,6 @@ const confirmSecretMethods = {
   Methods.messageEdit,
   Methods.projectConversationSend,
   Methods.taskCreate,
-  Methods.ideaAdd,
-  Methods.ideaUpdate,
   Methods.ticketCreate,
   Methods.ticketUpdate,
   Methods.ticketRevisePlan,

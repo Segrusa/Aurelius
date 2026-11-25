@@ -419,32 +419,8 @@ extension UsageHoursView on UsageHours {
   bool get estimate => hours.any((h) => h.estimate);
 }
 
-extension IdeaViewState on IdeaView {
-  /// Noted by an employee rather than the user.
-  bool get byEmployee => employeeId != null || author != 'You';
-}
-
 extension ProjectConversationView on ProjectConversationSummary {
   String get displayTitle => title.isNotEmpty ? title : 'New conversation';
-}
-
-// ---- recurring tasks ----
-
-const weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-String _clock(int minute) => '${(minute ~/ 60).toString().padLeft(2, '0')}:${(minute % 60).toString().padLeft(2, '0')}';
-
-extension RecurrenceView on Recurrence {
-  /// "Every 6 hours", "Daily at 09:30", "Mon, Fri at 09:00".
-  String get label => switch (this) {
-        RecurrenceEveryHours(:final hours) => hours == 1 ? 'Every hour' : 'Every $hours hours',
-        RecurrenceDaily(:final atMinute) => 'Daily at ${_clock(atMinute)}',
-        RecurrenceWeekly(:final weekdays, :final atMinute) => () {
-            final days = ([...weekdays]..sort()).where((d) => d >= 0 && d < 7).toList();
-            final text = days.length == 7 ? 'Every day' : days.map((d) => weekdayNames[d]).join(', ');
-            return '$text at ${_clock(atMinute)}';
-          }(),
-      };
 }
 
 // ---- load and power ----

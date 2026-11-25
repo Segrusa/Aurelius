@@ -118,15 +118,12 @@ extension EventKinds on Event {
 
   bool get isRun => kind.wire.startsWith('run.');
   bool get isTask => kind.wire.startsWith('task.');
-  bool get isIdea => kind.wire.startsWith('idea.');
 
   /// Memories.
   bool get isMemory => kind.wire.startsWith('memory.');
 
   /// Connections and the run defaults.
   bool get isRuntimeConfig => kind == EventKind.configChanged || kind == EventKind.connectionChanged;
-
-  bool get isSchedule => kind == EventKind.recurringTaskChanged;
 
   /// Frequent bookkeeping that changes nothing a phone shows (streamed text
   /// arrives as appends; usage is fetched on demand).
