@@ -10,7 +10,9 @@ import type {
 import { describe, expect, it } from "vitest";
 import {
   behindText,
+  canAskTrace,
   canSubmit,
+  chatRunning,
   currentItem,
   diffRows,
   fileLabel,
@@ -31,6 +33,8 @@ import {
   threadsOn,
   tidyText,
   tidyUp,
+  traceAsk,
+  traceAskLine,
   verdictAt,
   waited,
 } from "./code-review-logic";
@@ -432,5 +436,53 @@ describe("the checks with the server's data", () => {
     expect(passed).toEqual({ name: "Tests", tone: "ok", value: "Passed", sub: "717 passed, 0 failed · 14 min ago" });
     expect(testsCheck(item(), [], NOW)).toMatchObject({ value: "Not run" });
     expect(testsCheck(item({ kind: "session" }), undefined, NOW).sub).toBe("a session has no Testing step");
+  });
+});
+
+describe("Ask Trace to review", () => {
+  const session = item({ key: "session/35f38c72", kind: "session", title: "Defaults", number: null });
+
+  it("points Trace at the worktree the branch is checked out in, not the project folder", () => {
+    const text = traceAsk({ ...session, where: "/wt/session-35f38c72" }, "/repo", "main");
+    expect(text).toContain("checked out in /wt/session-35f38c72");
+    expect(text).not.toContain("/repo");
+  });
+
+  it("falls back to the project folder when the branch has no worktree", () => {
+    expect(traceAsk(session, "/repo", "main")).toContain("checked out in /repo");
+  });
+
+  it("asks to review uncommitted files too and to leave the folder as it is", () => {
+    const text = traceAsk({ ...session, where: "/repo", uncommitted: 3 }, "/repo", "main");
+    expect(text).toContain("3 uncommitted files");
+    expect(text).toContain("do not switch branches, commit or change files");
+    expect(traceAsk(session, "/repo", "main")).not.toContain("uncommitted");
+  });
+
+  it("sees Trace's chat as running only while a run goes in that chat", () => {
+    const agent = (kind: string, conversation_id: string) => ({
+      kind,
+      conversation_id,
+      name: "",
+      detail: "",
+      since_ms: 0,
+      steps: 0,
+    });
+    expect(chatRunning({ conversation_id: "c-trace", agents: [] })).toBe(false);
+    expect(chatRunning({ conversation_id: "c-trace", agents: [agent("conversation", "c-trace")] })).toBe(true);
+    // A task or another chat of Trace's does not hold up its own chat.
+    expect(chatRunning({ conversation_id: "c-trace", agents: [agent("conversation", "c-task")] })).toBe(false);
+    expect(chatRunning({ conversation_id: "c-trace", agents: [agent("subagent", "c-trace")] })).toBe(false);
+  });
+
+  it("offers no second ask while Trace's chat is busy and says where the review is", () => {
+    const busy = { sending: false, working: true, asked: true };
+    expect(canAskTrace(busy)).toBe(false);
+    expect(traceAskLine(busy)).toBe("Trace is reviewing this branch. The findings come in Trace's chat.");
+    expect(canAskTrace({ sending: true, working: false, asked: false })).toBe(false);
+    expect(canAskTrace({ sending: false, working: false, asked: true })).toBe(true);
+    expect(traceAskLine({ sending: false, working: false, asked: false })).toBe(
+      "No review yet. A session has no review step of its own.",
+    );
   });
 });

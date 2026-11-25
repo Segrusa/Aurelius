@@ -12,6 +12,7 @@ import type {
   CodeThreadView,
   CodeView,
   CodeWorktree,
+  EmployeeSummary,
   MessageView,
   TicketView,
   WorkSessionView,
@@ -404,10 +405,52 @@ export function commitAsk(branch: string): string {
   return `Please commit your changes with their tests, so I can merge ${branch}.`;
 }
 
-/** The message Ask Trace to review sends to the reviewer. */
+/**
+ * The message Ask Trace to review sends to the reviewer. It names the folder the branch is checked out in, so
+ * uncommitted work is reviewed too, and asks to leave that folder as it is: in the project folder another session
+ * may be working.
+ */
 export function traceAsk(item: ReviewItem, repo: string, main: string): string {
   const what = item.kind === "ticket" ? `ticket #${item.number} (${item.title})` : `the work session "${item.title}"`;
-  return `Please review branch ${item.branch.name} of ${what} in ${repo} against ${main}, and post your findings with their file and line.`;
+  const where = item.where ?? repo;
+  const changes =
+    item.uncommitted > 0
+      ? ` It also has ${item.uncommitted} uncommitted ${item.uncommitted === 1 ? "file" : "files"} there: review those too.`
+      : "";
+  return (
+    `Please review branch ${item.branch.name} of ${what} against ${main}. It is checked out in ${where}.${changes} ` +
+    "Only read: do not switch branches, commit or change files in that folder. " +
+    "Post your findings with their file and line."
+  );
+}
+
+/** Where Ask Trace to review stands for one branch. */
+export interface TraceAskState {
+  /** The ask is on its way to the server. */
+  sending: boolean;
+  /** Trace's chat has a run going. */
+  working: boolean;
+  /** This window asked Trace to review this branch. */
+  asked: boolean;
+}
+
+/** Whether the ask button is offered; otherwise the page offers to open Trace's chat. */
+export function canAskTrace(s: TraceAskState): boolean {
+  return !s.sending && !s.working;
+}
+
+/** The line beside the ask in the Conversation tab. */
+export function traceAskLine(s: TraceAskState): string {
+  if (s.sending) return "Asking Trace to review…";
+  if (s.working && s.asked) return "Trace is reviewing this branch. The findings come in Trace's chat.";
+  if (s.working) return "Trace is busy in their chat. Ask again when that answer is done.";
+  if (s.asked) return "Trace answered in their chat. Open it for the findings, or ask again.";
+  return "No review yet. A session has no review step of its own.";
+}
+
+/** Whether the reviewer's own chat has a run going: a new ask then waits until it is done. */
+export function chatRunning(e: Pick<EmployeeSummary, "agents" | "conversation_id">): boolean {
+  return e.agents.some((a) => a.kind === "conversation" && a.conversation_id === e.conversation_id);
 }
 
 /** The head's line about main: "main · 4 ahead of origin · fetched 12 min ago". */

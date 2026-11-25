@@ -26,7 +26,9 @@ import {
   behindText,
   type Check,
   type CheckTone,
+  canAskTrace,
   canSubmit,
+  chatRunning,
   commitAsk,
   currentItem,
   filterQueue,
@@ -41,10 +43,12 @@ import {
   reviewQueue,
   sizeCheck,
   type Tidy,
+  type TraceAskState,
   testsCheck,
   tidyText,
   tidyUp,
   traceAsk,
+  traceAskLine,
   type Verdict,
   type VerdictOf,
   verdictAt,
@@ -696,14 +700,32 @@ function authorOf(m: MessageView): string {
   return m.author ?? "Employee";
 }
 
+/** Ask Trace to review, or, while Trace's chat is busy or after asking, the way to that chat. */
+function TraceAsk({ state, onAsk, onOpen }: { state: TraceAskState; onAsk: () => void; onOpen: () => void }) {
+  return (
+    <>
+      {state.working ? null : (
+        <Button
+          size="sm"
+          label={state.asked ? "Ask Trace again" : "Ask Trace to review"}
+          isDisabled={!canAskTrace(state)}
+          onClick={onAsk}
+        />
+      )}
+      {state.working || state.asked ? <Button size="sm" label="Open Trace's chat" onClick={onOpen} /> : null}
+    </>
+  );
+}
+
 function Conversation({
   item,
   now,
   review,
   onOpen,
   onAskTrace,
+  onOpenTrace,
   onFinish,
-  traceBusy,
+  traceState,
 }: {
   item: ReviewItem;
   now: number;
@@ -711,8 +733,9 @@ function Conversation({
   review: CodeReviewView | undefined;
   onOpen: () => void;
   onAskTrace: (() => void) | null;
+  onOpenTrace: (() => void) | null;
   onFinish: () => void;
-  traceBusy: boolean;
+  traceState: TraceAskState;
 }) {
   const connection = useConnection();
   const report = useReport(item);
@@ -867,13 +890,13 @@ function Conversation({
           </div>
         </div>
       ) : null}
-      {isSession && onAskTrace && (review?.reviews ?? []).length === 0 ? (
+      {isSession && onAskTrace && onOpenTrace && (review?.reviews ?? []).length === 0 ? (
         <div {...stylex.props(styles.evS)}>
           <span aria-hidden="true" {...stylex.props(styles.ic)}>
             ◎
           </span>
-          <span>No review yet. A session has no review step of its own.</span>
-          <Button size="sm" label="Ask Trace to review" isDisabled={traceBusy} onClick={onAskTrace} />
+          <span>{traceAskLine(traceState)}</span>
+          <TraceAsk state={traceState} onAsk={onAskTrace} onOpen={onOpenTrace} />
         </div>
       ) : null}
       {report.comments.map((m) => (
@@ -1226,6 +1249,8 @@ export function CodeReview({
   const [reviewing, setReviewing] = useState(false);
   const [asking, setAsking] = useState<Asking>(null);
   const [traceBusy, setTraceBusy] = useState(false);
+  const [asked, setAsked] = useState<ReadonlySet<string>>(() => new Set());
+  const client = useQueryClient();
   const main = view.main_branch ?? "main";
 
   const queue = useMemo(
@@ -1242,6 +1267,8 @@ export function CodeReview({
   const item = currentItem(ready, wanted);
   const tidy = useMemo(() => tidyUp(view, now), [view, now]);
   const trace = (employees.data ?? []).find((e) => e.name === REVIEWER) ?? null;
+  // Trace's chat runs one answer at a time: while one goes, a new ask only waits behind it.
+  const traceWorking = trace !== null && chatRunning(trace);
   const reviewRead = useCodeReviewRead(projectId, item?.branch.name ?? "", item?.branch.head ?? "", item !== null);
   const branchReview = kept && item ? reviewRead.data : undefined;
   const discussion = useMessages(item?.ticket?.conversation_id ?? null);
@@ -1254,7 +1281,7 @@ export function CodeReview({
   };
 
   const askTrace = (it: ReviewItem) => {
-    if (!trace || traceBusy) return;
+    if (!trace || traceBusy || traceWorking) return;
     setTraceBusy(true);
     connection
       .write(
@@ -1262,10 +1289,22 @@ export function CodeReview({
         { employee_id: trace.id, conversation_id: trace.conversation_id, text: traceAsk(it, view.repo_path, main) },
         { retry: false },
       )
-      .then(() => toast(`${REVIEWER} reviews ${it.branch.name}. The findings come in ${REVIEWER}'s chat.`))
+      .then(() => {
+        setAsked((was) => new Set(was).add(it.key));
+        toast(`${REVIEWER} reviews ${it.branch.name}. The findings come in ${REVIEWER}'s chat.`);
+        return client.invalidateQueries({ queryKey: ["employees"] });
+      })
       .catch((e: unknown) => toast(e instanceof Error ? e.message : "This did not work."))
       .finally(() => setTraceBusy(false));
   };
+  const openTrace = trace
+    ? () => void navigate({ to: "/session/$conversationId", params: { conversationId: trace.conversation_id } })
+    : null;
+  const traceAskFor = (it: ReviewItem): TraceAskState => ({
+    sending: traceBusy,
+    working: traceWorking,
+    asked: asked.has(it.key),
+  });
 
   const open = (it: ReviewItem) => {
     if (it.ticket) void navigate(ticketPlace({ id: it.ticket.id, number: it.ticket.number }));
@@ -1333,14 +1372,9 @@ export function CodeReview({
             <div {...stylex.props(styles.checks)}>
               {checks.map((c) => (
                 <CheckCard key={c.name} check={c}>
-                  {isSession && c.name === "Review" && c.tone === "n" && trace ? (
+                  {isSession && c.name === "Review" && c.tone === "n" && trace && openTrace ? (
                     <span {...stylex.props(styles.checkAsk)}>
-                      <Button
-                        size="sm"
-                        label="Ask Trace to review"
-                        isDisabled={traceBusy}
-                        onClick={() => askTrace(item)}
-                      />
+                      <TraceAsk state={traceAskFor(item)} onAsk={() => askTrace(item)} onOpen={openTrace} />
                     </span>
                   ) : null}
                 </CheckCard>
@@ -1371,7 +1405,8 @@ export function CodeReview({
                   onFinish={() => setAsking("finish")}
                   onOpen={() => open(item)}
                   onAskTrace={trace ? () => askTrace(item) : null}
-                  traceBusy={traceBusy}
+                  onOpenTrace={openTrace}
+                  traceState={traceAskFor(item)}
                 />
               ) : null}
               {tab === "commits" ? <Commits item={item} view={view} now={now} /> : null}
