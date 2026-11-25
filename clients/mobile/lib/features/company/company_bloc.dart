@@ -46,7 +46,7 @@ class EmployeeSequentialToggled extends CompanyEvent {
 }
 
 /// Any employee or company command from the company pages
-/// (employee pages, org chart, Home's Give work).
+/// (employee pages, org chart).
 class CompanyCommandSent extends CompanyEvent {
   const CompanyCommandSent(this.command, {this.done, this.expectedVersion, this.retry = true, this.then = const []});
 
@@ -106,7 +106,7 @@ class CompanyState extends Equatable {
   /// Ids of main tasks whose decision is someone else's: they are not counted as waiting (freeze §5).
   final Set<String> othersTasks;
 
-  /// What waits for this board member: what Dashboard and Inbox count.
+  /// What waits for this board member: what the Inbox counts.
   List<TaskView> get waitingTasks => tasks.where((t) => t.needsYou && !othersTasks.contains(t.id)).toList();
 
   /// The server setting "Follow the org chart".

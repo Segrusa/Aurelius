@@ -29,7 +29,7 @@ class _CompanyOrgPageState extends State<CompanyOrgPage> {
   @override
   void didUpdateWidget(CompanyOrgPage old) {
     super.didUpdateWidget(old);
-    // Home's "Org chart" link goes here with ?view=chart.
+    // A link with ?view=chart opens the org chart.
     final asked = CompanyOrgView.values.where((v) => v.name == widget.initial).firstOrNull;
     if (asked != null && widget.initial != old.initial) _view = asked;
   }
