@@ -245,8 +245,10 @@ export const METHODS = {
   "user.login": "read",
   "user.logout": "read",
   "user.rail_pins": "read",
+  "user.run_defaults": "read",
   "user.set_password": "host",
   "user.set_rail_pins": "command",
+  "user.set_run_defaults": "command",
   "user.whoami": "read",
   "vault.archive": "host",
   "vault.audit": "read",
@@ -1067,6 +1069,11 @@ export interface MethodParams {
    */
   "user.rail_pins": undefined;
   /**
+   * The run defaults of the board member of the session (feature
+   * `user_run_defaults`), never another's. Not for apps.
+   */
+  "user.run_defaults": undefined;
+  /**
    * Change a password. Own (no `user_id`, or the session's): with the old
    * password; the other sessions end, this one stays. Another board member's
    * (B10): a temporary password, changed at their next sign-in
@@ -1081,6 +1088,12 @@ export interface MethodParams {
    * ("none"). Answers `RailPinsSet`.
    */
   "user.set_rail_pins": { project_ids: string[] };
+  /**
+   * `user.set_run_defaults` (feature `user_run_defaults`): the board member of
+   * the session sets their own defaults. Replaces them as a whole; an empty one
+   * clears them. Answers `UserRunDefaultsSet`.
+   */
+  "user.set_run_defaults": { defaults: M.UserRunDefaults };
   /**
    * Whether the server has board members, and this connection's session's one.
    * Works without a session.
