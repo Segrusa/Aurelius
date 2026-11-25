@@ -149,6 +149,7 @@ const styles = stylex.create({
     paddingInline: 24,
     paddingBottom: 8,
   },
+  gateFlush: { maxWidth: "none", maxHeight: "none", overflowY: "visible", paddingInline: 0, paddingBottom: 0 },
   centre: {
     display: "flex",
     minHeight: 0,
@@ -421,6 +422,8 @@ function Session({
   const work = useTicketWork(detail.tasks);
   const finish = useFinish(detail, t, work);
   const gate = <TicketGate detail={detail} t={t} finish={finish} />;
+  // In the Activity tab the card lines up with the Plan under it, as in design/review-finish.html.
+  const panelGate = <TicketGate detail={detail} t={t} finish={finish} flush />;
   const top = <PageTop t={t} />;
   const asks = useTicketAsks(detail, t, work);
   // A link to a message or a thread opens the Timeline; else the Activity is what a ticket opens on.
@@ -442,7 +445,7 @@ function Session({
       t={t}
       work={work}
       asks={asks}
-      gate={gate}
+      gate={panelGate}
       finish={finish?.kind ?? null}
       mergeHash={finish?.merge?.hash ?? null}
       description={top}
@@ -574,10 +577,13 @@ export function TicketGate({
   detail,
   t,
   finish = null,
+  flush = false,
 }: {
   detail: TicketDetail;
   t: TicketView;
   finish?: Finish | null;
+  /** Inside the Activity column: no padding or height cap of its own. */
+  flush?: boolean;
 }) {
   const { status } = useLinkState();
   const { choosing, line } = useDispatcherLine(t);
@@ -616,7 +622,7 @@ export function TicketGate({
     );
   if (!body) return null;
   return (
-    <section aria-label="Your decision" {...stylex.props(styles.gate)}>
+    <section aria-label="Your decision" {...stylex.props(styles.gate, flush && styles.gateFlush)}>
       {body}
     </section>
   );
