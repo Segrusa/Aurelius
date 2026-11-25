@@ -16,7 +16,7 @@ const PASSWORD = "a-long-enough-password";
 const toast = (page: Page, text: string | RegExp) =>
   page.getByRole("region", { name: "Notifications" }).getByText(text);
 
-test("employees, projects, guidelines, ideas, memory and the vault over a real daemon", async () => {
+test("employees, projects, guidelines, memory and the vault over a real daemon", async () => {
   test.setTimeout(120_000);
   const daemon = new TestDaemon();
   await daemon.start();
@@ -134,18 +134,6 @@ test("employees, projects, guidelines, ideas, memory and the vault over a real d
     await page.getByRole("textbox", { name: "Text" }).fill("## Rules\n- Keep it smaller");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("v2")).toBeVisible();
-
-    // An idea: made, then dropped.
-    if (!hidden("Ideas")) {
-      await page.getByRole("link", { name: "Ideas" }).click();
-      await page.getByRole("button", { name: "New idea" }).click();
-      await page.getByPlaceholder(/The idea, for example/).fill("Dark mode");
-      await page.getByRole("button", { name: "Add idea" }).click();
-      const idea = page.getByRole("region", { name: "Ideas" }).getByText("Dark mode");
-      await expect(idea).toBeVisible();
-      await page.getByRole("button", { name: "Drop", exact: true }).click();
-      await expect(idea).toBeHidden();
-    }
 
     // A memory, in the context of the project.
     await page.getByRole("link", { name: "Memory" }).click();
@@ -465,7 +453,7 @@ test.describe("scripted organisation", () => {
 
     await show.click();
     await expect(page.getByText(SECRET)).toBeVisible();
-    await page.getByRole("link", { name: "Ideas" }).click();
+    await page.getByRole("link", { name: "Guidelines" }).click();
     await expect(page.getByText(SECRET)).toBeHidden();
     expect(await page.content()).not.toContain(SECRET);
     await stop();

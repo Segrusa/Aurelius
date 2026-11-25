@@ -11,7 +11,6 @@ export type Feature =
   | "RecurringTasks"
   | "Vault"
   | "EmployeeTools"
-  | "Ideas"
   | "MemoryProposals"
   | "SequentialTasks"
   | "RunScratchpad";
@@ -26,7 +25,6 @@ export const HIDDEN_FEATURES: readonly Feature[] = [
   "RecurringTasks",
   "Vault",
   "EmployeeTools",
-  "Ideas",
   "MemoryProposals",
   "SequentialTasks",
   "RunScratchpad",

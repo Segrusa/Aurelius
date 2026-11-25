@@ -119,7 +119,6 @@ const noNavigation = () => {};
 const KNOWLEDGE: { key: string; label: string; feature?: Feature }[] = shown([
   { key: "guidelines", label: "Guidelines" },
   { key: "memory", label: "Memory" },
-  { key: "ideas", label: "Ideas", feature: "Ideas" },
   { key: "vault", label: "Vault", feature: "Vault" },
 ]);
 

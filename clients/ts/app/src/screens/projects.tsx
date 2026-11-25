@@ -19,7 +19,6 @@ import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { pinnedFirst, togglePin } from "./employee-logic";
 import { pinKey, usePins, useStoredPins } from "./employees";
-import { IdeasBody } from "./ideas";
 import { Confirm, Empty, FormDialog, failureOf, Hint, KnowledgeTabs, Page, PageHead, Problem } from "./org-kit";
 import { useFolderChooser } from "./run-tools";
 import { ScheduleDialog } from "./settings-advanced";
@@ -484,12 +483,11 @@ export function ProjectsScreen() {
   );
 }
 
-type ProjectTab = "overview" | "board" | "tasks" | "ideas" | "vault";
+type ProjectTab = "overview" | "board" | "tasks" | "vault";
 const TABS: { key: ProjectTab; label: string; feature?: Feature }[] = shown([
   { key: "overview", label: "Settings" },
   { key: "board", label: "Board" },
   { key: "tasks", label: "Tasks" },
-  { key: "ideas", label: "Ideas", feature: "Ideas" },
   { key: "vault", label: "Vault", feature: "Vault" },
 ]);
 
@@ -578,7 +576,6 @@ export function ProjectPage({ id, tab: asked }: { id: string; tab: ProjectTab })
           onArchiving={setArchiving}
         />
       ) : null}
-      {tab === "ideas" ? <IdeasBody projectId={project.id} chrome={false} /> : null}
       {tab === "vault" ? (
         <div {...stylex.props(styles.fill)}>
           <VaultBody projectId={project.id} scopeName={project.name} />

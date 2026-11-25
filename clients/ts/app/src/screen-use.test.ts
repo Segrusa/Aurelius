@@ -49,7 +49,6 @@ describe("hidden features", () => {
       "RecurringTasks",
       "Vault",
       "EmployeeTools",
-      "Ideas",
       "MemoryProposals",
       "SequentialTasks",
       "RunScratchpad",

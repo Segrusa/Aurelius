@@ -38,7 +38,6 @@ import { Gate } from "./screens/gate";
 import { GuidelineEditor, GuidelinesScreen } from "./screens/guidelines";
 import { HistoryScreen } from "./screens/history";
 import { historyFilters } from "./screens/history-logic";
-import { IdeasBody } from "./screens/ideas";
 import { LinkFollower } from "./screens/links";
 import { MemoryBody } from "./screens/memory";
 import { NewSessionScreen } from "./screens/new-session";
@@ -205,9 +204,16 @@ const knowledge = createRoute({
     if (tab === "memory") {
       return <MemoryBody key={workspace.id ?? start ?? ""} projectId={workspace.id} start={start ?? null} />;
     }
-    if (tab === "ideas" && !hidden("Ideas")) return <IdeasBody projectId={null} />;
     if (tab === "vault" && !hidden("Vault")) return <VaultScreen />;
     return <GuidelinesScreen />;
+  },
+});
+// Ideas are gone (OPR-4); an old link opens Guidelines, the first Knowledge tab.
+const ideas = createRoute({
+  getParentRoute: () => root,
+  path: "/knowledge/ideas",
+  beforeLoad: () => {
+    throw redirect({ to: "/knowledge/$tab", params: { tab: "guidelines" } });
   },
 });
 const guideline = createRoute({
@@ -222,7 +228,7 @@ const guideline = createRoute({
   },
 });
 const projectsList = createRoute({ getParentRoute: () => root, path: "/projects", component: ProjectsScreen });
-const PROJECT_TABS = ["overview", "board", "tasks", "ideas", "vault"] as const;
+const PROJECT_TABS = ["overview", "board", "tasks", "vault"] as const;
 const project = createRoute({
   getParentRoute: () => root,
   path: "/projects/$id",
@@ -315,6 +321,7 @@ const router = createRouter({
     employee,
     employees,
     knowledgeIndex,
+    ideas,
     guideline,
     knowledge,
     projectsList,
