@@ -43,7 +43,6 @@ describe("hidden features", () => {
   it("are the simplification's", () => {
     for (const feature of [
       "ActivityInSidebar",
-      "Trace",
       "Vault",
       "EmployeeTools",
       "MemoryProposals",

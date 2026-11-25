@@ -818,55 +818,6 @@ export function LoadSection() {
   );
 }
 
-export function TraceSection() {
-  const connection = useConnection();
-  const { busy, error, run } = useChange();
-  const [asking, setAsking] = useState(false);
-  const trace = useSetting(
-    "trace",
-    async () => expectBody(await connection.call("trace.get_setting"), "trace_setting").value,
-  );
-  const set = (enabled: boolean) => run(() => connection.write("trace.set_enabled", { enabled }, { retry: false }));
-  return (
-    <>
-      <Group>
-        <Row
-          title="Trace mode"
-          hint={
-            trace.data
-              ? `Keeps a trace of every run, for ${trace.data.keep_days} days and at most ${trace.data.keep_runs} runs.`
-              : undefined
-          }
-        >
-          {asking ? (
-            <>
-              <span {...stylex.props(styles.status)}>Turn trace mode off? Every kept trace is deleted.</span>
-              <SmallButton
-                kind="danger"
-                onClick={() => {
-                  setAsking(false);
-                  void set(false);
-                }}
-              >
-                Turn off and delete
-              </SmallButton>
-              <SmallButton onClick={() => setAsking(false)}>Keep on</SmallButton>
-            </>
-          ) : (
-            <Switch
-              label="Trace mode"
-              on={trace.data?.enabled ?? false}
-              disabled={busy || !trace.data}
-              onChange={(enabled) => (enabled ? void set(true) : setAsking(true))}
-            />
-          )}
-        </Row>
-      </Group>
-      <Problem error={trace.error ?? error} />
-    </>
-  );
-}
-
 export function CompactionSection() {
   const { features } = useLinkState();
   return features.includes("compaction_setting") ? (
