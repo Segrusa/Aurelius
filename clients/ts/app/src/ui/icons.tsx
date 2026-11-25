@@ -55,6 +55,8 @@ const NAV_PATHS = {
   usage: "M2.5 11.5a5.5 5.5 0 1 1 11 0M8 11.5l2.5-3",
   devices: "M2 4h8.5v5.5H2zM1 11.5h8.5M11.5 6.5h3v6.5h-3z",
   signOut: "M6.5 13.5h-3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3M10.5 11l3-3-3-3M13.5 8h-7",
+  // A speech bubble with a question mark: a side question about the conversation (like /btw).
+  aside: "M2.5 3.5h11v7.5H7l-3 2.5V11H2.5zM6.6 5.9a1.4 1.4 0 1 1 2 1.3c-.4.2-.6.5-.6.9M8 9.4h.01",
 } as const;
 
 export type NavIcon = keyof typeof NAV_PATHS;

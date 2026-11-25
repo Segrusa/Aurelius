@@ -667,6 +667,117 @@ test.describe("states a test daemon cannot produce", () => {
     await expect(properties).toHaveCount(0);
     await page.getByRole("button", { name: "Show session properties" }).click();
     await expect(properties).toBeVisible();
+    // A server without side questions gets no button for them.
+    await expect(page.getByRole("button", { name: "Ask a side question" })).toHaveCount(0);
+  });
+
+  test("a side question about a session streams its answer beside the talk and stops when closed", async ({ page }) => {
+    const session = {
+      conversation_id: "s1",
+      title: "Fix the login page",
+      employee_id: "e1",
+      employee_name: "Flux",
+      project_id: "p",
+      project_name: "Northwind API",
+      running: true,
+      created_at_ms: Date.now() - 600_000,
+      last_activity_ms: Date.now() - 60_000,
+    };
+    const asks: Record<string, unknown>[] = [];
+    const cancels: Record<string, unknown>[] = [];
+    const { writes, push } = await scriptServer(page, {
+      ...script,
+      features: ["work_sessions", "side_question"],
+      conversations: {
+        s1: messages("s1", [
+          message("m1", "user", "Fix the login page."),
+          message("m2", "assistant", "Looking at the form.", { run_id: "r9" }),
+        ]),
+      },
+      reads: {
+        "work_session.list": () => ({ type: "work_sessions", value: { sessions: [session], as_of_seq: 1 } }),
+        "conversation.side_ask": (request) => {
+          asks.push(request.params as Record<string, unknown>);
+          return { type: "side_asked", value: { side_id: `q${asks.length}` } };
+        },
+        "conversation.side_cancel": (request) => {
+          cancels.push(request.params as Record<string, unknown>);
+          return { type: "side_asked", value: request.params };
+        },
+      },
+    });
+    await page.goto(site.origin);
+    await page.goto(`${site.origin}/session/s1`);
+    await expect(page.getByText("Looking at the form.")).toBeVisible();
+    await page.getByRole("button", { name: "Ask a side question" }).click();
+    const field = page.getByRole("textbox", { name: "Side question" });
+    await field.fill("What is it doing right now?");
+    await field.press("Enter");
+    await expect.poll(() => asks[0]).toEqual({ conversation_id: "s1", question: "What is it doing right now?" });
+    await expect(page.getByText("What is it doing right now?")).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Thinking…" })).toBeVisible();
+    push({ type: "side_answer", side_id: "q1", text: "It is reading", done: false });
+    await expect(page.getByText("It is reading")).toBeVisible();
+    // One question at a time: Ask waits for the answer.
+    await field.fill("And then?");
+    await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeDisabled();
+    push({ type: "side_answer", side_id: "q1", text: "It is reading `src/login.tsx` to fix the form.", done: true });
+    await expect(page.getByText("src/login.tsx")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeEnabled();
+    await page.screenshot({ path: `${REPO}/target/side-question/session-side-question.png` });
+    // The talk itself is unchanged: nothing was sent into it.
+    expect(writes.filter((w) => w.method === "chat.send")).toEqual([]);
+
+    // A failure says why and offers to ask again.
+    await field.press("Enter");
+    await expect.poll(() => asks.length).toBe(2);
+    push({ type: "side_answer", side_id: "q2", text: "", done: true, error: "Stopped." });
+    await expect(page.getByRole("alert").filter({ hasText: "Stopped." })).toBeVisible();
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect.poll(() => asks[2]).toEqual({ conversation_id: "s1", question: "And then?" });
+
+    // Closing the popover stops what is still being answered, and forgets the questions.
+    await page.keyboard.press("Escape");
+    await expect(field).toHaveCount(0);
+    await expect.poll(() => cancels).toEqual([{ side_id: "q3" }]);
+    await page.getByRole("button", { name: "Ask a side question" }).click();
+    await expect(page.getByText("What is it doing right now?")).toHaveCount(0);
+  });
+
+  test("a side question about a ticket asks about its discussion", async ({ page }) => {
+    const discussed = { ...doing, conversation_id: "d3" };
+    const asks: Record<string, unknown>[] = [];
+    const { push } = await scriptServer(page, {
+      ...script,
+      features: ["ticket_discussion", "ticket_channels", "side_question"],
+      channels: [channel("d3", "#23-export", { kind: "ticket", ticket_id: "t3", ticket_number: 23 })],
+      feeds: {
+        d3: messages("d3", [message("m1", "assistant", "Started on it.", { update: "group", author: "Flux" })]),
+      },
+      board: boardOf([discussed]),
+      tickets: [discussed],
+      details: { t3: { ticket: discussed, root_task: k3, tasks: [k3], as_of_seq: 1 } },
+      conversations: {
+        d3: messages("d3", [message("m1", "assistant", "Started on it.", { update: "group", author: "Flux" })]),
+      },
+      reads: {
+        "conversation.side_ask": (request) => {
+          asks.push(request.params as Record<string, unknown>);
+          return { type: "side_asked", value: { side_id: "t1" } };
+        },
+      },
+    });
+    await page.goto(site.origin);
+    await page.goto(`${site.origin}/ticket/23`);
+    const head = page.locator("header[data-titlebar]").filter({ hasText: "Still at work" });
+    await head.getByRole("button", { name: "Ask a side question" }).click();
+    const field = page.getByRole("textbox", { name: "Side question" });
+    await field.fill("Who is on it?");
+    await field.press("Enter");
+    await expect.poll(() => asks[0]).toEqual({ conversation_id: "d3", question: "Who is on it?" });
+    push({ type: "side_answer", side_id: "t1", text: "Flux works on the export.", done: true });
+    await expect(page.getByText("Flux works on the export.")).toBeVisible();
+    await page.screenshot({ path: `${REPO}/target/side-question/ticket-side-question.png` });
   });
 
   test("a subagent opens as a chat log that cannot be answered, and ends with its report", async ({ page }) => {

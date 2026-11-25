@@ -72,6 +72,7 @@ import {
   usePropertiesDock,
 } from "./run-side";
 import { FileChips } from "./run-tools";
+import { SideQuestionButton } from "./side-question";
 import { taskStateLine } from "./tasks-logic";
 import { ActivityPanel, type TicketTab, TicketTabs, useTicketAsks } from "./ticket-activity";
 import { branchOf, latestTodos } from "./ticket-overview-logic";
@@ -427,6 +428,7 @@ function Session({
   const head = (
     <Head
       t={t}
+      conversation={conversation}
       dock={dock}
       tabs={conversation ? <TicketTabs tab={tab} onTab={setTab} questions={asks.size} /> : null}
     />
@@ -502,10 +504,13 @@ function Session({
 
 function Head({
   t,
+  conversation,
   dock,
   tabs,
 }: {
   t: TicketView;
+  /** The ticket's discussion, which a side question asks about; none on an older server. */
+  conversation: string | null;
   /** The properties panel the head's button shows or hides. */
   dock: PropertiesDock;
   /** Activity and Timeline under the title (ticket #83). */
@@ -543,6 +548,7 @@ function Head({
         {tabs}
       </div>
       <div {...stylex.props(styles.tools)}>
+        {conversation ? <SideQuestionButton conversationId={conversation} /> : null}
         <Menu
           label="More"
           options={menu.options}

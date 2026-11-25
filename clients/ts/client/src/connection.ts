@@ -20,6 +20,7 @@ import {
   type RequestInput,
   type ResponseBody,
   type ServerMessage,
+  type SideAnswer,
   type SignOutReason,
   type UserView,
   type WriteName,
@@ -207,6 +208,8 @@ export class Connection {
   readonly loads = new Emitter<LoadSnapshot>();
   readonly powers = new Emitter<PowerState>();
   readonly claudeLoginPrompts = new Emitter<ClaudeLoginPrompt>();
+  /** Answers to this connection's side questions (`conversation.side_ask`), whole text each time. */
+  readonly sideAnswers = new Emitter<SideAnswer>();
 
   private state: LinkState = INITIAL;
   private readonly stateListeners = new Set<() => void>();
@@ -636,6 +639,9 @@ export class Connection {
         return;
       case "claude_login_prompt":
         this.claudeLoginPrompts.emit(message);
+        return;
+      case "side_answer":
+        this.sideAnswers.emit(message);
         return;
       case "signed_out":
         // A sign-out this device asked for needs no message.
