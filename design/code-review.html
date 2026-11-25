@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code tab — review first (Pixel)</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --body: #08090a; --surface: #0f1012; --card: #16171a; --muted-bg: #0f1012;
+    --text: #edeef0; --text2: #a0a4ab; --text3: #7d828a;
+    --line: rgb(255 255 255 / 0.07); --line2: rgb(255 255 255 / 0.05); --line-em: rgb(255 255 255 / 0.09);
+    --accent: #1f7a4c; --accent-text: #5fcb95;
+    --warning: #e8a84a; --warning-muted: rgb(229 162 58 / 0.1);
+    --success: #5fcb95; --success-muted: rgb(95 203 149 / 0.12);
+    --error: #f08a8a; --error-muted: rgb(240 138 138 / 0.12);
+    --info: #7ea6f8; --info-muted: rgb(126 166 248 / 0.12);
+    --neutral: rgb(255 255 255 / 0.06);
+    --add-bg: rgb(95 203 149 / 0.09); --add-gutter: rgb(95 203 149 / 0.16);
+    --del-bg: rgb(240 138 138 / 0.08); --del-gutter: rgb(240 138 138 / 0.15);
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  :root.light {
+    color-scheme: light;
+    --body: #f3f3f2; --surface: #ffffff; --card: #ffffff; --muted-bg: #f8f8f7;
+    --text: #1b1c1e; --text2: #55595f; --text3: #696d74;
+    --line: rgb(0 0 0 / 0.08); --line2: rgb(0 0 0 / 0.06); --line-em: rgb(0 0 0 / 0.12);
+    --accent: #17603f; --accent-text: #17603f;
+    --warning: #9a5800; --warning-muted: rgb(196 122 0 / 0.08);
+    --success: #17603f; --success-muted: rgb(23 96 63 / 0.08);
+    --error: #c2281c; --error-muted: rgb(194 40 28 / 0.08);
+    --info: #2d5bd0; --info-muted: rgb(45 91 208 / 0.08);
+    --neutral: rgb(0 0 0 / 0.05);
+    --add-bg: rgb(23 96 63 / 0.07); --add-gutter: rgb(23 96 63 / 0.13);
+    --del-bg: rgb(194 40 28 / 0.06); --del-gutter: rgb(194 40 28 / 0.12);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--body); color: var(--text); font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; }
+  button, input, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; border-radius: 4px; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .faint { color: var(--text3); }
+  .grow { flex: 1; }
+
+  .app { flex: 1; display: flex; min-height: 0; }
+  .rail { width: 210px; flex-shrink: 0; border-right: 1px solid var(--line); padding: 12px; color: var(--text2); display: flex; flex-direction: column; gap: 2px; }
+  .rail .item { padding: 6px 8px; border-radius: 6px; display: flex; justify-content: space-between; }
+  .rail .item.on { background: var(--neutral); color: var(--text); }
+  .rail .badge { font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--warning-muted); color: var(--warning); }
+
+  main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .head { flex-shrink: 0; padding: 10px 20px; border-bottom: 1px solid var(--line2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .head h1 { margin: 0; font-size: 15px; font-weight: 600; }
+  .head .repo { color: var(--text3); font-size: 12px; }
+  .mainline { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text2); padding: 2px 9px; border-radius: 999px; background: var(--neutral); }
+  .btn { border: 1px solid var(--line-em); background: var(--surface); color: var(--text); border-radius: 7px; padding: 5px 11px; cursor: pointer; font-weight: 500; white-space: nowrap; }
+  .btn:hover { background: var(--neutral); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.1); }
+  .btn.primary[disabled] { opacity: .45; cursor: not-allowed; filter: none; }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--text2); }
+  .btn.ghost:hover { background: var(--neutral); color: var(--text); }
+  .btn.sm { padding: 3px 9px; font-size: 12px; }
+  .icon { width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--text2); cursor: pointer; }
+  .icon:hover { background: var(--neutral); }
+
+  .work { flex: 1; display: flex; min-height: 0; }
+
+  /* ---------- the queue ---------- */
+  .queue { width: 330px; flex-shrink: 0; border-right: 1px solid var(--line); overflow: auto; padding: 12px 10px 24px; display: flex; flex-direction: column; gap: 4px; }
+  .q-h { display: flex; align-items: baseline; gap: 8px; padding: 10px 6px 4px; }
+  .q-h:first-child { padding-top: 2px; }
+  .q-h h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; }
+  .q-h .n { color: var(--text3); font-size: 12px; }
+  .q-h .hint { margin-left: auto; color: var(--text3); font-size: 11.5px; }
+  .qi { text-align: left; width: 100%; border: 1px solid transparent; background: transparent; border-radius: 10px; padding: 9px 10px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+  .qi:hover { background: var(--neutral); }
+  .qi[aria-current="true"] { background: var(--card); border-color: var(--line-em); }
+  .qi .t1 { display: flex; gap: 8px; align-items: center; min-width: 0; }
+  .qi .title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qi .num { color: var(--text3); font-weight: 500; }
+  .qi .t2 { display: flex; gap: 8px; align-items: center; color: var(--text3); font-size: 12px; min-width: 0; }
+  .qi .t2 .br { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .qi .t3 { display: flex; gap: 6px; flex-wrap: wrap; }
+  .size { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+  .size .a { color: var(--success); } .size .d { color: var(--error); }
+  .chip { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; }
+  .chip.ok { background: var(--success-muted); color: var(--success); }
+  .chip.warn { background: var(--warning-muted); color: var(--warning); }
+  .chip.bad { background: var(--error-muted); color: var(--error); }
+  .chip.info { background: var(--info-muted); color: var(--info); }
+  .chip.n { background: var(--neutral); color: var(--text2); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .chip.live .dot { animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  @media (prefers-reduced-motion: reduce) { .chip.live .dot { animation: none; } }
+
+  .mark { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #fff; flex-shrink: 0; }
+  .m-f { background: #c2672b; } .m-x { background: #2f8fb8; } .m-t { background: #b0466b; } .m-g { background: #4a7d3a; } .m-s { background: #5b6170; } .m-o { background: #8a5cd0; }
+
+  .seg { display: flex; gap: 2px; padding: 2px; margin: 0 4px 6px; border-radius: 8px; background: var(--neutral); }
+  .seg button { flex: 1; border: 0; background: transparent; border-radius: 6px; padding: 4px 8px; cursor: pointer; color: var(--text2); font-size: 12px; font-weight: 500; }
+  .seg button[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .25); }
+  .kind { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text3); border: 1px solid var(--line-em); border-radius: 4px; padding: 0 4px; flex-shrink: 0; }
+  .empty { padding: 8px 10px; color: var(--text3); font-size: 12.5px; }
+  .check .ask { align-self: flex-start; margin-top: 3px; }
+  .unc { font-size: 10.5px; font-weight: 700; color: var(--warning); white-space: nowrap; }
+  .tidy { margin-top: 6px; border: 1px dashed var(--line-em); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; color: var(--text2); font-size: 12.5px; }
+  .tidy .row { display: flex; gap: 8px; align-items: center; }
+  .tidy ul { margin: 0; padding: 0 0 0 16px; color: var(--text3); font-size: 12px; }
+  .link { border: 0; background: transparent; color: var(--accent-text); cursor: pointer; padding: 0; font-weight: 500; }
+  .link:hover { text-decoration: underline; }
+
+  /* ---------- the review ---------- */
+  .review { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .rv-scroll { flex: 1; overflow: auto; }
+  .rv { max-width: 1100px; margin: 0 auto; padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .back { display: none; }
+  .rv-top .l1 { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .rv-top h2 { margin: 0; font-size: 17px; font-weight: 600; }
+  .rv-top h2 .num { color: var(--text3); font-weight: 500; }
+  .rv-top .l2 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: var(--text2); font-size: 12.5px; margin-top: 6px; }
+  .sep { color: var(--text3); }
+
+  .checks { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .check { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .check .k { font-size: 11.5px; color: var(--text3); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  .check .v { font-weight: 600; display: flex; gap: 6px; align-items: center; }
+  .check .s { color: var(--text3); font-size: 12px; }
+  .check.ok .v { color: var(--success); } .check.warn .v { color: var(--warning); } .check.bad .v { color: var(--error); }
+  .check .v svg { flex-shrink: 0; }
+
+  .card { border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+  .summary { padding: 12px 14px; }
+  .summary h3, .h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; }
+  .summary p { margin: 0 0 6px; }
+  .summary ul { margin: 0; padding-left: 18px; color: var(--text2); }
+  .summary .from { margin-top: 8px; color: var(--text3); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line2); }
+  .tab { border: 0; background: transparent; padding: 7px 10px 9px; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; display: inline-flex; gap: 6px; align-items: center; font-weight: 500; }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent-text); }
+  .tab .count { font-size: 11px; color: var(--text3); }
+
+  .files { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .tree { position: sticky; top: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 6px; display: flex; flex-direction: column; gap: 1px; }
+  .tree .prog { padding: 4px 6px 8px; font-size: 12px; color: var(--text3); display: flex; flex-direction: column; gap: 5px; }
+  .bar { height: 4px; border-radius: 2px; background: var(--line-em); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--success); width: 0; transition: width .2s; }
+  .tf { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 6px; align-items: center; border: 0; background: transparent; text-align: left; padding: 4px 6px; border-radius: 6px; cursor: pointer; color: var(--text2); }
+  .tf:hover { background: var(--neutral); color: var(--text); }
+  .tf .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; font-family: var(--mono); font-size: 11.5px; }
+  .tf .st { font-family: var(--mono); font-size: 10.5px; font-weight: 700; }
+  .tf .st.A { color: var(--success); } .tf .st.M { color: var(--warning); } .tf .st.D { color: var(--error); }
+  .tf.viewed .fn { color: var(--text3); text-decoration: line-through; text-decoration-color: var(--line-em); }
+  .tf .cm { font-size: 10.5px; color: var(--info); font-weight: 700; }
+
+  .diffs { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .df { border: 1px solid var(--line); border-radius: 10px; background: var(--card); overflow: hidden; }
+  .df-h { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border-bottom: 1px solid var(--line2); background: var(--surface); position: sticky; top: 0; z-index: 1; }
+  .df-h .path { font-family: var(--mono); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .df-h label { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text2); cursor: pointer; white-space: nowrap; }
+  .df-h .fold { border: 0; background: transparent; color: var(--text3); cursor: pointer; width: 20px; }
+  .df.collapsed .df-b { display: none; }
+  .df-b { overflow-x: auto; }
+  table.d { border-collapse: collapse; width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  table.d td { padding: 0 8px; white-space: pre; vertical-align: top; }
+  table.d td.ln { width: 1%; text-align: right; color: var(--text3); user-select: none; padding: 0 6px; position: relative; }
+  table.d td.ln.new { padding-right: 22px; }
+  table.d tr.hunk td { background: var(--info-muted); color: var(--info); padding: 2px 8px; }
+  table.d tr.add td.code { background: var(--add-bg); } table.d tr.add td.ln { background: var(--add-gutter); }
+  table.d tr.del td.code { background: var(--del-bg); } table.d tr.del td.ln { background: var(--del-gutter); }
+  table.d td.code .pm { color: var(--text3); user-select: none; }
+  .addc { position: absolute; right: 2px; top: 1px; width: 17px; height: 17px; border-radius: 4px; border: 0; background: var(--accent); color: #fff; font-size: 13px; line-height: 17px; padding: 0; cursor: pointer; opacity: 0; }
+  tr:hover .addc, .addc:focus-visible { opacity: 1; }
+  tr.cmt td { white-space: normal; padding: 8px 10px; background: var(--surface); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 13px; border-top: 1px solid var(--line2); border-bottom: 1px solid var(--line2); }
+  .cbox { max-width: 640px; display: flex; flex-direction: column; gap: 6px; }
+  .cbox textarea { width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--line-em); border-radius: 8px; background: var(--card); padding: 7px 9px; }
+  .cbox .acts { display: flex; gap: 6px; justify-content: flex-end; }
+  .cnote { display: flex; gap: 8px; max-width: 640px; }
+  .cnote .who { font-weight: 600; } .cnote .when { color: var(--text3); font-size: 12px; }
+  .cnote .txt { color: var(--text); }
+  .cnote.trace { opacity: .95; }
+
+  .commits { list-style: none; margin: 0; padding: 0; }
+  .commits li { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 10px; padding: 8px 14px; border-top: 1px solid var(--line2); align-items: baseline; }
+  .commits li:first-child { border-top: 0; }
+  .commits .h { color: var(--text3); }
+  .commits .s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .findings { list-style: none; margin: 0; padding: 0; }
+  .findings li { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line2); align-items: start; }
+  .findings li:first-child { border-top: 0; }
+  .findings .w { color: var(--text3); font-size: 12px; }
+
+
+  /* conversation */
+  .tl { display: flex; flex-direction: column; gap: 12px; }
+  .ev-s { display: flex; gap: 10px; align-items: center; color: var(--text2); font-size: 12.5px; flex-wrap: wrap; }
+  .ev-s b { color: var(--text); }
+  .ev-s .ic { width: 24px; height: 24px; border-radius: 50%; background: var(--neutral); display: grid; place-items: center; color: var(--text3); flex-shrink: 0; margin-left: 4px; }
+  .ev-s .ic.ok { background: var(--success-muted); color: var(--success); } .ev-s .ic.warn { background: var(--warning-muted); color: var(--warning); }
+  .evc { list-style: none; margin: -4px 0 0 38px; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: var(--text2); }
+  .evc li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cwrap { display: flex; gap: 10px; align-items: flex-start; }
+  .cwrap .mark { width: 28px; height: 28px; border-radius: 50%; font-size: 12px; }
+  .ccard { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--card); overflow: hidden; }
+  .ccard .ch { display: flex; gap: 8px; align-items: center; padding: 7px 12px; background: var(--surface); border-bottom: 1px solid var(--line2); font-size: 12.5px; color: var(--text2); }
+  .ccard .ch b { color: var(--text); }
+  .ccard .cb { padding: 10px 12px; }
+  .txt { white-space: pre-wrap; }
+  .rv-ev { margin-left: 38px; display: flex; flex-direction: column; gap: 10px; }
+  .thread { border: 1px solid var(--line); border-radius: 10px; background: var(--card); overflow: hidden; }
+  tr.cmt .thread { max-width: 760px; }
+  .th-h { display: flex; gap: 8px; align-items: center; padding: 7px 12px; background: var(--surface); border-bottom: 1px solid var(--line2); font-size: 12px; min-width: 0; }
+  .th-h .faint { white-space: nowrap; }
+  .th-h .path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .snip { border-bottom: 1px solid var(--line2); }
+  .c1 { display: flex; gap: 9px; padding: 10px 12px; border-top: 1px solid var(--line2); }
+  .th-c .c1:first-child { border-top: 0; }
+  .c1b { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .c1h { display: flex; gap: 6px; align-items: center; font-size: 12.5px; }
+  .th-r { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line2); background: var(--surface); align-items: center; flex-wrap: wrap; }
+  .reply { flex: 1; min-width: 150px; text-align: left; border: 1px solid var(--line-em); border-radius: 7px; background: var(--card); padding: 5px 9px; color: var(--text3); cursor: text; }
+  .cbox-wrap { padding: 8px 12px; border-top: 1px solid var(--line2); background: var(--surface); }
+  .th-fold { width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 12px; color: var(--text2); cursor: pointer; display: flex; gap: 8px; align-items: center; font-size: 12.5px; }
+  .th-fold:hover { background: var(--neutral); }
+  .composer textarea { display: block; width: 100%; min-height: 76px; border: 0; background: transparent; padding: 10px 12px; resize: vertical; }
+  .composer textarea:focus-visible { outline: none; }
+  .cfoot { display: flex; gap: 8px; align-items: center; padding: 7px 10px 7px 12px; border-top: 1px solid var(--line2); background: var(--surface); font-size: 12px; flex-wrap: wrap; }
+  .cnt { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 999px; background: var(--warning-muted); color: var(--warning); font-size: 11px; font-weight: 700; text-align: center; }
+  .radios { display: flex; flex-direction: column; gap: 6px; }
+  .radio { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 1px 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; align-items: center; }
+  .radio input { grid-row: span 2; margin: 0; }
+  .radio .faint { font-size: 12px; }
+  .radio:has(input:checked) { border-color: var(--accent-text); background: var(--success-muted); }
+
+  /* the action bar */
+  .actbar { flex-shrink: 0; border-top: 1px solid var(--line); background: var(--surface); padding: 10px 24px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .actbar .state { color: var(--text2); font-size: 12.5px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .actbar .state b { color: var(--text); }
+
+  /* dialog */
+  dialog { border: 1px solid var(--line-em); border-radius: 14px; background: var(--card); color: var(--text); padding: 0; width: min(520px, calc(100vw - 32px)); }
+  dialog::backdrop { background: rgb(0 0 0 / .5); }
+  .dlg { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .dlg h2 { margin: 0; font-size: 15px; }
+  .dlg p { margin: 0; color: var(--text2); }
+  .dlg textarea { width: 100%; min-height: 90px; border: 1px solid var(--line-em); border-radius: 8px; background: var(--surface); padding: 8px 10px; resize: vertical; }
+  .dlg ul { margin: 0; padding-left: 18px; color: var(--text2); font-size: 12.5px; }
+  .dlg .acts { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  .toast { position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%); background: var(--card); border: 1px solid var(--line-em); border-radius: 10px; padding: 9px 14px; box-shadow: 0 8px 30px rgb(0 0 0 / .35); }
+
+  /* designer notes */
+  .notes { border: 1px dashed #5a4a8a; border-radius: 10px; padding: 12px 14px; color: var(--text2); font-size: 12.5px; }
+  .notes h3 { margin: 0 0 6px; font-size: 12px; color: #a08ae0; text-transform: uppercase; letter-spacing: .04em; }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin: 2px 0; }
+
+  @media (max-width: 1180px) {
+    .files { grid-template-columns: minmax(0, 1fr); }
+    .tree { position: static; }
+    .checks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 980px) { .rail { display: none; } }
+  @media (max-width: 760px) {
+    .head { padding: 10px 14px; }
+    .head .repo { display: none; }
+    .queue { width: 100%; border-right: 0; }
+    .review { display: none; }
+    .app.reviewing .queue { display: none; }
+    .app.reviewing .review { display: flex; }
+    .back { display: inline-flex; margin: 0 0 -4px -6px; align-self: flex-start; }
+    .rv { padding: 12px 14px 20px; }
+    .checks { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+    .actbar { padding: 10px 14px; }
+    .actbar .state { width: 100%; }
+    .actbar .btn { flex: 1; }
+    .actbar .grow { display: none; }
+    .rv-ev { margin-left: 0; }
+    .evc { margin-left: 34px; }
+    .cwrap > .mark { display: none; }
+    .findings li { grid-template-columns: 62px minmax(0, 1fr); }
+    .findings li .chip:last-child { grid-column: 2; justify-self: start; }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <nav class="rail" aria-label="Sidebar">
+    <div class="item">New session</div>
+    <div class="item">Inbox</div>
+    <div class="item">Board</div>
+    <div class="item on">Code <span class="badge" title="Waiting for your review">4</span></div>
+    <div class="item">Designs</div>
+    <div class="item">History</div>
+    <div class="item">Employees</div>
+  </nav>
+
+  <main>
+    <header class="head">
+      <h1>Code</h1>
+      <span class="mainline" title="main compared to origin/main after the last fetch"><span class="mono">main</span> · 4 ahead of origin · fetched 12 min ago</span>
+      <span class="grow"></span>
+      <button class="btn sm">Fetch</button>
+      <button class="icon" id="theme" title="Light / dark" aria-label="Switch light or dark">◐</button>
+    </header>
+
+    <div class="work">
+      <!-- ================= QUEUE ================= -->
+      <aside class="queue" aria-label="Branches to review">
+        <div class="seg" role="group" aria-label="Show">
+          <button data-k="all" aria-pressed="true">All</button><button data-k="ticket" aria-pressed="false">Tickets</button><button data-k="session" aria-pressed="false">Sessions</button>
+        </div>
+        <div class="q-h"><h2>Ready for review</h2><span class="n" id="n-ready"></span><span class="hint">oldest first</span></div>
+        <div id="q-ready"></div>
+
+        <div class="q-h"><h2>Being worked on</h2><span class="n" id="n-work"></span></div>
+        <div id="q-work"></div>
+
+        <div class="q-h"><h2>Tidy up</h2></div>
+        <div class="tidy">
+          <div><b>6 branches</b> are merged into main, <b>2 worktrees</b> are left behind.</div>
+          <ul>
+            <li class="mono">feat/ticket-81-workspace-settings</li>
+            <li class="mono">feat/plan-panel</li>
+            <li>and 4 more · 2 worktree folders under target/</li>
+          </ul>
+          <div class="row"><button class="btn sm">Clean up merged</button><button class="link" id="allbr">All branches and graph →</button></div>
+        </div>
+      </aside>
+
+      <!-- ================= REVIEW ================= -->
+      <section class="review" aria-label="Review">
+        <div class="rv-scroll">
+          <div class="rv" id="rv"></div>
+        </div>
+        <div class="actbar" id="actbar"></div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<dialog id="dlg"><div class="dlg" id="dlgc"></div></dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const ico = {
+  bubble: '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>',
+  commit: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="8" r="2.6"/><path d="M1 8h4.4M10.6 8H15"/></svg>',
+  eye: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/></svg>',
+  ok: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8.5l3 3 7-7"/></svg>',
+  warn: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 4v5M8 11.5v.5"/><circle cx="8" cy="8" r="6.5"/></svg>',
+  bad: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>',
+};
+
+/* ---------- data (realistic, from this repository) ---------- */
+const people = { Flux: 'm-f', Forge: 'm-g', Titan: 'm-t', Nexus: 'm-x', Trace: 'm-s', Orion: 'm-o' };
+const branches = {
+  b83: {
+    kind: 'ticket', num: 83, title: 'Ticket page: Activity and Timeline', branch: 'feat/ticket-83-activity-plain', owner: 'Flux',
+    waiting: '2 h', commits: 3, files: 9, add: 612, del: 148, behind: 2, ticket: 'Review',
+    checks: [
+      ['Review', 'ok', 'Approved', 'Trace · 0 blockers, 0 majors, 3 minors'],
+      ['Tests', 'ok', '717 passed', 'app tests · 14 min ago'],
+      ['Merge', 'ok', 'No conflicts', 'main moved on by 2 commits'],
+      ['Size', 'n', '9 files', '+612 −148 · 3 commits'],
+    ],
+    summary: ['The ticket page gets an <b>Activity</b> tab as its default: the plan on top, one card per employee, and questions answered inline.',
+      ['The properties panel keeps only Properties and Files.', 'The old Activity list becomes the <b>Timeline</b> tab, newest first, with filters.', 'Stop and the live bar leave the ticket page; Stop stays on the task screen.']],
+    commitList: [['93851c1e','design: ticket-activity-plain.html mock for the ticket page','Flux','3 h'],['b41e07a2','desktop: Activity tab with the plan and one card per employee','Flux','2 h'],['c7d2a913','desktop: Timeline tab, newest first, with filters','Flux','2 h']],
+    findings: [['minor','The plan card scrolls to an employee card but does not move focus there.','ticket-activity.tsx:212','open'],['minor','“Step 2 of 4” is read twice by a screen reader (label and text).','status-line.tsx:38','open'],['minor','Empty Timeline has no text when the filter hides everything.','ticket-timeline.tsx:91','fixed']],
+  },
+  b82: {
+    kind: 'ticket', num: 82, title: 'Workspace Overview page', branch: 'feat/ticket-82-workspace-overview', owner: 'Flux',
+    waiting: '1 d', commits: 3, files: 7, add: 488, del: 61, behind: 5, ticket: 'Review',
+    checks: [
+      ['Review', 'warn', '1 major open', 'Trace · 0 blockers, 1 major, 2 minors'],
+      ['Tests', 'ok', '709 passed', 'app tests · yesterday'],
+      ['Merge', 'bad', 'Conflict', 'sidebar.tsx, also changed on main'],
+      ['Size', 'n', '7 files', '+488 −61 · 3 commits'],
+    ],
+    summary: ['A new <b>Overview</b> row above New session opens the workspace overview: what needs you, what runs, the board in five lanes and what was done.', ['All workspaces shows Needs you across workspaces.', 'A new workspace gets a three-step start card.']],
+    commitList: [['a5727a8b','desktop: All workspaces lists every workspace, and each board member pins their own rail','Flux','1 d'],['5d12d7a0','desktop: a design session without a page no longer crashes Overview and Designs','Flux','1 d'],['e09f1c44','desktop: workspace Overview page','Flux','1 d']],
+    findings: [['major','Needs you counts a question twice when it is both on the ticket and in the inbox.','overview-logic.ts:64','open'],['minor','The done-per-day chart has no text alternative.','overview.tsx:301','open'],['minor','Board strip lanes do not wrap at 900 px.','overview.tsx:188','open']],
+  },
+  /* a work session on a branch of its own, idle, with commits ahead of main */
+  sA1: {
+    kind: 'session', title: 'Sidebar: Sessions and Tickets fold per section', branch: 'session/a1c93e07', owner: 'Flux', where: 'worktree',
+    waiting: '3 h', commits: 2, files: 3, add: 74, del: 39, behind: 0, ticket: 'Idle', uncommitted: 0,
+    checks: [
+      ['Review', 'n', 'Not reviewed', 'a session has no review step'],
+      ['Tests', 'ok', '121 passed', 'app tests · run in the session, 3 h ago'],
+      ['Merge', 'ok', 'No conflicts', 'up to date with main'],
+      ['Size', 'n', '3 files', '+74 −39 · 2 commits'],
+    ],
+    summary: ['The sidebar has two sections again, <b>Sessions</b> and <b>Tickets</b>. Each one always shows, even when empty, and folds from its header.',
+      ['The fold state is kept per section (sidebar.sessions, sidebar.tickets).', 'Running / Today / Earlier stay as groups inside each section.']],
+    commitList: [['df307b20','desktop: All workspaces is the list page beside the rail, without a panel','Flux','3 h'],['f8f81769','desktop: New session is a green button on top of the sidebar panel','Flux','3 h']],
+    findings: [],
+  },
+  /* a work session on its own branch, idle, with work that is not committed yet */
+  s35: {
+    kind: 'session', title: 'Design sessions always start in Auto', branch: 'session/35f38c72', owner: 'Titan', where: 'own branch in the project folder',
+    waiting: '25 min', commits: 1, files: 5, add: 61, del: 1, behind: 0, ticket: 'Idle', uncommitted: 5,
+    checks: [
+      ['Review', 'n', 'Not reviewed', 'a session has no review step'],
+      ['Tests', 'ok', '12 passed', 'cargo test -p aurelius-application work_session · in the session'],
+      ['Merge', 'warn', 'Not committed', '5 files changed since the last commit'],
+      ['Size', 'n', '5 files', '+61 −1 · 1 commit + changes'],
+    ],
+    summary: ['A design session always runs in <b>Auto</b>: there is no Mode choice for a design, and approving a plan in a design session no longer drops it to Accept edits.',
+      ['approvals.rs keeps Auto after a plan decision when the run is a design run.', 'New storage query <span class="mono">is_design_run</span>, with tests.']],
+    commitList: [['f7aee92b','design sessions always start in Auto; no Mode choice for a design','Titan','40 min']],
+    findings: [],
+  },
+};
+const order = ['b82', 'sA1', 'b83', 's35']; // oldest waiting first
+const working = [
+  ['Code tab: review first', 84, 'feat/ticket-84-code-review', 'Titan', 'Working', 'live', '1 commit · 4 files changed, not committed', 'ticket'],
+  ['Compaction threshold setting', null, 'session/7be2d915', 'Forge', 'Working', 'live', '11 files changed, not committed', 'session'],
+  ['Plan file in the runtime', 79, 'fix/aur-plan-file-001', 'Nexus', 'Waiting on review', 'n', 'Trace is reviewing · 2 commits', 'ticket'],
+];
+let filter = 'all';
+
+/* the diff of the selected branch: [path, status, add, del, hunks] ; hunk lines: ' ', '+', '-' */
+const diffs = {
+  b83: [
+    ['clients/ts/app/src/screens/ticket-activity.tsx', 'A', 214, 0, [
+      ['@@ -0,0 +1,214 @@', 1, 1, [
+        '+import { useMemo } from "react";',
+        '+import * as stylex from "@stylexjs/stylex";',
+        '+import { PlanCard } from "./plan-card";',
+        '+import { EmployeeCard } from "./employee-card";',
+        '+import { activityOf, type TicketActivity } from "./ticket-activity-logic";',
+        '+',
+        '+/** The Activity tab of a ticket: its plan, then one card per employee. */',
+        '+export function ActivityTab({ ticket }: { ticket: TicketView }) {',
+        '+  const activity: TicketActivity = useMemo(() => activityOf(ticket), [ticket]);',
+        '+  if (activity.employees.length === 0) {',
+        '+    return <EmptyState isCompact title="Nobody works on this ticket yet." />;',
+        '+  }',
+        '+  return (',
+        '+    <div {...stylex.props(styles.col)}>',
+        '+      <PlanCard plan={activity.plan} onPick={(id) => scrollToCard(id)} />',
+      ]]]],
+    ['clients/ts/app/src/screens/ticket.tsx', 'M', 38, 71, [
+      ['@@ -142,18 +142,12 @@ export function TicketScreen() {', 142, 142, [
+        '   const [tab, setTab] = useTicketTab(ticket.id);',
+        '-  const showLive = run?.state === "running";',
+        '-  const stop = useStopRun(run?.id ?? null);',
+        '   return (',
+        '     <TicketFrame ticket={ticket}>',
+        '-      {showLive && <LiveBar run={run} onStop={stop} />}',
+        '       <Tabs value={tab} onChange={setTab}>',
+        '-        <Tab value="discussion" label="Discussion" />',
+        '-        <Tab value="activity" label="Activity" />',
+        '+        <Tab value="activity" label="Activity" />',
+        '+        <Tab value="timeline" label="Timeline" />',
+        '+        <Tab value="discussion" label="Discussion" />',
+        '       </Tabs>',
+        '-      {tab === "activity" ? <ActivityList ticket={ticket} /> : <Discussion ticket={ticket} />}',
+        '+      {tab === "activity" && <ActivityTab ticket={ticket} />}',
+        '+      {tab === "timeline" && <TimelineTab ticket={ticket} />}',
+        '+      {tab === "discussion" && <Discussion ticket={ticket} />}',
+        '     </TicketFrame>',
+      ]]]],
+    ['clients/ts/app/src/screens/properties-panel.tsx', 'M', 6, 52, [
+      ['@@ -31,9 +31,6 @@ export function PropertiesPanel({ ticket }: Props) {', 31, 31, [
+        '   return (',
+        '     <aside aria-label="Ticket properties" {...stylex.props(styles.panel)}>',
+        '-      <PlanPanel plan={ticket.main_plan} />',
+        '-      <Activity ticket={ticket} />',
+        '       <Properties ticket={ticket} />',
+        '       <Files ticket={ticket} />',
+        '     </aside>',
+      ]]]],
+    ['clients/ts/app/src/screens/ticket-timeline.tsx', 'A', 168, 0, []],
+    ['clients/ts/app/src/screens/ticket-activity-logic.ts', 'A', 96, 0, []],
+    ['clients/ts/app/src/screens/employee-card.tsx', 'A', 61, 0, []],
+    ['clients/ts/app/src/screens/status-line.tsx', 'A', 29, 0, []],
+    ['clients/ts/app/src/screens/live-bar.tsx', 'D', 0, 25, []],
+    ['design/ticket-activity-plain.html', 'A', 0, 0, []],
+  ],
+};
+diffs.b82 = [
+  ['clients/ts/app/src/screens/overview.tsx', 'A', 342, 0, []],
+  ['clients/ts/app/src/screens/overview-logic.ts', 'A', 88, 0, [
+    ['@@ -0,0 +58,12 @@', 58, 58, [
+      '+/** What needs the board member now: questions, plans and reviews, once each. */',
+      '+export function needsYou(view: OverviewView): NeedsYou[] {',
+      '+  const fromTickets = view.tickets.flatMap(questionsOf);',
+      '+  const fromInbox = view.inbox.filter((i) => i.kind === "question");',
+      '+  return [...fromTickets, ...fromInbox.map(asNeed)].sort(byWaiting);',
+      '+}',
+    ]]]],
+  ['clients/ts/app/src/screens/sidebar.tsx', 'M', 31, 12, []],
+  ['clients/ts/app/src/screens/designs-logic.ts', 'M', 9, 3, []],
+  ['clients/ts/app/src/screens/designs.tsx', 'M', 6, 4, []],
+  ['clients/ts/app/src/router.tsx', 'M', 7, 2, []],
+  ['clients/ts/app/src/screens/overview.test.ts', 'A', 5, 40, []],
+];
+
+diffs.sA1 = [
+  ['clients/ts/app/src/screens/sidebar.tsx', 'M', 58, 31, [
+    ['@@ -204,10 +204,16 @@ function WorkspacePanel({ workspace }: Props) {', 204, 204, [
+      '   const sessions = useSessions(workspace.id);',
+      '   const tickets = useOpenTickets(workspace.id);',
+      '-  const rows = [...sessions, ...tickets].sort(byLastActivity);',
+      '+  const [sessionsOpen, toggleSessions] = useFold(sectionKey("sessions"));',
+      '+  const [ticketsOpen, toggleTickets] = useFold(sectionKey("tickets"));',
+      '   return (',
+      '     <nav aria-label="Workspace">',
+      '-      <Buckets rows={rows} />',
+      '+      <section aria-label="Sessions">',
+      '+        <SectionHeader label="Sessions" open={sessionsOpen} onToggle={toggleSessions} />',
+      '+        {sessionsOpen && (sessions.length ? <Buckets rows={sessions} /> : <Empty text="No sessions yet" />)}',
+      '+      </section>',
+      '+      <section aria-label="Tickets">',
+      '+        <SectionHeader label="Tickets" open={ticketsOpen} onToggle={toggleTickets} />',
+      '+        {ticketsOpen && (tickets.length ? <Buckets rows={tickets} /> : <Empty text="No open tickets" />)}',
+      '+      </section>',
+      '     </nav>',
+    ]]]],
+  ['clients/ts/app/src/screens/sidebar-logic.ts', 'M', 12, 8, []],
+  ['clients/ts/app/src/screens/sidebar.test.ts', 'M', 4, 0, []],
+];
+/* the 6th field marks a change that is in the worktree but not committed */
+diffs.s35 = [
+  ['crates/application/src/run/approvals.rs', 'M', 5, 1, [
+    ['@@ -331,11 +331,15 @@ impl CommandService {', 331, 331, [
+      '             // The conversation leaves plan mode too, so its mode shows it and the next answer runs in it.',
+      '-            let mode = match decision {',
+      '+            let mut mode = match decision {',
+      '                 PlanDecision::Approve => Some(aurelius_domain::autonomy::AgentMode::Auto),',
+      '                 PlanDecision::ApproveEdits => Some(aurelius_domain::autonomy::AgentMode::AcceptEdits),',
+      '                 PlanDecision::Revise | PlanDecision::Reject => None,',
+      '             };',
+      '+            // A design session stays in Auto (see `DESIGN_STAYS_AUTO`).',
+      '+            if mode.is_some() && aurelius_storage::work_sessions::is_design_run(tx, row.run_id)? {',
+      '+                mode = Some(aurelius_domain::autonomy::AgentMode::Auto);',
+      '+            }',
+      '             if let Some(mode) = mode {',
+    ]]], true],
+  ['crates/application/src/conversation/work_session_tests.rs', 'M', 44, 0, [], true],
+  ['crates/storage/src/work_sessions.rs', 'M', 5, 0, [], true],
+  ['crates/application/src/conversation/chat.rs', 'M', 4, 0, [], true],
+  ['crates/application/src/conversation/work_session.rs', 'M', 3, 0, [], true],
+];
+
+/* ---------- conversation: line threads and the timeline ----------
+   a thread: { id, file, line, snippet: [[line, kind, text]], resolved, comments: [{ who, text, when, pending }] }
+   a pending comment is yours and waits for Finish review, so the owner is woken once, not per comment */
+const state = Object.fromEntries(Object.keys(branches).map(k => [k, { viewed: new Set(), threads: [], timeline: [], open: new Set() }]));
+const th = (id, file, line, snippet, comments, resolved = false) => ({ id, file, line, snippet, comments, resolved });
+
+state.b83.threads = [
+  th('t83a', 'clients/ts/app/src/screens/ticket-activity.tsx', 15,
+    [[14, '+', '    <div {...stylex.props(styles.col)}>'], [15, '+', '      <PlanCard plan={activity.plan} onPick={(id) => scrollToCard(id)} />']],
+    [{ who: 'Trace', when: '2 h', text: 'Minor: scrolling to the employee card does not move focus there, so a keyboard user stays on the plan. Focus the card heading after the scroll.' },
+     { who: 'Flux', when: '1 h', text: 'Fixed in c7d2a913: scrollToCard now focuses the card heading (tabIndex -1).' }], true),
+  th('t83b', 'clients/ts/app/src/screens/status-line.tsx', 38,
+    [[37, '+', '  return <span aria-label={`Step ${n} of ${total}`}>'], [38, '+', '    {dots}<span>Step {n} of {total}</span>']],
+    [{ who: 'Trace', when: '2 h', text: 'Minor: “Step 2 of 4” is read twice by a screen reader, once from aria-label and once from the text.' },
+     { who: 'Flux', when: '1 h', text: 'On narrow cards only the dots show and the text is hidden, so the label is all a screen reader gets there. Shall I hide the text from screen readers instead and keep the label?' }]),
+];
+state.b83.timeline = [
+  { t: 'desc', who: 'Flux', when: '3 h' },
+  { t: 'commits', who: 'Flux', when: '3 h', list: [0, 1] },
+  { t: 'review', who: 'Trace', verdict: 'approved', when: '2 h', body: 'Mergeable: 0 blockers, 0 majors, 3 minors. The empty Timeline text is already fixed on this branch.', threads: ['t83a', 't83b'] },
+  { t: 'commits', who: 'Flux', when: '1 h', list: [2] },
+  { t: 'comment', who: 'Flux', when: '1 h', text: 'Ready for your review. Two of the three minors are fixed; the one on status-line.tsx needs your call.' },
+];
+state.b82.threads = [
+  th('t82a', 'clients/ts/app/src/screens/overview-logic.ts', 62,
+    [[60, '+', '  const fromTickets = view.tickets.flatMap(questionsOf);'], [61, '+', '  const fromInbox = view.inbox.filter((i) => i.kind === "question");'], [62, '+', '  return [...fromTickets, ...fromInbox.map(asNeed)].sort(byWaiting);']],
+    [{ who: 'Trace', when: '1 d', text: 'Major: a question on a ticket also lands in the inbox, so it is counted twice here. Deduplicate on the question id.' }]),
+];
+state.b82.timeline = [
+  { t: 'desc', who: 'Flux', when: '1 d' },
+  { t: 'commits', who: 'Flux', when: '1 d', list: [2, 1, 0] },
+  { t: 'review', who: 'Trace', verdict: 'changes', when: '1 d', body: 'Changes requested: 1 major (a question counts twice in Needs you) and 2 minors (no text alternative for the chart, lanes do not wrap at 900 px).', threads: ['t82a'] },
+  { t: 'event', when: '20 h', text: '<b>#81 Workspace settings</b> was merged into main; <span class="mono">sidebar.tsx</span> now conflicts.' },
+  { t: 'comment', who: 'Flux', when: '20 h', text: 'I will fix the major and bring the branch up to date with main in one go, once you agree with deduplicating on the question id.' },
+];
+state.sA1.timeline = [
+  { t: 'desc', who: 'Flux', when: '3 h' },
+  { t: 'commits', who: 'Flux', when: '3 h', list: [1, 0] },
+  { t: 'noreview' },
+];
+state.s35.timeline = [
+  { t: 'desc', who: 'Titan', when: '25 min' },
+  { t: 'commits', who: 'Titan', when: '40 min', list: [0] },
+  { t: 'event', when: '25 min', text: '5 files changed after the last commit and are <b>not committed</b> yet.' },
+  { t: 'noreview' },
+];
+let current = 'b83', tab = 'conversation';
+
+/* ---------- queue ---------- */
+const shows = k => filter === 'all' || filter === k;
+const label = b => b.kind === 'ticket' ? `<span class="num">#${b.num}</span> ${b.title}` : b.title;
+const openThreads = id => state[id].threads.filter(t => !t.resolved).length;
+function renderQueue() {
+  const ready = order.filter(id => shows(branches[id].kind));
+  $('#n-ready').textContent = ready.length;
+  $('#q-ready').innerHTML = ready.map(id => {
+    const b = branches[id], rev = review(id), mer = b.checks[2], ot = openThreads(id);
+    return `<button class="qi" data-b="${id}" aria-current="${id === current}">
+      <span class="t1"><span class="mark ${people[b.owner]}" title="${b.owner}">${b.owner[0]}</span><span class="title">${label(b)}</span>${b.kind === 'session' ? '<span class="grow"></span><span class="kind">Session</span>' : ''}</span>
+      <span class="t2"><span class="br mono">${b.branch}</span><span class="grow"></span><span class="size"><span class="a">+${b.add}</span> <span class="d">−${b.del}</span></span></span>
+      <span class="t3">${rev[1] !== 'n' ? `<span class="chip ${rev[1]}">${rev[2]}</span>` : ''}<span class="chip ${mer[1]}">${mer[2]}</span>${ot ? `<span class="chip info">${ico.bubble} ${ot} open</span>` : ''}<span class="chip n">${b.kind === 'session' ? 'idle' : 'waits'} ${b.waiting}</span></span>
+    </button>`;
+  }).join('') || `<div class="empty">Nothing waits for your review.</div>`;
+  const work = working.filter(w => shows(w[7]));
+  $('#n-work').textContent = work.length;
+  $('#q-work').innerHTML = work.map(([t, n, br, who, st, kind, sub, k]) => `
+    <button class="qi" disabled style="cursor:default">
+      <span class="t1"><span class="mark ${people[who]}" title="${who}">${who[0]}</span><span class="title">${n ? `<span class="num">#${n}</span> ` : ''}${t}</span><span class="grow"></span>${k === 'session' ? '<span class="kind">Session</span>' : ''}<span class="chip ${kind}${kind === 'live' ? ' ok' : ''}">${kind === 'live' ? '<span class="dot"></span>' : ''}${st}</span></span>
+      <span class="t2"><span class="br mono">${br}</span></span>
+      <span class="t2">${sub}</span>
+    </button>`).join('') || `<div class="empty">Nobody works on a branch right now.</div>`;
+  $$('#q-ready .qi').forEach(b => b.onclick = () => { current = b.dataset.b; tab = 'conversation'; renderQueue(); renderReview(); $('#app').classList.add('reviewing'); $('.rv-scroll').scrollTop = 0; });
+}
+
+/* the review check: your own verdict goes before Trace's */
+function review(id) {
+  const mine = [...state[id].timeline].reverse().find(e => e.t === 'review' && e.who === 'you' && e.verdict !== 'comment');
+  if (mine) return mine.verdict === 'approved' ? ['Review', 'ok', 'Approved', 'by you · just now'] : ['Review', 'warn', 'Changes requested', 'by you · just now'];
+  return branches[id].checks[0];
+}
+
+/* ---------- pieces ---------- */
+const avatar = who => who === 'you' ? '<span class="mark" style="background:#3a6ea5">S</span>' : `<span class="mark ${people[who]}">${who[0]}</span>`;
+const name = who => who === 'you' ? 'You' : who;
+function commentHtml(c) {
+  return `<div class="c1">${avatar(c.who)}<div class="c1b"><div class="c1h"><b>${name(c.who)}</b> <span class="faint">${c.pending ? '' : c.when + ' ago'}</span>${c.pending ? '<span class="chip warn">Pending</span>' : ''}</div><div class="txt">${esc(c.text)}</div></div></div>`;
+}
+function snippetHtml(t) {
+  return `<table class="d snip">${t.snippet.map(([ln, k, x]) => `<tr class="${k === '+' ? 'add' : k === '-' ? 'del' : 'ctx'}"><td class="ln">${ln}</td><td class="code"><span class="pm">${k}</span>${esc(x)}</td></tr>`).join('')}</table>`;
+}
+function threadHtml(t, inConversation) {
+  const s = state[current];
+  const head = inConversation ? `<div class="th-h"><span class="mono path">${t.file}</span><span class="faint">line ${t.line}</span><span class="grow"></span>${t.resolved ? `<span class="chip ok">${ico.ok} Resolved</span>` : ''}</div>` : '';
+  if (t.resolved && !s.open.has(t.id)) {
+    return `<div class="thread">${head}<button class="th-fold" data-open="${t.id}">${inConversation ? '' : `<span class="chip ok">${ico.ok} Resolved</span>`} ${t.comments.length} comments · Show</button></div>`;
+  }
+  return `<div class="thread" data-th="${t.id}">${head}${inConversation ? snippetHtml(t) : ''}
+    <div class="th-c">${t.comments.map(commentHtml).join('')}</div>
+    <div class="th-r"><button class="reply" data-reply="${t.id}">Reply…</button><button class="btn sm" data-resolve="${t.id}">${t.resolved ? 'Unresolve' : 'Resolve conversation'}</button></div></div>`;
+}
+function evHtml(e, b) {
+  const s = state[current], isS = b.kind === 'session';
+  const small = (icon, html) => `<div class="ev-s"><span class="ic">${icon}</span><span>${html}</span></div>`;
+  switch (e.t) {
+    case 'desc':
+      return `<div class="cwrap">${avatar(e.who)}<div class="ccard"><div class="ch"><b>${e.who}</b> ${isS ? 'in the session' : 'reported'} · ${e.when} ago<span class="grow"></span><span class="chip n">${isS ? 'Last answer' : 'Report'}</span></div>
+        <div class="cb"><p style="margin:0 0 6px">${b.summary[0]}</p><ul style="margin:0;padding-left:18px;color:var(--text2)">${b.summary[1].map(x => `<li>${x}</li>`).join('')}</ul>
+        <div class="faint" style="margin-top:8px;font-size:12px"><button class="link">${isS ? 'Open the session' : `Open ticket #${b.num}`}</button></div></div></div></div>`;
+    case 'commits':
+      return small(ico.commit, `<b>${e.who}</b> added ${e.list.length} commit${e.list.length > 1 ? 's' : ''} · ${e.when} ago`) +
+        `<ul class="evc">${e.list.map(i => { const [h, m] = b.commitList[i]; return `<li><span class="mono faint">${h.slice(0, 8)}</span> <span class="s">${m}</span></li>`; }).join('')}</ul>`;
+    case 'event':
+      return small(ico.warn, `${e.text} · ${e.when} ago`);
+    case 'noreview':
+      return small(ico.eye, `No review yet. A session has no review step of its own. <button class="btn sm" data-ask style="margin-left:6px">Ask Trace to review</button>`);
+    case 'comment':
+      return `<div class="cwrap">${avatar(e.who)}<div class="ccard"><div class="ch"><b>${name(e.who)}</b> commented · ${e.when === 'now' ? 'just now' : e.when + ' ago'}</div><div class="cb txt">${esc(e.text)}</div></div></div>`;
+    case 'review': {
+      const v = { approved: ['ok', ico.ok, 'approved these changes'], changes: ['warn', ico.warn, 'requested changes'], comment: ['n', ico.bubble, 'reviewed'] }[e.verdict];
+      const threads = e.threads.map(id => s.threads.find(t => t.id === id)).filter(Boolean);
+      return `<div class="ev-s"><span class="ic ${v[0]}">${v[1]}</span><span><b>${name(e.who)}</b> ${v[2]} · ${e.when === 'now' ? 'just now' : e.when + ' ago'}</span></div>
+        <div class="rv-ev">${e.body ? `<div class="ccard"><div class="cb txt">${esc(e.body)}</div></div>` : ''}${threads.map(t => threadHtml(t, true)).join('')}</div>`;
+    }
+  }
+}
+
+/* ---------- review ---------- */
+function diffTable(id, f) {
+  const [path, , , , hunks] = f;
+  if (!hunks.length) return `<div style="padding:10px 12px" class="faint">${f[1] === 'D' ? 'File removed.' : 'Not loaded yet.'} <button class="link">Show the diff</button></div>`;
+  let rows = '';
+  for (const [h, o0, n0, lines] of hunks) {
+    rows += `<tr class="hunk"><td colspan="3">${esc(h)}</td></tr>`;
+    let o = o0, n = n0;
+    for (const l of lines) {
+      const k = l[0], txt = esc(l.slice(1));
+      const cls = k === '+' ? 'add' : k === '-' ? 'del' : 'ctx';
+      const on = k === '+' ? '' : o, nn = k === '-' ? '' : n;
+      const line = k === '-' ? o : n;
+      rows += `<tr class="${cls}"><td class="ln">${on}</td><td class="ln new">${nn}<button class="addc" data-f="${path}" data-l="${line}" data-k="${k}" title="Comment on this line" aria-label="Comment on line ${line}">+</button></td><td class="code"><span class="pm">${k === ' ' ? ' ' : k}</span>${txt}</td></tr>`;
+      for (const t of state[id].threads.filter(t => t.file === path && t.line === line)) rows += `<tr class="cmt"><td colspan="3">${threadHtml(t, false)}</td></tr>`;
+      if (k !== '+') o++; if (k !== '-') n++;
+    }
+  }
+  return `<table class="d">${rows}</table>`;
+}
+
+const pendingOf = id => state[id].threads.flatMap(t => t.comments.filter(c => c.pending)).length;
+function renderReview() {
+  const b = branches[current], s = state[current], files = diffs[current];
+  const isS = b.kind === 'session', pend = pendingOf(current);
+  const allChecks = [review(current), ...b.checks.slice(1)];
+  const checks = allChecks.map(([k, kind, v, sub]) => `<div class="check ${kind}"><span class="k">${k}</span><span class="v">${ico[kind] || ''}${v}</span><span class="s">${sub}</span>${isS && k === 'Review' && kind === 'n' ? '<button class="btn sm ask" data-ask>Ask Trace to review</button>' : ''}</div>`).join('');
+  const nComments = s.threads.reduce((a, t) => a + t.comments.length, 0) + s.timeline.filter(e => e.t === 'comment').length;
+  const tabs = `<div class="tabs" role="tablist">
+      <button class="tab" role="tab" data-t="conversation" aria-selected="${tab === 'conversation'}">Conversation <span class="count">${nComments}</span></button>
+      <button class="tab" role="tab" data-t="commits" aria-selected="${tab === 'commits'}">Commits <span class="count">${b.commits}</span></button>
+      <button class="tab" role="tab" data-t="files" aria-selected="${tab === 'files'}">Files changed <span class="count">${files.length}</span></button></div>`;
+  let body = '';
+  if (tab === 'files') {
+    const tree = files.map(f => {
+      const n = s.threads.filter(t => t.file === f[0] && !t.resolved).length;
+      return `<button class="tf ${s.viewed.has(f[0]) ? 'viewed' : ''}" data-go="${f[0]}" title="${f[0]}${f[5] ? ' · not committed' : ''}"><span class="st ${f[1]}">${f[1]}</span><span class="fn">${f[0].split('/').slice(-2).join('/')}</span>${n ? `<span class="cm">${ico.bubble} ${n}</span>` : f[5] ? '<span class="unc">not committed</span>' : `<span class="size"><span class="a">+${f[2]}</span> <span class="d">−${f[3]}</span></span>`}</button>`;
+    }).join('');
+    const diffsHtml = files.map((f, i) => `<div class="df ${s.viewed.has(f[0]) ? 'collapsed' : ''}" id="f${i}" data-path="${f[0]}">
+        <div class="df-h"><button class="fold" aria-label="Fold">${s.viewed.has(f[0]) ? '▸' : '▾'}</button><span class="st mono" style="font-weight:700;color:var(--${f[1] === 'A' ? 'success' : f[1] === 'D' ? 'error' : 'warning'})">${f[1]}</span><span class="path" title="${f[0]}">${f[0]}</span>${f[5] ? '<span class="chip warn">Not committed</span>' : ''}<span class="grow"></span><span class="size"><span class="a">+${f[2]}</span> <span class="d">−${f[3]}</span></span><label><input type="checkbox" data-v="${f[0]}" ${s.viewed.has(f[0]) ? 'checked' : ''}> Viewed</label></div>
+        <div class="df-b">${diffTable(current, f)}</div></div>`).join('');
+    body = `<div class="files"><nav class="tree" aria-label="Changed files"><div class="prog"><span>${s.viewed.size} of ${files.length} files viewed</span><div class="bar"><i style="width:${s.viewed.size / files.length * 100}%"></i></div></div>${tree}</nav><div class="diffs">${diffsHtml}</div></div>`;
+  } else if (tab === 'conversation') {
+    const loose = s.threads.filter(t => !s.timeline.some(e => e.t === 'review' && e.threads.includes(t.id)));
+    const pendBox = loose.length ? `<div class="ev-s"><span class="ic warn">${ico.bubble}</span><span><b>Your review</b> · ${pend} pending comment${pend === 1 ? '' : 's'}, not sent yet <button class="btn sm" data-finish style="margin-left:6px">Finish review</button></span></div><div class="rv-ev">${loose.map(t => threadHtml(t, true)).join('')}</div>` : '';
+    body = `<div class="tl">${s.timeline.map(e => evHtml(e, b)).join('')}${pendBox}
+      <div class="cwrap composer">${avatar('you')}<div class="ccard"><textarea id="newc" placeholder="Add a comment for ${b.owner}" aria-label="Comment"></textarea>
+        <div class="cfoot"><span class="faint">${isS ? `Goes to the session and wakes ${b.owner}.` : `Goes to the discussion of ticket #${b.num} and wakes ${b.owner}.`}</span><span class="grow"></span><button class="btn sm primary" id="postc">Comment</button></div></div></div></div>`;
+  } else {
+    body = `<div class="card"><ul class="commits">${b.commitList.map(([h, s2, who, t]) => `<li><span class="h mono">${h.slice(0, 8)}</span><span class="s">${s2}</span><span class="faint" style="font-size:12px">${who} · ${t} ago</span></li>`).join('')}</ul></div>`;
+  }
+  $('#rv').innerHTML = `
+    <button class="btn ghost sm back" id="back">‹ To review</button>
+    <div class="rv-top">
+      <div class="l1">${isS ? '<span class="kind">Session</span>' : ''}<h2>${label(b)}</h2><span class="chip ${isS ? 'n' : b.ticket === 'Doing' ? 'warn' : 'info'}">${b.ticket}</span></div>
+      <div class="l2"><span class="mark ${people[b.owner]}">${b.owner[0]}</span>${b.owner}<span class="sep">·</span><span class="mono">${b.branch}</span><span class="sep">→</span><span class="mono">main</span><span class="sep">·</span>${b.behind ? `${b.behind} behind main` : 'up to date with main'}<span class="sep">·</span>${isS ? `${b.where} · idle ${b.waiting}` : `waits ${b.waiting}`}</div>
+    </div>
+    <div class="checks">${checks}</div>
+    ${tabs}${body}
+    <div class="notes"><h3>Design notes (not in the app)</h3><ul>
+      <li>The Code tab opens on <b>Ready for review</b>: tickets and work sessions together, oldest waiting first, with All · Tickets · Sessions on top. A <b>ticket</b> is ready when it is in Review and its branch is ahead of main. A <b>session</b> is ready when its run is idle and its branch (worktree or own branch) is ahead of main or has changes that are not committed. Running work sits under Being worked on, read-only. Merged branches and stale worktrees collapse into one <b>Tidy up</b> card; the old lists move behind <b>All branches and graph →</b>.</li>
+      <li><b>Conversation</b> works like a pull request: the owner's report (or last answer in a session) on top, then commits, reviews and comments in time order. A review holds its line threads with the code they are on. A thread gets replies and can be resolved; a resolved thread folds. A thread whose line changed in a later commit gets an <b>Outdated</b> tag and keeps its snippet.</li>
+      <li>A line comment or a reply is <b>Pending</b> until you press <b>Finish review</b>, so ${b.owner} is woken once with all of it. Finish review: <b>Comment</b> (posts and wakes, status stays), <b>Approve</b> (your approval shows in Review; merging stays a separate action) or <b>Request changes</b> (wakes the owner; a ticket goes back to Doing). The comment box at the bottom posts one comment at once.</li>
+      <li>Where it lands: for a ticket in its discussion, for a session as a message in the session, each with a link back to the thread here. The owner's replies on a thread come back the same way.</li>
+      <li>For a session: Review shows "Not reviewed" with <b>Ask Trace to review</b>. Uncommitted changes show with a tag; Merge then waits on <b>Ask … to commit</b>.</li>
+      <li>New server data: <span class="mono">code.diff {branch, path}</span> (also the worktree for uncommitted changes), a conflict check per branch (<span class="mono">git merge-tree</span>), review threads (branch, file, line, commit, resolved) with their comments, a pending review per board member, <span class="mono">code.submit_review {verdict, body}</span>, and the viewed files per board member and branch head.</li>
+    </ul></div>`;
+
+  const blocked = b.checks[2][1] === 'bad', unc = b.uncommitted > 0;
+  const progress = `<b>${s.viewed.size}/${files.length}</b> files viewed${pend ? ` · <b>${pend}</b> pending comment${pend > 1 ? 's' : ''}` : ''}`;
+  $('#actbar').innerHTML = `
+    <span class="state">${blocked ? `<span class="chip bad">${ico.bad} Conflict in sidebar.tsx</span> ${progress}` : unc ? `<span class="chip warn">${ico.warn} ${b.uncommitted} files not committed</span> ${progress}` : progress}</span>
+    <span class="grow"></span>
+    <button class="btn" data-finish>Finish review${pend ? ` <span class="cnt">${pend}</span>` : ''}</button>
+    ${unc ? `<button class="btn primary" id="commitask">Ask ${b.owner} to commit</button>` : `<button class="btn primary" id="merge" ${blocked ? `disabled title="${b.owner} has to resolve the conflict first"` : ''}>Merge into main</button>`}`;
+  wire();
+}
+
+function keep(fn) { const y = $('.rv-scroll').scrollTop; fn(); renderReview(); renderQueue(); $('.rv-scroll').scrollTop = y; }
+function wire() {
+  const s = state[current];
+  $$('.tab').forEach(t => t.onclick = () => { tab = t.dataset.t; renderReview(); });
+  $('#back').onclick = () => $('#app').classList.remove('reviewing');
+  $$('[data-v]').forEach(c => c.onchange = () => keep(() => c.checked ? s.viewed.add(c.dataset.v) : s.viewed.delete(c.dataset.v)));
+  $$('.fold').forEach(f => f.onclick = () => { const d = f.closest('.df'); d.classList.toggle('collapsed'); f.textContent = d.classList.contains('collapsed') ? '▸' : '▾'; });
+  $$('[data-go]').forEach(t => t.onclick = () => { const d = $$('.df').find(x => x.dataset.path === t.dataset.go); d.classList.remove('collapsed'); d.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  $$('.addc').forEach(a => a.onclick = () => openLineComment(a));
+  $$('[data-open]').forEach(x => x.onclick = () => keep(() => s.open.add(x.dataset.open)));
+  $$('[data-resolve]').forEach(x => x.onclick = () => keep(() => { const t = s.threads.find(t => t.id === x.dataset.resolve); t.resolved = !t.resolved; s.open.delete(t.id); }));
+  $$('[data-reply]').forEach(x => x.onclick = () => openBox(x.closest('.th-r'), `Reply to ${branches[current].owner}…`, text =>
+    s.threads.find(t => t.id === x.dataset.reply).comments.push({ who: 'you', text, pending: true })));
+  $$('[data-finish]').forEach(x => x.onclick = finishReview);
+  if ($('#postc')) $('#postc').onclick = () => { const v = $('#newc').value.trim(); if (!v) return $('#newc').focus(); keep(() => s.timeline.push({ t: 'comment', who: 'you', when: 'now', text: v })); toast(`Posted; ${branches[current].owner} is woken.`); };
+  if ($('#merge')) $('#merge').onclick = merge;
+  if ($('#commitask')) $('#commitask').onclick = askCommit;
+  $$('[data-ask]').forEach(a => a.onclick = () => toast(`Trace reviews ${branches[current].branch}. The review shows in Conversation when done.`));
+}
+/* a small comment box in place of a reply bar or under a diff line */
+function openBox(host, placeholder, onAdd, asRow) {
+  const box = document.createElement(asRow ? 'tr' : 'div');
+  box.className = asRow ? 'cmt draft' : 'cbox-wrap';
+  const inner = `<div class="cbox"><textarea placeholder="${placeholder}" aria-label="Comment"></textarea><div class="acts"><button class="btn ghost sm" data-x>Cancel</button><button class="btn sm primary" data-s>Add to review</button></div></div>`;
+  box.innerHTML = asRow ? `<td colspan="3">${inner}</td>` : inner;
+  if (asRow) host.after(box); else { host.hidden = true; host.after(box); }
+  const ta = box.querySelector('textarea'); ta.focus();
+  box.querySelector('[data-x]').onclick = () => { box.remove(); host.hidden = false; };
+  box.querySelector('[data-s]').onclick = () => { if (!ta.value.trim()) return ta.focus(); keep(() => onAdd(ta.value.trim())); };
+}
+function openLineComment(a) {
+  const tr = a.closest('tr');
+  if (tr.nextElementSibling?.classList.contains('draft')) return tr.nextElementSibling.querySelector('textarea').focus();
+  const s = state[current], code = tr.querySelector('.code').textContent.slice(1);
+  openBox(tr, `Comment on line ${a.dataset.l}…`, text => {
+    const existing = s.threads.find(t => t.file === a.dataset.f && t.line === +a.dataset.l);
+    if (existing) return existing.comments.push({ who: 'you', text, pending: true });
+    s.threads.push(th('n' + s.threads.length + Date.now(), a.dataset.f, +a.dataset.l, [[+a.dataset.l, a.dataset.k, code]], [{ who: 'you', text, pending: true }]));
+  }, true);
+}
+function dialog(html, onOk) {
+  $('#dlgc').innerHTML = html; const d = $('#dlg'); d.showModal();
+  $$('#dlgc [data-close]').forEach(b => b.onclick = () => d.close());
+  $('#dlgc [data-ok]').onclick = () => { d.close(); onOk(); };
+}
+function toast(t) { const el = $('#toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => el.hidden = true, 3200); }
+function finishReview() {
+  const b = branches[current], s = state[current], pend = pendingOf(current), isS = b.kind === 'session';
+  const opt = (v, t, d, on) => `<label class="radio"><input type="radio" name="verdict" value="${v}" ${on ? 'checked' : ''}><b>${t}</b><span class="faint">${d}</span></label>`;
+  dialog(`<h2>Finish your review</h2>
+    <p>${pend ? `${pend} pending comment${pend > 1 ? 's' : ''} go${pend > 1 ? '' : 'es'} with it.` : 'No line comments; you can still leave a summary.'}</p>
+    <textarea id="rbody" placeholder="Leave a summary (optional)" aria-label="Summary"></textarea>
+    <div class="radios">
+      ${opt('comment', 'Comment', `${b.owner} is woken and answers. ${isS ? 'Nothing else changes.' : 'The ticket stays in Review.'}`, !pend)}
+      ${opt('approved', 'Approve', 'Your approval shows in Review. You merge when you are ready.')}
+      ${opt('changes', 'Request changes', `${b.owner} is woken to change it.${isS ? '' : ' The ticket goes back to Doing.'}`, !!pend)}
+    </div>
+    <div class="acts"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-ok>Submit review</button></div>`,
+    () => {
+      const verdict = $('#dlgc input[name=verdict]:checked').value, body = $('#rbody').value.trim();
+      keep(() => {
+        const ids = s.threads.filter(t => t.comments.some(c => c.pending)).map(t => t.id);
+        s.threads.forEach(t => t.comments.forEach(c => { if (c.pending) { c.pending = false; c.when = 'now'; } }));
+        s.timeline.push({ t: 'review', who: 'you', verdict, when: 'now', body, threads: ids.filter(id => !s.timeline.some(e => e.t === 'review' && e.threads.includes(id))) });
+        if (verdict === 'changes' && !isS) b.ticket = 'Doing';
+        tab = 'conversation';
+      });
+      toast(verdict === 'approved' ? 'Approved. Merge into main when you are ready.' : `Sent to ${b.owner}${isS ? ' in the session' : ` on ticket #${b.num}`}.`);
+    });
+}
+function askCommit() {
+  const b = branches[current];
+  dialog(`<h2>Ask ${b.owner} to commit?</h2>
+    <p>This sends a message in the session and wakes ${b.owner}. Merge into main becomes available once the worktree is clean.</p>
+    <textarea aria-label="Message for ${b.owner}">Please commit your changes with their tests, so I can merge ${b.branch}.</textarea>
+    <div class="acts"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-ok>Send</button></div>`,
+    () => toast(`Sent to ${b.owner} in the session.`));
+}
+function merge() {
+  const b = branches[current], isS = b.kind === 'session', ot = openThreads(current);
+  dialog(`<h2>Merge ${b.branch} into main?</h2>
+    <p>${b.commits} commits, ${b.files} files, +${b.add} −${b.del}. ${b.behind ? `Main moved on by ${b.behind} commits; git merges them without conflicts.` : 'The branch is up to date with main.'}</p>
+    <ul>${ot ? `<li style="color:var(--warning)">${ot} conversation${ot > 1 ? 's are' : ' is'} not resolved.</li>` : ''}<li>Nothing is pushed.</li>${isS ? `<li>The session stays open; ${b.owner} can keep working on the branch.</li>` : `<li>Ticket #${b.num} stays in Review; set it to Done on the board.</li>`}<li>The branch and its worktree stay until you clean up.</li></ul>
+    <div class="acts"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-ok>Merge into main</button></div>`,
+    () => toast(`Merged into main as 4f1c2a90. Not pushed.`));
+}
+
+$('#theme').onclick = () => document.documentElement.classList.toggle('light');
+$$('.seg button').forEach(s => s.onclick = () => {
+  filter = s.dataset.k; $$('.seg button').forEach(x => x.setAttribute('aria-pressed', x === s));
+  if (!shows(branches[current].kind)) { const first = order.find(id => shows(branches[id].kind)); if (first) { current = first; tab = 'conversation'; renderReview(); } }
+  renderQueue();
+});
+$('#allbr').onclick =() => toast('Opens the full list: worktrees, all branches and the commit graph.');
+renderQueue(); renderReview();
+</script>
+</body>
+</html>
