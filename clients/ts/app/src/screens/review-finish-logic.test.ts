@@ -32,7 +32,7 @@ const msg = (id: string, role: "user" | "assistant", text: string, at = 1) => ({
   created_at_ms: at,
   system: null,
   deleted_at_ms: null,
-  author: role === "user" ? "Sebastien" : "Forge",
+  author: role === "user" ? "Sam" : "Forge",
 });
 
 const input = (over: Partial<FinishInput>): FinishInput => ({
@@ -57,7 +57,7 @@ describe("the merge request", () => {
     expect(mergeAsk([msg("a", "user", MERGE_ASK, 5), msg("b", "assistant", "Merging…", 6)])).toEqual({
       id: "a",
       atMs: 5,
-      author: "Sebastien",
+      author: "Sam",
     });
     expect(mergeAsk([msg("a", "user", MERGE_ASK), msg("b", "user", "Wait, explain first")])).toBeNull();
     expect(mergeAsk([])).toBeNull();

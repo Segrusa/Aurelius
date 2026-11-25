@@ -603,12 +603,7 @@ export function TicketGate({
         whyNot={check.kind === "working" ? "Still at work: Done waits until that has finished." : null}
       />
     ) : kind === "plan" ? (
-      <PlanGate
-        key={t.version}
-        keyed
-        t={t}
-        plan={root.isPending ? undefined : latestPlan(root.data?.messages ?? [])}
-      />
+      <PlanGate key={t.version} keyed t={t} plan={root.isPending ? undefined : latestPlan(root.data?.messages ?? [])} />
     ) : t.archived_at_ms ? null : t.column === "done" && finish && !isQuick(t) ? (
       <>
         <FinishCard detail={detail} t={t} finish={finish} />
