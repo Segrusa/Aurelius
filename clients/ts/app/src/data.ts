@@ -412,13 +412,13 @@ export function useWorkSessions(projectId: string | null = null) {
   );
 }
 
-/** A channel's messages; reading marks it read on the server. `channel` null: general. */
+/** A ticket channel's messages; reading marks it read on the server. Nothing is read without a channel (General is gone). */
 export function useChannelFeed(channel: string | null, wanted = true) {
   const connection = useConnection();
   return useKeyed(
     ["messages", "feed", channel],
     async () => expectBody(await connection.call("group_chat.get", { channel }), "messages").value,
-    wanted,
+    wanted && channel !== null,
   );
 }
 
