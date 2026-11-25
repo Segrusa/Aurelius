@@ -12,7 +12,8 @@
 //! - **Managers** are found by structure, never by name: the employee at the top of the org chart
 //!   (no boss, with reports of its own) or the dispatcher of the ticket's project (the project's,
 //!   else the company's). In a flat company only the dispatcher is a manager.
-//! - **Creating**: managers only, in Backlog. It never starts anything: no run, task or job.
+//! - **Creating**: any employee's run, from wherever it runs (a chat, a work session, a ticket's
+//!   discussion or a task), in Backlog. It never starts anything: no run, task or job.
 //! - **Updating** (title, description, priority, labels): managers on any open ticket, others only
 //!   on a ticket they work on (`tickets::employee_works_on`). Done and archived never change.
 //! - **Moving**: managers only, and only Backlog → Todo (a start) or staying where it is. Every
@@ -41,8 +42,6 @@ pub const LIST_LIMIT_DEFAULT: u32 = 25;
 /// The most tickets one `list_tickets` call shows.
 pub const LIST_LIMIT_MAX: u32 = 50;
 
-/// Why only management creates tickets.
-pub const CREATE_MANAGERS_ONLY: &str = "Only management creates tickets (the head of the org chart or the dispatcher). Ask a manager to create it.";
 /// Why a colleague cannot change a ticket it does not work on.
 pub const UPDATE_NOT_YOURS: &str = "You can only change a ticket you work on (you own it or have an open task in it); post in its discussion with post_to_ticket, or ask a manager.";
 /// Why only management moves a ticket.
@@ -68,7 +67,7 @@ pub const START_OTHER_LOGIN: &str = "This ticket runs on another board member's 
 /// Why an employee cannot rewrite a ticket's text while it is under review.
 pub const UPDATE_TEXT_LOCKED: &str = "The text of a ticket in Plan review, Testing or Review is under review and cannot be changed by an employee; post in its discussion with post_to_ticket instead.";
 /// Why a task is refused without a ticket.
-pub const DELEGATE_NEEDS_TICKET: &str = "Work always belongs to a ticket and this conversation has none: name it with ticket (#12; list_tickets shows the tickets). If none fits, management creates one with create_ticket, or ask a board member for one; then delegate again.";
+pub const DELEGATE_NEEDS_TICKET: &str = "Work always belongs to a ticket and this conversation has none: name it with ticket (#12; list_tickets shows the tickets). If none fits, create one with create_ticket; then delegate again.";
 /// Why a finished ticket takes no new task.
 pub const DELEGATE_TICKET_DONE: &str = "That ticket is Done and takes no new work; name an open ticket.";
 /// Why a run cannot put work on a ticket that runs on another board member's login.
@@ -259,7 +258,7 @@ fn parse_priority(text: Option<&str>) -> Result<TicketPriority, String> {
     }
 }
 
-/// `create_ticket`: a ticket in Backlog, for management. The board member behind the run
+/// `create_ticket`: a ticket in Backlog, for any employee. The board member behind the run
 /// (`login::of_run`) is its creator and Responsible; the same title made twice in one run is the
 /// same ticket. It starts nothing.
 pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>) -> Result<(bool, String, Vec<EventNotice>), StorageError> {
@@ -275,9 +274,6 @@ pub(crate) fn create(tx: &Tx<'_>, st: &Store, run: RunId, input: CreateInput<'_>
         (None, Some(p)) => p,
         (None, None) => return Ok((false, task_runs::need_project(tx, "a ticket")?, vec![])),
     };
-    if !is_manager(tx, me.employee, project)? {
-        return refuse(CREATE_MANAGERS_ONLY);
-    }
     let (title, description, labels) = match (ticket::valid_title(input.title), ticket::valid_description(input.description), ticket::valid_labels(input.labels)) {
         (Ok(t), Ok(d), Ok(l)) => (t, d, l),
         (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => return refuse(e.to_string()),

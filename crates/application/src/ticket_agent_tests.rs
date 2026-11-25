@@ -206,29 +206,57 @@ fn the_head_of_the_chart_creates_a_ticket_in_backlog_named_by_the_employee() {
     assert!(discussion_text(&s, id).contains("Atlas created this ticket"));
 }
 
-#[test]
-fn the_dispatcher_is_a_manager_by_structure_and_a_plain_agent_is_not() {
-    let s = setup();
-    let (ok, text) = act(&s, run_of(&s, s.orion, true), create_action("From the dispatcher"));
-    assert!(ok, "{text}");
-    let before = counts(&s);
-    let (ok, text) = act(&s, run_of(&s, s.ann, true), create_action("From an agent"));
-    let after = counts(&s);
-    assert!(!ok && text.contains("Only management creates tickets") && text.contains("Ask a manager"), "{text}");
-    // The run row of the test itself is the only difference.
-    assert_eq!(before[..3], after[..3].to_vec()[..3], "no event, ticket or task");
-    assert_eq!(before[4..], after[4..], "no job, message or blob");
+/// A running run of `employee` on a task of the ticket, in the employee's main chat.
+fn run_on_task(s: &Setup, employee: EmployeeId, ticket: TicketId) -> RunId {
+    let (task, project, st, user) = (aurelius_domain::TaskId::new(), s.project, s.service.store().clone(), s.user);
+    let run = RunId::new();
+    s.service
+        .store()
+        .write(move |tx| {
+            let blob = st.blobs().put(b"part", "text/plain; charset=utf-8")?;
+            aurelius_storage::blobs::register(tx, &blob)?;
+            let id = blob.id.to_string();
+            aurelius_storage::tasks::insert_ticket_task(tx, task, project, Some(employee), "Part", &id, &id, aurelius_domain::task::TaskStatus::Running, None, Some(ticket))?;
+            let chat = aurelius_storage::employees::main_chat(tx, employee)?.expect("an employee has a main chat");
+            tx.execute(
+                "INSERT INTO runs(id, conversation_id, employee_id, task_id, attempt, runtime_kind, model_id, resolved_config_json, status, started_at_ms, login_user) VALUES (?1, ?2, ?3, ?4, 1, 'fake', '', '{}', 'running', 1, ?5)",
+                rusqlite::params![run.to_string(), chat.to_string(), employee.to_string(), task.to_string(), user.to_string()],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    run
 }
 
 #[test]
-fn a_flat_company_has_no_manager_but_its_dispatcher() {
+fn any_employee_creates_a_ticket_from_a_chat_a_tickets_discussion_or_a_task() {
     let s = setup();
-    // Nobody reports to anyone: no head of a chart, only the dispatcher is management.
-    for e in [s.orion, s.ann, s.bo] {
-        s.service.store().write(move |tx| aurelius_storage::employees::set_reports_to(tx, e, None)).unwrap();
+    // Ann has no reports and is not the dispatcher: no management.
+    let (ok, text) = act(&s, run_of(&s, s.ann, true), create_action("From a chat"));
+    assert!(ok, "{text}");
+    let ticket = new_ticket(&s, "Discussed", None);
+    let discussion = view(&s, ticket).conversation_id.expect("a ticket has a discussion");
+    // Inside a ticket the project comes from the place, so it need not be named.
+    let unnamed = |title: &str| EmployeeAction::CreateTicket { project: None, title: title.into(), description: None, priority: None, labels: vec![] };
+    let (ok, text) = act(&s, run_in(&s, s.ann, discussion, Some(s.user)), unnamed("From a discussion"));
+    assert!(ok, "{text}");
+    let (ok, text) = act(&s, run_on_task(&s, s.bo, ticket), unnamed("From a task"));
+    assert!(ok, "{text}");
+    let made: Vec<(String, ColumnKind, Option<EmployeeId>)> =
+        s.service.store().read(|c| Ok(aurelius_storage::tickets::list(c, &Default::default(), &|_| None)?.into_iter().map(|t| (t.title, t.column, t.owner_employee_id)).collect())).unwrap();
+    for title in ["From a chat", "From a discussion", "From a task"] {
+        assert!(made.contains(&(title.to_owned(), ColumnKind::Backlog, None)), "{title} in Backlog without owner: {made:?}");
     }
-    assert!(!act(&s, run_of(&s, s.atlas, true), create_action("Flat Atlas")).0);
-    assert!(act(&s, run_of(&s, s.orion, true), create_action("Flat Orion")).0);
+}
+
+#[test]
+fn a_plain_employee_creates_but_does_not_start_a_ticket() {
+    let s = setup();
+    let run = run_of(&s, s.ann, true);
+    let (ok, text) = act(&s, run, create_action("Ann's idea"));
+    assert!(ok, "{text}");
+    let (ok, text) = act(&s, run, move_action(&format!("#{}", the_ticket_made(&text)), "todo"));
+    assert!(!ok && text.contains("Only management moves"), "{text}");
 }
 
 #[test]

@@ -47,7 +47,7 @@ fn ticket_row(root: &Path, title_like: &str) -> Option<(String, String)> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn management_makes_and_starts_a_ticket_and_a_plain_agent_cannot() {
+async fn anyone_makes_a_ticket_and_only_management_starts_it() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start_with_delay(dir.path(), 100).await;
     let client = connect_as(dir.path(), "grace").await;
@@ -58,14 +58,6 @@ async fn management_makes_and_starts_a_ticket_and_a_plain_agent_cannot() {
     let ann_run = run_in(&client, dir.path(), ann, ann_chat).await;
     let bridge = BridgeClient::connect(dir.path()).await.unwrap();
     let create = |title: &str| EmployeeTaskOp::CreateTicket { project: Some("Orbit".into()), title: title.into(), description: Some("Why.".into()), priority: Some("high".into()), labels: vec!["api".into()] };
-
-    // A plain agent is refused, and nothing is written.
-    // Only the ticket's own events count: the two runs of this test go on writing theirs.
-    let of_tickets = "SELECT COUNT(*) FROM events WHERE aggregate_type = 'ticket'";
-    let (events, tickets) = (count(dir.path(), of_tickets), count(dir.path(), "SELECT COUNT(*) FROM tickets"));
-    let (ok, text) = bridge.employee_act(ann_run, create("By Ann")).await.unwrap();
-    assert!(!ok && text.contains("Only management creates tickets"), "{text}");
-    assert_eq!((count(dir.path(), of_tickets), count(dir.path(), "SELECT COUNT(*) FROM tickets")), (events, tickets));
 
     // The head of the chart makes one: Backlog, no task, no run, no job.
     let (runs, tasks, jobs) = (count(dir.path(), "SELECT COUNT(*) FROM runs"), count(dir.path(), "SELECT COUNT(*) FROM tasks"), count(dir.path(), "SELECT COUNT(*) FROM jobs WHERE kind LIKE 'ticket.%'"));
@@ -100,6 +92,15 @@ async fn management_makes_and_starts_a_ticket_and_a_plain_agent_cannot() {
     assert_eq!(count(dir.path(), "SELECT COUNT(*) FROM tasks WHERE ticket_id IS NOT NULL"), 1, "the start made the main task");
     let (ok, text) = bridge.employee_act(ann_run, EmployeeTaskOp::PostToTicket { ticket: "#1".into(), message: "Looks good.".into() }).await.unwrap();
     assert!(ok, "{text}");
+
+    // A plain agent makes a ticket too, in Backlog, as itself; starting it stays with management.
+    let (ok, text) = bridge.employee_act(ann_run, create("By Ann")).await.unwrap();
+    assert!(ok, "{text}");
+    assert_eq!(ticket_row(dir.path(), "By Ann"), Some(("By Ann".into(), "backlog".into())));
+    let actor: String = db(dir.path()).query_row("SELECT actor_id FROM events WHERE type = 'ticket.created' ORDER BY seq DESC LIMIT 1", [], |r| r.get(0)).unwrap();
+    assert_eq!(actor, ann.to_string());
+    let (ok, text) = bridge.employee_act(ann_run, EmployeeTaskOp::MoveTicket { ticket: "#2".into(), column: "todo".into() }).await.unwrap();
+    assert!(!ok && text.contains("Only management moves"), "{text}");
     stop(dir.path(), daemon).await;
 }
 

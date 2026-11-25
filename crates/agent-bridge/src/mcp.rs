@@ -402,7 +402,7 @@ fn board_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "create_ticket",
-            "description": "Make a ticket in Backlog: for management. It starts nothing: no run, no owner; a manager starts it with move_ticket (todo) or a board member decides. Colleagues who are not management ask a manager to make it.",
+            "description": "Make a ticket in Backlog, from wherever you work: a chat, a session, a ticket or a task. It starts nothing: no run, no owner; a manager starts it with move_ticket (todo) or a board member decides.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
