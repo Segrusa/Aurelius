@@ -66,8 +66,9 @@ fn setup() -> Setup {
     Setup { _dir: dir, service, repo, repo_folder, plain, user, other, orion }
 }
 
+/// A session in a worktree of its own, or else on a branch of its own: never in the project's folder as it is.
 fn start(project: ProjectId, employee: EmployeeId, worktree: bool) -> Command {
-    Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], files: vec![], worktree, own_branch: false, run: RunSettings::default(), confirm_secret: false, design: false })
+    Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], files: vec![], worktree, own_branch: !worktree, run: RunSettings::default(), confirm_secret: false, design: false })
 }
 
 fn started(result: CommandResult) -> (ConversationId, aurelius_domain::RunId) {
@@ -106,7 +107,7 @@ fn only_the_board_member_who_started_a_session_lists_it() {
     let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
     let mine = s.service.store().read(|c| aurelius_storage::work_sessions::list(c, s.user, None)).unwrap();
     assert_eq!(mine.iter().map(|v| v.conversation_id).collect::<Vec<_>>(), [conversation]);
-    assert_eq!((mine[0].employee_name.as_str(), mine[0].project_name.as_str(), mine[0].branch.as_deref()), ("Orion", "Planora", None));
+    assert_eq!((mine[0].employee_name.as_str(), mine[0].project_name.as_str(), mine[0].branch.as_deref()), ("Orion", "Planora", Some(branch_of(conversation).as_str())));
     assert!(mine[0].running, "its first run is queued");
     assert!(s.service.store().read(|c| aurelius_storage::work_sessions::list(c, s.other, None)).unwrap().is_empty());
     assert!(s.service.store().read(|c| aurelius_storage::work_sessions::list(c, s.user, Some(s.plain))).unwrap().is_empty(), "another project's");
@@ -133,8 +134,22 @@ fn a_worktree_needs_a_project_folder_that_is_a_git_repository() {
     // Nothing was made.
     let sessions: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'session'", [], |r| r.get(0))?)).unwrap();
     assert_eq!(sessions, 0);
-    // Without a worktree the same project is fine.
-    started(exec_as(&s, Some(s.user), start(s.plain, s.orion, false)).unwrap());
+}
+
+#[test]
+fn a_session_without_a_branch_or_worktree_of_its_own_is_refused() {
+    let s = setup();
+    let mut command = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut command {
+        start.own_branch = false;
+    }
+    let refused = exec_as(&s, Some(s.user), command).unwrap_err();
+    assert!(refused.message.contains("branch of its own or in a worktree of its own"), "{}", refused.message);
+    let dispatch = Command::DispatchWorkSession(aurelius_domain::work_session::DispatchWorkSession { project_id: s.repo, text: "Kijk eens.".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: RunSettings::default(), confirm_secret: false, design: false });
+    let refused = exec_as(&s, Some(s.user), dispatch).unwrap_err();
+    assert!(refused.message.contains("branch of its own or in a worktree of its own"), "{}", refused.message);
+    let sessions: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'session'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(sessions, 0, "nothing was made");
 }
 
 #[test]

@@ -796,8 +796,12 @@ fn a_ticket_task_and_a_session_start_in_their_board_members_default_mode() {
     let (_, alexs) = ticket_of(&s, s.alex, s.iris.0);
     assert_eq!(mode_of(&s, start_task(&s, alexs, s.iris.0)), AgentMode::Ask);
 
+    // A session works on a branch of its own, so its project needs a git folder.
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+    let CommandResult::ProjectCreated { project_id: repo_project, .. } = exec(&s, s.alex, Command::CreateProject(CreateProject { name: "Repo".into(), description: None, folder: Some(repo.path().to_string_lossy().into_owned()) })) else { panic!() };
     let session = |by: UserId, run: aurelius_domain::task::RunSettings| {
-        let start = aurelius_domain::work_session::StartWorkSession { project_id: s.project, employee_id: s.otto.0, text: "Look at it".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run, confirm_secret: false, design: false };
+        let start = aurelius_domain::work_session::StartWorkSession { project_id: repo_project, employee_id: s.otto.0, text: "Look at it".into(), images: vec![], files: vec![], worktree: false, own_branch: true, run, confirm_secret: false, design: false };
         let CommandResult::WorkSessionStarted { run_id, .. } = exec(&s, by, Command::StartWorkSession(start)) else { panic!() };
         mode_of(&s, run_id)
     };
