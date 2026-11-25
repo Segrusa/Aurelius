@@ -48,7 +48,7 @@ import { ArtifactViews, artifactSession, pageHeight, renderArtifact, viewSlot } 
 import { connectOrStart, daemonProgram, installDir, startDaemon } from "./daemon";
 import { appendLinkLog, linkLine, PageWatch } from "./link-life";
 import { linkInArguments, linkOf } from "./links";
-import { runnable } from "./open-file";
+import { openCommand, runnable } from "./open-file";
 import { daemonEndpoint, dataDir, openPipe } from "./pipe";
 import { type Box, MIN_HEIGHT, MIN_WIDTH, placement } from "./placement";
 import { openRemote, openSession, requestPairing, uploadFile } from "./remote";
@@ -437,6 +437,16 @@ function serveDesktop(): void {
     if (runnable(path, info.mode, process.platform)) {
       shell.showItemInFolder(path);
       return "shown";
+    }
+    const command = openCommand(path, process.platform, existsSync("/usr/bin/gio"));
+    if (command !== null) {
+      await new Promise<void>((resolve, reject) => {
+        execFile(command.program, command.args, { timeout: 10_000 }, (error, _stdout, stderr) => {
+          if (error === null) resolve();
+          else reject(new Error(stderr.trim() || "No app opens this kind of file."));
+        });
+      });
+      return "opened";
     }
     const failure = await shell.openPath(path);
     if (failure) throw new Error(failure);
