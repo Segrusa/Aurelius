@@ -6,7 +6,7 @@ use crate::{Shared, VERSION};
 use aurelius_domain::{ConversationId, EmployeeId, ProjectId};
 use aurelius_protocol::{
     ApprovalsSnapshot, ProvidersSnapshot, ErrorCode, HealthResult, JobSummary, JobsSnapshot, EmployeesSnapshot, MemorySnapshot,
-    Method, MessagesSnapshot, NotificationsSnapshot, ProjectConversationsSnapshot, ProjectsSnapshot, ProtocolError, ResponseBody, TasksSnapshot,
+    Method, MessagesSnapshot, NotificationsSnapshot, ProjectsSnapshot, ProtocolError, ResponseBody, TasksSnapshot,
     TimelinePage,
 };
 use aurelius_storage::queries;
@@ -129,7 +129,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::CodeGet { project_id } => Ok(ResponseBody::Code(crate::code::view(shared, project_id).await?)),
         Method::CodeDiff { project_id, branch } => Ok(ResponseBody::CodeDiff(crate::code::diff(shared, project_id, branch).await?)),
         Method::CodeReview { project_id, branch, head } => code_review(shared, reader, project_id, branch, head).await,
-        Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
+        Method::ProjectConversationList { .. } => Err(ProtocolError::new(ErrorCode::NotFound, aurelius_application::conversation::project_chat::PROJECT_CONVERSATIONS_GONE)),
         Method::ApprovalList { project_id } => approvals(shared, project_id).await,
         Method::ProviderList => connections(shared).await,
         Method::TaskList { project_id, employee_id, state } => tasks(shared, project_id, employee_id, state).await,
@@ -668,21 +668,6 @@ async fn tickets(
     })
     .await
     .map(ResponseBody::Tickets)
-}
-
-async fn project_conversations(shared: &Arc<Shared>, project_id: ProjectId) -> Result<ResponseBody, ProtocolError> {
-    let store = shared.store().clone();
-    storage_task(move || {
-        store.read(|c| {
-            Ok(ProjectConversationsSnapshot {
-                as_of_seq: queries::last_seq(c)?,
-                project_id,
-                conversations: aurelius_storage::conversations::project_conversations(c, project_id)?,
-            })
-        })
-    })
-    .await
-    .map(ResponseBody::ProjectConversations)
 }
 
 async fn approvals(shared: &Arc<Shared>, project: Option<ProjectId>) -> Result<ResponseBody, ProtocolError> {

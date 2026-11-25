@@ -4,9 +4,12 @@
 
 mod common;
 
+use aurelius_application::conversation::project_chat::PROJECT_CONVERSATIONS_GONE;
 use aurelius_client::{Client, ClientError, envelope};
 use aurelius_domain::employee::{CreateEmployee, OpenEmployeeChat};
-use aurelius_domain::{Command, CommandResult, EmployeeId, ErrorCode};
+use aurelius_domain::project::CreateProject;
+use aurelius_domain::project_conversation::{SendProjectMessage, StartProjectConversation};
+use aurelius_domain::{Command, CommandResult, EmployeeId, ErrorCode, ProjectId};
 use aurelius_protocol::Method;
 use common::*;
 
@@ -57,5 +60,35 @@ async fn employee_open_chat_answers_gone() {
     let ann = hire(&client, "Ann").await;
     let err = client.execute(envelope(Command::OpenEmployeeChat(OpenEmployeeChat { employee_id: ann }), None)).await.unwrap_err();
     assert_eq!(refusal(err), gone(aurelius_application::EMPLOYEE_CHAT_GONE));
+    stop(dir.path(), daemon).await;
+}
+
+async fn project(client: &Client) -> ProjectId {
+    let CommandResult::ProjectCreated { project_id, .. } = client.execute(envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None }), None)).await.unwrap().result else { panic!() };
+    project_id
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn project_conversation_list_answers_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let project_id = project(&client).await;
+    let err = client.call(Method::ProjectConversationList { project_id }).await.unwrap_err();
+    assert_eq!(refusal(err), gone(PROJECT_CONVERSATIONS_GONE));
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn project_conversation_start_answers_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let project_id = project(&client).await;
+    let err = client.execute(envelope(Command::StartProjectConversation(StartProjectConversation { project_id, start: Default::default() }), None)).await.unwrap_err();
+    assert_eq!(refusal(err), gone(PROJECT_CONVERSATIONS_GONE));
+    // project_conversation.send still makes a conversation with its first message (mobile uses it).
+    let send = SendProjectMessage { confirm_secret: false, project_id, text: "Hello".into(), conversation_id: None, images: vec![], files: vec![], interrupt: false, start: Default::default() };
+    assert!(matches!(client.execute(envelope(Command::SendProjectMessage(send), None)).await.unwrap().result, CommandResult::ProjectMessageSent { .. }));
     stop(dir.path(), daemon).await;
 }

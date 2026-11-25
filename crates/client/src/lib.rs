@@ -701,11 +701,6 @@ impl Client {
         self.read(Method::MemoryGetContext { project_id, employee_id }, body!(MemoryContext)).await
     }
 
-    /// The conversations of a project.
-    pub async fn project_conversations(&self, project_id: aurelius_domain::ProjectId) -> Result<aurelius_protocol::ProjectConversationsSnapshot, ClientError> {
-        self.read(Method::ProjectConversationList { project_id }, body!(ProjectConversations)).await
-    }
-
     /// A screenshot the agent took, as JPEG bytes.
     pub async fn screenshot(&self, id: &str) -> Result<Vec<u8>, ClientError> {
         use base64::Engine;
@@ -1115,11 +1110,6 @@ impl Client {
             *path = self.stage_file(Path::new(path.as_str())).await?;
         }
         self.execute(envelope(Command::SendProjectMessage(send), None)).await
-    }
-
-    /// A new, empty project conversation.
-    pub async fn start_project_conversation(&self, start: aurelius_domain::project_conversation::StartProjectConversation) -> Result<CommandReceipt, ClientError> {
-        self.execute(envelope(Command::StartProjectConversation(start), None)).await
     }
 
     /// Delete a message that still waits for its answer (`MessageView::queued`).

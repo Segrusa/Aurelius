@@ -259,7 +259,7 @@ impl CommandService {
             Command::SetProjectFolder(cmd) => self.set_project_folder(&envelope, hash, cmd),
             Command::SetEmployeeFolder(cmd) => self.set_employee_folder(&envelope, hash, cmd),
             Command::DeleteConversation(cmd) => self.delete_conversation(ctx, &envelope, hash, cmd),
-            Command::StartProjectConversation(cmd) => self.start_project_conversation(ctx, &envelope, hash, cmd),
+            Command::StartProjectConversation(_) => Err(AppError::new(ErrorCode::NotFound, conversation::project_chat::PROJECT_CONVERSATIONS_GONE)),
             Command::StartWorkSession(cmd) => self.start_work_session(ctx, &envelope, hash, cmd),
             Command::DispatchWorkSession(cmd) => self.dispatch_work_session(ctx, &envelope, hash, cmd),
             Command::AssignWorkSession(cmd) => self.assign_work_session(ctx, &envelope, hash, cmd),

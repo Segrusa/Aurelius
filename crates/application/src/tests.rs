@@ -29,14 +29,7 @@ pub(crate) fn conversation(service: &CommandService) -> aurelius_domain::Convers
     let name = format!("Talk {}", aurelius_domain::ConversationId::new());
     let created = service.execute(&context, create(&name)).unwrap().receipt.result;
     let CommandResult::ProjectCreated { project_id, .. } = created else { panic!("{created:?}") };
-    let start = CommandEnvelope {
-        command_id: CommandId::new(),
-        expected_version: None,
-        command: Command::StartProjectConversation(aurelius_domain::project_conversation::StartProjectConversation { project_id, start: Default::default() }),
-    };
-    let started = service.execute(&context, start).unwrap().receipt.result;
-    let CommandResult::ProjectConversationStarted { conversation_id, .. } = started else { panic!("{started:?}") };
-    conversation_id
+    crate::conversation::project_chat::empty_for_tests(service.store(), project_id).unwrap()
 }
 
 #[test]

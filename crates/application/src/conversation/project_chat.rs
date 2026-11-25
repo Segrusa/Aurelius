@@ -11,7 +11,7 @@ use aurelius_domain::{
     ActorKind, ConversationId, DomainError, MessageId, ProjectId,
     conversation::{MessageRole, MessageStatus},
     employee::LifecycleStatus,
-    project_conversation::{SendProjectMessage, StartProjectConversation},
+    project_conversation::SendProjectMessage,
 };
 use aurelius_domain::{AppError, CommandEnvelope, CommandResult};
 use aurelius_storage::{
@@ -24,28 +24,12 @@ use rusqlite::OptionalExtension;
 /// How the assistant of a project conversation introduces itself and its tools.
 pub const ASSISTANT_GUIDANCE: &str = "You talk with the user about the project as a whole. The company's employees do the work, each as tasks of their own in this project: when work should be done, give it to the employee who suits it best with delegate_task (a title, a goal and optionally criteria); the employee's result comes back in this conversation as a [Task …] message and you tell the user. Do small things (reading, answering, looking something up) yourself. You cannot hand over a task. Something worth doing later that is not part of the current work: mention it to the user. Decisions, assumptions and project knowledge worth keeping: remember (it goes to the project's memory), and look up earlier decisions with recall before you decide something.";
 
-impl CommandService {
-    pub(crate) fn start_project_conversation(
-        &self,
-        ctx: &CommandContext,
-        envelope: &CommandEnvelope,
-        hash: String,
-        cmd: &StartProjectConversation,
-    ) -> Result<Committed, AppError> {
-        let (project_id, start) = (cmd.project_id, aurelius_domain::task::RunSettings::from(cmd.start.clone()));
-        let command_id = envelope.command_id;
-        let meta = ctx.metadata();
-        let login = ctx.user_id;
-        self.commit(command_id, hash, move |tx| {
-            if let Err(err) = open_project(tx, project_id)? {
-                return Ok(Err(err));
-            }
-            let conversation_id = ConversationId::new();
-            let notices = create(tx, &meta, command_id, project_id, conversation_id, "", &start, login)?;
-            Ok(Ok((CommandResult::ProjectConversationStarted { project_id, conversation_id }, notices)))
-        })
-    }
+/// Why `project_conversation.start` and `project_conversation.list` answer "gone" (`not_found`):
+/// a project conversation starts with its first `project_conversation.send`, and no client lists
+/// them any more. The methods stay for older clients (protocol 5).
+pub const PROJECT_CONVERSATIONS_GONE: &str = "Starting or listing project conversations is no longer available: send the first message instead.";
 
+impl CommandService {
     pub(crate) fn send_project_message(
         &self,
         ctx: &CommandContext,
@@ -263,4 +247,14 @@ pub(crate) fn assistant_system(
         text.push_str(&format!("\n\n{}", crate::conversation::overview::TOOLS_GUIDANCE));
     }
     Ok(text)
+}
+
+/// An empty project conversation in `project`, as `project_conversation.start` made one
+/// before it answered gone: tests make the conversation they talk in with `chat.send`.
+#[cfg(any(test, feature = "testing"))]
+pub fn empty_for_tests(store: &aurelius_storage::Store, project: ProjectId) -> Result<ConversationId, aurelius_storage::StorageError> {
+    let conversation = ConversationId::new();
+    let start = aurelius_domain::task::RunSettings::default();
+    store.write(move |tx| create(tx, &serde_json::json!({}), aurelius_domain::CommandId::new(), project, conversation, "", &start, None))?;
+    Ok(conversation)
 }

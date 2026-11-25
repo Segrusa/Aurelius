@@ -64,9 +64,5 @@ async fn an_employee_chats_outside_projects_and_keeps_its_task_conversations() {
     assert_eq!(client.messages(conversation).await.unwrap().project_id, Some(project_id));
     client.execute(envelope(message(alex, conversation), None)).await.expect("a task conversation is not closed");
 
-    // Neither is offered as a project conversation.
-    let listed = client.project_conversations(project_id).await.unwrap().conversations;
-    assert!(listed.iter().all(|c| c.id != conversation && c.id != chat), "{listed:?}");
-
     stop(dir.path(), daemon).await;
 }
