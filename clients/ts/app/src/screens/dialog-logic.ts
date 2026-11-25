@@ -19,7 +19,6 @@ export interface TicketForm {
   /** None: the dispatcher chooses. */
   ownerEmployeeId: string | null;
   fromMessage?: string | undefined;
-  fromIdea?: string | undefined;
 }
 
 export function ticketCreateParams(form: TicketForm, confirmSecret: boolean): MethodParams["ticket.create"] {
@@ -38,7 +37,6 @@ export function ticketCreateParams(form: TicketForm, confirmSecret: boolean): Me
     ...(form.responsibleUserId ? { responsible_user_id: form.responsibleUserId } : {}),
     ...(form.ownerEmployeeId ? { owner_employee_id: form.ownerEmployeeId } : {}),
     ...(form.fromMessage ? { from_message: form.fromMessage } : {}),
-    ...(form.fromIdea ? { from_idea: form.fromIdea } : {}),
   };
 }
 

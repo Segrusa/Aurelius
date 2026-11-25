@@ -13,7 +13,6 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useAllTasks, useEmployees } from "../data";
-import { hidden } from "../hidden";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
 import { initial, Mark, markColor } from "../ui/marks";
@@ -41,7 +40,6 @@ import {
   threadGroup,
   togglePin,
 } from "./employee-logic";
-import { policyLine } from "./employee-tools-logic";
 import { pinKey, usePins } from "./employees";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, shortDay } from "./org-kit";
 import { overlays } from "./overlays-store";
@@ -408,11 +406,6 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
                       )}
                       {features.includes("employee_access") ? (
                         <MetadataListItem label="Access">{accessLabel(accessOf(e))}</MetadataListItem>
-                      ) : null}
-                      {features.includes("employee_tools") &&
-                      !hidden("EmployeeTools") &&
-                      policyLine(e.tool_policy ?? {}) ? (
-                        <MetadataListItem label="Tools">{policyLine(e.tool_policy ?? {})}</MetadataListItem>
                       ) : null}
                     </MetadataList>
                     {e.description ? (

@@ -141,9 +141,6 @@ test("the board and a ticket's session against a real daemon", async () => {
     await page.waitForTimeout(100);
     await page.keyboard.press("Space");
     await until("moved by keyboard", async () => ((await read()).todo as string[]).includes("First ticket"));
-
-    await page.keyboard.press("Control+7");
-    await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
   } finally {
     seed?.dispose();
     await app.close();
@@ -544,21 +541,32 @@ test.describe("states a test daemon cannot produce", () => {
       .toMatchObject({ approval_id: "q1" });
   });
 
-  test("Tasks and a run: approve inline, stop, and the properties", async ({ page }) => {
+  test("old links of removed screens open a screen that is there", async ({ page }) => {
+    await scriptServer(page, script);
+    await page.goto(site.origin);
+    // The Tasks list, Scheduled and Ideas are gone (OPR-4): never an error page.
+    for (const [from, to] of [
+      ["/tasks", /\/new$/],
+      ["/scheduled", /\/new$/],
+      ["/knowledge/ideas", /\/knowledge\/guidelines$/],
+    ] as const) {
+      await page.goto(`${site.origin}${from}`);
+      await expect(page).toHaveURL(to);
+      await expect(page.getByText("This screen ran into a problem.")).toHaveCount(0);
+    }
+    await expect(page.getByRole("heading", { name: "Knowledge", level: 1 })).toBeVisible();
+
+    // A task's run stays, and Back leads to the ticket it works for.
+    await page.goto(`${site.origin}/tasks/k1`);
+    await expect(page.getByRole("heading", { name: "Run by Flux" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page).toHaveURL(/\/ticket\/21$/);
+  });
+
+  test("a run: approve inline, stop, and the properties", async ({ page }) => {
     const { writes } = await scriptServer(page, script);
     await page.goto(site.origin);
-    await page.goto(`${site.origin}/tasks`);
-    const list = page.getByRole("region", { name: "Task list" });
-    await expect(list.getByText("Task k3")).toBeVisible();
-    await expect(list.getByText("A sub task")).toHaveCount(0);
-    await page.getByRole("button", { name: /^All/ }).click();
-    await expect(list.getByText("A sub task")).toBeVisible();
-    await list.getByRole("button", { name: "Fold" }).first().click();
-    await expect(list.getByText("A sub task")).toHaveCount(0);
-    await list.getByRole("button", { name: /Task k3/ }).click();
-    const preview = page.getByRole("complementary", { name: "Task preview" });
-    await expect(preview.getByText("The goal of k3.")).toBeVisible();
-    await preview.getByRole("button", { name: /Open conversation/ }).click();
+    await page.goto(`${site.origin}/tasks/k3`);
 
     await expect(page.getByRole("heading", { name: "Run by Flux" })).toBeVisible();
     // The same chat as a session: the steps stand where they were taken, folded to one line each.

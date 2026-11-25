@@ -1,4 +1,4 @@
-// Texts and parsing around a run, as the desktop app writes them (trace.rs, markdown.rs, views.rs).
+// Texts and parsing around a run, as the desktop app writes them (markdown.rs, views.rs).
 
 import type { LoadSnapshot, TokenUsage } from "@aurelius/protocol";
 import { costText, tokensShort } from "./usage-logic";
@@ -11,11 +11,6 @@ export function usageLine(u: TokenUsage): string {
     `${tokensShort(u.cache_creation_tokens)} cache write`,
     costText(u.cost_micro_usd, u.estimate),
   ].join(" · ");
-}
-
-export function traceSessionText(session: string): string {
-  if (session === "continue" || session === "resume") return "resumed session: only the new messages";
-  return session === "new" ? "new session: the whole conversation sent again" : "no session";
 }
 
 export function elapsedText(ms: number): string {

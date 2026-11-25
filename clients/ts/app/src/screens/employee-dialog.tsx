@@ -1,5 +1,4 @@
 import { Button } from "@astryxdesign/core/Button";
-import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Field } from "@astryxdesign/core/Field";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { TextArea } from "@astryxdesign/core/TextArea";
@@ -20,7 +19,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useEmployees, useKeyed } from "../data";
-import { hidden } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
@@ -41,7 +39,6 @@ import {
   reportsCandidates,
   usableConnections,
 } from "./employee-logic";
-import { EmployeeTools } from "./employee-tools";
 import { isDefaultPolicy, nameAfterProfile, profileOption, samePolicy } from "./employee-tools-logic";
 import { DialogSelector, FormDialog, failureOf, Hint, Problem, shortDay } from "./org-kit";
 import { useFolderChooser } from "./run-tools";
@@ -111,8 +108,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const connections = usableConnections(list.data?.connections ?? []);
   const inherited = inheritedRun(list.data);
   const hasAccess = features.includes("employee_access");
-  // Hidden, its block is gone but the policy stays in the state: save only sends a change.
-  const hasTools = features.includes("employee_tools") && !hidden("EmployeeTools");
+  // The tools block is gone (OPR-4), but a start profile's policy stays in the state: save only sends a change.
   const employees = useEmployees();
   const [name, setName] = useState(employee?.name ?? "");
   const [role, setRole] = useState(employee?.role ?? "");
@@ -122,7 +118,8 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const [instructions, setInstructions] = useState(employee?.instructions ?? "");
   const [folder, setFolder] = useState("");
   const [mode, setMode] = useState<AgentMode>(employee?.agent_mode ?? "ask");
-  const [sequential, setSequential] = useState(employee?.sequential_tasks ?? false);
+  // The switch is gone (OPR-4); an edit sends back what the employee already has.
+  const sequential = employee?.sequential_tasks ?? false;
   const [access, setAccess] = useState<AccessLevel>(accessOf(employee));
   const [policy, setPolicy] = useState<ToolPolicy>(employee?.tool_policy ?? {});
   const [profile, setProfile] = useState<StartProfile | null>(null);
@@ -295,7 +292,6 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
     }
   };
   useAction("ConfirmPrimary", () => void save());
-  useAction("ToggleManagerSequential", () => setSequential(!sequential), !hidden("SequentialTasks"));
   useAction("CycleReportsTo", () => setReportsTo(cycle(["", ...candidates.map((c) => c.id)], reportsTo)));
   useAction(
     "CycleTaskEffort",
@@ -440,7 +436,6 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
       {employee ? null : (
         <>
           {accessField}
-          {hasTools ? <EmployeeTools policy={policy} access={access} onChange={setPolicy} /> : null}
           <div {...stylex.props(styles.folder)}>
             <span {...stylex.props(styles.grow)}>
               <TextInput
@@ -516,13 +511,12 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
             </div>
           )}
           {accessField}
-          {hasTools ? <EmployeeTools policy={policy} access={access} onChange={setPolicy} /> : null}
           <div>
             <Button
               size="sm"
               variant="ghost"
               aria-expanded={more}
-              label={`${more ? "Less ▴" : "More ▾"} Advanced: ${[ownDefaults ? null : "Subagents", hidden("SequentialTasks") ? null : `run one at a time${sequential ? " (on)" : ""}`, hasVersions ? "instruction versions" : null].filter(Boolean).join(", ")}`}
+              label={`${more ? "Less ▴" : "More ▾"} Advanced: ${[ownDefaults ? null : "Subagents", hasVersions ? "instruction versions" : null].filter(Boolean).join(", ")}`}
               onClick={() => setMore(!more)}
             />
           </div>
@@ -546,14 +540,6 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
                     }))}
                   />
                 </div>
-              )}
-              {hidden("SequentialTasks") ? null : (
-                <CheckboxInput
-                  label="Run tasks one at a time"
-                  description="Tasks wait in line and start one after the other."
-                  value={sequential}
-                  onChange={(checked) => setSequential(checked)}
-                />
               )}
               {hasVersions ? (
                 <div {...stylex.props(styles.versions)}>

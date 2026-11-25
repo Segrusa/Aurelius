@@ -1,20 +1,15 @@
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { TextArea } from "@astryxdesign/core/TextArea";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { expectBody } from "@aurelius/client";
-import type { LoadLimitsUpdate, McpLogin, McpTransport, ProviderKind, TaskScheduleView } from "@aurelius/protocol";
+import type { LoadLimitsUpdate, McpLogin, McpTransport, ProviderKind } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, Fragment, useEffect, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
-import { useEmployees, useProjects } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
-import { AttachRow, useAttachments } from "../ui/attach";
-import { useWorkspace } from "../workspace";
-import { DialogSelector, FormDialog } from "./org-kit";
-import { FileChips } from "./run-tools";
+import { FormDialog } from "./org-kit";
 import {
   bytes,
   ConfirmButton,
@@ -33,15 +28,7 @@ import {
   useSetting,
   when,
 } from "./settings-kit";
-import {
-  compactFieldOf,
-  compactThresholdOf,
-  type RecurrenceForm,
-  recurrenceForm,
-  recurrenceOf,
-  recurrenceText,
-  WEEKDAYS,
-} from "./settings-logic";
+import { compactFieldOf, compactThresholdOf } from "./settings-logic";
 
 const TEXT3 = "var(--precision-text3)";
 
@@ -82,40 +69,6 @@ const styles = stylex.create({
   status: { fontSize: 12, color: "var(--color-text-secondary)" },
   quiet: { margin: 0, color: TEXT3 },
   contents: { display: "contents" },
-  chips: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 },
-  chip: {
-    cursor: "pointer",
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--color-border)",
-    borderRadius: 6,
-    backgroundColor: "transparent",
-    paddingInline: 8,
-    paddingBlock: 4,
-    fontSize: 12,
-    color: "var(--color-text-primary)",
-  },
-  two: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 },
-  weekdays: { margin: 0, display: "flex", gap: 4, borderWidth: 0, padding: 0 },
-  day: {
-    borderWidth: 1,
-    borderStyle: "solid",
-    borderColor: "var(--color-border)",
-    borderRadius: 6,
-    paddingInline: 8,
-    fontSize: 12,
-    color: "var(--color-text-secondary)",
-  },
-  dayOn: {
-    borderColor: "var(--color-text-accent)",
-    backgroundColor: "var(--color-overlay-hover)",
-    color: "var(--color-text-primary)",
-  },
-  block: { display: "flex", flexDirection: "column", gap: 12, fontSize: 12 },
-  blockTitle: { margin: 0, marginBlockEnd: 4, fontWeight: 500, color: TEXT3 },
-  text: { margin: 0 },
-  goal: { margin: 0, lineHeight: 1.5, whiteSpace: "pre-wrap" },
-  list: { margin: 0, paddingInlineStart: 16 },
 });
 
 const PROVIDERS: { key: ProviderKind; label: string; about: string }[] = [
@@ -686,292 +639,6 @@ export function McpSection() {
   );
 }
 
-export function ScheduleDialog({
-  schedule,
-  projectId,
-  onClose,
-}: {
-  schedule: TaskScheduleView | null;
-  projectId?: string;
-  onClose: () => void;
-}) {
-  const connection = useConnection();
-  const employees = useEmployees();
-  const projects = useProjects();
-  const start = recurrenceForm(schedule?.recurrence ?? null);
-  const attach = useAttachments(schedule?.attachments.length ?? 0);
-  const [dropped, setDropped] = useState<string[]>([]);
-  const [title, setTitle] = useState(schedule?.title ?? "");
-  const [goal, setGoal] = useState(schedule?.goal ?? "");
-  const [criteria, setCriteria] = useState((schedule?.criteria ?? []).join("\n"));
-  const [employee, setEmployee] = useState(schedule?.employee_id ?? "");
-  const workspace = useWorkspace();
-  const [project, setProject] = useState(schedule?.project_id ?? projectId ?? workspace.id ?? "");
-  const [form, setForm] = useState(start);
-  const { busy, error, run } = useChange();
-  const [problem, setProblem] = useState<string | null>(null);
-  const save = async (confirmSecret = false) => {
-    if (title.trim() === "" || goal.trim() === "") return setProblem("Enter a title and what to do.");
-    const who = employee || employees.data?.find((e) => e.status === "active")?.id;
-    const where = project || projects.data?.find((p) => p.status !== "archived")?.id;
-    if (!who) return setProblem("Add an employee first.");
-    if (!schedule && !where) return setProblem("Make a project first.");
-    const made = recurrenceOf(form);
-    if (typeof made === "string") return setProblem(made);
-    setProblem(null);
-    const fields = {
-      title: title.trim(),
-      goal,
-      employee_id: who,
-      recurrence: made,
-      acceptance_criteria: criteria
-        .split("\n")
-        .map((c) => c.trim())
-        .filter(Boolean),
-      confirm_secret: confirmSecret,
-    };
-    const ok = await run(() =>
-      schedule
-        ? connection.write(
-            "recurring_task.update",
-            { schedule_id: schedule.id, ...fields, add_files: attach.paths, remove_files: dropped },
-            { retry: false },
-          )
-        : connection.write(
-            "recurring_task.create",
-            { project_id: where as string, ...fields, files: attach.paths },
-            { retry: false },
-          ),
-    );
-    if (ok) onClose();
-  };
-  const heading = schedule ? "Edit recurring task" : "New recurring task";
-  return (
-    <FormDialog
-      title={heading}
-      width={560}
-      onClose={onClose}
-      footer={
-        <>
-          <Button label="Cancel" onClick={onClose} />
-          <Button
-            variant="primary"
-            label={schedule ? "Save" : "Save recurring task"}
-            isDisabled={busy}
-            onClick={() => void save()}
-          />
-        </>
-      }
-    >
-      <Muted>
-        Each time it is due, a normal task is made from this for the employee. If the previous one is still open, that
-        time is skipped.
-      </Muted>
-      <TextInput label="Title" showLabel autoFocus value={title} onChange={(e) => setTitle(e.target.value)} />
-      <TextArea label="What to do" rows={4} value={goal} onChange={setGoal} />
-      <TextArea label="Done when (one per line)" rows={2} value={criteria} onChange={setCriteria} />
-      <div {...attach.target} {...stylex.props(styles.chips)}>
-        {(schedule?.attachments ?? [])
-          .filter((f) => !dropped.includes(f.path))
-          .map((f) => (
-            <button
-              key={f.path}
-              type="button"
-              aria-label={`Remove ${f.name}`}
-              onClick={() => setDropped([...dropped, f.path])}
-              {...stylex.props(styles.chip)}
-            >
-              {f.name} ×
-            </button>
-          ))}
-        <AttachRow attach={attach} />
-      </div>
-      <div {...stylex.props(styles.two)}>
-        <DialogSelector
-          label="Employee"
-          size="sm"
-          variant="secondary"
-          value={employee || (employees.data?.find((e) => e.status === "active")?.id ?? "")}
-          options={(employees.data ?? [])
-            .filter((e) => e.status === "active" || e.id === employee)
-            .map((e) => ({ value: e.id, label: e.name }))}
-          onChange={setEmployee}
-        />
-        {schedule ? null : (
-          <DialogSelector
-            label="Project"
-            size="sm"
-            variant="secondary"
-            value={project || (projects.data?.find((p) => p.status !== "archived")?.id ?? "")}
-            options={(projects.data ?? [])
-              .filter((p) => p.status !== "archived")
-              .map((p) => ({ value: p.id, label: p.name }))}
-            onChange={setProject}
-          />
-        )}
-      </div>
-      <SegmentedControl
-        label="When"
-        size="sm"
-        value={form.kind}
-        onChange={(next) => setForm({ ...form, kind: next as RecurrenceForm["kind"] })}
-      >
-        <SegmentedControlItem value="every_hours" label="Every N hours" />
-        <SegmentedControlItem value="daily" label="Daily" />
-        <SegmentedControlItem value="weekly" label="Weekly" />
-      </SegmentedControl>
-      {form.kind === "every_hours" ? (
-        <TextInput
-          label="Hours"
-          showLabel
-          type="number"
-          min={1}
-          width={90}
-          value={form.hours}
-          onChange={(e) => setForm({ ...form, hours: e.target.value })}
-        />
-      ) : (
-        <TextInput
-          label="Time"
-          showLabel
-          placeholder="HH:MM"
-          width={90}
-          value={form.time}
-          onChange={(e) => setForm({ ...form, time: e.target.value })}
-        />
-      )}
-      {form.kind === "weekly" ? (
-        <fieldset {...stylex.props(styles.weekdays)} aria-label="Weekdays">
-          {WEEKDAYS.map((d, i) => {
-            const on = form.weekdays.includes(i);
-            return (
-              <ToggleButton
-                key={d}
-                label={d}
-                size="sm"
-                isPressed={on}
-                onPressedChange={() =>
-                  setForm({ ...form, weekdays: on ? form.weekdays.filter((x) => x !== i) : [...form.weekdays, i] })
-                }
-                xstyle={[styles.day, on && styles.dayOn]}
-              />
-            );
-          })}
-        </fieldset>
-      ) : null}
-      <Problem error={problem ?? error} />
-    </FormDialog>
-  );
-}
-
-export function SchedulesSection() {
-  const connection = useConnection();
-  const { busy, error, run } = useChange();
-  const [editing, setEditing] = useState<TaskScheduleView | "new" | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
-  const list = useSetting(
-    "schedules",
-    async () => expectBody(await connection.call("recurring_task.list", {}), "task_schedules").value.schedules,
-  );
-  return (
-    <>
-      <Group title="Recurring schedules">
-        {list.data?.length === 0 ? <Row title="No recurring tasks yet." /> : null}
-        {(list.data ?? []).map((s) => (
-          <Fragment key={s.id}>
-            <Row
-              joined={open === s.id}
-              title={
-                <button
-                  type="button"
-                  aria-expanded={open === s.id}
-                  onClick={() => setOpen(open === s.id ? null : s.id)}
-                  {...stylex.props(styles.open)}
-                >
-                  {open === s.id ? "▾" : "▸"} {s.title}
-                </button>
-              }
-              hint={`${s.employee_name} · ${recurrenceText(s.recurrence)} · ${s.paused ? "Paused" : `Next ${when(s.next_run_ms)}`} · Last ${when(s.last_run_ms)}`}
-            >
-              <SmallButton
-                disabled={busy}
-                onClick={() =>
-                  void run(() => connection.write("recurring_task.run_now", { schedule_id: s.id }, { retry: false }))
-                }
-              >
-                Run now
-              </SmallButton>
-              <SmallButton onClick={() => setEditing(s)}>Edit</SmallButton>
-              <Keyed action="SettingsRemove" chord="Del">
-                <ConfirmButton
-                  label="Delete"
-                  question="Delete this recurring task? Tasks it already made stay."
-                  disabled={busy}
-                  onConfirm={() =>
-                    void run(() => connection.write("recurring_task.delete", { schedule_id: s.id }, { retry: false }))
-                  }
-                />
-              </Keyed>
-              <Switch
-                label={`${s.title} is active`}
-                on={!s.paused}
-                disabled={busy}
-                onChange={(on) =>
-                  void run(() =>
-                    connection.write("recurring_task.set_paused", { schedule_id: s.id, paused: !on }, { retry: false }),
-                  )
-                }
-              />
-            </Row>
-            {open === s.id ? (
-              <Part xstyle={[styles.details, styles.block]}>
-                <div>
-                  <p {...stylex.props(styles.blockTitle)}>Goal</p>
-                  <p {...stylex.props(styles.goal)}>{s.goal}</p>
-                </div>
-                {s.criteria.length > 0 ? (
-                  <div>
-                    <p {...stylex.props(styles.blockTitle)}>Acceptance criteria</p>
-                    <ul {...stylex.props(styles.list)}>
-                      {s.criteria.map((c) => (
-                        <li key={c}>{c}</li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                <div>
-                  <p {...stylex.props(styles.blockTitle)}>Each task runs with</p>
-                  <p {...stylex.props(styles.text)}>
-                    Mode {s.run.mode ?? "default"} · Model {s.run.model ? modelName(s.run.model) : "default"} · Effort{" "}
-                    {s.run.effort ?? "default"}
-                  </p>
-                </div>
-                {s.attachments.length > 0 ? (
-                  <div>
-                    <p {...stylex.props(styles.blockTitle)}>Attachments</p>
-                    <FileChips files={s.attachments} />
-                  </div>
-                ) : null}
-              </Part>
-            ) : null}
-          </Fragment>
-        ))}
-      </Group>
-      <div>
-        <Keyed action="SettingsNew" chord="N">
-          <SmallButton kind="primary" onClick={() => setEditing("new")}>
-            New recurring task
-          </SmallButton>
-        </Keyed>
-      </div>
-      {editing ? (
-        <ScheduleDialog schedule={editing === "new" ? null : editing} onClose={() => setEditing(null)} />
-      ) : null}
-      <Problem error={list.error ?? error} />
-    </>
-  );
-}
-
 export function BackupsSection() {
   const connection = useConnection();
   const { busy, error, run } = useChange();
@@ -1147,55 +814,6 @@ export function LoadSection() {
         ) : null}
       </form>
       <Problem error={load.error ?? invalid ?? error} />
-    </>
-  );
-}
-
-export function TraceSection() {
-  const connection = useConnection();
-  const { busy, error, run } = useChange();
-  const [asking, setAsking] = useState(false);
-  const trace = useSetting(
-    "trace",
-    async () => expectBody(await connection.call("trace.get_setting"), "trace_setting").value,
-  );
-  const set = (enabled: boolean) => run(() => connection.write("trace.set_enabled", { enabled }, { retry: false }));
-  return (
-    <>
-      <Group>
-        <Row
-          title="Trace mode"
-          hint={
-            trace.data
-              ? `Keeps a trace of every run, for ${trace.data.keep_days} days and at most ${trace.data.keep_runs} runs.`
-              : undefined
-          }
-        >
-          {asking ? (
-            <>
-              <span {...stylex.props(styles.status)}>Turn trace mode off? Every kept trace is deleted.</span>
-              <SmallButton
-                kind="danger"
-                onClick={() => {
-                  setAsking(false);
-                  void set(false);
-                }}
-              >
-                Turn off and delete
-              </SmallButton>
-              <SmallButton onClick={() => setAsking(false)}>Keep on</SmallButton>
-            </>
-          ) : (
-            <Switch
-              label="Trace mode"
-              on={trace.data?.enabled ?? false}
-              disabled={busy || !trace.data}
-              onChange={(enabled) => (enabled ? void set(true) : setAsking(true))}
-            />
-          )}
-        </Row>
-      </Group>
-      <Problem error={trace.error ?? error} />
     </>
   );
 }

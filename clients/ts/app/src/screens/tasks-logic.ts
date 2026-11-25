@@ -1,52 +1,10 @@
-// The Tasks page's filter and tree, pure.
+// A task's tree, state and steps, pure.
 
 import type { TaskStatus, TaskView } from "@aurelius/protocol";
-import { isWaiting } from "./inbox-logic";
-
-export type TaskState = "open" | "needs_you" | "ended" | "all";
-
-export const TASK_STATES: { key: TaskState; label: string }[] = [
-  { key: "open", label: "Open" },
-  { key: "needs_you", label: "Needs you" },
-  { key: "ended", label: "Ended" },
-  { key: "all", label: "All" },
-];
 
 const TERMINAL: TaskStatus[] = ["succeeded", "failed", "cancelled"];
 
 export const isActive = (t: TaskView) => !TERMINAL.includes(t.status) || Boolean(t.live_run);
-
-export function admits(state: TaskState, t: TaskView): boolean {
-  if (state === "open") return isActive(t);
-  if (state === "needs_you") return isWaiting(t) || t.pending_approvals > 0;
-  return state === "ended" ? !isActive(t) : true;
-}
-
-export interface TaskFilter {
-  state: TaskState;
-  employee: string | null;
-  project: string | null;
-}
-
-/** Newest change first. */
-export function filterTasks(tasks: TaskView[], f: TaskFilter): TaskView[] {
-  return tasks
-    .filter(
-      (t) =>
-        admits(f.state, t) &&
-        (f.employee === null || t.employee_id === f.employee) &&
-        (f.project === null || t.project_id === f.project),
-    )
-    .sort((a, b) => b.updated_at_ms - a.updated_at_ms);
-}
-
-export interface TreeRow {
-  task: TaskView;
-  depth: number;
-  /** All tasks below this one, shown or not. */
-  below: number;
-  open: boolean;
-}
 
 /** A delegated task sits right under the one that delegated it, oldest first; a task whose parent is not here stays on top. */
 export function treeOrder(rows: TaskView[]): { task: TaskView; depth: number }[] {
@@ -90,20 +48,11 @@ export function subtasksOf(rows: TaskView[], rootId: string): { task: TaskView; 
     .map(({ task, depth }) => ({ task, depth }));
 }
 
-/** Hides what sits below a folded task. Open when `folds` says so, else while it is not finished. */
-export function foldTree(tree: { task: TaskView; depth: number }[], folds: Record<string, boolean>): TreeRow[] {
-  const out: TreeRow[] = [];
-  let hiddenFrom: number | null = null;
-  tree.forEach(({ task, depth }, i) => {
-    if (hiddenFrom !== null && depth > hiddenFrom) return;
-    hiddenFrom = null;
-    let below = 0;
-    for (let j = i + 1; j < tree.length && (tree[j]?.depth ?? 0) > depth; j++) below++;
-    const open = folds[task.id] ?? isActive(task);
-    out.push({ task, depth, below, open });
-    if (below > 0 && !open) hiddenFrom = depth;
-  });
-  return out;
+/** Where Back leads from a task's run: the ticket it works for, else its employee, else New session. */
+export function taskBackPath(t: Pick<TaskView, "ticket_id" | "ticket_number" | "employee_id"> | undefined): string {
+  if (t?.ticket_number) return `/ticket/${t.ticket_number}`;
+  if (t?.ticket_id) return `/board?ticket=${t.ticket_id}`;
+  return t?.employee_id ? `/employees/${t.employee_id}` : "/new";
 }
 
 /** What a task's state says, and in which colour. */

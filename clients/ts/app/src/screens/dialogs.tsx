@@ -335,7 +335,6 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
             responsibleUserId,
             ownerEmployeeId: owner === "dispatcher" ? null : owner,
             fromMessage: seed?.fromMessage,
-            fromIdea: seed?.fromIdea,
           },
           confirmSecret,
         ),

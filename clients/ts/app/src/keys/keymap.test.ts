@@ -17,14 +17,13 @@ const base: KeyState = {
 };
 
 describe("the table", () => {
-  it("names the screen a Go to shortcut lands on: Ideas and Guidelines are Knowledge tabs", () => {
+  it("names the screen a Go to shortcut lands on: Guidelines is a Knowledge tab", () => {
     const label = (action: string) => SHORTCUTS.find((s) => s.action === action)?.label;
-    expect(label("GoIdeas")).toBe("Go to Ideas (Knowledge tab)");
     expect(label("GoGuidelines")).toBe("Go to Guidelines (Knowledge tab)");
   });
 
   it("holds the desktop's shortcuts that do something here, none twice for one chord in one context", () => {
-    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(69);
+    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(60);
     const seen = new Set<string>();
     for (const s of SHORTCUTS) {
       for (const k of s.keys) {
@@ -64,7 +63,7 @@ describe("what a chord means", () => {
   it("no longer knows the keys of a hidden feature", () => {
     expect(actionsFor("secondary-shift-v", base)).toEqual([]);
     expect(actionsFor("secondary-0", base)).toEqual([]);
-    expect(actionsFor("secondary-7", base)).toEqual(["GoTasks"]);
+    expect(actionsFor("secondary-7", base)).toEqual([]);
   });
 
   it("leaves typing alone, except what has a modifier", () => {

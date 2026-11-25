@@ -39,7 +39,6 @@ export type Area =
   | "tickets"
   | "guidelines"
   | "messages"
-  | "ideas"
   | "usage"
   | "memory"
   | "vault"
@@ -67,7 +66,7 @@ export function areasOf(kind: EventKind | string): Area[] {
       return ["projects"];
     case "task":
     case "run":
-      return ["tasks", "notifications", "employees", "messages", "tickets", "ideas", "usage", "scheduled", "activity"];
+      return ["tasks", "notifications", "employees", "messages", "tickets", "usage", "scheduled", "activity"];
     case "conversation":
     case "message":
     case "chat":
@@ -83,13 +82,10 @@ export function areasOf(kind: EventKind | string): Area[] {
     // A proposed colleague or new instructions arrive as `employee.*` events.
     case "employee":
       return ["settings", "employees", "proposals", "activity"];
-    case "idea":
-      return ["ideas"];
     case "memory":
       return ["memory"];
     case "vault":
       return ["vault"];
-    case "recurring_task":
     case "schedule":
       return ["settings", "scheduled"];
     default:
@@ -500,15 +496,6 @@ export function useEffectiveSets(pairs: [string, string | null][]) {
       return new Map(answers.flatMap((a) => (a ? [a] : [])));
     },
     pairs.length > 0,
-  );
-}
-
-export function useIdeas(projectId: string | null) {
-  const connection = useConnection();
-  return useKeyed(["ideas", projectId], async () =>
-    projectId
-      ? expectBody(await connection.call("idea.list", { project_id: projectId }), "ideas").value.ideas
-      : expectBody(await connection.call("idea.list_all", {}), "all_ideas").value.ideas,
   );
 }
 
