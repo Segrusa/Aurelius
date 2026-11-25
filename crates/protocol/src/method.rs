@@ -277,6 +277,11 @@ pub enum Method {
     /// `user_run_defaults`), never another's. Not for apps.
     #[serde(rename = "user.run_defaults")]
     UserRunDefaults,
+    /// What a run on another board member's login comes to without a choice of
+    /// its own (feature `run_defaults_of`): shown as "Kim's default · Sonnet 5.5"
+    /// on a ticket that runs on Kim's login. Board members only; not for apps.
+    #[serde(rename = "user.run_defaults_of")]
+    UserRunDefaultsOf { user_id: aurelius_domain::UserId },
     /// Sign in (protocol 5): a right username and password give this connection a
     /// session and answer `Login` with its token, shown once (keep it for the
     /// server and give it in every hello). A wrong password, an unknown username

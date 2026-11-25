@@ -257,6 +257,24 @@ async fn my_chosen_effort_is_shown_kept_used_by_the_next_run_and_can_be_cleared(
     stop(dir.path(), daemon).await;
 }
 
+/// A ticket on Robin's login runs with Robin's defaults, so another board member
+/// reads those (for "Robin's default · …"), while their own stay their own.
+#[tokio::test(flavor = "multi_thread")]
+async fn another_board_members_run_defaults_are_readable_for_their_ticket() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    client.set_user_run_defaults(UserRunDefaults { model: Some("fake-mine".into()), ..Default::default() }).await.unwrap();
+    let robin = connect_as(dir.path(), "robin").await;
+    robin.set_user_run_defaults(UserRunDefaults { model: Some("fake-robins".into()), effort: Some("low".into()), ..Default::default() }).await.unwrap();
+    let robin_id = robin.user_whoami().await.unwrap().user.unwrap().id;
+
+    let of_robin = client.user_run_defaults_of(robin_id).await.unwrap();
+    assert_eq!((of_robin.model.as_deref(), of_robin.defaults.effort.as_deref()), (Some("fake-robins"), Some("low")));
+    assert_eq!(client.user_run_defaults().await.unwrap().model.as_deref(), Some("fake-mine"));
+    stop(dir.path(), daemon).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_effort_my_model_lacks_is_refused() {
     let dir = tempfile::tempdir().unwrap();
