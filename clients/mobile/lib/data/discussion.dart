@@ -161,19 +161,6 @@ class TicketDraft {
   final bool quick;
 }
 
-/// The draft for a ticket from [idea]: its title and note, in its project; a bug keeps that word as a label.
-TicketDraft draftFromIdea(IdeaView idea) => TicketDraft(
-      title: idea.title,
-      description: idea.note ?? '',
-      projectId: idea.projectId,
-      fromIdea: idea.id,
-      ideaFiles: idea.attachments.length,
-      labels: idea.kind == IdeaKind.bug ? 'bug' : '',
-    );
-
-/// An idea becomes a ticket once, and not after it became a task (an older client).
-bool ideaCanBecomeTicket(IdeaView idea) => idea.taskId == null && idea.ticketId == null;
-
 /// The longest title a ticket takes (MU1-07).
 const _titleMax = 160;
 
