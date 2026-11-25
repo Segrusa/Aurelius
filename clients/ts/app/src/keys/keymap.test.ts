@@ -17,6 +17,12 @@ const base: KeyState = {
 };
 
 describe("the table", () => {
+  it("names the screen a Go to shortcut lands on: Ideas and Guidelines are Knowledge tabs", () => {
+    const label = (action: string) => SHORTCUTS.find((s) => s.action === action)?.label;
+    expect(label("GoIdeas")).toBe("Go to Ideas (Knowledge tab)");
+    expect(label("GoGuidelines")).toBe("Go to Guidelines (Knowledge tab)");
+  });
+
   it("holds the desktop's shortcuts that do something here, none twice for one chord in one context", () => {
     expect(SHORTCUTS.length).toBeGreaterThanOrEqual(69);
     const seen = new Set<string>();
