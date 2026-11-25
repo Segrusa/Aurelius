@@ -218,10 +218,7 @@ export function useTicketProgress(
     stateLine: activity ? ticketActivityLine(activity) : working,
     stateKind,
     now: newest ? nowLine(newest.activity, since, nowMs) : running && since !== null ? nowLine([], since, nowMs) : null,
-    todos: latestTodos(
-      [...rootLive].reverse().map((u) => u.activity),
-      messages,
-    ),
+    todos: latestTodos(rootLive, messages),
     open: openTasks(tasks, rootId),
     tally: taskTally(tasks, rootId),
     tasks,

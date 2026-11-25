@@ -6,8 +6,16 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/builders.dart';
 
-ActivityView act(String id, String tool, [Object? input, int offset = 0]) =>
-    ActivityView(callId: id, input: input, offset: offset, ok: true, tool: tool);
+ActivityView act(String id, String tool, [Object? input, int offset = 0, String? output]) =>
+    ActivityView(callId: id, input: input, offset: offset, ok: true, tool: tool, output: output);
+
+/// A TaskCreate as Claude Code 2.1.318 reports it: the number is in the result.
+ActivityView create(int n, String subject, [int offset = 0]) =>
+    act('c$n', taskCreateTool, {'subject': subject, 'activeForm': '$subject…'}, offset, 'Task #$n created successfully: $subject');
+
+ActivityView update(int n, String status, [int offset = 0]) => act('u$n-$status', taskUpdateTool, {'taskId': '$n', 'status': status}, offset);
+
+List<(String, TodoStatus)> rowsOf(List<TodoItem>? todos) => [for (final t in todos ?? const <TodoItem>[]) (t.content, t.status)];
 
 Map<String, Object?> todos(List<(String, String)> rows) => {
       'todos': [for (final (c, s) in rows) {'content': c, 'status': s, 'activeForm': '$c…'}],
@@ -50,7 +58,8 @@ void main() {
         act('t2', todoWriteTool, todos([('A', 'completed')])),
         act('3', 'Edit'),
       ]);
-      expect(blocks.whereType<TodoBlock>().map((b) => b.call.callId), ['t2']);
+      expect(blocks.whereType<TodoBlock>().map((b) => rowsOf(b.todos)), [[('A', TodoStatus.completed)]]);
+      expect(blocks.indexWhere((b) => b is TodoBlock), 1, reason: 'the card stands where the last call was');
       final steps = blocks.whereType<StepsBlock>().expand((b) => b.steps).map((a) => a.callId);
       expect(steps, ['1', '2', '3']);
     });
@@ -61,8 +70,58 @@ void main() {
     });
 
     test('the current step is the row in progress of the latest checklist', () {
-      expect(currentStep([act('t', todoWriteTool, todos([('A', 'completed'), ('B', 'in_progress')]))]), 'B…');
-      expect(currentStep([act('b', 'Bash')]), isNull);
+      expect(currentStep(todosAcross([[act('t', todoWriteTool, todos([('A', 'completed'), ('B', 'in_progress')]))]])), 'B…');
+      expect(currentStep(todosAcross([[act('b', 'Bash')]])), isNull);
+    });
+
+    test('TaskCreate and TaskUpdate in one answer make the card, and are no steps', () {
+      final blocks = answerBlocks([create(1, 'A', 0), create(2, 'B', 1), act('r', 'Read', null, 2), update(1, 'in_progress', 3)]);
+      expect(blocks.whereType<TodoBlock>().map((b) => rowsOf(b.todos)), [
+        [('A', TodoStatus.inProgress), ('B', TodoStatus.pending)],
+      ]);
+      expect(blocks.whereType<StepsBlock>().expand((b) => b.steps).map((a) => a.callId), ['r']);
+    });
+
+    test('an update in a later answer changes the list made in an earlier one', () {
+      final todos = todosAcross([
+        [create(1, 'A'), create(2, 'B', 1), create(3, 'C', 2)],
+        [update(1, 'completed'), update(2, 'in_progress', 1)],
+      ]);
+      expect(rowsOf(todos), [('A', TodoStatus.completed), ('B', TodoStatus.inProgress), ('C', TodoStatus.pending)]);
+      expect(currentStep(todos), 'B…');
+    });
+
+    test('items added in a later answer join the earlier list, deleted ones go', () {
+      final todos = todosAcross([
+        [create(1, 'A'), create(2, 'B', 1)],
+        [update(1, 'completed'), update(2, 'deleted', 1), create(3, 'C', 2)],
+      ]);
+      expect(rowsOf(todos), [('A', TodoStatus.completed), ('C', TodoStatus.pending)]);
+    });
+
+    test('numbering from 1 again starts a fresh list, and a TodoWrite replaces it', () {
+      expect(rowsOf(todosAcross([[create(1, 'A'), create(2, 'B', 1)], [create(1, 'New')]])), [('New', TodoStatus.pending)]);
+      expect(rowsOf(todosAcross([[create(1, 'A')], [act('t', todoWriteTool, todos([('W', 'completed')]))]])), [('W', TodoStatus.completed)]);
+      expect(todosAcross([[act('b', 'Bash')]]), isNull);
+    });
+
+    test('a failed call changes nothing', () {
+      final failed = ActivityView(callId: 'x', input: {'taskId': '1', 'status': 'completed'}, offset: 1, ok: false, tool: taskUpdateTool);
+      expect(rowsOf(todosAcross([[create(1, 'A'), failed]])), [('A', TodoStatus.pending)]);
+    });
+
+    test('todosByAnswer carries the list per author and only marks answers that changed it', () {
+      final messages = [
+        messageOf('a1', MessageRole.assistant, '', author: 'Flux', activity: [create(1, 'A'), create(2, 'B', 1)]),
+        messageOf('u1', MessageRole.user, 'Do B as well'),
+        messageOf('a2', MessageRole.assistant, 'Sure', author: 'Flux', activity: [act('r', 'Read')]),
+        messageOf('g1', MessageRole.assistant, '', author: 'Forge', activity: [create(1, 'Other')]),
+        messageOf('a3', MessageRole.assistant, '', author: 'Flux', activity: [update(1, 'completed'), create(3, 'C', 1)]),
+      ];
+      final by = todosByAnswer(messages);
+      expect(by.keys, ['a1', 'g1', 'a3']);
+      expect(rowsOf(by['a3']), [('A', TodoStatus.completed), ('B', TodoStatus.pending), ('C', TodoStatus.pending)]);
+      expect(rowsOf(by['g1']), [('Other', TodoStatus.pending)]);
     });
 
     testWidgets('TodoCard marks rows and folds long lists to the row in progress', (tester) async {
@@ -85,6 +144,18 @@ void main() {
       expect(find.byKey(const Key('todo-fold')), findsNothing);
       await tester.pumpWidget(const MaterialApp(home: Scaffold(body: TodoCard(todos: []))));
       expect(find.text('A'), findsNothing);
+    });
+
+    testWidgets('AnswerBody draws the list carried over from earlier answers', (tester) async {
+      final m = messageOf('m', MessageRole.assistant, '', activity: [update(1, 'completed'), update(2, 'in_progress', 1)]);
+      final carried = todosAcross([
+        [create(1, 'Old step'), create(2, 'Next step', 1)],
+        m.activity,
+      ]);
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: AnswerBody(message: m, todos: carried))));
+      expect(find.byKey(const Key('todo-card')), findsOneWidget);
+      expect(find.text('1 of 2 done'), findsOneWidget);
+      expect(find.text('Next step…'), findsOneWidget);
     });
 
     testWidgets('AnswerBody draws the card for the last TodoWrite', (tester) async {

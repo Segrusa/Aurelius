@@ -7,7 +7,7 @@ import type { ActivityView, ApprovalView, MessageView, TaskView } from "@aureliu
 import { answerParts } from "./answer-steps-logic";
 import { isProgressTool, type Todo } from "./chat-logic";
 import { rowFiles } from "./ticket-activity-logic";
-import { todosOf } from "./ticket-overview-logic";
+import { todosAcross } from "./ticket-overview-logic";
 import { busy } from "./ticket-page-logic";
 
 const bare = (tool: string) => tool.replace(/^claude\./, "");
@@ -440,6 +440,8 @@ export function workBlocks(tasks: readonly TaskWork[]): WorkBlock[] {
     const blocks: Building[] = [];
     let todos: Todo[] | null = null;
     let current: Building | null = null;
+    // The plan's calls so far, per answer: a later answer updates the list an earlier one made.
+    const progressCalls: ActivityView[][] = [];
     const liveOf = new Map(t.live.map((u) => [u.message_id, u]));
     const answers = [
       ...t.messages
@@ -481,7 +483,8 @@ export function workBlocks(tasks: readonly TaskWork[]): WorkBlock[] {
       // Work without a plan step does not run on over answers; a step does.
       if (current && current.step === null) current = null;
       if (current) current.block.endMs = Math.max(current.block.endMs, answer.atMs);
-      const progressCalls: ActivityView[] = [];
+      const calls: ActivityView[] = [];
+      progressCalls.push(calls);
       for (const part of answerParts(answer.text, answer.activity)) {
         if (part.kind === "text") {
           current ??= open(answer, `t${blocks.length}`);
@@ -490,8 +493,8 @@ export function workBlocks(tasks: readonly TaskWork[]): WorkBlock[] {
         }
         for (const call of part.steps) {
           if (progress(call)) {
-            progressCalls.push(call);
-            const next = todosOf(progressCalls);
+            calls.push(call);
+            const next = todosAcross(progressCalls);
             if (!next) continue;
             todos = next;
             for (const b of blocks) {

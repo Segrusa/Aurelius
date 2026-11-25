@@ -502,6 +502,8 @@ class _MessagesState extends State<_Messages> {
     }
     if (state.messages.isEmpty && state.unsent.isEmpty) return clear(EmptyState(widget.emptyTitle, detail: widget.emptyDetail));
     final versions = _versions(state.messages);
+    // The checklist carries over from answer to answer (TaskCreate/TaskUpdate).
+    final todos = todosByAnswer(state.messages);
     // What a run in an employee's own chat asks with no answer streaming here to show it under.
     final asks = [
       for (final a in approvals)
@@ -550,6 +552,7 @@ class _MessagesState extends State<_Messages> {
                           source: source,
                           ticket: made[m.id],
                           version: versions[m.id],
+                          todos: todos[m.id],
                           blocking: !m.isStreaming ? null : group ? approvals.where((a) => a.runId == m.runId).firstOrNull : blocking,
                         ),
         ),
@@ -1034,7 +1037,7 @@ class _UserBubble extends StatelessWidget {
 }
 
 class _AssistantMessage extends StatelessWidget {
-  const _AssistantMessage({required this.message, this.group = false, this.version, this.blocking, this.mentioned = false, this.source, this.ticket});
+  const _AssistantMessage({required this.message, this.group = false, this.version, this.todos, this.blocking, this.mentioned = false, this.source, this.ticket});
 
   final MessageView message;
 
@@ -1050,6 +1053,9 @@ class _AssistantMessage extends StatelessWidget {
   /// In the Team chat: the sender shows with their role.
   final bool group;
   final (int, int)? version;
+
+  /// The checklist as it stands after this answer, when the answer changed it.
+  final List<TodoItem>? todos;
   final ApprovalView? blocking;
 
   String? _replyTarget(ChatState state) {
@@ -1143,7 +1149,7 @@ class _AssistantMessage extends StatelessWidget {
           children: [
             if (header.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(header, style: Tokens.monoSmall().copyWith(color: mentioned ? Tokens.accentText : null))),
             if (message.text.isNotEmpty || message.activity.isNotEmpty)
-              Collapsible(id: message.id, text: message.text, streaming: message.isStreaming, builder: (context, cut) => AnswerBody(message: message, cut: cut)),
+              Collapsible(id: message.id, text: message.text, streaming: message.isStreaming, builder: (context, cut) => AnswerBody(message: message, cut: cut, todos: todos)),
             if (message.files.isNotEmpty) MessageFiles(files: message.files),
             if (message.sources.isNotEmpty)
               Padding(
@@ -1207,7 +1213,7 @@ class _LiveProgressState extends State<_LiveProgress> {
   @override
   Widget build(BuildContext context) {
     final p = context.select((ChatBloc b) => b.state.progress[widget.messageId]);
-    final step = context.select((ChatBloc b) => currentStep(b.state.messages.where((m) => m.id == widget.messageId).firstOrNull?.activity ?? const []));
+    final step = context.select((ChatBloc b) => currentStep(todosByAnswer(b.state.messages)[widget.messageId]));
     if (p == null) return const SizedBox.shrink();
     return Flexible(
       child: Padding(

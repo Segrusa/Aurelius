@@ -20,9 +20,13 @@ import 'screenshot_page.dart';
 /// An answer: Markdown with the tools it used shown in place, as separate
 /// blocks (commands, edits, web searches), as on the desktop.
 class AnswerBody extends StatelessWidget {
-  const AnswerBody({super.key, required this.message, this.cut});
+  const AnswerBody({super.key, required this.message, this.cut, this.todos});
 
   final MessageView message;
+
+  /// The checklist as it stands after this answer, carried over from earlier
+  /// answers ([todosByAnswer]); without it the answer's own calls make it.
+  final List<TodoItem>? todos;
 
   /// Show only the text before this UTF-16 index, and the steps taken before it.
   final int? cut;
@@ -40,7 +44,7 @@ class AnswerBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = markdownStyle(context);
     // Steps with nothing written between them share one line; the checklist is a card.
-    final blocks = answerBlocks(_parts());
+    final blocks = answerBlocks(_parts(), todos: todos);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -50,7 +54,7 @@ class AnswerBody extends StatelessWidget {
             child: switch (block) {
               StepsBlock(steps: [final only]) => ActivityCard(key: ValueKey(only.callId), activity: only, messageId: message.id),
               StepsBlock(steps: final run) => ActivityRun(key: ValueKey('run-${run.first.callId}'), run: run, messageId: message.id),
-              TodoBlock(:final call) => TodoCard(key: const Key('todo-card'), todos: parseTodos(call.input)),
+              TodoBlock(:final todos) => TodoCard(key: const Key('todo-card'), todos: todos),
               TextBlock(:final markdown) => MessageMarkdown(data: markdown, scope: chatFileScope(context), styleSheet: style, diagrams: !message.isStreaming),
             },
           ),
@@ -59,7 +63,7 @@ class AnswerBody extends StatelessWidget {
   }
 }
 
-/// The agent's checklist (TodoWrite): done, in progress (bold, in its active
+/// The agent's checklist (TodoWrite or TaskCreate/TaskUpdate): done, in progress (bold, in its active
 /// form) and open. Long lists fold to the row in progress and a count.
 class TodoCard extends StatefulWidget {
   const TodoCard({super.key, required this.todos});
