@@ -2,16 +2,10 @@
 // (ticket #19, and the simplification of 2026-11-09). Nothing is removed: the server's data and the
 // protocol stay, so showing a feature again is deleting its line here.
 
-export type Feature = "ChatAttachments" | "ActivityInSidebar" | "Vault" | "MemoryProposals" | "SequentialTasks";
+export type Feature = "ChatAttachments" | "ActivityInSidebar" | "Vault" | "SequentialTasks";
 
 /** The one list. */
-export const HIDDEN_FEATURES: readonly Feature[] = [
-  "ChatAttachments",
-  "ActivityInSidebar",
-  "Vault",
-  "MemoryProposals",
-  "SequentialTasks",
-];
+export const HIDDEN_FEATURES: readonly Feature[] = ["ChatAttachments", "ActivityInSidebar", "Vault", "SequentialTasks"];
 
 export function hidden(feature: Feature): boolean {
   return HIDDEN_FEATURES.includes(feature);

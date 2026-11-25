@@ -41,7 +41,7 @@ describe("hidden features", () => {
   });
 
   it("are the simplification's", () => {
-    for (const feature of ["ActivityInSidebar", "Vault", "MemoryProposals", "SequentialTasks"] as const) {
+    for (const feature of ["ActivityInSidebar", "Vault", "SequentialTasks"] as const) {
       expect(hidden(feature)).toBe(true);
     }
   });

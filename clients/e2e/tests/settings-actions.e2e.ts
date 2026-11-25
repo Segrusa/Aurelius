@@ -2,7 +2,6 @@
 // and the screens around a run: the writes are checked against a script.
 
 import { expect, type Page, test } from "@playwright/test";
-import { hidden } from "../../ts/app/src/hidden";
 import { serveStatic, WEB_DIST } from "./daemon";
 import { notification, scriptServer } from "./fake-server";
 
@@ -217,41 +216,6 @@ test.describe("settings actions", () => {
 });
 
 test.describe("around the work", () => {
-  test("memory answers to the keys of the selected entry", async ({ page }) => {
-    test.skip(hidden("MemoryProposals"), "hidden in hidden.ts");
-    const memory = (id: string, status: string, content: string) => ({
-      id,
-      status,
-      content,
-      kind: "project_knowledge",
-      pinned: false,
-      sources: [],
-      scope: { kind: "project", id: "p1" },
-      created_at_ms: 0,
-      version: 1,
-    });
-    const { writes, stop } = await scripted(
-      page,
-      {
-        reads: {
-          "memory.list": () => ({
-            type: "memory",
-            value: { items: [memory("m1", "proposed", "First"), memory("m2", "proposed", "Second")] },
-          }),
-        },
-      },
-      "/knowledge/memory?project=p1",
-    );
-    await expect(page.getByText("Second")).toBeVisible();
-    await page.getByText("Second").click();
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await page.keyboard.press("y");
-    await expect
-      .poll(() => sent(writes, "memory.decide").map((w) => w.params))
-      .toEqual([{ memory_id: "m2", accept: true }]);
-    await stop();
-  });
-
   test("files on a new ticket are uploaded by a browser, and sent by the path it got", async ({ page }) => {
     const { writes, stop } = await scripted(page, {}, "/new");
     await page.route("**/v1/upload", (route) =>

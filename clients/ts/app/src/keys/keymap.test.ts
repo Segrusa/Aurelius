@@ -23,7 +23,7 @@ describe("the table", () => {
   });
 
   it("holds the desktop's shortcuts that do something here, none twice for one chord in one context", () => {
-    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(63);
+    expect(SHORTCUTS.length).toBeGreaterThanOrEqual(61);
     const seen = new Set<string>();
     for (const s of SHORTCUTS) {
       for (const k of s.keys) {

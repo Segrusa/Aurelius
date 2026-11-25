@@ -13,10 +13,6 @@ const MEMORY_KIND: Record<string, string> = {
 export const memoryKind = (m: Pick<MemoryView, "kind" | "lesson">) =>
   m.lesson ? "Lesson" : (MEMORY_KIND[m.kind] ?? m.kind);
 
-/** Newest proposals first. */
-export const memoryProposals = (items: MemoryView[]) =>
-  items.filter((m) => m.status === "proposed").sort((a, b) => b.created_at_ms - a.created_at_ms);
-
 export const memoryHistory = (items: MemoryView[]) =>
   items.filter((m) => m.status === "superseded" || m.status === "rejected" || m.status === "forgotten");
 

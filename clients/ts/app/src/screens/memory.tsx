@@ -9,10 +9,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useConnection } from "../connection";
 import { useEmployees, useMemory, useMemoryContext, useProjects } from "../data";
-import { hidden } from "../hidden";
 import { useAction } from "../keys/provider";
 import { toast } from "../ui/toast";
-import { consolidationScopes, memoryHistory, memoryKind, memoryProposals, thousands } from "./knowledge-logic";
+import { consolidationScopes, memoryHistory, memoryKind, thousands } from "./knowledge-logic";
 import {
   Confirm,
   Eyebrow,
@@ -27,7 +26,7 @@ import {
   Problem,
 } from "./org-kit";
 
-type MemoryTab = "context" | "proposals" | "history";
+type MemoryTab = "context" | "history";
 
 const PANEL = "memory-panel";
 // Selector takes no empty value, so "no employee" needs a word of its own.
@@ -155,9 +154,7 @@ const styles = stylex.create({
   },
 });
 
-const NOTE = hidden("MemoryProposals")
-  ? "What you remember here is used in the runs of this project."
-  : "Employees propose memories during runs. Proposals wait here until you accept or reject them; accepted ones go into every run in this project.";
+const NOTE = "What you remember here is used in the runs of this project.";
 
 export function Entry({
   m,
@@ -296,14 +293,13 @@ export function MemoryBody({
   const [who, setWho] = useState<string | null | undefined>(undefined);
   const contextEmployee = who === undefined ? (staff[0]?.id ?? null) : who;
   const context = useMemoryContext(project, contextEmployee);
-  const [tab, setTab] = useState<MemoryTab>(hidden("MemoryProposals") ? "context" : "proposals");
+  const [tab, setTab] = useState<MemoryTab>("context");
   const [text, setText] = useState("");
   const [kind, setKind] = useState<"project_knowledge" | "decision">("project_knowledge");
   const [revising, setRevising] = useState<MemoryView | null>(null);
   const [forgetting, setForgetting] = useState<MemoryView | null>(null);
   const [overOpen, setOverOpen] = useState(false);
   const items = memory.data ?? [];
-  const proposals = useMemo(() => memoryProposals(items), [items]);
   const history = useMemo(() => memoryHistory(items), [items]);
   const refresh = () => client.invalidateQueries({ queryKey: ["memory"] });
   const act = async (run: () => Promise<unknown>, done?: string) => {
@@ -315,11 +311,6 @@ export function MemoryBody({
       toast(failureOf(e));
     }
   };
-  const decide = (m: MemoryView, accept: boolean) =>
-    act(
-      () => connection.write("memory.decide", { memory_id: m.id, accept }, { retry: false }),
-      accept ? "Proposal accepted; it is used as context from now on." : "Proposal rejected.",
-    );
   const remember = () => {
     if (!project || text.trim() === "") return;
     const content = text.trim();
@@ -353,8 +344,7 @@ export function MemoryBody({
       toast(failureOf(e));
     }
   };
-  const shownItems =
-    tab === "proposals" ? proposals : tab === "history" ? history : items.filter((m) => m.status === "active");
+  const shownItems = tab === "history" ? history : items.filter((m) => m.status === "active");
   const [chosen, setChosen] = useState<string | null>(null);
   const current = shownItems.find((m) => m.id === chosen) ?? shownItems[0] ?? null;
   const step = (by: number) => {
@@ -363,17 +353,8 @@ export function MemoryBody({
   };
   useAction("SelectNext", () => step(1));
   useAction("SelectPrev", () => step(-1));
-  useAction(
-    "AcceptMemory",
-    () => {
-      if (current?.status === "proposed") void decide(current, true);
-      else toast("Select a proposal to accept (filter 2 shows only proposals).");
-    },
-    !hidden("MemoryProposals"),
-  );
   useAction("RemoveMemory", () => {
-    if (current?.status === "proposed") void decide(current, false);
-    else if (current?.status === "active") setForgetting(current);
+    if (current?.status === "active") setForgetting(current);
     else if (current) toast("This item is no longer active.");
   });
   const pin = (m: MemoryView) =>
@@ -385,7 +366,6 @@ export function MemoryBody({
     if (current) void pin(current);
   });
   useAction("Filter1", () => setTab("context"));
-  useAction("Filter2", () => setTab("proposals"), !hidden("MemoryProposals"));
   useAction("Filter3", () => setTab("history"));
   const ctx = context.data;
   const place = (p: string) => (ctx?.items ?? []).filter((i) => i.placement === p);
@@ -393,7 +373,6 @@ export function MemoryBody({
   const over = (ctx?.always_tokens ?? 0) > budget;
   const tabs: { key: MemoryTab; label: string; n?: number }[] = [
     { key: "context", label: "In context" },
-    ...(hidden("MemoryProposals") ? [] : [{ key: "proposals" as const, label: "Proposals", n: proposals.length }]),
     { key: "history", label: "History", n: history.length },
   ];
   return (
@@ -437,18 +416,6 @@ export function MemoryBody({
             </TabList>
             <div id={PANEL} role="tabpanel" {...stylex.props(styles.panel)}>
               {memory.isPending ? <Loading /> : null}
-              {tab === "proposals" && memory.data ? (
-                proposals.length === 0 ? (
-                  <p {...stylex.props(styles.empty)}>No proposals.</p>
-                ) : (
-                  proposals.map((m) => (
-                    <Entry key={m.id} m={m} selected={m.id === current?.id} onSelect={() => setChosen(m.id)}>
-                      <Button size="sm" variant="primary" label="Accept" onClick={() => void decide(m, true)} />
-                      <Button size="sm" label="Reject" onClick={() => void decide(m, false)} />
-                    </Entry>
-                  ))
-                )
-              ) : null}
               {tab === "history" && memory.data ? (
                 history.length === 0 ? (
                   <p {...stylex.props(styles.empty)}>Nothing superseded, rejected or forgotten yet.</p>
@@ -489,11 +456,7 @@ export function MemoryBody({
                   {context.isPending ? <Loading /> : null}
                   {context.error ? <Problem>{context.error.message}</Problem> : null}
                   {ctx && ctx.items.length === 0 ? (
-                    <p {...stylex.props(styles.empty)}>
-                      {hidden("MemoryProposals")
-                        ? "No memory yet for this employee. Use Remember."
-                        : "No memory yet for this employee. Use Remember, or accept proposals."}
-                    </p>
+                    <p {...stylex.props(styles.empty)}>No memory yet for this employee. Use Remember.</p>
                   ) : null}
                   {ctx ? (
                     <>
