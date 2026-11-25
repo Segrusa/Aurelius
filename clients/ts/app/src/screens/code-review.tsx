@@ -56,7 +56,8 @@ const NARROW = "@media (max-width: 760px)";
 const REVIEWER = "Trace";
 
 const styles = stylex.create({
-  work: { display: "flex", minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%" },
+  // minWidth 0: a long commit line or branch name must not make the page wider than the window.
+  work: { display: "flex", minHeight: 0, minWidth: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%" },
   // The queue
   queue: {
     display: { default: "flex", [NARROW]: "flex" },

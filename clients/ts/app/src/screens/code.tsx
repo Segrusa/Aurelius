@@ -18,6 +18,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
+import { useTickets, useWorkSessions } from "../data";
 import { Icon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/marks";
 import { useWorkspace } from "../workspace";
@@ -55,7 +56,7 @@ import {
   writtenView,
 } from "./code-logic";
 import { CodeReview } from "./code-review";
-import { mainlineText } from "./code-review-logic";
+import { mainlineText, reviewQueue } from "./code-review-logic";
 import { Confirm, failureOf, Loading, Page } from "./org-kit";
 import { ticketPlace } from "./ticket-session-logic";
 
@@ -82,8 +83,10 @@ const styles = stylex.create({
   },
   muted: { fontSize: 12, color: "var(--precision-text3)", fontVariantNumeric: "tabular-nums" },
   mainline: {
-    display: "inline-flex",
-    alignItems: "center",
+    display: { default: "inline-block", "@media (max-width: 760px)": "none" },
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
     paddingInline: 9,
     paddingBlock: 2,
     borderRadius: 999,
@@ -346,12 +349,17 @@ function useCode(projectId: string | null, live: boolean) {
   return query;
 }
 
-/** The sidebar's count beside Code: the worktrees besides the project's folder. */
-export function useCodeWorktreeCount(): number | null {
+/** The sidebar's badge beside Code (ticket #84): how many branches wait for the board member's review. */
+export function useCodeReviewCount(): number | null {
   const { id } = useWorkspace();
   const code = useCode(id, false);
-  const n = code.data?.problem ? 0 : (code.data?.worktrees ?? []).filter((w) => !w.is_main).length;
-  return id === null || !code.data ? null : n;
+  const tickets = useTickets(id !== null);
+  const sessions = useWorkSessions(id);
+  const view = code.data;
+  if (id === null || !view) return null;
+  if (view.problem) return 0;
+  const mine = (tickets.data ?? []).filter((t) => t.project_id === id);
+  return reviewQueue(view, mine, sessions.data ?? []).ready.length;
 }
 
 type CodeWrite = "code.fetch" | "code.merge" | "code.remove_worktree" | "code.delete_branch" | "code.prune_merged";
