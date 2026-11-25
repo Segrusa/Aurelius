@@ -4,10 +4,13 @@ import {
   accessLabel,
   accessOf,
   canPin,
+  canReportTo,
   choiceLine,
+  employeeFilterCounts,
   employeeGroups,
   employeeState,
   employeeTabs,
+  inEmployeeFilter,
   inheritedRun,
   instructionsFold,
   isEmployeeTab,
@@ -235,5 +238,34 @@ describe("instructionsFold", () => {
     expect(instructionsFold("You are Iris.\nBe brief.")).toBe(false);
     expect(instructionsFold(Array.from({ length: 13 }, (_, i) => `RULE ${i}`).join("\n"))).toBe(true);
     expect(instructionsFold("x".repeat(1201))).toBe(true);
+  });
+});
+
+describe("settings › employees", () => {
+  it("puts everyone still here under All and each state under its own filter", () => {
+    const working = m("Forge", null, { working: true, activity_state: "working" });
+    const asking = m("Flux", null, { activity_state: "waiting" });
+    const paused = m("Sentinel", null, { status: "paused" });
+    const gone = m("Pulse", null, { status: "archived" });
+    const idle = m("Nova");
+    const all = [working, asking, paused, gone, idle];
+    expect(all.filter((e) => inEmployeeFilter(e, "all")).map((e) => e.name)).toEqual([
+      "Forge",
+      "Flux",
+      "Sentinel",
+      "Nova",
+    ]);
+    expect(employeeFilterCounts(all)).toEqual({ all: 4, work: 1, you: 1, paused: 1, archived: 1 });
+  });
+
+  it("refuses a drag that would make someone report to itself or below itself", () => {
+    const atlas = m("Atlas");
+    const orion = m("Orion", atlas.id);
+    const titan = m("Titan", orion.id);
+    const all = [atlas, orion, titan];
+    expect(canReportTo(all, titan.id, atlas.id)).toBe(true);
+    expect(canReportTo(all, titan.id, titan.id)).toBe(false);
+    expect(canReportTo(all, atlas.id, titan.id)).toBe(false);
+    expect(canReportTo(all, titan.id, orion.id)).toBe(false);
   });
 });

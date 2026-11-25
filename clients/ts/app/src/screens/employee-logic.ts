@@ -273,3 +273,55 @@ const INSTRUCTIONS_PREVIEW_CHARS = 1200;
  */
 export const instructionsFold = (text: string) =>
   text.split("\n").length > INSTRUCTIONS_PREVIEW_LINES || text.length > INSTRUCTIONS_PREVIEW_CHARS;
+
+/** The filters of Settings › Employees: everyone still here, or one state. */
+export type EmployeeFilter = "all" | "work" | "you" | "paused" | "archived";
+
+/** Which filter an employee falls under besides All; archived employees only show under Archived. */
+export function employeeFilterOf(e: Pick<EmployeeSummary, "status" | "working" | "activity_state">): EmployeeFilter {
+  if (e.status === "archived") return "archived";
+  if (e.status === "paused") return "paused";
+  const label = employeeState(e).label;
+  if (label === "Working") return "work";
+  return label === "Waiting for you" ? "you" : "all";
+}
+
+/** Whether `e` shows under `filter`. */
+export function inEmployeeFilter(
+  e: Pick<EmployeeSummary, "status" | "working" | "activity_state">,
+  filter: EmployeeFilter,
+): boolean {
+  const of = employeeFilterOf(e);
+  return filter === "all" ? of !== "archived" : of === filter;
+}
+
+/** How many employees each filter shows, for the counts on its button. */
+export function employeeFilterCounts(
+  all: Pick<EmployeeSummary, "status" | "working" | "activity_state">[],
+): Record<EmployeeFilter, number> {
+  const counts: Record<EmployeeFilter, number> = { all: 0, work: 0, you: 0, paused: 0, archived: 0 };
+  for (const e of all) {
+    for (const f of Object.keys(counts) as EmployeeFilter[]) if (inEmployeeFilter(e, f)) counts[f] += 1;
+  }
+  return counts;
+}
+
+/**
+ * Whether `employee` may report to `boss` after a drag on the org chart: not to itself, and not to
+ * someone who already reports to it, directly or further down (that would make a loop).
+ */
+export function canReportTo(
+  all: Pick<EmployeeSummary, "id" | "reports_to">[],
+  employee: string,
+  boss: string,
+): boolean {
+  if (employee === boss) return false;
+  const seen = new Set<string>();
+  let at: string | null | undefined = boss;
+  while (at && !seen.has(at)) {
+    if (at === employee) return false;
+    seen.add(at);
+    at = all.find((e) => e.id === at)?.reports_to;
+  }
+  return all.find((e) => e.id === employee)?.reports_to !== boss;
+}

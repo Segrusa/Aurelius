@@ -1,5 +1,3 @@
-import { Heading } from "@astryxdesign/core/Heading";
-import { LayoutHeader } from "@astryxdesign/core/Layout";
 import { expectBody } from "@aurelius/client";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
@@ -14,6 +12,7 @@ import { ActivitySection } from "./activity";
 import type { ActivityFilters } from "./activity-logic";
 import { BackupsSection, ConnectionsSection, McpSection, RunsAndLoadSection } from "./settings-advanced";
 import { EmployeeRunsSection } from "./settings-employee-runs";
+import { SettingsBody, SettingsHead } from "./settings-frame";
 import { focusField, HINTS_KEY, pressKeyed, stepRow, useSetting } from "./settings-kit";
 import { sectionKeyOf, sectionsFor, settingMatches } from "./settings-logic";
 import { MyDefaultsSection, USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
@@ -45,10 +44,6 @@ const KEYED_ACTIONS = [
   "LoadSave",
   "LoadToggleEnabled",
 ];
-
-const enter = stylex.keyframes({
-  from: { opacity: 0, transform: "translateY(4px)" },
-});
 
 const styles = stylex.create({
   sidebar: {
@@ -169,32 +164,6 @@ const styles = stylex.create({
     backgroundColor: "var(--color-text-accent)",
   },
   placeName: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-  head: {
-    display: "flex",
-    height: 44,
-    alignItems: "center",
-    gap: 8,
-    paddingInline: 20,
-    color: "var(--precision-text3)",
-  },
-  title: { margin: 0, fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)" },
-  scroller: { minHeight: 0, flex: 1, overflowY: "auto" },
-  wide: { maxWidth: 1080 },
-  page: {
-    display: "flex",
-    width: "100%",
-    maxWidth: 720,
-    boxSizing: "border-box",
-    flexDirection: "column",
-    gap: 26,
-    marginInline: "auto",
-    paddingBlock: "28px 64px",
-    paddingInline: 28,
-    animationName: enter,
-    animationDuration: "160ms",
-    animationTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",
-    "@media (prefers-reduced-motion: reduce)": { animationName: "none" },
-  },
   missing: { margin: 0, color: "var(--precision-text3)" },
 });
 
@@ -515,19 +484,10 @@ export function SettingsScreen({ section, filters }: { section: string; filters:
     (SECTIONS.some((s) => s.key === key) ? sections.find((s) => s.key === "defaults") : undefined);
   return (
     <>
-      <LayoutHeader hasDivider padding={0} data-titlebar>
-        <div {...stylex.props(styles.head)}>
-          Settings<span>›</span>
-          <Heading level={1} xstyle={styles.title}>
-            {found?.label ?? "Not found"}
-          </Heading>
-        </div>
-      </LayoutHeader>
-      <div {...stylex.props(styles.scroller)}>
-        <div key={section} {...stylex.props(styles.page, found?.wide && styles.wide)}>
-          {found?.body ? found.body(filters) : <p {...stylex.props(styles.missing)}>This section does not exist.</p>}
-        </div>
-      </div>
+      <SettingsHead title={found?.label ?? "Not found"} />
+      <SettingsBody width={found?.wide ? "wide" : "narrow"} pageKey={section}>
+        {found?.body ? found.body(filters) : <p {...stylex.props(styles.missing)}>This section does not exist.</p>}
+      </SettingsBody>
     </>
   );
 }
