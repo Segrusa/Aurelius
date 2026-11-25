@@ -114,6 +114,7 @@ class ChatView extends StatefulWidget {
     this.revealMessage,
     this.floating = false,
     this.topInset = 0,
+    this.modeFixed = false,
   });
 
   final String emptyTitle;
@@ -157,6 +158,10 @@ class ChatView extends StatefulWidget {
   /// under a floating head [topInset] high and under a floating composer.
   final bool floating;
   final double topInset;
+
+  /// The mode cannot change here: a design session always works in Auto (the server refuses
+  /// another mode), so the composer shows no mode to pick.
+  final bool modeFixed;
 
   @override
   State<ChatView> createState() => _ChatViewState();
@@ -1599,7 +1604,7 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
             if (floating && !group) ...[
               Align(
                 alignment: Alignment.centerLeft,
-                child: _FloatingChips(state: state, readOnly: readOnly, pickMode: () => _pickMode(state.mode), toggleBrowser: () => _toggleBrowser(state), toggleScreen: () => _toggleScreen(state)),
+                child: _FloatingChips(state: state, readOnly: readOnly, pickMode: widget.config.modeFixed ? null : () => _pickMode(state.mode), toggleBrowser: () => _toggleBrowser(state), toggleScreen: () => _toggleScreen(state)),
               ),
               const SizedBox(height: 10),
             ],
@@ -1826,12 +1831,14 @@ class _ComposerState extends State<_Composer> with WidgetsBindingObserver {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  ActionChip(
-                    avatar: Icon(Icons.tune, size: 16, color: state.mode == AgentMode.auto ? Tokens.warning : Tokens.text2),
-                    label: Text(state.mode.label, style: TextStyle(color: state.mode == AgentMode.auto ? Tokens.warning : Tokens.text2)),
-                    onPressed: readOnly ? null : () => _pickMode(state.mode),
-                  ),
-                  const SizedBox(width: 6),
+                  if (!widget.config.modeFixed) ...[
+                    ActionChip(
+                      avatar: Icon(Icons.tune, size: 16, color: state.mode == AgentMode.auto ? Tokens.warning : Tokens.text2),
+                      label: Text(state.mode.label, style: TextStyle(color: state.mode == AgentMode.auto ? Tokens.warning : Tokens.text2)),
+                      onPressed: readOnly ? null : () => _pickMode(state.mode),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                   const ConversationModelChip(),
                   if (state.browserAllowed) ...[
                     const SizedBox(width: 6),
@@ -1896,7 +1903,8 @@ class _FloatingChips extends StatelessWidget {
 
   final ChatState state;
   final bool readOnly;
-  final VoidCallback pickMode;
+  /// Null: the mode is fixed (a design session), so no mode pill.
+  final VoidCallback? pickMode;
   final VoidCallback toggleBrowser;
   final VoidCallback toggleScreen;
 
@@ -1911,13 +1919,15 @@ class _FloatingChips extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Row(children: [
-        _ChromePill(
-          key: const Key('composer-mode'),
-          leading: Icon(Icons.tune, size: 14, color: state.mode == AgentMode.auto ? Tokens.warning : Tokens.ink2),
-          label: state.mode.label,
-          onTap: readOnly ? null : pickMode,
-        ),
-        const SizedBox(width: 6),
+        if (pickMode case final pick?) ...[
+          _ChromePill(
+            key: const Key('composer-mode'),
+            leading: Icon(Icons.tune, size: 14, color: state.mode == AgentMode.auto ? Tokens.warning : Tokens.ink2),
+            label: state.mode.label,
+            onTap: readOnly ? null : pick,
+          ),
+          const SizedBox(width: 6),
+        ],
         _ChromePill(
           key: const Key('conversation-model-chip'),
           label: model,

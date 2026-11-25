@@ -110,7 +110,7 @@ export function SessionScreen({ conversationId, design = null }: { conversationI
             title: "This session is starting.",
             description: "The first answer appears here. Talk with the employee as in a chat; there is no ticket.",
           },
-          footer: (snapshot) => <RunChips snapshot={snapshot} />,
+          footer: (snapshot) => <RunChips snapshot={snapshot} design={session?.design ?? false} />,
           ...(session?.dispatch ? { instead: <Chooser session={session} /> } : {}),
           ...(othersSession ? { instead: <p {...stylex.props(styles.chooser)}>{OTHERS_SESSION}</p> } : {}),
           actions: <PropertiesToggle dock={dock} label="Session properties" />,
@@ -223,8 +223,11 @@ function Chooser({ session }: { session: WorkSessionView }) {
   );
 }
 
-/** Model, effort and mode of the next run (a session's or a task's); a run under way keeps what it started with. */
-export function RunChips({ snapshot }: { snapshot: MessagesSnapshot }) {
+/**
+ * Model, effort and mode of the next run (a session's or a task's); a run under way keeps what it started with.
+ * A design always works in Auto (the server refuses another mode), so it shows no Mode chip.
+ */
+export function RunChips({ snapshot, design = false }: { snapshot: MessagesSnapshot; design?: boolean }) {
   const connection = useConnection();
   const client = useQueryClient();
   const models = useModels();
@@ -271,21 +274,23 @@ export function RunChips({ snapshot }: { snapshot: MessagesSnapshot }) {
           </Chip>
         }
       />
-      <Menu
-        label="Mode"
-        value={mode}
-        options={MODES.map((m) => ({ key: m, label: MODE_LABELS[m] }))}
-        onPick={(next: AgentMode) =>
-          void write(
-            connection.write("conversation.set_agent_mode", { conversation_id: id, mode: next }, { retry: false }),
-          )
-        }
-        trigger={
-          <Chip name="Mode" quiet>
-            {MODE_LABELS[mode]}
-          </Chip>
-        }
-      />
+      {design ? null : (
+        <Menu
+          label="Mode"
+          value={mode}
+          options={MODES.map((m) => ({ key: m, label: MODE_LABELS[m] }))}
+          onPick={(next: AgentMode) =>
+            void write(
+              connection.write("conversation.set_agent_mode", { conversation_id: id, mode: next }, { retry: false }),
+            )
+          }
+          trigger={
+            <Chip name="Mode" quiet>
+              {MODE_LABELS[mode]}
+            </Chip>
+          }
+        />
+      )}
     </>
   );
 }

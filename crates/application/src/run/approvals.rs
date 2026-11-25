@@ -331,11 +331,15 @@ impl CommandService {
             // The answer goes on under the plan and the decision, not above them.
             conv::move_run_message_to_end(tx, row.run_id)?;
             // The conversation leaves plan mode too, so its mode shows it and the next answer runs in it.
-            let mode = match decision {
+            let mut mode = match decision {
                 PlanDecision::Approve => Some(aurelius_domain::autonomy::AgentMode::Auto),
                 PlanDecision::ApproveEdits => Some(aurelius_domain::autonomy::AgentMode::AcceptEdits),
                 PlanDecision::Revise | PlanDecision::Reject => None,
             };
+            // A design session stays in Auto (see `DESIGN_STAYS_AUTO`).
+            if mode.is_some() && aurelius_storage::work_sessions::is_design_run(tx, row.run_id)? {
+                mode = Some(aurelius_domain::autonomy::AgentMode::Auto);
+            }
             if let Some(mode) = mode {
                 if let Some(conversation) = conv::set_mode_for_run(tx, row.run_id, mode)? {
                     let metadata = serde_json::json!({ "agent_mode": mode.as_str(), "ctx": meta.clone() });

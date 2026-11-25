@@ -251,6 +251,50 @@ fn a_design_session_always_starts_in_auto_whatever_mode_was_asked() {
 }
 
 #[test]
+fn a_design_sessions_mode_cannot_leave_auto_but_a_plain_session_can() {
+    use aurelius_domain::autonomy::{AgentMode, SetAgentMode};
+    let s = setup();
+    let mut cmd = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut cmd {
+        start.design = true;
+    }
+    let (design, _) = started(exec_as(&s, Some(s.user), cmd).unwrap());
+    for mode in [AgentMode::Plan, AgentMode::Ask, AgentMode::AcceptEdits] {
+        let refused = exec_as(&s, Some(s.user), Command::SetAgentMode(SetAgentMode { conversation_id: design, mode }));
+        let refused = refused.expect_err("a design stays in Auto");
+        assert_eq!(refused.code, aurelius_domain::ErrorCode::Validation, "{mode:?}: {refused:?}");
+    }
+    exec_as(&s, Some(s.user), Command::SetAgentMode(SetAgentMode { conversation_id: design, mode: AgentMode::Auto })).unwrap();
+    assert_eq!(s.service.store().read(|c| aurelius_storage::conversations::agent_mode(c, design)).unwrap(), AgentMode::Auto);
+    let (plain, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
+    exec_as(&s, Some(s.user), Command::SetAgentMode(SetAgentMode { conversation_id: plain, mode: AgentMode::Plan })).unwrap();
+}
+
+#[test]
+fn approving_a_designs_plan_with_accept_edits_keeps_it_in_auto() {
+    use aurelius_domain::approval::{DecidePlan, PlanDecision};
+    use aurelius_domain::autonomy::AgentMode;
+    let s = setup();
+    let mut cmd = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut cmd {
+        start.design = true;
+    }
+    let (_, run) = started(exec_as(&s, Some(s.user), cmd).unwrap());
+    // Running, so its job is claimed by the dispatcher.
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [run.to_string()])?;
+            Ok(tx.execute("UPDATE jobs SET state = 'leased', lease_owner = 'test', lease_until_ms = 0 WHERE id = ?1", [run.to_string()])?)
+        })
+        .unwrap();
+    let input = serde_json::json!({ "plan": "# Plan\n\n1. Make the page" });
+    let crate::run::approvals::RuntimePermission::Pending { approval_id, .. } = s.service.request_runtime_permission(run, Some("p1".into()), "ExitPlanMode", &input).unwrap() else { panic!("a plan waits for the user") };
+    exec_as(&s, Some(s.user), Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id, decision: PlanDecision::ApproveEdits, feedback: None })).unwrap();
+    assert_eq!(s.service.run_mode(run).unwrap(), AgentMode::Auto);
+}
+
+#[test]
 fn the_board_member_who_started_a_session_goes_on_in_it_with_chat_send() {
     let s = setup();
     let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());

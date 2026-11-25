@@ -28,6 +28,9 @@ pub const WORKTREE_NEEDS_GIT: &str = "A worktree of its own needs a project fold
 /// Refused: a branch of its own needs a project folder that is a git repository.
 pub const OWN_BRANCH_NEEDS_GIT: &str = "A branch of its own needs a project folder that is a git repository; start the session without one, or set the project's folder.";
 
+/// Refused: a design writes its pages, so its mode stays Auto.
+pub const DESIGN_STAYS_AUTO: &str = "A design session always works in Auto: it writes its pages, which Plan or Ask would stop.";
+
 /// Refused: a session works either in a worktree of its own or on its own branch.
 pub const WORKTREE_OR_OWN_BRANCH: &str = "Choose a worktree of its own or a branch of its own, not both.";
 

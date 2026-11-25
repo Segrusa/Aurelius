@@ -33,7 +33,7 @@ LinkState linkOf(List<String> features) => LinkState(status: LinkStatus.online, 
 
 final sessionsLink = linkOf(const ['work_sessions', 'session_dispatch', 'chat_files']);
 
-WorkSessionView sessionOf(String id, {String title = 'Fix the login', int at = 0, bool running = false, SessionDispatch? dispatch, String employeeId = 'forge', String employee = 'Forge', bool unseen = false}) => WorkSessionView(
+WorkSessionView sessionOf(String id, {String title = 'Fix the login', int at = 0, bool running = false, SessionDispatch? dispatch, String employeeId = 'forge', String employee = 'Forge', bool unseen = false, bool design = false}) => WorkSessionView(
       conversationId: id,
       createdAtMs: 0,
       employeeId: employeeId,
@@ -45,6 +45,7 @@ WorkSessionView sessionOf(String id, {String title = 'Fix the login', int at = 0
       title: title,
       dispatch: dispatch,
       unseen: unseen,
+      design: design,
     );
 
 MockRepository repoWith({List<WorkSessionView> sessions = const [], LinkState? link, MessagesSnapshot? messages, BoardView? board}) {
@@ -493,6 +494,15 @@ void main() {
       expect(send['method'], 'chat.send');
       expect(paramsOf(send)['conversation_id'], 'c1');
       expect(paramsOf(send)['text'], 'Also the logout');
+    });
+
+    testWidgets('a design session offers no mode: it always works in Auto; a plain session does', (tester) async {
+      final repo = repoWith(sessions: [sessionOf('c1', design: true), sessionOf('c2')], messages: snapshotOf('c1', messages: [messageOf('m1', MessageRole.user, 'A login page')]));
+      await pumpSessions(tester, repo, const SessionPage(conversationId: 'c1'));
+      expect(find.byKey(const Key('composer-chips')), findsOneWidget);
+      expect(find.byKey(const Key('composer-mode')), findsNothing);
+      await pumpSessions(tester, repo, const SessionPage(conversationId: 'c2'));
+      expect(find.byKey(const Key('composer-mode')), findsOneWidget);
     });
 
     testWidgets('the composer input is exactly as high as its buttons', (tester) async {

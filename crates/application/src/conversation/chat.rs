@@ -260,6 +260,10 @@ impl CommandService {
         let meta = ctx.metadata();
         let conversation_id = cmd.conversation_id;
         let mut committed = self.commit(command_id, hash, move |tx| {
+            // Auto stays allowed, so a design that started in another mode can still get there.
+            if cmd.mode != aurelius_domain::autonomy::AgentMode::Auto && aurelius_storage::work_sessions::of_conversation(tx, cmd.conversation_id)?.is_some_and(|s| s.design) {
+                return Ok(Err(domain_error(DomainError::OutOfRange { field: "mode".into(), detail: crate::conversation::work_session::DESIGN_STAYS_AUTO.into() })));
+            }
             if !conv::set_agent_mode(tx, cmd.conversation_id, cmd.mode)? {
                 return Ok(Err(domain_error(DomainError::ConversationNotFound(cmd.conversation_id))));
             }
