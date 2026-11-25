@@ -5,6 +5,7 @@ import {
   canSubmit,
   currentItem,
   filterQueue,
+  mainlineText,
   mergeBlocked,
   mergeCheck,
   type ReviewItem,
@@ -270,5 +271,15 @@ describe("waited", () => {
     expect(waited(NOW - 2 * HOUR, NOW)).toBe("2 h");
     expect(waited(NOW - 30 * HOUR, NOW)).toBe("1 d");
     expect(waited(NOW, NOW)).toBe("now");
+  });
+});
+
+describe("the head's line about main", () => {
+  it("says how far main is from its remote and when it was fetched", () => {
+    const main = branch("main", { is_main: true, ahead: 0, upstream: "origin/main", upstream_ahead: 4 });
+    expect(
+      mainlineText({ branches: [main], main_branch: "main", has_remote: true, fetched_at_ms: NOW - 12 * MIN }, NOW),
+    ).toBe("main · 4 ahead of origin · fetched 12 min ago");
+    expect(mainlineText({ branches: [], main_branch: "main", has_remote: false }, NOW)).toBe("main · no remote");
   });
 });

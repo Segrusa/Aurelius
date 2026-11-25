@@ -265,3 +265,28 @@ export function traceAsk(item: ReviewItem, repo: string, main: string): string {
   const what = item.kind === "ticket" ? `ticket #${item.number} (${item.title})` : `the work session "${item.title}"`;
   return `Please review branch ${item.branch.name} of ${what} in ${repo} against ${main}, and post your findings with their file and line.`;
 }
+
+/** The head's line about main: "main · 4 ahead of origin · fetched 12 min ago". */
+export function mainlineText(
+  view: Pick<CodeView, "branches" | "main_branch" | "has_remote" | "fetched_at_ms">,
+  now: number,
+): string {
+  const main = view.main_branch ?? "main";
+  const b = (view.branches ?? []).find((x) => x.is_main);
+  const parts = [main];
+  if (b?.upstream) {
+    const remote = b.upstream.split("/")[0] ?? b.upstream;
+    const ahead = b.upstream_ahead ?? 0;
+    const behind = b.upstream_behind ?? 0;
+    if (ahead === 0 && behind === 0) parts.push(`up to date with ${remote}`);
+    if (ahead > 0) parts.push(`${ahead} ahead of ${remote}`);
+    if (behind > 0) parts.push(`${behind} behind ${remote}`);
+  }
+  if (!view.has_remote) parts.push("no remote");
+  else if (view.fetched_at_ms === null || view.fetched_at_ms === undefined) parts.push("never fetched");
+  else
+    parts.push(
+      `fetched ${waited(view.fetched_at_ms, now) === "now" ? "just now" : `${waited(view.fetched_at_ms, now)} ago`}`,
+    );
+  return parts.join(" · ");
+}
