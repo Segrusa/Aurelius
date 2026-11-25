@@ -610,7 +610,7 @@ pub(crate) fn employee_name(conn: &rusqlite::Connection, employee: EmployeeId) -
 }
 
 /// The conversation of a message, how a line names it ("Ann's chat", the task's,
-/// the project assistant's), for a ticket made from it, and the project it belongs
+/// the project assistant's, a work session's), for a ticket made from it, and the project it belongs
 /// to (none: an employee's chat).
 /// None for a message that does not exist or is in no known kind of conversation.
 pub(crate) fn message_place(conn: &rusqlite::Connection, message: MessageId) -> Result<Option<(ConversationId, String, Option<ProjectId>)>, StorageError> {
@@ -625,7 +625,7 @@ pub(crate) fn message_place(conn: &rusqlite::Connection, message: MessageId) -> 
         .optional()?;
     let Some((id, kind, project, employee, task, project_id)) = row else { return Ok(None) };
     let Ok(id) = ConversationId::parse(&id) else { return Ok(None) };
-    if !matches!(kind.as_str(), "ticket" | "employee" | "project" | "task") {
+    if !matches!(kind.as_str(), "ticket" | "employee" | "project" | "task" | "session") {
         return Ok(None);
     }
     let project_id = match project_id {
@@ -641,6 +641,7 @@ pub(crate) fn message_place(conn: &rusqlite::Connection, message: MessageId) -> 
             None => "a ticket's discussion".to_owned(),
         },
         ("task", _, _, Some(task)) => format!("the task “{task}”"),
+        ("session", _, Some(employee), _) => format!("a session with {employee}"),
         ("project", Some(project), _, _) => format!("the assistant of {project}"),
         (_, _, Some(employee), _) => format!("{employee}'s chat"),
         _ => "a chat".to_owned(),

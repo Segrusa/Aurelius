@@ -429,3 +429,46 @@ fn only_a_design_sessions_run_may_render_its_pages_and_is_told_to_look_at_them()
     assert!(!plan.design_session, "a plain session does not");
     assert!(!plan.system.as_deref().unwrap_or("").contains("view_design"));
 }
+
+fn ticket_from(s: &Setup, project: ProjectId, message: aurelius_domain::MessageId) -> Result<CommandResult, AppError> {
+    let create = aurelius_domain::ticket::CreateTicket {
+        responsible_user_id: None,
+        confirm_secret: false,
+        project_id: project,
+        title: "Build pricing.html".into(),
+        description: None,
+        priority: Default::default(),
+        labels: vec![],
+        deadline_ms: None,
+        owner_employee_id: None,
+        run: Default::default(),
+        files: vec![],
+        start: false,
+        from_message: Some(message),
+        from_idea: None,
+        kind: None,
+    };
+    exec_as(s, Some(s.user), Command::CreateTicket(create))
+}
+
+#[test]
+fn a_ticket_made_from_a_sessions_message_is_marked_in_the_session() {
+    // "Create ticket" in a (design) session: the session gets ticket_created at the
+    // message, so the client stops offering the button for it.
+    let s = setup();
+    let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
+    let list = |s: &Setup| {
+        let st = s.service.store().clone();
+        s.service.store().read(move |c| aurelius_storage::conversations::list_messages(c, conversation, &|k| st.blobs().read(k).ok().and_then(|b| String::from_utf8(b).ok()))).unwrap()
+    };
+    let message = list(&s).first().expect("the session's first message").id;
+    let refused = ticket_from(&s, s.plain, message).unwrap_err();
+    assert!(refused.message.contains("another project"), "{}", refused.message);
+
+    let CommandResult::TicketCreated { ticket_id, number } = ticket_from(&s, s.repo, message).unwrap() else { panic!("no ticket") };
+    let marks: Vec<_> = list(&s).into_iter().filter(|m| m.system.as_ref().is_some_and(|l| l.kind == aurelius_domain::views::SystemLineKind::TicketCreated)).collect();
+    assert_eq!(marks.len(), 1);
+    let line = marks[0].system.clone().unwrap();
+    assert_eq!((line.ticket_id, line.message_id), (Some(ticket_id), Some(message)));
+    assert_eq!(marks[0].text, format!("grace created #{number} from a message"));
+}

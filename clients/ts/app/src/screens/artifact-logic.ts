@@ -409,3 +409,19 @@ export function designTicket(name: string, path: string): { title: string; descr
     description: `Build this page as designed in ${path}. The design is attached: follow its layout, colours and texts.`,
   };
 }
+
+/** The server feature that takes a work session's message as a ticket's `from_message`. */
+export const TICKET_FROM_SESSION = "ticket_from_session";
+
+/**
+ * The message a design's ticket is made from, so the conversation marks it (`ticket_created`) and
+ * the viewer stops offering Create ticket for it. Only in a conversation with one employee (where
+ * comments can be sent) and on a server that takes a session's message; else none.
+ */
+export function designTicketSource(
+  features: readonly string[],
+  messageId: string | null | undefined,
+  oneEmployee: boolean,
+): string | null {
+  return oneEmployee && messageId && features.includes(TICKET_FROM_SESSION) ? messageId : null;
+}

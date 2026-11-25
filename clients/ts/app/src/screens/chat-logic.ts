@@ -847,7 +847,7 @@ export function ownerAnswers(owner: string | null): string {
 }
 
 /** The ticket already made from a message, from the channel's `ticket_created` lines. */
-export function ticketFrom(list: MessageView[], id: string): { ticket: string | null; label: string } | null {
+export function ticketFrom(list: readonly MessageView[], id: string): { ticket: string | null; label: string } | null {
   for (let i = list.length - 1; i >= 0; i--) {
     const m = list[i] as MessageView;
     if (m.system?.kind === "ticket_created" && m.system.message_id === id) {
