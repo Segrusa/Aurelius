@@ -12,7 +12,7 @@ use aurelius_domain::idea::{AddIdea, IdeaStatus, StartIdea};
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::project_conversation::{SendProjectMessage, StartProjectConversation};
 use aurelius_domain::{Command, CommandResult, EmployeeId, ErrorCode, ProjectId};
-use aurelius_protocol::Method;
+use aurelius_protocol::{FileScope, Method};
 use common::*;
 
 /// The error code and message of a refused read or write.
@@ -110,5 +110,21 @@ async fn idea_start_answers_gone() {
     let idea = client.ideas(project_id).await.unwrap().ideas.into_iter().find(|i| i.id == idea_id).unwrap();
     assert_eq!((idea.status, idea.task_id), (IdeaStatus::Open, None));
     assert!(client.tasks(None).await.unwrap().tasks.is_empty());
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn markdown_list_answers_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let project_id = project(&client).await;
+    let folder = client.projects().await.unwrap().projects.into_iter().find(|p| p.id == project_id).unwrap().folder.expect("folder");
+    std::fs::write(std::path::Path::new(&folder).join("README.md"), "# Atlas").unwrap();
+    let scope = FileScope::Project { project_id };
+    let err = client.call(Method::MarkdownList { scope: scope.clone() }).await.unwrap_err();
+    assert_eq!(refusal(err), gone(aurelius_daemon::api::MARKDOWN_LIST_GONE));
+    // markdown.get still reads a file by its path.
+    assert_eq!(client.markdown_file(scope, "README.md").await.unwrap().text, "# Atlas");
     stop(dir.path(), daemon).await;
 }

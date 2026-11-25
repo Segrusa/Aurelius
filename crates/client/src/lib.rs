@@ -768,11 +768,6 @@ impl Client {
         self.read(Method::EmployeeInstructionVersions { employee_id }, body!(EmployeeInstructionVersions)).await
     }
 
-    /// Markdown files of a work folder.
-    pub async fn markdown_files(&self, scope: aurelius_protocol::FileScope) -> Result<aurelius_protocol::MarkdownFileList, ClientError> {
-        self.read(Method::MarkdownList { scope }, body!(MarkdownFiles)).await
-    }
-
     /// One Markdown file, relative or absolute inside the work folder.
     pub async fn markdown_file(&self, scope: aurelius_protocol::FileScope, path: &str) -> Result<aurelius_protocol::MarkdownFileContent, ClientError> {
         self.read(Method::MarkdownGet { scope, path: path.to_owned() }, body!(MarkdownFile)).await

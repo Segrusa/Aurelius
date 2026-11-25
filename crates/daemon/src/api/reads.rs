@@ -277,7 +277,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             .await?;
             found.map(ResponseBody::Context).ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "No context overview was kept for this answer."))
         }
-        Method::MarkdownList { scope } => crate::markdown::list(shared, scope).await.map(ResponseBody::MarkdownFiles),
+        Method::MarkdownList { .. } => Err(ProtocolError::new(ErrorCode::NotFound, super::MARKDOWN_LIST_GONE)),
         Method::MarkdownGet { scope, path } => crate::markdown::read(shared, scope, path).await.map(ResponseBody::MarkdownFile),
         Method::SubagentList { conversation_id } => {
             let store = shared.store().clone();
