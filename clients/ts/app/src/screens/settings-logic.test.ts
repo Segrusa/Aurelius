@@ -169,7 +169,11 @@ describe("my run defaults", () => {
     const defaults = { model: "claude-opus-5-5", mode: "plan" as const };
     expect(runDefaultValue(defaults, "model")).toBe("claude-opus-5-5");
     expect(runDefaultValue(defaults, "effort")).toBe("default");
-    expect(withRunDefault(defaults, "effort", "high")).toEqual({ model: "claude-opus-5-5", mode: "plan", effort: "high" });
+    expect(withRunDefault(defaults, "effort", "high")).toEqual({
+      model: "claude-opus-5-5",
+      mode: "plan",
+      effort: "high",
+    });
     expect(withRunDefault(defaults, "model", "default")).toEqual({ mode: "plan" });
   });
 

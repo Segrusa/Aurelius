@@ -21,8 +21,8 @@ import {
   TraceSection,
 } from "./settings-advanced";
 import { EmployeeRunsSection } from "./settings-employee-runs";
-import { MyDefaultsSection } from "./settings-run-defaults";
 import { focusField, HINTS_KEY, pressKeyed, stepRow } from "./settings-kit";
+import { MyDefaultsSection } from "./settings-run-defaults";
 import { CompanySection, RemoteSection, ServerSection } from "./settings-workspace";
 import { AccountSection, AppSection } from "./settings-you";
 

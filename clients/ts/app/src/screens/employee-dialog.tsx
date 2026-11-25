@@ -469,51 +469,51 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
               options={providerOptions}
             />
           ) : (
-          <div {...stylex.props(styles.three)}>
-            <DialogSelector
-              label="Default mode"
-              value={mode}
-              onChange={(v) => setMode(v as AgentMode)}
-              options={MODES.map((m) => ({ value: m, label: MODE_LABELS[m] }))}
-            />
-            <DialogSelector
-              label="Provider"
-              labelTooltip="Which connection this employee's runs use. Runs stay on your own Claude login."
-              value={provider}
-              onChange={chooseProvider}
-              options={providerOptions}
-            />
-            <DialogSelector
-              label="Model"
-              labelTooltip="The default for this employee's chat and tasks. A chat or task can override it for itself (Ctrl+M) without changing this."
-              value={model}
-              onChange={(v) => setPicks({ ...picks, model: v })}
-              options={ownModels}
-            />
-          </div>
+            <div {...stylex.props(styles.three)}>
+              <DialogSelector
+                label="Default mode"
+                value={mode}
+                onChange={(v) => setMode(v as AgentMode)}
+                options={MODES.map((m) => ({ value: m, label: MODE_LABELS[m] }))}
+              />
+              <DialogSelector
+                label="Provider"
+                labelTooltip="Which connection this employee's runs use. Runs stay on your own Claude login."
+                value={provider}
+                onChange={chooseProvider}
+                options={providerOptions}
+              />
+              <DialogSelector
+                label="Model"
+                labelTooltip="The default for this employee's chat and tasks. A chat or task can override it for itself (Ctrl+M) without changing this."
+                value={model}
+                onChange={(v) => setPicks({ ...picks, model: v })}
+                options={ownModels}
+              />
+            </div>
           )}
           {ownDefaults ? null : (
-          <div {...stylex.props(styles.field)}>
-            <Field isGroupLabel label="Effort" inputID="employee-effort">
-              <SegmentedControl
-                label="Effort"
-                layout="fill"
-                value={effort}
-                onChange={(next) => setPicks({ ...picks, effort: next })}
-              >
-                {EFFORTS.map(([value, label]) => (
-                  <SegmentedControlItem key={value} value={value} label={label.split(" · ")[0] as string} />
-                ))}
-              </SegmentedControl>
-            </Field>
-            {effort === "inherit" ? (
-              <Hint>
-                {inherited.effort
-                  ? `Inherits ${effortName(inherited.effort)} from the company default.`
-                  : "Inherits the default of the model."}
-              </Hint>
-            ) : null}
-          </div>
+            <div {...stylex.props(styles.field)}>
+              <Field isGroupLabel label="Effort" inputID="employee-effort">
+                <SegmentedControl
+                  label="Effort"
+                  layout="fill"
+                  value={effort}
+                  onChange={(next) => setPicks({ ...picks, effort: next })}
+                >
+                  {EFFORTS.map(([value, label]) => (
+                    <SegmentedControlItem key={value} value={value} label={label.split(" · ")[0] as string} />
+                  ))}
+                </SegmentedControl>
+              </Field>
+              {effort === "inherit" ? (
+                <Hint>
+                  {inherited.effort
+                    ? `Inherits ${effortName(inherited.effort)} from the company default.`
+                    : "Inherits the default of the model."}
+                </Hint>
+              ) : null}
+            </div>
           )}
           {accessField}
           {hasTools ? <EmployeeTools policy={policy} access={access} onChange={setPolicy} /> : null}
@@ -529,23 +529,23 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
           {more ? (
             <div {...stylex.props(styles.stack)}>
               {ownDefaults ? null : (
-              <div {...stylex.props(styles.two)}>
-                <DialogSelector
-                  label="Subagents of this employee"
-                  value={subModel}
-                  onChange={(v) => setPicks({ ...picks, subModel: v })}
-                  options={modelOptions}
-                />
-                <DialogSelector
-                  label="Effort of subagents"
-                  value={subEffort}
-                  onChange={(v) => setPicks({ ...picks, subEffort: v })}
-                  options={EFFORTS.map(([value, label]) => ({
-                    value,
-                    label: value === "inherit" ? "Effort: follows the employee" : label,
-                  }))}
-                />
-              </div>
+                <div {...stylex.props(styles.two)}>
+                  <DialogSelector
+                    label="Subagents of this employee"
+                    value={subModel}
+                    onChange={(v) => setPicks({ ...picks, subModel: v })}
+                    options={modelOptions}
+                  />
+                  <DialogSelector
+                    label="Effort of subagents"
+                    value={subEffort}
+                    onChange={(v) => setPicks({ ...picks, subEffort: v })}
+                    options={EFFORTS.map(([value, label]) => ({
+                      value,
+                      label: value === "inherit" ? "Effort: follows the employee" : label,
+                    }))}
+                  />
+                </div>
               )}
               {hidden("SequentialTasks") ? null : (
                 <CheckboxInput

@@ -35,8 +35,8 @@ import {
 } from "./run-side";
 import { chooserText, runChange, runChipLabel, sessionFolder, sessionStatus } from "./session-logic";
 import { modelName } from "./settings-kit";
-import { SideQuestionButton } from "./side-question";
 import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
+import { SideQuestionButton } from "./side-question";
 import { SubagentsAtWork } from "./subagents";
 import { filesWritten } from "./tasks-logic";
 

@@ -235,13 +235,20 @@ function DefaultConnection() {
     run(() =>
       connection.write(
         "connection.set_defaults",
-        { purpose: "employee", scope: { kind: "global" }, settings: { ...settings, connection: { mode: "value", value: id } } },
+        {
+          purpose: "employee",
+          scope: { kind: "global" },
+          settings: { ...settings, connection: { mode: "value", value: id } },
+        },
         { retry: false },
       ),
     );
   return (
     <Group title="Company connection">
-      <Row title="Connection" hint="What employees run on. Each board member picks their own model under You → My defaults.">
+      <Row
+        title="Connection"
+        hint="What employees run on. Each board member picks their own model under You → My defaults."
+      >
         <Selector
           label="Company connection"
           isLabelHidden

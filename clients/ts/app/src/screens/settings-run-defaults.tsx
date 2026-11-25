@@ -43,7 +43,9 @@ export function MyDefaultsSection() {
       ),
     );
   const modelOptions = (defaultLabel: string) =>
-    models.map((m) => (m.key === "default" ? { value: "default", label: defaultLabel } : { value: m.key, label: m.label }));
+    models.map((m) =>
+      m.key === "default" ? { value: "default", label: defaultLabel } : { value: m.key, label: m.label },
+    );
   const effort = runDefaultValue(data.defaults, "effort");
   const efforts = data.supported_efforts ?? [];
   return (
@@ -76,7 +78,9 @@ export function MyDefaultsSection() {
             value={effort === "default" ? "inherit" : effort}
             options={effortOptions(
               efforts,
-              data.model_default_effort ? `${effortName(data.model_default_effort)} (model's default)` : "Model's default",
+              data.model_default_effort
+                ? `${effortName(data.model_default_effort)} (model's default)`
+                : "Model's default",
               effort === "default" ? null : effort,
             )}
             onChange={(value) => void save("effort", value === "inherit" ? "default" : value)}
@@ -91,7 +95,10 @@ export function MyDefaultsSection() {
             width={WIDTH}
             isDisabled={busy}
             value={runDefaultValue(data.defaults, "mode")}
-            options={[{ value: "default", label: "Default · Ask" }, ...MODES.map((m) => ({ value: m, label: MODE_LABELS[m] }))]}
+            options={[
+              { value: "default", label: "Default · Ask" },
+              ...MODES.map((m) => ({ value: m, label: MODE_LABELS[m] })),
+            ]}
             onChange={(value) => void save("mode", value)}
           />
         </Row>
