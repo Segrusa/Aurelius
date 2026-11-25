@@ -37,10 +37,10 @@ test("employees, projects, guidelines, memory and the vault over a real daemon",
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
 
     // A project, opened on creation.
-    await openCompanyPage(page, "Knowledge");
+    await openCompanyPage(page, "Guidelines");
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     await page.getByRole("button", { name: "New project" }).first().click();
     await page.getByPlaceholder("Name, for example Atlas").fill("Atlas");
@@ -109,7 +109,7 @@ test("employees, projects, guidelines, memory and the vault over a real daemon",
     await page.getByRole("button", { name: "Cancel" }).click();
 
     // A guideline: made, linked, changed to a second version, then archived and restored.
-    await openCompanyPage(page, "Knowledge");
+    await openCompanyPage(page, "Guidelines");
     await expect(page.getByRole("heading", { name: "No guidelines yet" })).toBeVisible();
     await page.getByRole("button", { name: "New guideline" }).first().click();
     await page.getByLabel("Title *").fill("Rust");

@@ -37,17 +37,18 @@ test("a board member pairs, lists and revokes their own device in Account", asyn
     await page.getByLabel("Name").fill("sam");
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "All workspaces" })).toBeVisible();
     await openSettings(page);
 
-    // Remote access is the server's switch; it points to Account for your own devices.
-    await open(page, "Remote access");
+    // Remote access is the server's switch; your own devices are paired in Account.
+    await open(page, "Remote & phones");
     await main(page).getByRole("switch", { name: "Remote access" }).click();
-    await expect(main(page).getByText("Pair and revoke your own phones and computers under Account.")).toBeVisible();
+    await expect(main(page).getByText("On", { exact: true })).toBeVisible();
     await expect(main(page).getByRole("button", { name: "Show code" })).toBeHidden();
 
     await open(page, "Account");
-    await expect(main(page).getByText("No paired devices.")).toBeVisible();
+    await expect(main(page).getByText("This device", { exact: true })).toBeVisible();
+    await main(page).getByRole("button", { name: "Add a device" }).click();
     await main(page).getByRole("button", { name: "Show code" }).click();
     const code =
       (await main(page)
@@ -70,16 +71,14 @@ test("a board member pairs, lists and revokes their own device in Account", asyn
     const row = main(page).getByText("sam-phone", { exact: true });
     await expect(row).toBeVisible();
     await expect(waiting).toBeHidden();
-    await expect(main(page).getByText("Only you see these devices.", { exact: false })).toBeVisible();
 
-    // Not listed again under Remote access: it is sam's, not the server's.
-    await open(page, "Remote access");
+    // Not listed again under Remote & phones: it is sam's, not the server's.
+    await open(page, "Remote & phones");
     await expect(main(page).getByText("sam-phone", { exact: true })).toBeHidden();
 
     await open(page, "Account");
     await main(page).getByRole("button", { name: "Revoke", exact: true }).click();
     await main(page).getByRole("button", { name: "Yes, revoke" }).click();
-    await expect(main(page).getByText("No paired devices.")).toBeVisible();
     await expect(main(page).getByText("sam-phone", { exact: true })).toBeHidden();
   } finally {
     await app.close();

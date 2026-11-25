@@ -599,7 +599,7 @@ test("a real daemon takes the filters of a workspace", async () => {
     await page.getByLabel("Password").fill("a-long-enough-password");
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { level: 1, name: "New session" })).toBeVisible();
-    await openCompanyPage(page, "Knowledge");
+    await openCompanyPage(page, "Guidelines");
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     await page.getByRole("button", { name: "New project" }).first().click();
     await page.getByPlaceholder("Name, for example Atlas").fill("Atlas");

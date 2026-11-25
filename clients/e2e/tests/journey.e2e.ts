@@ -91,7 +91,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
     });
 
     await step("add a project", async () => {
-      await act(() => openCompanyPage(p, "Knowledge"));
+      await act(() => openCompanyPage(p, "Guidelines"));
       await act(() => p.getByRole("link", { name: "Projects", exact: true }).click());
       await act(() => p.getByRole("button", { name: "New project" }).first().click());
       const dialog = p.getByRole("dialog");
@@ -234,7 +234,7 @@ test("a ticket from nothing to Done, a chat, and a restart of the server", async
         await p.waitForTimeout(300);
       });
     }
-    for (const screen of ["Employees", "Knowledge"] as const) {
+    for (const screen of ["Employees", "Guidelines"] as const) {
       await step(`dark ${screen}`, async () => {
         await act(() => openCompanyPage(p, screen));
         await p.waitForTimeout(300);

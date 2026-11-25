@@ -37,10 +37,13 @@ export async function expectWorkspace(page: Page, name: string): Promise<void> {
  * Opens Employees or Knowledge, which live under Settings › Company: from the app through the
  * Settings row, from inside Settings straight from its sidebar.
  */
-export async function openCompanyPage(page: Page, name: "Employees" | "Knowledge"): Promise<void> {
-  const main = page.getByRole("navigation", { name: "Main" });
+export async function openCompanyPage(
+  page: Page,
+  name: "Employees" | "Workspaces" | "Guidelines" | "Memory",
+): Promise<void> {
+  const rail = page.getByRole("navigation", { name: "Workspaces" });
   const settings = page.getByRole("navigation", { name: "Settings" });
-  await expect(main.or(settings)).toBeVisible();
+  await expect(rail.or(settings).first()).toBeVisible();
   if (!(await settings.isVisible())) await openSettings(page);
   await settings.getByRole("link", { name, exact: true }).click();
 }

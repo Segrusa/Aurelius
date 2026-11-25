@@ -105,14 +105,16 @@ test.describe("against a real daemon", () => {
     await openSettings(page);
     for (const name of [
       "Account",
-      "App",
-      "Company",
-      "Servers & PC",
-      "Remote access",
+      "My defaults",
+      "This device",
+      "General",
+      "Board members",
+      "Overview",
+      "Remote & phones",
       "Connections",
-      "MCP & tools",
+      "Tools & MCP",
+      "Runs & load",
       "Backups",
-      "Load limits",
       "Activity log",
     ]) {
       await page.getByRole("navigation", { name: "Settings" }).getByRole("link", { name, exact: true }).click();
@@ -125,7 +127,7 @@ test.describe("against a real daemon", () => {
     }
     await page
       .getByRole("navigation", { name: "Settings" })
-      .getByRole("link", { name: "Remote access", exact: true })
+      .getByRole("link", { name: "Remote & phones", exact: true })
       .click();
     await expect(page.getByText("A browser can never allow other devices.")).toBeVisible();
 

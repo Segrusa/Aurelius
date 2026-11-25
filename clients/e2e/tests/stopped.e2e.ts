@@ -45,7 +45,7 @@ test("a ticket that cannot start says so everywhere, and offers a way out", asyn
       .click();
     await expect(p.getByRole("dialog")).toHaveCount(0);
 
-    await openCompanyPage(p, "Knowledge");
+    await openCompanyPage(p, "Guidelines");
     await p.getByRole("link", { name: "Projects", exact: true }).click();
     await p.getByRole("button", { name: "New project" }).first().click();
     await p.getByRole("dialog").getByLabel("Name").fill("Atlas");

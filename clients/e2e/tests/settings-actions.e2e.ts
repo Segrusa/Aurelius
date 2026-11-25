@@ -114,16 +114,18 @@ test.describe("settings actions", () => {
       },
       "/settings/servers",
     );
+    await page.getByRole("button", { name: "What's new" }).click();
     await expect(page.getByText("Better.")).toBeVisible();
-    await page.getByRole("button", { name: "Download update" }).click();
+    await page.getByRole("button", { name: "Update", exact: true }).click();
+    await page.getByRole("button", { name: "Yes, update" }).click();
     await expect.poll(() => sent(writes, "update.prepare").length).toBe(1);
-    await page.getByRole("button", { name: "Shut down now", exact: true }).click();
+    await page.getByRole("button", { name: "Now", exact: true }).click();
     expect(sent(writes, "power.shutdown")).toHaveLength(0);
-    await page.getByRole("button", { name: "Yes, shut down now" }).click();
+    await page.getByRole("button", { name: "Yes, now" }).click();
     await expect.poll(() => sent(writes, "power.shutdown").map((w) => w.params)).toEqual([{ when: "now" }]);
     await page.getByRole("button", { name: "Cancel shutdown" }).click();
     await expect.poll(() => sent(writes, "power.cancel").length).toBe(1);
-    await expect(page.getByRole("button", { name: "When all work is done" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "When idle" })).toBeVisible();
     await stop();
   });
 
@@ -147,7 +149,7 @@ test.describe("settings actions", () => {
       },
       "/settings/connections",
     );
-    await page.getByRole("button", { name: "API key", exact: true }).click();
+    await page.getByRole("button", { name: "Add key", exact: true }).click();
     await page.getByLabel("API key").fill("sk-secret");
     await page.getByLabel("API key").press("Enter");
     await expect(page.getByText("This key was refused.")).toBeVisible();
@@ -170,7 +172,7 @@ test.describe("settings actions", () => {
       "/settings/mcp",
     );
     await expect(page.getByText("Claude Code no longer has this server.")).toBeVisible();
-    await page.getByRole("button", { name: "Add MCP server…" }).click();
+    await page.getByRole("button", { name: "Add MCP server" }).click();
     await page.getByLabel("Name").fill("files");
     await page.getByLabel("Command").fill("npx -y server-files /tmp");
     await page.getByRole("button", { name: "Add server" }).click();
