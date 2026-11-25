@@ -210,7 +210,8 @@ class _NewSessionPageState extends State<NewSessionPage> {
     setState(() => _tried = true);
     final link = context.read<ConnectionBloc>().state;
     final dispatchOn = link.has(sessionDispatchFeature);
-    final problem = startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: link.has(chatFilesFeature));
+    final ownBranch = link.has(ownBranchFeature);
+    final problem = startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: link.has(chatFilesFeature), ownBranch: ownBranch);
     final project = _project;
     final who = _who;
     if (problem != null || _busy || _uploading || project == null || who == null) return;
@@ -226,8 +227,8 @@ class _NewSessionPageState extends State<NewSessionPage> {
       files: [for (final f in _files) f.path],
     );
     final request = who == dispatcherWho
-        ? workSessionDispatch(sessionDispatchParams(start, confirmSecret: false))
-        : workSessionStart(sessionStartParams(start, employeeId: who, confirmSecret: false));
+        ? workSessionDispatch(sessionDispatchParams(start, confirmSecret: false, ownBranch: ownBranch))
+        : workSessionStart(sessionStartParams(start, employeeId: who, confirmSecret: false, ownBranch: ownBranch));
     setState(() => _busy = true);
     try {
       final receipt = await writeConfirmingSecret(repository, request, sendAnywayDialog(context), retry: false);
@@ -394,6 +395,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
     final kind = sessionsOn ? _kind : StartKind.ticket;
     final dispatchOn = link.has(sessionDispatchFeature);
     final filesOn = link.has(chatFilesFeature);
+    final ownBranch = link.has(ownBranchFeature);
     final models = context.select<RuntimeBloc, List<String>>((b) => b.state.choice(Purpose.employee)?.connection.models ?? const []);
     final model = _modelOf(models);
     final projects = company.openProjects;
@@ -401,12 +403,12 @@ class _NewSessionPageState extends State<NewSessionPage> {
     final whoName = _who == dispatcherWho ? 'Dispatcher' : company.employee(_who ?? '')?.name;
     final problem = kind == StartKind.ticket
         ? null
-        : startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: filesOn);
+        : startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: filesOn, ownBranch: ownBranch);
     final note = kind == StartKind.ticket
         ? 'Opens New ticket with this text, to add an owner, labels and more.'
         : _who == dispatcherWho
-            ? dispatchedNote(false)
-            : sessionNote(whoName, false);
+            ? dispatchedNote(ownBranch)
+            : sessionNote(whoName, ownBranch);
     final can = !_busy && !_uploading && (kind == StartKind.ticket ? _text.text.trim().isNotEmpty : problem == null);
     final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     final project = projects.where((p) => p.id == _project).firstOrNull;

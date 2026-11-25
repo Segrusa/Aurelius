@@ -95,9 +95,10 @@ void main() {
     });
 
     test('sessionNote and dispatchedNote as on the desktop', () {
-      expect(sessionNote('Forge', false), "Forge works in the project's folder itself. No ticket: you talk with them in the session.");
-      expect(sessionNote(null, true), 'The employee works in a worktree of its own, on its own branch. No ticket: you talk with them in the session.');
-      expect(dispatchedNote(false), "The dispatcher chooses who takes it, in the project's folder itself. No ticket: you talk with them in the session.");
+      expect(sessionNote('Forge', true), "Forge works on a branch of its own in the project's folder. No ticket: you talk with them in the session.");
+      expect(sessionNote(null, false), 'The employee works in a worktree of its own, on its own branch. No ticket: you talk with them in the session.');
+      expect(dispatchedNote(true), "The dispatcher chooses who takes it, on a branch of its own in the project's folder. No ticket: you talk with them in the session.");
+      expect(dispatchedNote(false), 'The dispatcher chooses who takes it, in a worktree of its own on its own branch. No ticket: you talk with them in the session.');
     });
   });
 
@@ -105,12 +106,13 @@ void main() {
     const start = SessionStartInput(projectId: 'p1', text: '  Fix it  ', model: 'default', effort: 'high', mode: 'plan', images: ['i.png'], files: ['a.pdf']);
 
     test('sessionStartParams trims the text, drops default picks and carries photos and files', () {
-      final p = sessionStartParams(start, employeeId: 'e1', confirmSecret: false).toJson();
+      final p = sessionStartParams(start, employeeId: 'e1', confirmSecret: false, ownBranch: true).toJson();
       expect(p, {
         'confirm_secret': false,
         'employee_id': 'e1',
         'files': ['a.pdf'],
         'images': ['i.png'],
+        'own_branch': true,
         'project_id': 'p1',
         'run': {'effort': 'high', 'mode': 'plan'},
         'text': 'Fix it',
@@ -118,13 +120,20 @@ void main() {
       });
     });
 
+    test('never starts in the project folder as it is: a worktree where the server has no own branch', () {
+      final p = sessionStartParams(start, employeeId: 'e1', confirmSecret: false, ownBranch: false).toJson();
+      expect([p['worktree'], p.containsKey('own_branch')], [true, false]);
+      final d = sessionDispatchParams(start, confirmSecret: false, ownBranch: true).toJson();
+      expect([d['worktree'], d['own_branch']], [false, true]);
+    });
+
     test('all defaults send no run', () {
       const plain = SessionStartInput(projectId: 'p1', text: 'x', model: 'default', effort: 'default', mode: 'default');
-      expect(sessionStartParams(plain, employeeId: 'e1', confirmSecret: true).toJson().containsKey('run'), isFalse);
+      expect(sessionStartParams(plain, employeeId: 'e1', confirmSecret: true, ownBranch: true).toJson().containsKey('run'), isFalse);
     });
 
     test('sessionDispatchParams is the start without an employee', () {
-      final p = sessionDispatchParams(start, confirmSecret: true).toJson();
+      final p = sessionDispatchParams(start, confirmSecret: true, ownBranch: true).toJson();
       expect(p.containsKey('employee_id'), isFalse);
       expect(p['text'], 'Fix it');
       expect(p['files'], ['a.pdf']);
@@ -160,7 +169,8 @@ void main() {
 
     test('files need chat_files', () {
       expect(startProblem(offline: false, projectId: 'p', text: 'x', who: 'e1', dispatchOn: false, files: 1, filesOn: false), 'Add files in the session once it has started.');
-      expect(startProblem(offline: false, projectId: 'p', text: 'x', who: 'e1', dispatchOn: false, files: 1, filesOn: true), isNull);
+      expect(startProblem(offline: false, projectId: 'p', text: 'x', who: 'e1', dispatchOn: false, files: 1, filesOn: true, ownBranch: true), isNull);
+      expect(startProblem(offline: false, projectId: 'p', text: 'x', who: 'e1', dispatchOn: false, files: 1, filesOn: true), 'Add files once the session works in its own worktree.');
     });
   });
 

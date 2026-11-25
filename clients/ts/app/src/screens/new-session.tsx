@@ -52,6 +52,7 @@ import {
   sessionKey,
   sessionRequest,
   sessionStartParams,
+  shownPlace,
   shownProjects,
   startedSession,
   startProblem,
@@ -205,10 +206,10 @@ export function NewSessionScreen() {
   const designsOn = other === "session" && features.includes(DESIGN_SESSIONS_FEATURE);
   const [chosenDesign, setDesign] = useState(() => defaultDesign(storage.get(sessionKey("kind", hostId)), true));
   const design = designsOn && kind === "session" && chosenDesign;
-  const [chosenPlace, setPlace] = useState<SessionPlace>("folder");
-  // Own branch only where the server has it; a server without it falls back to the project folder.
+  const [chosenPlace, setPlace] = useState<SessionPlace | null>(null);
+  // Always a branch of its own: Own branch unless chosen otherwise, a worktree where the server lacks it.
   const ownBranchOn = features.includes(OWN_BRANCH_FEATURE);
-  const place: SessionPlace = chosenPlace === "branch" && !ownBranchOn ? "folder" : chosenPlace;
+  const place = shownPlace(chosenPlace, ownBranchOn);
   const worktree = place === "worktree";
   // A ticket takes files of any type; a session's first message where the server has `chat_files`.
   const sessionFiles = features.includes(CHAT_FILES_FEATURE);
@@ -272,6 +273,7 @@ export function NewSessionScreen() {
     files: attach.files.length,
     sessionFiles,
     worktree,
+    ownBranch: ownBranchOn,
     sessionDispatch,
   });
   // Lands where the dialogs land since #58: the new ticket's chat, else its panel on the Board.

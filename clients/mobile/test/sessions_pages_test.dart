@@ -353,12 +353,14 @@ void main() {
       await pumpSessions(tester, repo, const NewSessionPage());
       await tester.enterText(find.byKey(const ValueKey('new-session-text')), 'Look at the export');
       await choose(tester, 'who', 'pick-Who-forge');
-      expect(find.textContaining("Forge works in the project's folder itself"), findsOneWidget);
+      // A server without session_own_branch: a worktree of its own, never the project's folder as it is.
+      expect(find.textContaining('Forge works in a worktree of its own'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('new-session-start')));
       await settleBoard(tester);
       final write = writesOf(repo).single;
       expect(write['method'], 'work_session.start');
       expect(paramsOf(write)['employee_id'], 'forge');
+      expect(paramsOf(write)['worktree'], isTrue);
       expect(paramsOf(write).containsKey('run'), isFalse, reason: "all the employee's defaults");
       expect(find.text('session c8'), findsOneWidget);
       final prefs = await SharedPreferences.getInstance();
