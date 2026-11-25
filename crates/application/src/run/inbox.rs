@@ -167,8 +167,7 @@ pub(crate) fn enqueue(
 
 /// A run row with its configuration snapshot of now.
 fn make_run(tx: &Tx<'_>, run: RunId, conversation: ConversationId, login: Option<UserId>) -> Result<(), StorageError> {
-    let mut resolved = connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee)?;
-    resolved.login_user = login;
+    let resolved = connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee, login)?;
     conv::insert_run(tx, run, conversation, &resolved)?;
     Ok(())
 }
@@ -312,7 +311,8 @@ fn claim_next(tx: &Tx<'_>, owner: &str, now: i64, lease_ms: i64, limit: u32) -> 
 }
 
 fn quota_until(tx: &Tx<'_>, conversation: ConversationId, login: &str, now: i64) -> Result<Option<i64>, StorageError> {
-    let resolved = connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee)?;
+    // Only the runtime counts here, and a board member's defaults never choose it.
+    let resolved = connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee, None)?;
     store::quota_until(tx, resolved.runtime_kind(), login, now)
 }
 

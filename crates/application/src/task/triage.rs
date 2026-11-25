@@ -142,9 +142,9 @@ impl CommandService {
             })
             .map_err(storage_error)?;
         let (Some((dispatcher, system, prompt)), notices) = prepared else { return Ok((None, prepared.1)) };
-        let mut config = self.resolve_for_employee(dispatcher, aurelius_domain::connection::Purpose::Employee)?;
         // The ticket's login (MU3-10 AC1).
-        config.login_user = self.store.read(|c| aurelius_storage::tickets::login_user(c, ticket)).map_err(storage_error)?;
+        let login = self.store.read(|c| aurelius_storage::tickets::login_user(c, ticket)).map_err(storage_error)?;
+        let config = self.resolve_for_employee(dispatcher, aurelius_domain::connection::Purpose::Employee, login)?;
         let login = config.login_user.map(|u| u.to_string());
         let run_id = RunId::new();
         let resolved = serde_json::to_string(&config).map_err(|e| AppError::new(aurelius_domain::ErrorCode::Internal, e.to_string()))?;

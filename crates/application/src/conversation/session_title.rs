@@ -83,12 +83,11 @@ impl CommandService {
             .map_err(storage_error)?;
         let Some((project_name, employee, employee_name, started_by)) = head else { return Ok(None) };
         let Ok(employee_id) = aurelius_domain::EmployeeId::parse(&employee) else { return Ok(None) };
-        let mut config = self.resolve_for_employee(employee_id, aurelius_domain::connection::Purpose::Memory)?;
         let by_run = match run {
             Some(run) => self.store.read(|c| crate::run::login::of_run(c, run)).map_err(storage_error)?,
             None => None,
         };
-        config.login_user = by_run.or_else(|| UserId::parse(&started_by).ok());
+        let config = self.resolve_for_employee(employee_id, aurelius_domain::connection::Purpose::Memory, by_run.or_else(|| UserId::parse(&started_by).ok()))?;
         let store = self.store.clone();
         self.store
             .read(|conn| {

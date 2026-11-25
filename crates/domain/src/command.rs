@@ -337,4 +337,10 @@ pub enum CommandResult {
         project_ids: Vec<crate::ProjectId>,
         changed: bool,
     },
+    /// `user.set_run_defaults` (feature `user_run_defaults`): the defaults as
+    /// stored now. `changed` is false when they already were these.
+    UserRunDefaultsSet {
+        defaults: crate::user::UserRunDefaults,
+        changed: bool,
+    },
 }

@@ -77,7 +77,8 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         }
         Method::EmployeeRunOverview => {
             let store = shared.store().clone();
-            Ok(ResponseBody::EmployeeRuns(storage_task(move || store.read(aurelius_application::run::connections::employee_runs)).await?))
+            // On the reader's login: their own defaults, as their runs would use them.
+            Ok(ResponseBody::EmployeeRuns(storage_task(move || store.read(|c| aurelius_application::run::connections::employee_runs(c, reader))).await?))
         }
         Method::GroupChatGet { channel } => {
             let store = shared.store().clone();
@@ -118,6 +119,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::TicketFollowers { ticket_id } => ticket_followers(shared, ticket_id).await,
         Method::TicketMyTickets { project_id, include_done } => my_tickets(shared, reader, project_id, include_done).await,
         Method::UserRailPins => rail_pins(shared, reader).await,
+        Method::UserRunDefaults => user_run_defaults(shared, reader).await,
         Method::TicketHistory { project_id, employee_id, from_ms, to_ms, query, before_done_at_ms, before_number, limit } => {
             let before = before_done_at_ms.zip(before_number);
             let filter = aurelius_storage::history::Filter { project: project_id, employee: employee_id, from_ms, to_ms, query, before };
@@ -915,6 +917,14 @@ async fn my_tickets(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId
     })
     .await
     .map(ResponseBody::MyTickets)
+}
+
+/// `user.run_defaults`: the run defaults of the board member of the session,
+/// never of one named in a param.
+async fn user_run_defaults(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
+    let Some(user) = reader else { return Err(ProtocolError::new(ErrorCode::BoardMemberRequired, "Run defaults are a board member's own.")) };
+    let store = shared.store().clone();
+    storage_task(move || store.read(|c| aurelius_application::run::connections::user_runs(c, user))).await.map(ResponseBody::UserRunDefaults)
 }
 
 /// `user.rail_pins`: the rail of the board member of the session, never of one

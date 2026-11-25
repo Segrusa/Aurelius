@@ -228,9 +228,106 @@ pub struct RailPinsView {
     pub project_ids: Vec<ProjectId>,
 }
 
+/// The longest model name a board member's default can hold, as for a task's model.
+pub const RUN_DEFAULT_MODEL_MAX: usize = 200;
+
+/// A board member's own defaults for the runs that work for them (feature
+/// `user_run_defaults`): runs on their login (the tickets they made, the sessions
+/// they started) use these unless the conversation or the task chose otherwise.
+/// They replace the employee's and the company's model and effort. None: not
+/// chosen, so the connection's default model, the model's own effort and Ask.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UserRunDefaults {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<crate::autonomy::AgentMode>,
+    /// The model of the subagents a run starts itself (Claude Code's Agent tool).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subagent_model: Option<String>,
+}
+
+impl UserRunDefaults {
+    /// Trimmed, an empty text as not chosen; a model of at most
+    /// `RUN_DEFAULT_MODEL_MAX` characters and a known effort level.
+    pub fn validated(&self) -> Result<UserRunDefaults, DomainError> {
+        let text = |v: &Option<String>| v.as_deref().map(str::trim).filter(|t| !t.is_empty()).map(str::to_owned);
+        let (model, effort, subagent_model) = (text(&self.model), text(&self.effort), text(&self.subagent_model));
+        for (field, value) in [("model", &model), ("subagent_model", &subagent_model)] {
+            if value.as_ref().is_some_and(|m| m.chars().count() > RUN_DEFAULT_MODEL_MAX) {
+                return Err(DomainError::OutOfRange { field: field.into(), detail: format!("at most {RUN_DEFAULT_MODEL_MAX} characters") });
+            }
+        }
+        if effort.as_ref().is_some_and(|e| !crate::connection::EFFORT_LEVELS.contains(&e.as_str())) {
+            return Err(DomainError::OutOfRange { field: "effort".into(), detail: crate::connection::EFFORT_LEVELS.join(", ") });
+        }
+        Ok(UserRunDefaults { model, effort, mode: self.mode, subagent_model })
+    }
+
+    /// Whether setting these needs the right to approve from a phone: Auto mode
+    /// lets the runs act without asking, as switching a conversation to Auto does.
+    pub fn needs_approve(&self) -> bool {
+        self.mode == Some(crate::autonomy::AgentMode::Auto)
+    }
+}
+
+/// `user.set_run_defaults` (feature `user_run_defaults`): the board member of
+/// the session sets their own defaults. Replaces them as a whole; an empty one
+/// clears them. Answers `UserRunDefaultsSet`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetUserRunDefaults {
+    pub defaults: UserRunDefaults,
+}
+
+/// `user.run_defaults` (feature `user_run_defaults`): the defaults of the board
+/// member of the session, never another's, and what a run of theirs comes to.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UserRunDefaultsView {
+    /// What they chose.
+    pub defaults: UserRunDefaults,
+    /// The model a run of theirs uses without a choice of its own: theirs, else
+    /// the connection's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The effort levels that model takes, for the effort picker.
+    #[serde(default)]
+    pub supported_efforts: Vec<String>,
+    /// The model's own effort, shown as "Default (…)".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_default_effort: Option<String>,
+    /// A chosen effort the model does not take: a run leaves it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unsupported_effort: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn run_defaults_are_trimmed_and_an_empty_text_is_not_chosen() {
+        let set = UserRunDefaults { model: Some("  claude-opus-5-5 ".into()), effort: Some(" ".into()), mode: Some(crate::autonomy::AgentMode::Plan), subagent_model: Some(String::new()) };
+        let valid = set.validated().unwrap();
+        assert_eq!(valid, UserRunDefaults { model: Some("claude-opus-5-5".into()), effort: None, mode: Some(crate::autonomy::AgentMode::Plan), subagent_model: None });
+    }
+
+    #[test]
+    fn an_unknown_effort_or_a_too_long_model_is_refused() {
+        let effort = UserRunDefaults { effort: Some("extreme".into()), ..Default::default() };
+        assert!(matches!(effort.validated(), Err(DomainError::OutOfRange { field, .. }) if field == "effort"));
+        let long = UserRunDefaults { subagent_model: Some("m".repeat(RUN_DEFAULT_MODEL_MAX + 1)), ..Default::default() };
+        assert!(matches!(long.validated(), Err(DomainError::OutOfRange { field, .. }) if field == "subagent_model"));
+    }
+
+    #[test]
+    fn only_auto_as_default_mode_needs_approve() {
+        use crate::autonomy::AgentMode;
+        assert!(UserRunDefaults { mode: Some(AgentMode::Auto), ..Default::default() }.needs_approve());
+        assert!(!UserRunDefaults { mode: Some(AgentMode::AcceptEdits), model: Some("m".into()), ..Default::default() }.needs_approve());
+    }
 
     #[test]
     fn rail_pins_keep_their_order_and_a_workspace_named_twice_only_at_its_first_place() {

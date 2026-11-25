@@ -1040,6 +1040,16 @@ impl Client {
         self.read(Method::UserRailPins, body!(RailPins)).await
     }
 
+    /// The signed-in board member's own run defaults (`user.run_defaults`, feature `user_run_defaults`).
+    pub async fn user_run_defaults(&self) -> Result<aurelius_domain::user::UserRunDefaultsView, ClientError> {
+        self.read(Method::UserRunDefaults, body!(UserRunDefaults)).await
+    }
+
+    /// Set the signed-in board member's own run defaults (`user.set_run_defaults`).
+    pub async fn set_user_run_defaults(&self, defaults: aurelius_domain::user::UserRunDefaults) -> Result<CommandReceipt, ClientError> {
+        self.execute(envelope(Command::SetUserRunDefaults(aurelius_domain::user::SetUserRunDefaults { defaults }), None)).await
+    }
+
     /// Pin these workspaces to the signed-in board member's rail, in this order (`user.set_rail_pins`).
     pub async fn set_rail_pins(&self, project_ids: Vec<aurelius_domain::ProjectId>) -> Result<CommandReceipt, ClientError> {
         self.execute(envelope(Command::SetRailPins(aurelius_domain::user::SetRailPins { project_ids }), None)).await

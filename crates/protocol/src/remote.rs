@@ -144,6 +144,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::UserWhoami
         // One's own rail, from every own device.
         | Method::UserRailPins
+        // One's own run defaults.
+        | Method::UserRunDefaults
         | Method::UserLogin(_)
         | Method::UserLogout
         | Method::SessionList { .. }
@@ -373,6 +375,10 @@ fn command_needs(command: &Command) -> Needs {
         Command::SetServerName(_) => Needs::Owner,
         // One's own rail, like marking one's own notifications read: it changes nothing for others.
         Command::SetRailPins(_) => Needs::Cap(Read),
+        // One's own run defaults steer the runs on one's login: like choosing a run's
+        // model and mode in a chat, and Auto as default like switching to Auto.
+        Command::SetUserRunDefaults(d) if d.defaults.needs_approve() => Needs::Cap(Approve),
+        Command::SetUserRunDefaults(_) => Needs::Cap(Chat),
     }
 }
 
@@ -688,6 +694,15 @@ mod tests {
         let plan = exec(Command::SetAgentMode(SetAgentMode { conversation_id: id, mode: AgentMode::Plan }));
         assert_eq!(required(&auto), cap(Capability::Approve));
         assert_eq!(required(&plan), cap(Capability::Chat));
+    }
+
+    #[test]
+    fn own_run_defaults_need_chat_and_auto_as_default_needs_approve() {
+        use aurelius_domain::{autonomy::AgentMode, user::{SetUserRunDefaults, UserRunDefaults}};
+        let set = |mode| exec(Command::SetUserRunDefaults(SetUserRunDefaults { defaults: UserRunDefaults { mode, ..Default::default() } }));
+        assert_eq!(required(&set(Some(AgentMode::Auto))), cap(Capability::Approve));
+        assert_eq!(required(&set(Some(AgentMode::Plan))), cap(Capability::Chat));
+        assert_eq!(required(&read(Method::UserRunDefaults)), cap(Capability::Read));
     }
 
     #[test]

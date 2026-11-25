@@ -67,13 +67,15 @@ pub struct SummaryInput {
 }
 
 impl CommandService {
-    /// Run configuration for memory work of an employee (same connection as the employee).
-    pub fn resolve_for_employee(&self, employee: EmployeeId, _purpose: aurelius_domain::connection::Purpose) -> Result<crate::run::connections::ResolvedRunConfig, AppError> {
+    /// Run configuration for work of an employee outside a conversation of its
+    /// own (memory, titles, triage): the same connection as the employee, on
+    /// `login`'s Claude login and with that board member's defaults.
+    pub fn resolve_for_employee(&self, employee: EmployeeId, _purpose: aurelius_domain::connection::Purpose, login: Option<aurelius_domain::UserId>) -> Result<crate::run::connections::ResolvedRunConfig, AppError> {
         self.store
             .write(move |tx| {
                 let conversation: String = tx.query_row("SELECT id FROM conversations WHERE employee_id = ?1 AND kind = 'employee' ORDER BY created_at_ms, id LIMIT 1", [employee.to_string()], |r| r.get(0))?;
                 let conversation = ConversationId::parse(&conversation).map_err(|e| StorageError::Rejected(e.to_string()))?;
-                crate::run::connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee)
+                crate::run::connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee, login)
             })
             .map_err(storage_error)
     }
@@ -242,9 +244,9 @@ impl CommandService {
         let Some(ctx) = ctx else { return Ok(None) };
         let Some(employee_id) = ctx.employee_id else { return Ok(None) };
         let store_ref = self.store.clone();
-        let mut config = self.resolve_for_employee(employee_id, aurelius_domain::connection::Purpose::Memory)?;
         // On the task's own login: a ticket's summary after Done on the ticket's (MU3-10 AC1).
-        config.login_user = self.store.read(|c| crate::run::login::of_task(c, task_id)).map_err(storage_error)?;
+        let login = self.store.read(|c| crate::run::login::of_task(c, task_id)).map_err(storage_error)?;
+        let config = self.resolve_for_employee(employee_id, aurelius_domain::connection::Purpose::Memory, login)?;
         self.store
             .read(|conn| {
                 let read = |key: &str| store_ref.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
@@ -569,10 +571,9 @@ impl CommandService {
             .read(|c| Ok(c.query_row("SELECT employee_id FROM conversations WHERE id = ?1", [conversation_id.to_string()], |r| r.get::<_, Option<String>>(0)).ok().flatten()))
             .map_err(storage_error)?;
         let Some(employee_id) = employee.and_then(|m| EmployeeId::parse(&m).ok()) else { return Ok(None) };
-        let mut config = self.resolve_for_employee(employee_id, aurelius_domain::connection::Purpose::Memory)?;
         // On the login of what it summarizes: the task's, else the login of the run
         // that scheduled it, never of another run of a shared conversation (B1-1).
-        config.login_user = self
+        let login = self
             .store
             .read(|c| {
                 let task: Option<String> = c.query_row("SELECT id FROM tasks WHERE conversation_id = ?1", [conversation_id.to_string()], |r| r.get(0)).optional()?;
@@ -582,6 +583,7 @@ impl CommandService {
                 }
             })
             .map_err(storage_error)?;
+        let config = self.resolve_for_employee(employee_id, aurelius_domain::connection::Purpose::Memory, login)?;
         self.store
             .read(|conn| {
                 let read = |key: &str| store_ref.blobs().read(key).ok().and_then(|b| String::from_utf8(b).ok());
@@ -883,9 +885,9 @@ impl CommandService {
             })
             .map_err(storage_error)?;
         let Some(employee) = employee.and_then(|m| EmployeeId::parse(&m).ok()) else { return Ok(None) };
-        let mut config = self.resolve_for_employee(employee, aurelius_domain::connection::Purpose::Memory)?;
         // No source: the company's login (B6); without one it does not run.
-        config.login_user = self.store.read(crate::run::login::of_company).map_err(storage_error)?;
+        let login = self.store.read(crate::run::login::of_company).map_err(storage_error)?;
+        let config = self.resolve_for_employee(employee, aurelius_domain::connection::Purpose::Memory, login)?;
         let store_ref = self.store.clone();
         let scope = scope_id.to_owned();
         self.store

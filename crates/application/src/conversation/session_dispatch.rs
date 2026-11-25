@@ -156,9 +156,8 @@ impl CommandService {
             })
             .map_err(storage_error)?;
         let (Some((dispatcher, started_by, system, prompt)), notices) = prepared else { return Ok((None, prepared.1)) };
-        let mut config = self.resolve_for_employee(dispatcher, aurelius_domain::connection::Purpose::Employee)?;
         // The login of the board member who started the session, as its runs have.
-        config.login_user = Some(started_by);
+        let config = self.resolve_for_employee(dispatcher, aurelius_domain::connection::Purpose::Employee, Some(started_by))?;
         let run_id = RunId::new();
         let resolved = serde_json::to_string(&config).map_err(|e| AppError::new(aurelius_domain::ErrorCode::Internal, e.to_string()))?;
         let (kind, model) = (config.runtime_kind().to_owned(), config.model.clone().unwrap_or_default());

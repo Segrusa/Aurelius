@@ -78,6 +78,7 @@ pub mod run;
 pub mod task;
 pub mod server_name;
 pub mod rail_pins;
+pub mod user_run_defaults;
 pub mod ticket;
 pub(crate) mod ticket_follow;
 pub mod user;
@@ -302,6 +303,7 @@ impl CommandService {
             Command::EditMessage(cmd) => self.edit_message(ctx, &envelope, hash, cmd),
             Command::DeleteMessage(cmd) => self.delete_message(ctx, &envelope, hash, cmd),
             Command::SetRailPins(cmd) => self.set_rail_pins(ctx, &envelope, hash, cmd),
+            Command::SetUserRunDefaults(cmd) => self.set_user_run_defaults(ctx, &envelope, hash, cmd),
         };
         COMMAND_METHOD.set("");
         result

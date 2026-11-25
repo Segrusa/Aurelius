@@ -482,6 +482,16 @@ pub mod feature {
     /// the write `user.set_rail_pins` and the event `user.rail_pins_changed`. A client
     /// without it keeps the pins on the device.
     pub const RAIL_PINS: &str = "rail_pins";
+    /// Each board member's own default model, effort, mode and subagent model
+    /// (protocol 5, additive): the read `user.run_defaults`, the write
+    /// `user.set_run_defaults` and the event `user.run_defaults_changed`. Runs on
+    /// their login use them instead of the employee's or the company's model and
+    /// effort. A client without it shows the per-employee settings.
+    pub const USER_RUN_DEFAULTS: &str = "user_run_defaults";
+    /// `ticket.create { from_message }` also takes a message of a work session
+    /// (protocol 5, additive): the session gets `ticket_created` at that message. A
+    /// client without it makes such a ticket without `from_message`.
+    pub const TICKET_FROM_SESSION: &str = "ticket_from_session";
 }
 
 /// Every feature this build has.
@@ -547,6 +557,8 @@ pub const FEATURES: &[&str] = &[
     feature::SESSION_OWN_BRANCH,
     feature::OWN_DEVICES,
     feature::RAIL_PINS,
+    feature::USER_RUN_DEFAULTS,
+    feature::TICKET_FROM_SESSION,
 ];
 
 /// The answer of `command.applied`.
@@ -678,6 +690,8 @@ pub enum ResponseBody {
     MyTickets(aurelius_domain::ticket::MyTicketsView),
     /// `user.rail_pins`.
     RailPins(aurelius_domain::user::RailPinsView),
+    /// `user.run_defaults`.
+    UserRunDefaults(aurelius_domain::user::UserRunDefaultsView),
     /// `ticket.history`.
     History(aurelius_domain::history::HistoryPage),
     /// `work_session.history`.

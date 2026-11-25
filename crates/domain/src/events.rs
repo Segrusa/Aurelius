@@ -218,6 +218,10 @@ event_kinds! {
     // `metadata.user_id` and `project_ids`. A client whose board member it is reads
     // `user.rail_pins` again; the others ignore it.
     UserRailPinsChanged => "user.rail_pins_changed",
+    // A board member changed their own run defaults (feature `user_run_defaults`); the
+    // aggregate is the user. `metadata.user_id` and `defaults`. A client whose board
+    // member it is reads `user.run_defaults` again; the others ignore it.
+    UserRunDefaultsChanged => "user.run_defaults_changed",
 }
 
 impl EventKind {

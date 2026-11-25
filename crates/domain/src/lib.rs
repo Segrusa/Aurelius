@@ -177,6 +177,7 @@ pub enum Command {
     EditMessage(group_chat::EditMessage),
     DeleteMessage(group_chat::DeleteMessage),
     SetRailPins(user::SetRailPins),
+    SetUserRunDefaults(user::SetUserRunDefaults),
 }
 
 /// `(type, method)` for every command: the tag in the JSON of a `Command` and
@@ -281,6 +282,7 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("edit_message", "message.edit"),
     ("delete_message", "message.delete"),
     ("set_rail_pins", "user.set_rail_pins"),
+    ("set_user_run_defaults", "user.set_run_defaults"),
 ];
 
 impl Command {

@@ -56,8 +56,7 @@ impl CommandService {
         if description.is_empty() {
             return Ok(None);
         }
-        let mut config = self.resolve_for_employee(runner, aurelius_domain::connection::Purpose::Memory)?;
-        config.login_user = login;
+        let config = self.resolve_for_employee(runner, aurelius_domain::connection::Purpose::Memory, login)?;
         Ok(Some(TicketTitleInput { ticket_id: ticket, project_name, description, config }))
     }
 
