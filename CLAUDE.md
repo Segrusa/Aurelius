@@ -7,7 +7,12 @@ So every worktree builds only into its own `target` folder.
 
 ## Worktrees
 
-- Create a worktree only with `scripts/worktree.ps1 new <name> [-Base main] [-Branch <branch>]`.
+- Aurelius gives every session, ticket and delegated task a worktree of its own
+  (`<data>/worktrees/session-…`, `ticket-<N>`, `ticket-<N>-…`, `task-…`) and says so in
+  the run's instructions. Then work in that worktree on its branch: do not make another
+  one, never switch the project's main checkout to another branch, and build with
+  `CARGO_TARGET_DIR=<that worktree>/target`.
+- Outside such a run, create a worktree only with `scripts/worktree.ps1 new <name> [-Base main] [-Branch <branch>]`.
   It makes `target/wt-<name>` (branch defaults to `feat/<name>`) and prints the
   `CARGO_TARGET_DIR` line for it. `scripts/worktree.ps1 env <name>` prints it again.
 - Do all work for a task inside that worktree, not in the main checkout.
