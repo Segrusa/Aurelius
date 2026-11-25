@@ -24,6 +24,10 @@ mod writes;
 pub(crate) use bridge::serve as serve_bridge;
 pub use users::SESSION_CHECK_MS;
 
+/// Why `markdown.list` answers "gone" (`not_found`): no client lists a work folder's
+/// Markdown files any more; `markdown.get` still reads one. The method stays for older clients (protocol 5).
+pub const MARKDOWN_LIST_GONE: &str = "Listing a work folder's Markdown files is no longer available: open a file by its path.";
+
 use crate::{Shared, VERSION};
 use aurelius_application::Origin;
 use aurelius_domain::{ClientId, Command};

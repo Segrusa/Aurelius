@@ -125,9 +125,10 @@ async fn backup_restore_paused_scrub_and_export() {
     let entries = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect::<Vec<_>>();
     assert!(projects.iter().any(|p| p.name == "Atlas") && !projects.iter().any(|p| p.name == "After"), "the restore did not happen; the root holds {entries:?}");
     assert!(client.tasks(None).await.unwrap().tasks.iter().any(|t| t.title == "Onboarding" && t.status == TaskStatus::Succeeded));
-    let listed = |snapshot: aurelius_protocol::ProjectConversationsSnapshot, id| snapshot.conversations.iter().any(|c| c.id == id);
-    assert!(listed(client.project_conversations(keep_project).await.unwrap(), keep), "the kept conversation is back");
-    assert!(!listed(client.project_conversations(gone_project).await.unwrap(), gone), "the deleted conversation stays deleted");
+    // A project's conversations as the export lists them (`project_conversation.list` is gone).
+    let listed = |project, id| aurelius_storage::conversations::project_conversations(&db(dir.path()), project).unwrap().iter().any(|c| c.id == id);
+    assert!(listed(keep_project, keep), "the kept conversation is back");
+    assert!(!listed(gone_project, gone), "the deleted conversation stays deleted");
     assert!(dir.path().read_dir().unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with("before-restore-")), "the previous data is kept aside");
 
     // Paused: nothing runs until resumed.

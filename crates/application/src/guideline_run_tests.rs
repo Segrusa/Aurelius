@@ -8,7 +8,6 @@ use aurelius_domain::employee::CreateEmployee;
 use aurelius_domain::group_chat::SendGroupMessage;
 use aurelius_domain::guideline::*;
 use aurelius_domain::project::CreateProject;
-use aurelius_domain::project_conversation::StartProjectConversation;
 use aurelius_domain::task::{CreateTask, TaskStatus};
 use aurelius_domain::views::SystemLineKind;
 use aurelius_domain::{ConversationId, EmployeeId, GuidelineId, MessageId, RunId, UserId};
@@ -152,7 +151,7 @@ fn the_block_comes_after_the_identity_with_the_set_of_the_run() {
     assert_eq!(titles_in(woken.system.as_deref().unwrap()), vec!["Own rule", "Project rule"]);
 
     // The project assistant: the project's only.
-    let CommandResult::ProjectConversationStarted { conversation_id, .. } = exec(&s, Command::StartProjectConversation(StartProjectConversation { project_id: s.project, start: Default::default() })) else { panic!() };
+    let conversation_id = crate::conversation::project_chat::empty_for_tests(s.service.store(), s.project).unwrap();
     let assistant = plan(&s, queued(&s, conversation_id));
     let system = assistant.system.clone().unwrap();
     assert_eq!(titles_in(&system), vec!["Project rule"]);

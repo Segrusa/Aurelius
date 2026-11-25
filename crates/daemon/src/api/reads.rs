@@ -6,7 +6,7 @@ use crate::{Shared, VERSION};
 use aurelius_domain::{ConversationId, EmployeeId, ProjectId};
 use aurelius_protocol::{
     ApprovalsSnapshot, ProvidersSnapshot, ErrorCode, HealthResult, JobSummary, JobsSnapshot, EmployeesSnapshot, MemorySnapshot,
-    Method, MessagesSnapshot, NotificationsSnapshot, ProjectConversationsSnapshot, ProjectsSnapshot, ProtocolError, ResponseBody, TasksSnapshot,
+    Method, MessagesSnapshot, NotificationsSnapshot, ProjectsSnapshot, ProtocolError, ResponseBody, TasksSnapshot,
     TimelinePage,
 };
 use aurelius_storage::queries;
@@ -51,15 +51,8 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             Ok(body)
         }
         Method::EmployeeList => employees(shared).await,
-        Method::EmployeeChat { employee_id } => {
-            let store = shared.store().clone();
-            let chat = storage_task(move || store.read(|c| aurelius_storage::employees::main_chat(c, employee_id))).await?;
-            match chat {
-                Some(conversation_id) => messages(shared, conversation_id, reader).await,
-                None => Err(ProtocolError::new(ErrorCode::NotFound, format!("employee {employee_id} does not exist"))),
-            }
-        }
-        Method::EmployeeChats => employee_chats(shared).await,
+        // Chatting with an employee is gone; the methods stay for older clients.
+        Method::EmployeeChat { .. } | Method::EmployeeChats => Err(ProtocolError::new(ErrorCode::NotFound, aurelius_application::EMPLOYEE_CHAT_GONE)),
         Method::WorkSessionList { project_id } => work_sessions(shared, reader, project_id).await,
         Method::DesignList { project_id } => designs(shared, project_id).await,
         Method::ScheduledMessageList { project_id } => scheduled_messages(shared, reader, project_id).await,
@@ -136,7 +129,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::CodeGet { project_id } => Ok(ResponseBody::Code(crate::code::view(shared, project_id).await?)),
         Method::CodeDiff { project_id, branch } => Ok(ResponseBody::CodeDiff(crate::code::diff(shared, project_id, branch).await?)),
         Method::CodeReview { project_id, branch, head } => code_review(shared, reader, project_id, branch, head).await,
-        Method::ProjectConversationList { project_id } => project_conversations(shared, project_id).await,
+        Method::ProjectConversationList { .. } => Err(ProtocolError::new(ErrorCode::NotFound, aurelius_application::conversation::project_chat::PROJECT_CONVERSATIONS_GONE)),
         Method::ApprovalList { project_id } => approvals(shared, project_id).await,
         Method::ProviderList => connections(shared).await,
         Method::TaskList { project_id, employee_id, state } => tasks(shared, project_id, employee_id, state).await,
@@ -284,7 +277,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
             .await?;
             found.map(ResponseBody::Context).ok_or_else(|| ProtocolError::new(ErrorCode::NotFound, "No context overview was kept for this answer."))
         }
-        Method::MarkdownList { scope } => crate::markdown::list(shared, scope).await.map(ResponseBody::MarkdownFiles),
+        Method::MarkdownList { .. } => Err(ProtocolError::new(ErrorCode::NotFound, super::MARKDOWN_LIST_GONE)),
         Method::MarkdownGet { scope, path } => crate::markdown::read(shared, scope, path).await.map(ResponseBody::MarkdownFile),
         Method::SubagentList { conversation_id } => {
             let store = shared.store().clone();
@@ -377,13 +370,6 @@ async fn jobs(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
         })
         .collect();
     Ok(ResponseBody::Jobs(JobsSnapshot { as_of_seq, jobs }))
-}
-
-/// The lasting chats with employees are gone: always an empty list (the method stays for older clients).
-async fn employee_chats(shared: &Arc<Shared>) -> Result<ResponseBody, ProtocolError> {
-    let store = shared.store().clone();
-    let as_of_seq = storage_task(move || store.read(queries::last_seq)).await?;
-    Ok(ResponseBody::EmployeeChats(aurelius_domain::views::EmployeeChatsSnapshot { as_of_seq, chats: Vec::new() }))
 }
 
 /// The designs of a project, or of all (`design.list`).
@@ -682,21 +668,6 @@ async fn tickets(
     })
     .await
     .map(ResponseBody::Tickets)
-}
-
-async fn project_conversations(shared: &Arc<Shared>, project_id: ProjectId) -> Result<ResponseBody, ProtocolError> {
-    let store = shared.store().clone();
-    storage_task(move || {
-        store.read(|c| {
-            Ok(ProjectConversationsSnapshot {
-                as_of_seq: queries::last_seq(c)?,
-                project_id,
-                conversations: aurelius_storage::conversations::project_conversations(c, project_id)?,
-            })
-        })
-    })
-    .await
-    .map(ResponseBody::ProjectConversations)
 }
 
 async fn approvals(shared: &Arc<Shared>, project: Option<ProjectId>) -> Result<ResponseBody, ProtocolError> {

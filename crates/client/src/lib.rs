@@ -568,16 +568,6 @@ impl Client {
         self.read(Method::EmployeeList, body!(Employees)).await
     }
 
-    /// An employee's persistent chat with the user (no project).
-    pub async fn employee_chat(&self, employee_id: aurelius_domain::EmployeeId) -> Result<MessagesSnapshot, ClientError> {
-        self.read(Method::EmployeeChat { employee_id }, body!(Messages)).await
-    }
-
-    /// The signed-in board member's chats with employees, the latest first.
-    pub async fn employee_chats(&self) -> Result<aurelius_domain::views::EmployeeChatsSnapshot, ClientError> {
-        self.read(Method::EmployeeChats, body!(EmployeeChats)).await
-    }
-
     /// Messages employees scheduled: what waits, then what went out.
     pub async fn scheduled_messages(&self) -> Result<aurelius_domain::views::ScheduledMessagesSnapshot, ClientError> {
         self.read(Method::ScheduledMessageList { project_id: None }, body!(ScheduledMessages)).await
@@ -711,11 +701,6 @@ impl Client {
         self.read(Method::MemoryGetContext { project_id, employee_id }, body!(MemoryContext)).await
     }
 
-    /// The conversations of a project.
-    pub async fn project_conversations(&self, project_id: aurelius_domain::ProjectId) -> Result<aurelius_protocol::ProjectConversationsSnapshot, ClientError> {
-        self.read(Method::ProjectConversationList { project_id }, body!(ProjectConversations)).await
-    }
-
     /// A screenshot the agent took, as JPEG bytes.
     pub async fn screenshot(&self, id: &str) -> Result<Vec<u8>, ClientError> {
         use base64::Engine;
@@ -781,11 +766,6 @@ impl Client {
     /// The versions of an employee's instructions, newest first (feature `instruction_proposals`).
     pub async fn employee_instruction_versions(&self, employee_id: aurelius_domain::EmployeeId) -> Result<aurelius_protocol::EmployeeInstructionVersionsSnapshot, ClientError> {
         self.read(Method::EmployeeInstructionVersions { employee_id }, body!(EmployeeInstructionVersions)).await
-    }
-
-    /// Markdown files of a work folder.
-    pub async fn markdown_files(&self, scope: aurelius_protocol::FileScope) -> Result<aurelius_protocol::MarkdownFileList, ClientError> {
-        self.read(Method::MarkdownList { scope }, body!(MarkdownFiles)).await
     }
 
     /// One Markdown file, relative or absolute inside the work folder.
@@ -1125,11 +1105,6 @@ impl Client {
             *path = self.stage_file(Path::new(path.as_str())).await?;
         }
         self.execute(envelope(Command::SendProjectMessage(send), None)).await
-    }
-
-    /// A new, empty project conversation.
-    pub async fn start_project_conversation(&self, start: aurelius_domain::project_conversation::StartProjectConversation) -> Result<CommandReceipt, ClientError> {
-        self.execute(envelope(Command::StartProjectConversation(start), None)).await
     }
 
     /// Delete a message that still waits for its answer (`MessageView::queued`).

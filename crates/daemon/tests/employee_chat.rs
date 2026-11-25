@@ -1,6 +1,6 @@
-//! Every employee has one persistent chat with the user, outside projects
-//! (`employee.chat`); its task conversations work too. Other conversations take
-//! no message from it.
+//! Every employee has one persistent chat with the user, outside projects (read with
+//! `conversation.get`; `employee.chat` is gone); its task conversations work too. Other
+//! conversations take no message from it.
 
 mod common;
 
@@ -32,13 +32,13 @@ async fn an_employee_chats_outside_projects_and_keeps_its_task_conversations() {
     };
     let message = |employee_id: EmployeeId, conversation_id| Command::SendEmployeeMessage(SendEmployeeMessage { confirm_secret: false, employee_id, text: "Hallo".into(), conversation_id, images: Vec::new(), files: Vec::new(), interrupt: false });
 
-    // Its chat: no project, reachable with employee.chat, and it answers there.
-    let opened = client.employee_chat(alex).await.unwrap();
+    // Its chat: no project, and it answers there.
+    let opened = client.messages(chat).await.unwrap();
     assert_eq!((opened.conversation_id, opened.employee_id, opened.project_id, opened.read_only), (chat, Some(alex), None, false));
     let CommandResult::EmployeeMessageSent { message_id, .. } = client.execute(envelope(message(alex, chat), None)).await.unwrap().result else { panic!() };
     let mut answered = false;
     for _ in 0..400 {
-        let messages = client.employee_chat(alex).await.unwrap().messages;
+        let messages = client.messages(chat).await.unwrap().messages;
         if messages.iter().any(|m| m.role == MessageRole::Assistant && m.reply_to == Some(message_id) && m.status == MessageStatus::Complete) {
             answered = true;
             break;
@@ -48,7 +48,6 @@ async fn an_employee_chats_outside_projects_and_keeps_its_task_conversations() {
     assert!(answered, "the employee answers in its chat");
     // A conversation that is not its chat nor one of its tasks takes no message.
     assert!(client.execute(envelope(message(alex, aurelius_domain::ConversationId::new()), None)).await.is_err());
-    assert!(client.employee_chat(EmployeeId::new()).await.is_err(), "an unknown employee has no chat");
 
     // Tasks keep their conversation, in the task's project, and the user can still write in it.
     let cmd = CreateTask { confirm_secret: false, project_id, employee_id: Some(alex), title: "Dark mode".into(), goal: "Werk aan dark mode".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
@@ -64,10 +63,6 @@ async fn an_employee_chats_outside_projects_and_keeps_its_task_conversations() {
     let conversation = conversation.expect("the task ran in a conversation of its own");
     assert_eq!(client.messages(conversation).await.unwrap().project_id, Some(project_id));
     client.execute(envelope(message(alex, conversation), None)).await.expect("a task conversation is not closed");
-
-    // Neither is offered as a project conversation.
-    let listed = client.project_conversations(project_id).await.unwrap().conversations;
-    assert!(listed.iter().all(|c| c.id != conversation && c.id != chat), "{listed:?}");
 
     stop(dir.path(), daemon).await;
 }

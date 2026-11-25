@@ -85,6 +85,15 @@ pub async fn connect_events_as(root: &Path, name: &str) -> (Client, mpsc::Unboun
     (client, rx)
 }
 
+/// The data folder of each daemon these helpers signed in to, by its host id (one per folder):
+/// `conversation` writes its empty conversation there, as no method makes one any more (OPR-3).
+static ROOTS: std::sync::Mutex<std::collections::BTreeMap<String, std::path::PathBuf>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+async fn remember_root(root: &Path, client: &Client) {
+    let host = client.health().await.expect("health").host_id.to_string();
+    ROOTS.lock().unwrap().insert(host, root.to_path_buf());
+}
+
 /// A client without a session: only the hello, the sign-in and the onboarding work.
 pub async fn connect_anonymous(root: &Path) -> Client {
     let (tx, rx) = mpsc::unbounded_channel();
@@ -99,31 +108,38 @@ pub async fn connect_anonymous(root: &Path) -> Client {
 /// costs no failed sign-in (R1 m-11). Answers the session.
 pub fn sign_in<'a>(root: &'a Path, client: &'a Client, name: &'a str) -> std::pin::Pin<Box<dyn std::future::Future<Output = aurelius_domain::user::LoginResult> + Send + 'a>> {
     Box::pin(async move {
-        if !client.user_whoami().await.expect("whoami").board_members_exist {
-            // The onboarding; another connection may make the first one at the same time.
-            if client.user_create(name, BOARD_PASSWORD).await.is_ok() {
-                return client.user_login(name, BOARD_PASSWORD, "test").await.expect("sign in");
-            }
-        }
-        // A maker signed in with the known password: `BOARD_MEMBER` first, else one of the others.
-        let maker = connect_anonymous(root).await;
-        let mut signed_in = maker.user_login(BOARD_MEMBER, BOARD_PASSWORD, "test").await.is_ok();
-        if !signed_in {
-            for username in usernames(root) {
-                if maker.user_login(&username, BOARD_PASSWORD, "test").await.is_ok() {
-                    signed_in = true;
-                    break;
-                }
-            }
-        }
-        assert!(signed_in, "no board member to make {name}: the test made its own with other passwords");
-        let exists = maker.user_list().await.expect("board members").users.iter().any(|u| u.username.eq_ignore_ascii_case(name));
-        if !exists {
-            // Another connection may make the same one at the same time.
-            let _ = maker.user_create(name, BOARD_PASSWORD).await;
-        }
-        client.user_login(name, BOARD_PASSWORD, "test").await.expect("sign in")
+        let session = sign_in_once(root, client, name).await;
+        remember_root(root, client).await;
+        session
     })
+}
+
+/// `sign_in` without remembering the data folder.
+async fn sign_in_once(root: &Path, client: &Client, name: &str) -> aurelius_domain::user::LoginResult {
+    if !client.user_whoami().await.expect("whoami").board_members_exist {
+        // The onboarding; another connection may make the first one at the same time.
+        if client.user_create(name, BOARD_PASSWORD).await.is_ok() {
+            return client.user_login(name, BOARD_PASSWORD, "test").await.expect("sign in");
+        }
+    }
+    // A maker signed in with the known password: `BOARD_MEMBER` first, else one of the others.
+    let maker = connect_anonymous(root).await;
+    let mut signed_in = maker.user_login(BOARD_MEMBER, BOARD_PASSWORD, "test").await.is_ok();
+    if !signed_in {
+        for username in usernames(root) {
+            if maker.user_login(&username, BOARD_PASSWORD, "test").await.is_ok() {
+                signed_in = true;
+                break;
+            }
+        }
+    }
+    assert!(signed_in, "no board member to make {name}: the test made its own with other passwords");
+    let exists = maker.user_list().await.expect("board members").users.iter().any(|u| u.username.eq_ignore_ascii_case(name));
+    if !exists {
+        // Another connection may make the same one at the same time.
+        let _ = maker.user_create(name, BOARD_PASSWORD).await;
+    }
+    client.user_login(name, BOARD_PASSWORD, "test").await.expect("sign in")
 }
 
 /// The active board members, oldest first, from the database (without a
@@ -167,18 +183,20 @@ pub async fn free_chart(client: &Client) {
     client.execute(aurelius_client::envelope(Command::SetFollowOrgChart(SetFollowOrgChart { follow: false }), None)).await.expect("follow the org chart off");
 }
 
-/// A conversation to talk in: a project conversation of a new project without
+/// A conversation to talk in: an empty project conversation of a new project without
 /// a folder (answers run text-only, as plain chats did). Since protocol 3.0
-/// there are no standalone chats, so `chat.send` needs one.
+/// there are no standalone chats, so `chat.send` needs one; `project_conversation.start`
+/// answers gone (OPR-3), so it is written straight into the daemon's database.
 pub async fn conversation(client: &Client) -> aurelius_domain::ConversationId {
-    use aurelius_domain::{Command, CommandResult, ConversationId, project::CreateProject, project_conversation::StartProjectConversation};
+    use aurelius_domain::{Command, CommandResult, ConversationId, project::CreateProject};
     let name = format!("Talk {}", ConversationId::new());
     let created = client.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name, description: None, folder: None }), None)).await.expect("project");
     let CommandResult::ProjectCreated { project_id, .. } = created.result else { panic!("{:?}", created.result) };
-    let start = StartProjectConversation { project_id, start: Default::default() };
-    let started = client.execute(aurelius_client::envelope(Command::StartProjectConversation(start), None)).await.expect("conversation");
-    let CommandResult::ProjectConversationStarted { conversation_id, .. } = started.result else { panic!("{:?}", started.result) };
-    conversation_id
+    let host = client.health().await.expect("health").host_id.to_string();
+    let found = ROOTS.lock().unwrap().get(&host).cloned();
+    let root = found.expect("a client signed in with `sign_in` (as connect and connect_as do)");
+    let store = aurelius_storage::Store::open(&root).expect("the daemon's database");
+    aurelius_application::conversation::project_chat::empty_for_tests(&store, project_id).expect("an empty project conversation")
 }
 
 /// Send `text` in a new conversation (see `conversation`): its id, the message and the run.
