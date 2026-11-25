@@ -495,13 +495,6 @@ void main() {
     expect(host.websocketUri.toString(), 'wss://pc.tail1.ts.net:8443/v1/ws');
   });
 
-  test('ideas: who noted them and the task they became', () {
-    final first = ideaOf('1', 'Dark mode', author: 'Iris', employeeId: 'm1');
-    final last = ideaOf('2', 'Export', taskId: 't', taskStatus: TaskStatus.running);
-    expect([first.byEmployee, last.byEmployee], [true, false]);
-    expect(last.taskStatus, TaskStatus.running);
-  });
-
   group('org chart', () {
     test('reads as a tree: bosses first, their reports indented, a missing boss makes a root', () {
       final chart = orgChart([

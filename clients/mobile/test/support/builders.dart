@@ -188,25 +188,6 @@ ApprovalView approvalOf(
       tool: tool,
     );
 
-IdeaView ideaOf(String id, String title, {String projectId = 'p1', String author = 'You', String? employeeId, IdeaKind kind = IdeaKind.feature, IdeaStatus status = IdeaStatus.open, String? note, String? taskId, TaskStatus? taskStatus, String? ticketId, int? ticketNumber, List<MessageFileView> attachments = const []}) =>
-    IdeaView(
-      attachments: attachments,
-      author: author,
-      createdAtMs: 0,
-      id: id,
-      kind: kind,
-      employeeId: employeeId,
-      note: note,
-      projectId: projectId,
-      status: status,
-      taskId: taskId,
-      taskStatus: taskStatus,
-      ticketId: ticketId,
-      ticketNumber: ticketNumber,
-      title: title,
-      updatedAtMs: 0,
-    );
-
 ConversationSummary conversationOf(String id, {String title = '', int messageCount = 0, int updatedAtMs = 0}) =>
     ConversationSummary(createdAtMs: 0, id: id, messageCount: messageCount, title: title, updatedAtMs: updatedAtMs);
 

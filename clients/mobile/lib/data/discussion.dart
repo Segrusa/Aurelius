@@ -138,7 +138,7 @@ class TicketSource {
 
 /// What "New ticket" starts with when it is made from a message (MU2-10 AC1, Fase 1 §10.3).
 class TicketDraft {
-  const TicketDraft({required this.title, required this.description, this.projectId, this.fromMessage, this.fromIdea, this.ideaFiles = 0, this.labels = '', this.ownerId, this.quick = false});
+  const TicketDraft({required this.title, required this.description, this.projectId, this.fromMessage, this.labels = '', this.ownerId, this.quick = false});
 
   final String title;
   final String description;
@@ -146,10 +146,6 @@ class TicketDraft {
 
   /// The message it is made from (`ticket.create.from_message`).
   final String? fromMessage;
-
-  /// The idea it is made from (`ticket.create.from_idea`); the server copies its [ideaFiles] files.
-  final String? fromIdea;
-  final int ideaFiles;
 
   /// Labels, comma separated.
   final String labels;

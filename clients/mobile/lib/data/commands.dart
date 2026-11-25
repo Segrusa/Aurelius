@@ -157,14 +157,6 @@ abstract final class Commands {
         title: title,
       ));
 
-  /// [files]: upload paths of attached files (feature `idea_attachments`).
-  static Map<String, dynamic> addIdea(String projectId, String title, String? note, {IdeaKind? kind, List<String> files = const []}) =>
-      ideaAdd(AddIdea(files: files, kind: kind, note: note, projectId: projectId, title: title));
-
-  /// [addFiles]: upload paths; [removeFiles]: `path`s of the idea's own attachments.
-  static Map<String, dynamic> updateIdea(String ideaId, String title, String? note, {IdeaKind? kind, List<String> addFiles = const [], List<String> removeFiles = const []}) =>
-      ideaUpdate(UpdateIdea(addFiles: addFiles, ideaId: ideaId, kind: kind, note: note, removeFiles: removeFiles, title: title));
-
   static Map<String, dynamic> cancelTask(String taskId) => taskCancel(CancelTask(taskId: taskId));
 
   /// The run settings for chat or employee runs (model, effort) at [scope]

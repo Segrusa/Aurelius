@@ -13,15 +13,13 @@ import '../../data/aurelius_repository.dart';
 import '../../data/company.dart';
 import '../../data/mode_memory.dart';
 import '../../data/views.dart';
-import '../account/claude_login.dart' show ownSubscriptionNote;
 import '../../data/run_config.dart';
 import '../../core/widgets/ios.dart';
 
 /// What [NewTaskPage] returns.
 /// `run`: mode, connection_id, model and effort of the task's conversation (unset: as the employee).
 /// `projectId`: the project picked on the form (only when it shows the project field).
-/// `files`: upload paths of the files added now; `removeFiles`: paths of a
-/// schedule's own attachments taken off. `recurrence` and `paused` only for recurring tasks.
+/// `files`: upload paths of the files added now.
 typedef NewTask = ({
   String title,
   String goal,
@@ -30,20 +28,15 @@ typedef NewTask = ({
   String? projectId,
   Map<String, String> run,
   List<String> files,
-  List<String> removeFiles,
-  Recurrence? recurrence,
-  bool paused,
 });
 
-/// A file on the form: already on a schedule ([path] is its place in the work
-/// folder) or uploaded now ([path] is the upload).
+/// A file on the form, uploaded now ([path] is the upload).
 class _Attached {
-  const _Attached({required this.name, required this.byteLength, required this.path, this.existing = false});
+  const _Attached({required this.name, required this.byteLength, required this.path});
 
   final String name;
   final int byteLength;
   final String path;
-  final bool existing;
 }
 
 /// Files per task and their size (as messages).
@@ -66,8 +59,7 @@ List<String> splitCriteria(String text) => text.split(RegExp(r'[\n;]')).map((c) 
 /// leads it in one place. Only the title is required; the goal defaults to it
 /// on the PC. The lead picker lists the management team first, then the rest;
 /// the single root is preselected. With [projects] (opened from
-/// Home) the project is a field of the form too. With [recurring] it is the
-/// form of a recurring task: a recurrence editor; [schedule] fills it to edit that one.
+/// Home) the project is a field of the form too.
 class NewTaskPage extends StatefulWidget {
   const NewTaskPage({
     super.key,
@@ -76,8 +68,6 @@ class NewTaskPage extends StatefulWidget {
     this.projectId,
     this.employeeId,
     this.title,
-    this.recurring = false,
-    this.schedule,
     this.submit,
   });
 
@@ -95,8 +85,6 @@ class NewTaskPage extends StatefulWidget {
   final String? projectId;
   final String? employeeId;
   final String? title;
-  final bool recurring;
-  final TaskScheduleView? schedule;
 
   static Future<NewTask?> open(
     BuildContext context,
@@ -105,8 +93,6 @@ class NewTaskPage extends StatefulWidget {
     String? projectId,
     String? employeeId,
     String? title,
-    bool recurring = false,
-    TaskScheduleView? schedule,
     Future<bool> Function(BuildContext context, NewTask task)? submit,
   }) =>
       Navigator.of(context).push<NewTask>(
@@ -118,8 +104,6 @@ class NewTaskPage extends StatefulWidget {
             projectId: projectId,
             employeeId: employeeId,
             title: title,
-            recurring: recurring || schedule != null,
-            schedule: schedule,
             submit: submit,
           ),
         ),
@@ -130,10 +114,10 @@ class NewTaskPage extends StatefulWidget {
 }
 
 class _NewTaskPageState extends State<NewTaskPage> {
-  late final _title = TextEditingController(text: widget.schedule?.title ?? widget.title);
-  late final _goal = TextEditingController(text: widget.schedule?.goal);
-  late final _criteria = TextEditingController(text: widget.schedule?.criteria.join('\n'));
-  late String? _employee = widget.schedule?.employeeId ?? widget.employeeId ?? defaultAssignee(widget.employees);
+  late final _title = TextEditingController(text: widget.title);
+  final _goal = TextEditingController();
+  final _criteria = TextEditingController();
+  late String? _employee = widget.employeeId ?? defaultAssignee(widget.employees);
   late String? _project = widget.projectId ?? _onlyProject;
 
   late final List<EmployeeGroup> _groups = pickerGroups(widget.employees);
@@ -144,16 +128,12 @@ class _NewTaskPageState extends State<NewTaskPage> {
     return open.length == 1 ? open.single.id : null;
   }
 
-  late final Map<String, String> _scheduleRun = widget.schedule?.run.choices ?? const {};
-  late String? _mode = _scheduleRun['mode'];
+  String? _mode;
 
-  /// The user picked a mode here (or edits a schedule): the remembered one no longer applies.
-  late bool _modeChosen = widget.schedule != null;
-  late (String, String)? _model = switch (_scheduleRun) {
-    final run when run['model'] != null => (run['connection_id'] ?? '', run['model']!),
-    _ => null,
-  }; // (connection id, model)
-  late String? _effort = _scheduleRun['effort'];
+  /// The user picked a mode here: the remembered one no longer applies.
+  bool _modeChosen = false;
+  (String, String)? _model; // (connection id, model)
+  String? _effort;
   List<ConnectionView> _connections = const [];
 
   /// The run defaults, to show what "Employee default" resolves to.
@@ -165,14 +145,9 @@ class _NewTaskPageState extends State<NewTaskPage> {
         _ => null,
       };
 
-  late List<_Attached> _files = [for (final f in widget.schedule?.attachments ?? const []) _Attached(name: f.name, byteLength: f.byteLength, path: f.path, existing: true)];
-  final _removed = <String>[];
+  List<_Attached> _files = const [];
   bool _uploading = false;
   bool _sending = false;
-
-  late Recurrence _recurrence = widget.schedule?.recurrence ?? const RecurrenceDaily(atMinute: 9 * 60);
-  late final _hours = TextEditingController(text: _recurrence is RecurrenceEveryHours ? '${(_recurrence as RecurrenceEveryHours).hours}' : '6');
-  bool _paused = false;
 
   @override
   void initState() {
@@ -304,10 +279,7 @@ class _NewTaskPageState extends State<NewTaskPage> {
 
   static String _names(List<String> names) => names.length == 1 ? names.single : '${names.take(names.length - 1).join(', ')} and ${names.last}';
 
-  void _removeFile(_Attached f) => setState(() {
-        _files = _files.where((x) => x != f).toList();
-        if (f.existing) _removed.add(f.path);
-      });
+  void _removeFile(_Attached f) => setState(() => _files = _files.where((x) => x != f).toList());
 
   /// "Employee default (Opus 5.5 · High)" for the model, "Employee default (High)"
   /// for the effort: what the lead runs on when nothing is chosen here. Never
@@ -321,43 +293,6 @@ class _NewTaskPageState extends State<NewTaskPage> {
     return 'Employee default ($value)';
   }
 
-  Future<void> _pickTime() async {
-    final at = _atMinute;
-    final picked = await showTimePicker(context: context, initialTime: TimeOfDay(hour: at ~/ 60, minute: at % 60));
-    if (picked != null) _setAtMinute(picked.hour * 60 + picked.minute);
-  }
-
-  int get _atMinute => switch (_recurrence) {
-        RecurrenceDaily(:final atMinute) => atMinute,
-        RecurrenceWeekly(:final atMinute) => atMinute,
-        _ => 9 * 60,
-      };
-
-  void _setAtMinute(int minute) => setState(() => _recurrence = switch (_recurrence) {
-        RecurrenceWeekly(:final weekdays) => RecurrenceWeekly(weekdays: weekdays, atMinute: minute),
-        _ => RecurrenceDaily(atMinute: minute),
-      });
-
-  void _setKind(String kind) => setState(() {
-        _recurrence = switch (kind) {
-          'every_hours' => RecurrenceEveryHours(hours: int.tryParse(_hours.text) ?? 6),
-          'weekly' => RecurrenceWeekly(weekdays: const [0], atMinute: _atMinute),
-          _ => RecurrenceDaily(atMinute: _atMinute),
-        };
-      });
-
-  void _toggleDay(int day) {
-    final current = _recurrence as RecurrenceWeekly;
-    final days = (current.weekdays.contains(day) ? current.weekdays.where((d) => d != day).toList() : [...current.weekdays, day])..sort();
-    setState(() => _recurrence = RecurrenceWeekly(weekdays: days, atMinute: current.atMinute));
-  }
-
-  bool get _recurrenceValid => switch (_recurrence) {
-        RecurrenceEveryHours(:final hours) => hours >= 1 && hours <= 8760,
-        RecurrenceWeekly(:final weekdays) => weekdays.isNotEmpty,
-        _ => true,
-      };
-
   Map<String, String> get _run => {
         'mode': ?_mode,
         if (_model != null) ...{'connection_id': _model!.$1, 'model': _model!.$2},
@@ -365,9 +300,6 @@ class _NewTaskPageState extends State<NewTaskPage> {
       };
 
   List<String> get _criteriaList => splitCriteria(_criteria.text);
-
-  /// Whether a schedule being edited already sets something under Advanced; then it starts open.
-  bool get _advancedSet => _criteria.text.trim().isNotEmpty || _mode != null || _model != null || _effort != null;
 
   /// One line for the folded Advanced section: "Employee default · Ask · High · 2 criteria".
   String get _summary {
@@ -387,14 +319,13 @@ class _NewTaskPageState extends State<NewTaskPage> {
       _criteriaList.length <= maxCriteria &&
       !_uploading &&
       !_sending &&
-      (widget.projects == null || _project != null) &&
-      (!widget.recurring || (_employee != null && _recurrenceValid));
+      (widget.projects == null || _project != null);
 
   Future<void> _create() async {
     if (!_valid) return;
     // The next task for this lead starts in the mode used now (none: its default).
     final host = _hostId;
-    if (host != null && _employee != null && !widget.recurring && widget.schedule == null) ModeMemory.write(host, _employee!, _mode);
+    if (host != null && _employee != null) ModeMemory.write(host, _employee!, _mode);
     final NewTask task = (
       title: _title.text.trim(),
       goal: _goal.text.trim(),
@@ -402,10 +333,7 @@ class _NewTaskPageState extends State<NewTaskPage> {
       employeeId: _employee,
       projectId: _project,
       run: _run,
-      files: [for (final f in _files) if (!f.existing) f.path],
-      removeFiles: _removed,
-      recurrence: widget.recurring ? _recurrence : null,
-      paused: _paused,
+      files: [for (final f in _files) f.path],
     );
     if (widget.submit case final submit?) {
       setState(() => _sending = true);
@@ -423,61 +351,7 @@ class _NewTaskPageState extends State<NewTaskPage> {
     _title.dispose();
     _goal.dispose();
     _criteria.dispose();
-    _hours.dispose();
     super.dispose();
-  }
-
-  List<Widget> _recurrenceEditor() {
-    final kind = switch (_recurrence) {
-      RecurrenceEveryHours() => 'every_hours',
-      RecurrenceWeekly() => 'weekly',
-      _ => 'daily',
-    };
-    final at = _atMinute;
-    final time = TimeOfDay(hour: at ~/ 60, minute: at % 60).format(context);
-    return [
-      const Eyebrow('Repeats', padding: EdgeInsets.fromLTRB(0, 22, 0, 10)),
-      // B1-2: a schedule runs on the login of whoever makes it or sets it again.
-      Padding(
-        padding: const EdgeInsets.only(bottom: 10),
-        child: Text(ownSubscriptionNote, key: const ValueKey('schedule-subscription'), style: TextStyle(fontSize: 13, color: Tokens.label2)),
-      ),
-      Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final (value, label) in const [('every_hours', 'Every N hours'), ('daily', 'Daily'), ('weekly', 'Weekly')])
-            ChoiceChip(label: Text(label), selected: kind == value, onSelected: (_) => _setKind(value)),
-        ],
-      ),
-      const SizedBox(height: 12),
-      if (_recurrence case RecurrenceEveryHours(:final hours))
-        TextField(
-          controller: _hours,
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: InputDecoration(labelText: 'Every … hours', helperText: 'From 1 hour up to a year (8760)', errorText: hours >= 1 && hours <= 8760 ? null : 'Between 1 and 8760'),
-          onChanged: (v) => setState(() => _recurrence = RecurrenceEveryHours(hours: int.tryParse(v) ?? 0)),
-        ),
-      if (_recurrence case RecurrenceWeekly(:final weekdays)) ...[
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final (i, d) in weekdayNames.indexed) FilterChip(label: Text(d), selected: weekdays.contains(i), onSelected: (_) => _toggleDay(i)),
-          ],
-        ),
-        if (weekdays.isEmpty)
-          Padding(padding: const EdgeInsets.only(top: 6), child: Text('Pick at least one day', style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 12))),
-        const SizedBox(height: 8),
-      ],
-      if (kind != 'every_hours') OutlinedButton.icon(onPressed: _pickTime, icon: const Icon(Icons.schedule, size: 18), label: Text('At $time')),
-      Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: Text('Server time. If the previous task is still open when it is due, that run is skipped.', style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
-      ),
-      if (widget.schedule == null) SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Start paused'), value: _paused, onChanged: (v) => setState(() => _paused = v)),
-    ];
   }
 
   @override
@@ -490,12 +364,12 @@ class _NewTaskPageState extends State<NewTaskPage> {
       },
       child: Scaffold(
         appBar: GlassAppBar(
-          title: Text(widget.schedule != null ? 'Edit recurring task' : (widget.recurring ? 'New recurring task' : 'New task')),
+          title: const Text('New task'),
           leading: IconButton(tooltip: 'Cancel', icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
           actions: [
             Padding(
               padding: const EdgeInsets.only(right: 12),
-              child: Tooltip(message: 'Create (⌘↩)', child: FilledButton(onPressed: _valid ? _create : null, child: Text(widget.schedule != null ? 'Save' : 'Create'))),
+              child: Tooltip(message: 'Create (⌘↩)', child: FilledButton(onPressed: _valid ? _create : null, child: const Text('Create'))),
             ),
           ],
         ),
@@ -506,7 +380,7 @@ class _NewTaskPageState extends State<NewTaskPage> {
             children: [
               TextField(
                 controller: _title,
-                autofocus: widget.schedule == null,
+                autofocus: true,
                 textCapitalization: TextCapitalization.sentences,
                 textInputAction: TextInputAction.next,
                 maxLength: 160,
@@ -581,7 +455,6 @@ class _NewTaskPageState extends State<NewTaskPage> {
                     ),
                   ),
                 ),
-              if (widget.recurring) ..._recurrenceEditor(),
               const Eyebrow('Attachments', padding: EdgeInsets.fromLTRB(0, 22, 0, 10)),
               Wrap(
                 spacing: 8,
@@ -601,7 +474,6 @@ class _NewTaskPageState extends State<NewTaskPage> {
               const SizedBox(height: 14),
               ExpansionTile(
                 key: const ValueKey('new-task-advanced'),
-                initiallyExpanded: _advancedSet,
                 maintainState: true,
                 tilePadding: EdgeInsets.zero,
                 childrenPadding: EdgeInsets.zero,

@@ -104,8 +104,6 @@ void main() {
       for (final request in [
         Commands.createTask('p1', 't', 'g', const []),
         Commands.sendProjectMessage('p1', 'x'),
-        Commands.addIdea('p1', 't', null),
-        Commands.updateIdea('i1', 't', null),
         Commands.answerQuestion('a1', const {'q': 'x'}),
         Commands.decidePlan('a1', PlanDecision.revise, feedback: 'x'),
         ticketCreate(projectId: 'p1', title: 't'),

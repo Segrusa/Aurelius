@@ -44,7 +44,7 @@ class NewTicketPage extends StatefulWidget {
   /// The board's project filter, when set.
   final String? projectId;
 
-  /// Made from a chat message (MU2-10 AC1) or an idea: title, description and project filled in.
+  /// Made from a chat message (MU2-10 AC1): title, description and project filled in.
   final TicketDraft? draft;
 
   @override
@@ -167,7 +167,6 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
       // B10 (AUR-MU-04-F5): Send anyway creates it with `confirm_secret`; Cancel keeps the form.
       final receipt = await writeConfirmingSecret(repository, ticketCreate(
         fromMessage: from,
-        fromIdea: widget.draft?.fromIdea,
         title: title,
         projectId: _project!,
         description: _description.text.trim().isEmpty ? null : _description.text.trim(),
@@ -233,7 +232,6 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
         labels: parseLabels(_labels.text),
         files: [for (final f in _files) f.path],
         deadlineMs: _deadline?.millisecondsSinceEpoch,
-        fromIdea: widget.draft?.fromIdea,
         fromMessage: link.has(ticketDiscussionFeature) ? widget.draft?.fromMessage : null,
       ), sendAnywayDialog(context));
       if (receipt == null) return;
@@ -463,21 +461,11 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
                 for (final p in company.openProjects)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
-                    child: ChoiceChip(key: ValueKey('new-ticket-project-${p.id}'), label: Text(p.name), selected: _project == p.id, showCheckmark: false, selectedColor: Tokens.accentTint, onSelected: widget.draft?.fromIdea != null ? null : (_) => setState(() => _project = p.id)),
+                    child: ChoiceChip(key: ValueKey('new-ticket-project-${p.id}'), label: Text(p.name), selected: _project == p.id, showCheckmark: false, selectedColor: Tokens.accentTint, onSelected: (_) => setState(() => _project = p.id)),
                   ),
               ]),
             ),
             if (_projectError != null) Padding(padding: const EdgeInsets.fromLTRB(32, 4, 32, 0), child: Text(_projectError!, style: TextStyle(color: Tokens.negative, fontSize: 13))),
-            if (widget.draft?.fromIdea != null)
-              Padding(
-                key: const ValueKey('new-ticket-from-idea'),
-                padding: const EdgeInsets.fromLTRB(32, 6, 32, 0),
-                child: Text(switch (widget.draft!.ideaFiles) {
-                  0 => 'The idea is marked done.',
-                  1 => "The idea is marked done. Its file goes along.",
-                  final n => 'The idea is marked done. Its $n files go along.',
-                }, style: TextStyle(color: Tokens.muted, fontSize: 13)),
-              ),
             const GroupHeader('Priority', caps: true),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
