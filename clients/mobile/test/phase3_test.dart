@@ -451,7 +451,9 @@ void main() {
             SessionView(id: 's-2', userId: 'u-1', deviceName: 'Desktop · dev-laptop', current: false, createdAtMs: now, lastSeenMs: now - const Duration(hours: 2).inMilliseconds, expiresAtMs: 0, clientId: 'c-1'),
           ]));
       when(() => repo.revokeSession('s-2')).thenAnswer((_) async {});
-      await pump(tester, const SessionsPage());
+      await pump(tester, const SignedInPage());
+      expect(find.text('Signed in on'), findsWidgets, reason: 'the title of the Profile row that opens it (OPR-2)');
+      expect(find.text('Sessions'), findsNothing, reason: 'Sessions is the tab of work sessions');
       expect(find.text('DEVICES SIGNED IN AS ALEX'), findsOneWidget);
       expect(find.text('This device'), findsOneWidget);
       expect(find.byKey(const ValueKey('revoke-s-1')), findsNothing, reason: 'this phone signs out with Sign out');
@@ -467,7 +469,7 @@ void main() {
 
     testWidgets('a server without session.list yet says so, with Try again', (tester) async {
       when(() => repo.sessions(userId: any(named: 'userId'))).thenThrow(const ProtocolException(ErrorCode.validation, 'This server cannot do this yet.'));
-      await pump(tester, const SessionsPage());
+      await pump(tester, const SignedInPage());
       expect(find.text(notOnServerMessage), findsOneWidget);
       expect(find.text('Try again'), findsOneWidget);
     });

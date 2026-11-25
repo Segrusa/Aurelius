@@ -76,7 +76,7 @@ class AppRouter {
         // Account is part of Profile (ticket #72); its subpages stay here.
         redirect: (context, state) => state.uri.path == '/account' ? '/profile' : null,
         routes: [
-          GoRoute(parentNavigatorKey: _root, path: 'sessions', pageBuilder: (context, state) => routePage(state, const SessionsPage())),
+          GoRoute(parentNavigatorKey: _root, path: 'sessions', pageBuilder: (context, state) => routePage(state, const SignedInPage())),
           GoRoute(parentNavigatorKey: _root, path: 'devices', pageBuilder: (context, state) => routePage(state, const DevicesPage())),
           GoRoute(parentNavigatorKey: _root, path: 'password', pageBuilder: (context, state) => routePage(state, const ChangePasswordPage())),
           GoRoute(parentNavigatorKey: _root, path: 'claude', pageBuilder: (context, state) => routePage(state, const ClaudeLoginPage())),
@@ -186,7 +186,7 @@ class AppRouter {
               GoRoute(
                 parentNavigatorKey: _root,
                 path: ':uid/sessions',
-                pageBuilder: (context, state) => routePage(state, SessionsPage(userId: state.pathParameters['uid'], username: state.uri.queryParameters['name'])),
+                pageBuilder: (context, state) => routePage(state, SignedInPage(userId: state.pathParameters['uid'], username: state.uri.queryParameters['name'])),
               ),
               GoRoute(
                 parentNavigatorKey: _root,
