@@ -19384,22 +19384,19 @@ final class StartWorkSession {
   final bool? design;
   final String employeeId;
   /// Files that belong to the first message (feature `chat_files`, see
-  /// `SendChatMessage::files`). Not with `worktree`: that folder does not exist yet.
+  /// `SendChatMessage::files`). They go into the session's worktree folder.
   final List<String> files;
   /// Images that belong to the first message (see `SendChatMessage::images`).
   final List<String> images;
-  /// Work in the project's folder itself, on a branch of its own that the daemon
-  /// makes from what the folder has checked out (feature `session_own_branch`). Needs
-  /// a project folder that is a git repository; not with `worktree`. Each run is
-  /// refused while the folder has uncommitted changes on another branch, or while
-  /// another run works in it, because checking out changes the folder for everyone.
+  /// Asked by older clients (feature `session_own_branch`): the session gets a worktree of
+  /// its own instead (feature `worktrees_only`).
   final bool? ownBranch;
   final String projectId;
   /// Mode, model and effort it starts with (empty: the employee's defaults).
   final TaskRun? run;
   final String text;
-  /// Work in a worktree of its own instead of the project's folder. Needs a
-  /// project folder that is a git repository with a main branch.
+  /// Asked by older clients; every session works in a worktree of its own (feature
+  /// `worktrees_only`), which needs a project folder that is a git repository with a main branch.
   final bool? worktree;
 
   factory StartWorkSession.fromJson(Map<String, dynamic> json) => StartWorkSession(
