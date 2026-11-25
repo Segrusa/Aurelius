@@ -20,29 +20,46 @@ import { useLinkState } from "../connection";
 import { KeyHint } from "../ui/key-hint";
 
 const styles = stylex.create({
-  group: { display: "flex", flexDirection: "column", gap: 10 },
-  groupTitle: { margin: 0, fontSize: 12, fontWeight: 500, color: "var(--precision-text3)" },
+  group: { display: "flex", flexDirection: "column", gap: 8 },
+  groupHead: { display: "flex", minHeight: 28, alignItems: "center", gap: 8, paddingInline: 2 },
+  groupTitle: { margin: 0, fontSize: 12.5, fontWeight: 600, color: "var(--color-text-secondary)" },
+  count: { fontSize: 12, color: "var(--precision-text3)" },
+  grow: { flex: 1 },
   card: {
+    overflow: "hidden",
     borderWidth: 1,
     borderStyle: "solid",
     borderColor: "var(--color-border)",
-    borderRadius: 10,
+    borderRadius: 12,
+    backgroundColor: "var(--color-background-card)",
+    boxShadow: "var(--precision-card-shadow)",
   },
   part: {
     display: "flex",
     flexDirection: "column",
-    gap: 8,
+    gap: 10,
     paddingInline: 16,
-    paddingBlock: 14,
+    paddingBlockStart: 12,
+    paddingBlockEnd: 16,
+    backgroundColor: "var(--precision-sunk)",
     borderBlockEndWidth: { default: 1, ":last-child": 0 },
     borderBlockEndStyle: "solid",
     borderBlockEndColor: "var(--precision-line2)",
   },
+  foot: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+    paddingInline: 10,
+    paddingBlock: 8,
+  },
   row: {
+    minHeight: 52,
     gap: 16,
     borderBlockEndColor: "var(--precision-line2)",
     paddingInline: 16,
-    paddingBlock: 14,
+    paddingBlock: 10,
     outlineStyle: "none",
     backgroundColor: {
       default: "transparent",
@@ -50,11 +67,18 @@ const styles = stylex.create({
       ":focus": "var(--color-overlay-hover)",
     },
   },
+  dim: { opacity: 0.6 },
   joined: { borderBlockEndWidth: 0 },
-  title: { display: "block", fontWeight: 500, overflowWrap: "anywhere" },
+  title: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+    fontWeight: 500,
+    overflowWrap: "anywhere",
+  },
   hint: {
     display: "block",
-    marginBlockStart: 2,
     fontSize: 12,
     lineHeight: 1.5,
     color: "var(--precision-text3)",
@@ -68,6 +92,60 @@ const styles = stylex.create({
   // The input takes its font from these two, and has no styling of its own to pass.
   field: { "--text-body-size": "12px" },
   fieldMono: { "--text-body-size": "12px", "--font-family-body": "var(--font-family-code)" },
+  chip: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    borderRadius: 999,
+    paddingInline: 7,
+    paddingBlock: 1,
+    fontSize: 11,
+    fontWeight: 600,
+    lineHeight: 1.5,
+    whiteSpace: "nowrap",
+    backgroundColor: "var(--color-overlay-hover)",
+    color: "var(--color-text-secondary)",
+  },
+  chipok: { backgroundColor: "var(--color-accent-muted)", color: "var(--color-text-accent)" },
+  chipwarn: { backgroundColor: "var(--color-warning-muted)", color: "var(--color-text-warning)" },
+  chipbad: { backgroundColor: "var(--color-error-muted)", color: "var(--color-text-error)" },
+  chipinfo: { backgroundColor: "var(--color-info-muted)", color: "var(--color-text-info)" },
+  chipDot: { width: 6, height: 6, borderRadius: "50%", backgroundColor: "currentColor" },
+  box: {
+    display: "grid",
+    width: 30,
+    height: 30,
+    flexShrink: 0,
+    placeItems: "center",
+    borderRadius: 8,
+    backgroundColor: "var(--precision-sunk)",
+    color: "var(--color-text-secondary)",
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+  },
+  boxLarge: { width: 40, height: 40, borderRadius: 10 },
+  facts: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--precision-line2)",
+  },
+  fact: {
+    display: "flex",
+    minWidth: 0,
+    flexDirection: "column",
+    gap: 2,
+    paddingBlock: 12,
+    paddingInline: 16,
+    borderInlineStartWidth: { default: 1, ":first-child": 0 },
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: "var(--precision-line2)",
+  },
+  factKey: { fontSize: 12, color: "var(--precision-text3)" },
+  factValue: { overflow: "hidden", fontWeight: 600, textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  boxinfo: { backgroundColor: "var(--color-info-muted)", color: "var(--color-text-info)" },
+  boxwarn: { backgroundColor: "var(--color-warning-muted)", color: "var(--color-text-warning)" },
 });
 
 /** A read of a settings section; refetched by events and after every change here. */
@@ -121,11 +199,28 @@ export function GroupTitle({ children }: { children: ReactNode }) {
   );
 }
 
-/** A titled group. Without a title it is only the card. */
-export function Group({ title, children }: { title?: string; children: ReactNode }) {
+/** A titled group, with its count and an action at the right. Without a title it is only the card. */
+export function Group({
+  title,
+  count,
+  action,
+  children,
+}: {
+  title?: string;
+  count?: number;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section {...stylex.props(styles.group)}>
-      {title ? <GroupTitle>{title}</GroupTitle> : null}
+      {title ? (
+        <div {...stylex.props(styles.groupHead)}>
+          <GroupTitle>{title}</GroupTitle>
+          {count === undefined ? null : <span {...stylex.props(styles.count)}>{count}</span>}
+          <span {...stylex.props(styles.grow)} />
+          {action}
+        </div>
+      ) : null}
       <Section variant="transparent" padding={0} xstyle={styles.card}>
         <InGroup value={true}>
           <List hasDividers>{children}</List>
@@ -189,23 +284,92 @@ export function stepRow(by: 1 | -1): void {
   (rows[at + by] ?? (at < 0 ? rows[0] : undefined))?.focus();
 }
 
+/** The last line of a card: actions that concern the whole list. */
+export function Foot({ children }: { children: ReactNode }) {
+  return (
+    <li {...stylex.props(styles.foot)}>
+      <InGroup value={false}>{children}</InGroup>
+    </li>
+  );
+}
+
+/** A strip of facts across a card: Version, Running since, Busy now. */
+export function Facts({ facts }: { facts: { label: string; value: string }[] }) {
+  return (
+    <li {...stylex.props(styles.facts)}>
+      {facts.map((f) => (
+        <div key={f.label} {...stylex.props(styles.fact)}>
+          <span {...stylex.props(styles.factKey)}>{f.label}</span>
+          <span {...stylex.props(styles.factValue)}>{f.value}</span>
+        </div>
+      ))}
+    </li>
+  );
+}
+
+export type Tone = "ok" | "warn" | "bad" | "info" | "plain";
+
+const CHIP_TONES = {
+  ok: styles.chipok,
+  warn: styles.chipwarn,
+  bad: styles.chipbad,
+  info: styles.chipinfo,
+  plain: null,
+} as const;
+
+/** A short state beside a row's title: "Linked", "This device", "Needs login". */
+export function Chip({ tone = "plain", dot = false, children }: { tone?: Tone; dot?: boolean; children: string }) {
+  return (
+    <span {...stylex.props(styles.chip, CHIP_TONES[tone])}>
+      {dot ? <span {...stylex.props(styles.chipDot)} /> : null}
+      {children}
+    </span>
+  );
+}
+
+const BOX_TONES = { info: styles.boxinfo, warn: styles.boxwarn, plain: null } as const;
+
+/** The square at the start of a row, around an icon or two letters. */
+export function IconBox({
+  large = false,
+  tone = "plain",
+  children,
+}: {
+  large?: boolean;
+  tone?: keyof typeof BOX_TONES;
+  children: ReactNode;
+}) {
+  return (
+    <span aria-hidden="true" {...stylex.props(styles.box, large && styles.boxLarge, BOX_TONES[tone])}>
+      {children}
+    </span>
+  );
+}
+
 export function Row({
   title,
   hint,
+  start,
   joined = false,
+  dim = false,
   children,
 }: {
   title: ReactNode;
   hint?: ReactNode;
+  /** An icon box or a mark before the title. */
+  start?: ReactNode;
   /** What this row opens follows right under it, without a line between them. */
   joined?: boolean;
+  /** A row that no longer counts, like a disabled board member. */
+  dim?: boolean;
   children?: ReactNode;
 }) {
   return (
     <ListItem
       data-setting-row
       tabIndex={-1}
-      xstyle={[styles.row, joined && styles.joined]}
+      xstyle={[styles.row, joined && styles.joined, dim && styles.dim]}
+      {...(start ? { startContent: start } : {})}
       label={<span {...stylex.props(styles.title)}>{title}</span>}
       description={hint ? <span {...stylex.props(styles.hint)}>{hint}</span> : undefined}
       endContent={
@@ -376,7 +540,7 @@ export function NameEditor({
         setDraft(null);
       }}
     >
-      <TextInput label={label} value={shown} onChange={(e) => setDraft(e.target.value)} width={200} />
+      <TextInput label={label} value={shown} onChange={(e) => setDraft(e.target.value)} width={220} />
       {changed ? (
         <SmallButton kind="primary" type="submit" disabled={busy}>
           Save

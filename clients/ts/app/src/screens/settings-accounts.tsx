@@ -7,10 +7,13 @@ import type { ClaudeLoginPrompt } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
+import { Icon } from "../ui/icons";
 import { FormDialog, Loading } from "./org-kit";
 import {
+  Chip,
   ConfirmButton,
   Group,
+  IconBox,
   Muted,
   openWeb,
   Problem,
@@ -162,9 +165,9 @@ function Connect({ onDone }: { onDone: () => void }) {
 }
 
 const STATUS = {
-  linked: "Connected",
-  expired: "Expired. Claude asked to sign in again.",
-  missing: "Not connected. Your tickets wait until you connect.",
+  linked: { title: "Connected", chip: "Linked", tone: "ok" },
+  expired: { title: "Expired", chip: "Sign in again", tone: "warn" },
+  missing: { title: "Not connected", chip: "Your tickets wait", tone: "bad" },
 } as const;
 
 export function ClaudeLogin() {
@@ -186,7 +189,23 @@ export function ClaudeLogin() {
     <>
       <Group title="Claude login">
         <Row
-          title={claudeLogin ? STATUS[claudeLogin.status] : "Unknown"}
+          start={
+            <IconBox>
+              <Icon name="plug" />
+            </IconBox>
+          }
+          title={
+            claudeLogin ? (
+              <>
+                {STATUS[claudeLogin.status].title}
+                <Chip tone={STATUS[claudeLogin.status].tone} dot={claudeLogin.status === "linked"}>
+                  {STATUS[claudeLogin.status].chip}
+                </Chip>
+              </>
+            ) : (
+              "Unknown"
+            )
+          }
           hint={
             [claudeLogin?.email, claudeLogin?.plan].filter(Boolean).join(" · ") ||
             "Tickets you create run on your own Claude login."

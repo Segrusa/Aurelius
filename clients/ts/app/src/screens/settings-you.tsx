@@ -7,13 +7,17 @@ import { type Appearance, useAppearance } from "../appearance";
 import { useConnection, useLinkState } from "../connection";
 import { useAction } from "../keys/provider";
 import { usePlatform } from "../platform";
-import { parseScreenUse, SCREEN_USE_KEY } from "../screen-use";
+import { Icon } from "../ui/icons";
+import { initial, Mark, markColor } from "../ui/marks";
 import { ClaudeLogin, passwordProblem } from "./settings-accounts";
-import { YourDevices } from "./settings-devices";
+import { PairDevice, PendingPairings } from "./settings-devices";
 import {
+  Chip,
   ConfirmButton,
+  Foot,
   Group,
   HINTS_KEY,
+  IconBox,
   Keyed,
   Muted,
   Part,
@@ -24,19 +28,19 @@ import {
   TextInput,
   useChange,
   useSetting,
-  when,
 } from "./settings-kit";
-import { screenUseRows } from "./settings-logic";
+import { agoText, deviceHint, OWN_DEVICES } from "./settings-logic";
 
 const styles = stylex.create({
-  label: { fontWeight: 500 },
-  form: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
-  value: { fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--color-text-secondary)" },
-  status: { fontSize: 12, color: "var(--color-text-secondary)" },
-  notes: { whiteSpace: "pre-wrap" },
+  name: { fontSize: 15, fontWeight: 600 },
+  stack: { display: "flex", flexDirection: "column", gap: 10 },
+  buttons: { display: "flex", flexWrap: "wrap", gap: 8 },
+  status: { color: "var(--color-text-secondary)" },
+  notes: { margin: 0, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)" },
 });
 
-function ChangePassword() {
+/** The open Change row: three fields, Save password and Cancel. */
+function ChangePassword({ onClose }: { onClose: () => void }) {
   const connection = useConnection();
   const { busy, error, run } = useChange();
   const [oldPassword, setOldPassword] = useState("");
@@ -56,20 +60,20 @@ function ChangePassword() {
   };
   return (
     <Part>
-      <div {...stylex.props(styles.label)}>Password</div>
-      <form {...stylex.props(styles.form)} onSubmit={(e) => void submit(e)}>
+      <form {...stylex.props(styles.stack)} onSubmit={(e) => void submit(e)}>
         <TextInput
           label="Current password"
           placeholder="Current password"
           type="password"
           autoComplete="current-password"
+          autoFocus
           required
           value={oldPassword}
           onChange={(e) => setOldPassword(e.target.value)}
         />
         <TextInput
           label="New password"
-          placeholder="New password"
+          placeholder="New password · at least 12 characters"
           type="password"
           autoComplete="new-password"
           required
@@ -77,38 +81,136 @@ function ChangePassword() {
           onChange={(e) => setNewPassword(e.target.value)}
         />
         <TextInput
-          label="Repeat password"
-          placeholder="Repeat password"
+          label="Repeat new password"
+          placeholder="Repeat new password"
           type="password"
           autoComplete="new-password"
           required
           value={repeat}
           onChange={(e) => setRepeat(e.target.value)}
         />
-        <SmallButton type="submit" disabled={busy || problem !== null}>
-          Change password
-        </SmallButton>
+        {newPassword && problem ? <Muted>{problem}</Muted> : null}
+        {done ? <Muted>Your password is changed.</Muted> : null}
+        <div {...stylex.props(styles.buttons)}>
+          <SmallButton kind="primary" type="submit" disabled={busy || problem !== null}>
+            Save password
+          </SmallButton>
+          <SmallButton kind="ghost" onClick={onClose}>
+            Cancel
+          </SmallButton>
+        </div>
       </form>
-      <Muted>{newPassword && problem ? problem : "At least 12 characters."}</Muted>
-      {done ? <Muted>Your password is changed.</Muted> : null}
       <Problem error={error} />
     </Part>
   );
 }
 
-function Sessions() {
+const PHONE = /ios|iphone|ipad|android/i;
+
+/**
+ * Account → Devices: where you are signed in and the devices you paired, in one list. A signed-in
+ * session of a paired device shows once, as that device.
+ */
+function Devices() {
+  const platform = usePlatform();
   const connection = useConnection();
+  const { features } = useLinkState();
   const { busy, error, run } = useChange();
-  const { user } = useLinkState();
+  const [adding, setAdding] = useState(false);
+  const own = features.includes(OWN_DEVICES);
   const sessions = useSetting(
     "sessions",
     async () => expectBody(await connection.call("session.list", {}), "sessions").value.sessions,
   );
+  const devices = useSetting("devices", async () =>
+    own ? expectBody(await connection.call("device.list"), "devices").value.devices : [],
+  );
+  const remote = useSetting(
+    "remote",
+    async () => expectBody(await connection.call("remote.get_status"), "remote").value,
+  );
+  const now = Date.now();
+  const all = sessions.data ?? [];
+  const current = all.find((s) => s.current);
+  const paired = (devices.data ?? []).filter((d) => d.id !== current?.client_id);
+  const pairedIds = new Set((devices.data ?? []).map((d) => d.id));
+  const others = all.filter((s) => !s.current && !(s.client_id && pairedIds.has(s.client_id)));
+  const signedIn = all.filter((s) => !s.current);
+  // A browser never allows other devices; a phone or other non-owner device cannot read the status.
+  const canPair = own && platform.kind !== "web" && remote.data !== undefined;
+  const count = (current ? 1 : 0) + paired.length + others.length;
+  const signOutAll = () =>
+    run(async () => {
+      for (const s of signedIn) await connection.write("session.revoke", { session_id: s.id }, { retry: false });
+    });
   return (
-    <Group title="Signed in on">
-      {(sessions.data ?? []).map((s) => (
-        <Row key={s.id} title={s.device_name} hint={s.current ? "This device" : `Last seen ${when(s.last_seen_ms)}`}>
-          {s.current ? null : (
+    <>
+      <Group
+        title="Devices"
+        count={count}
+        action={
+          canPair ? (
+            <SmallButton
+              disabled={!remote.data?.enabled}
+              title={remote.data?.enabled ? undefined : "Turn on remote access first, under Server › Remote & phones."}
+              onClick={() => setAdding(!adding)}
+            >
+              {adding ? "Done" : "Add a device"}
+            </SmallButton>
+          ) : undefined
+        }
+      >
+        {adding && canPair && remote.data?.enabled ? <PairDevice title="Add a device" /> : null}
+        {current ? (
+          <Row
+            start={
+              <IconBox>
+                <Icon name={platform.kind === "web" ? "globe" : "laptop"} />
+              </IconBox>
+            }
+            title={
+              <>
+                {current.device_name}
+                <Chip tone="ok">This device</Chip>
+              </>
+            }
+            hint={`${platform.kind === "web" ? "Browser" : "Desktop app"} · now`}
+          />
+        ) : null}
+        {paired.map((d) => (
+          <Row
+            key={d.id}
+            start={
+              <IconBox>
+                <Icon name={PHONE.test(d.platform) ? "phone" : "laptop"} />
+              </IconBox>
+            }
+            title={d.name}
+            hint={deviceHint(d, (ms) => agoText(ms, now))}
+          >
+            <Keyed action="SettingsRemove" chord="Del">
+              <ConfirmButton
+                label="Revoke"
+                question={`Revoke ${d.name}? It is signed out and must be paired again.`}
+                disabled={busy}
+                onConfirm={() =>
+                  void run(() => connection.write("device.revoke", { client_id: d.id }, { retry: false }))
+                }
+              />
+            </Keyed>
+          </Row>
+        ))}
+        {others.map((s) => (
+          <Row
+            key={s.id}
+            start={
+              <IconBox>
+                <Icon name="globe" />
+              </IconBox>
+            }
+            title={s.device_name}
+            hint={`Signed in · ${agoText(s.last_seen_ms, now)}`}
+          >
             <ConfirmButton
               label="Sign out"
               question={`Sign out ${s.device_name}?`}
@@ -117,45 +219,47 @@ function Sessions() {
                 void run(() => connection.write("session.revoke", { session_id: s.id }, { retry: false }))
               }
             />
-          )}
-        </Row>
-      ))}
-      {sessions.data?.length === 0 ? <Row title={user?.username ?? ""} hint="No other devices." /> : null}
-      {(sessions.data ?? []).some((s) => !s.current) ? (
-        <Row title="Sign out all other devices" hint="This device stays signed in.">
-          <ConfirmButton
-            label="Sign out all"
-            question="Sign out all other devices?"
-            disabled={busy}
-            onConfirm={() =>
-              void run(async () => {
-                for (const s of sessions.data ?? []) {
-                  if (!s.current) await connection.write("session.revoke", { session_id: s.id }, { retry: false });
-                }
-              })
-            }
-          />
-        </Row>
-      ) : null}
-      <Problem error={sessions.error ?? error} />
-    </Group>
+          </Row>
+        ))}
+        {signedIn.length > 0 ? (
+          <Foot>
+            <ConfirmButton
+              label="Sign out all other devices"
+              question="Sign out all other devices?"
+              disabled={busy}
+              onConfirm={() => void signOutAll()}
+            />
+          </Foot>
+        ) : null}
+        <Problem error={sessions.error ?? devices.error ?? error} />
+      </Group>
+      {canPair && remote.data ? <PendingPairings pending={remote.data.pending} /> : null}
+    </>
   );
 }
 
 export function AccountSection() {
   const connection = useConnection();
   const { user } = useLinkState();
+  const [changing, setChanging] = useState(false);
+  const name = user?.username ?? "Nobody";
   return (
     <>
       <Group>
-        <Row title={user?.username ?? "Nobody"} hint="The board member signed in on this device.">
+        <Row
+          start={<Mark letter={initial(name)} color={markColor(user?.id ?? name)} size={40} radius={10} />}
+          title={<span {...stylex.props(styles.name)}>{name}</span>}
+          hint="Board member"
+        >
           <SmallButton onClick={() => void connection.signOut()}>Sign out</SmallButton>
         </Row>
-        <ChangePassword />
+        <Row title="Password" joined={changing}>
+          {changing ? null : <SmallButton onClick={() => setChanging(true)}>Change</SmallButton>}
+        </Row>
+        {changing ? <ChangePassword onClose={() => setChanging(false)} /> : null}
       </Group>
       <ClaudeLogin />
-      <YourDevices />
-      <Sessions />
+      <Devices />
     </>
   );
 }
@@ -165,34 +269,6 @@ const APPEARANCES: { key: Appearance; label: string }[] = [
   { key: "light", label: "Light" },
   { key: "dark", label: "Dark" },
 ];
-
-function ScreenUse() {
-  const { storage } = usePlatform();
-  const [use, setUse] = useState(() => parseScreenUse(storage.get(SCREEN_USE_KEY)));
-  const rows = screenUseRows(use);
-  return (
-    <Group title="Screen use (this device only)">
-      {rows.length === 0 ? <Row title="Nothing counted yet." /> : null}
-      {rows.map(([key, u]) => (
-        <Row key={key} title={key} hint={`Last opened ${when(u.last_ms)}`}>
-          <span {...stylex.props(styles.value)}>{u.opens}×</span>
-        </Row>
-      ))}
-      {rows.length > 0 ? (
-        <Row title="Reset counts" hint="Counted here only; nothing goes to a server.">
-          <SmallButton
-            onClick={() => {
-              storage.set(SCREEN_USE_KEY, "{}");
-              setUse({});
-            }}
-          >
-            Reset counts
-          </SmallButton>
-        </Row>
-      ) : null}
-    </Group>
-  );
-}
 
 /** The service goes on when the window closes; whether it starts by itself is this computer's. */
 function Background() {
@@ -206,7 +282,7 @@ function Background() {
   return (
     <Group title="Background">
       {startup ? (
-        <Row title="Start at sign-in" hint="The background service starts when you sign in to this computer.">
+        <Row title="Start at sign-in">
           <Keyed action="SettingsLoginStart" chord="L">
             <Switch
               label="Start at sign-in"
@@ -222,27 +298,38 @@ function Background() {
           </Keyed>
         </Row>
       ) : null}
-      <Row title="Closing" hint="Closing the window: background work continues.">
-        <span {...stylex.props(styles.status)}>Keeps running</span>
+      <Row title="Closing the window">
+        <span {...stylex.props(styles.status)}>Work continues</span>
       </Row>
       <Problem error={problem} />
     </Group>
   );
 }
 
-/** Only for this computer's own install: a paired server can't update the app you look at. */
-function AppUpdate() {
+/**
+ * This app's version and, for this computer's own install, its update: a paired server can't
+ * update the app you look at.
+ */
+function AppVersion() {
   const connection = useConnection();
   const client = useQueryClient();
   const platform = usePlatform();
   const { remote } = useLinkState();
   const { busy, error, run } = useChange();
+  const [notes, setNotes] = useState(false);
   const status = useSetting(
     "update",
     async () => expectBody(await connection.call("update.get", { check: false }), "update").value,
   );
-  const app = status.data?.app;
-  if (platform.quit === null || remote || !app) return null;
+  const app = platform.quit === null || remote ? undefined : status.data?.app;
+  const title = `Aurelius ${platform.version}`;
+  if (!app) {
+    return (
+      <Group title="App">
+        <Row title={title} hint={platform.kind === "web" ? "In a browser" : "Desktop app"} />
+      </Group>
+    );
+  }
   const check = () =>
     run(async () => {
       const body = await connection.call("update.get", { check: true });
@@ -259,20 +346,30 @@ function AppUpdate() {
       // The service replaces the app once it has closed, then opens the new one.
       platform.quit?.();
     });
+  const chip = !app.enabled ? (
+    <Chip>Updates are off</Chip>
+  ) : app.available ? (
+    <Chip tone="info">{`${app.latest ?? "A new version"} is available`}</Chip>
+  ) : (
+    <Chip tone="ok">Up to date</Chip>
+  );
   return (
-    <Group title="App update">
-      <Row title="Latest" hint={app.checked_at_ms ? `Checked ${when(app.checked_at_ms)}` : undefined}>
-        <span {...stylex.props(styles.value)}>{app.latest ?? "Unknown"}</span>
-        <Keyed action="SettingsCheckUpdate" chord="C">
-          <SmallButton disabled={busy} onClick={() => void check()}>
-            Check now
+    <Group title="App">
+      <Row
+        joined={notes}
+        title={
+          <>
+            {title}
+            {chip}
+          </>
+        }
+        hint={app.error ?? (app.checked_at_ms ? `Checked ${agoText(app.checked_at_ms, Date.now())}` : undefined)}
+      >
+        {app.notes ? (
+          <SmallButton kind="ghost" onClick={() => setNotes(!notes)}>
+            What's new
           </SmallButton>
-        </Keyed>
-      </Row>
-      <Row title="Status" hint={app.error ?? app.reason ?? undefined}>
-        <span {...stylex.props(styles.status)}>
-          {!app.enabled ? "Updates are off" : app.available ? "An update is available" : "Up to date"}
-        </span>
+        ) : null}
         {app.enabled && app.available ? (
           <Keyed action="SettingsInstallAppUpdate" chord="I">
             <ConfirmButton
@@ -282,19 +379,28 @@ function AppUpdate() {
               onConfirm={() => void install()}
             />
           </Keyed>
-        ) : null}
+        ) : (
+          <Keyed action="SettingsCheckUpdate" chord="C">
+            <SmallButton disabled={busy} onClick={() => void check()}>
+              Check now
+            </SmallButton>
+          </Keyed>
+        )}
       </Row>
-      {app.notes ? <Row title="What's new" hint={<span {...stylex.props(styles.notes)}>{app.notes}</span>} /> : null}
+      {notes && app.notes ? (
+        <Part>
+          <p {...stylex.props(styles.notes)}>{app.notes}</p>
+        </Part>
+      ) : null}
       <Problem error={error} />
     </Group>
   );
 }
 
-export function AppSection() {
+/** You › This device: what this app and this computer keep for themselves. */
+export function DeviceSection() {
   const { appearance, choose } = useAppearance();
-  const platform = usePlatform();
-  const { daemonVersion } = useLinkState();
-  const { storage } = platform;
+  const { storage } = usePlatform();
   const [hints, setHints] = useState(() => storage.get(HINTS_KEY) === "true");
   useAction("SettingsAppearance", () => {
     const at = APPEARANCES.findIndex((a) => a.key === appearance);
@@ -304,7 +410,7 @@ export function AppSection() {
   return (
     <>
       <Group>
-        <Row title="Appearance" hint="Kept on this device.">
+        <Row title="Appearance">
           <SegmentedControl
             label="Appearance"
             size="sm"
@@ -316,9 +422,7 @@ export function AppSection() {
             ))}
           </SegmentedControl>
         </Row>
-      </Group>
-      <Group>
-        <Row title="Always show shortcut hints" hint="The keys of this page, beside its buttons.">
+        <Row title="Always show shortcut hints">
           <Keyed action="SettingsShowHints" chord="H">
             <Switch
               label="Always show shortcut hints"
@@ -332,17 +436,8 @@ export function AppSection() {
           </Keyed>
         </Row>
       </Group>
-      <ScreenUse />
       <Background />
-      <AppUpdate />
-      <Group title="Version">
-        <Row title="This app" hint={platform.kind === "web" ? "In a browser" : "Desktop"}>
-          <span {...stylex.props(styles.value)}>{platform.version}</span>
-        </Row>
-        <Row title="The server">
-          <span {...stylex.props(styles.value)}>{daemonVersion ?? "Unknown"}</span>
-        </Row>
-      </Group>
+      <AppVersion />
     </>
   );
 }

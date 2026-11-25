@@ -1,4 +1,4 @@
-import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
@@ -9,14 +9,20 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { usePlatform } from "../platform";
+import { Icon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/marks";
+import { FormDialog } from "./org-kit";
 import { ServerChoicesPanel } from "./servers";
 import { MemberAccess, passwordProblem } from "./settings-accounts";
 import { PairDevice, PendingPairings } from "./settings-devices";
 import {
+  Chip,
   ConfirmButton,
+  Facts,
+  Foot,
   Group,
   GroupTitle,
+  IconBox,
   Keyed,
   Muted,
   modelName,
@@ -31,11 +37,11 @@ import {
   useSetting,
   when,
 } from "./settings-kit";
-import { deviceHint, OWN_DEVICES, remoteAccessDevices } from "./settings-logic";
+import { agoText, deviceHint, OWN_DEVICES, remoteAccessDevices, uptimeText } from "./settings-logic";
 import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 
 const styles = stylex.create({
-  form: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  form: { display: "flex", flexDirection: "column", gap: 12 },
   stack: { display: "flex", flexDirection: "column", gap: 10 },
   models: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8 },
   model: {
@@ -58,91 +64,139 @@ const styles = stylex.create({
   },
   connection: { display: "block", fontSize: 12, fontWeight: 400, color: "var(--precision-text3)" },
   quiet: { color: "var(--precision-text3)" },
+  value: { color: "var(--color-text-secondary)" },
   member: { display: "inline-flex", alignItems: "center", gap: 6 },
-  tight: { padding: 12 },
-  value: { fontFamily: "var(--font-family-code)", fontSize: 12, color: "var(--color-text-secondary)" },
-  status: { fontSize: 12, color: "var(--color-text-secondary)" },
-  notes: { whiteSpace: "pre-wrap" },
+  tight: { padding: 12, backgroundColor: "transparent" },
+  name: { fontSize: 15, fontWeight: 600 },
+  mono: { fontFamily: "var(--font-family-code)", fontSize: 12 },
+  notes: { margin: 0, whiteSpace: "pre-wrap", color: "var(--color-text-secondary)" },
 });
 
-function BoardMembers() {
+/** The Add board member dialog: a name and a first password, typed twice. */
+function AddMemberDialog({ onClose }: { onClose: () => void }) {
+  const connection = useConnection();
+  const { busy, error, run } = useChange();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const problem = passwordProblem(password, repeat);
+  const ready = username.trim() !== "" && problem === null;
+  const add = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!ready) return;
+    const ok = await run(() =>
+      connection.write("user.create", { username: username.trim(), password }, { retry: false }),
+    );
+    if (ok) onClose();
+  };
+  return (
+    <FormDialog
+      title="Add board member"
+      width={400}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" label="Cancel" onClick={onClose} />
+          <Button variant="primary" label="Add" isDisabled={busy || !ready} onClick={() => void add()} />
+        </>
+      }
+    >
+      <form {...stylex.props(styles.form)} onSubmit={(e) => void add(e)}>
+        <TextInput
+          label="Name"
+          showLabel
+          required
+          autoFocus
+          autoComplete="off"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+        />
+        <TextInput
+          label="First password"
+          showLabel
+          placeholder="At least 12 characters"
+          type="password"
+          required
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <TextInput
+          label="Repeat password"
+          showLabel
+          type="password"
+          required
+          autoComplete="new-password"
+          value={repeat}
+          onChange={(e) => setRepeat(e.target.value)}
+        />
+        {password && problem ? <Muted>{problem}</Muted> : null}
+        {/* Enter in a field adds, as the Add button does. */}
+        <button type="submit" hidden />
+      </form>
+      <Problem error={error} />
+    </FormDialog>
+  );
+}
+
+/** Company › Board members: who may sign in, with Add board member in a dialog. */
+export function BoardMembersSection() {
   const connection = useConnection();
   const { user } = useLinkState();
   const { busy, error, run } = useChange();
   const users = useSetting("users", async () => expectBody(await connection.call("user.list"), "users").value.users);
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [repeat, setRepeat] = useState("");
+  const [adding, setAdding] = useState(false);
   const [access, setAccess] = useState<{ id: string; username: string } | null>(null);
-  const problem = passwordProblem(password, repeat);
-  const add = async (event: FormEvent) => {
-    event.preventDefault();
-    if (problem) return;
-    const ok = await run(() =>
-      connection.write("user.create", { username: username.trim(), password }, { retry: false }),
-    );
-    setPassword("");
-    setRepeat("");
-    if (ok) setUsername("");
-  };
+  const list = users.data ?? [];
   return (
-    <Group title="Board members">
-      {(users.data ?? []).map((u) => (
-        <Row
-          key={u.id}
-          title={u.username}
-          hint={u.disabled_at_ms ? "Disabled" : u.id === user?.id ? "You" : "Signs in with their own Claude login."}
-        >
-          {u.id === user?.id || u.disabled_at_ms ? null : (
-            <SmallButton onClick={() => setAccess(u)}>Sessions</SmallButton>
-          )}
-          {u.id === user?.id || u.disabled_at_ms ? null : (
-            <ConfirmButton
-              label="Disable"
-              question={`Disable ${u.username}? They are signed out everywhere and can no longer sign in.`}
-              disabled={busy}
-              onConfirm={() => void run(() => connection.write("user.disable", { user_id: u.id }, { retry: false }))}
-            />
-          )}
-        </Row>
-      ))}
-      <Part>
-        <form {...stylex.props(styles.form)} onSubmit={(e) => void add(e)}>
-          <TextInput
-            label="New board member's name"
-            placeholder="Name"
-            required
-            autoComplete="off"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-          <TextInput
-            label="New board member's password"
-            placeholder="First password"
-            type="password"
-            required
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          <TextInput
-            label="Repeat the first password"
-            placeholder="Repeat password"
-            type="password"
-            required
-            autoComplete="new-password"
-            value={repeat}
-            onChange={(e) => setRepeat(e.target.value)}
-          />
-          <SmallButton type="submit" disabled={busy || problem !== null}>
-            Add board member
-          </SmallButton>
-        </form>
-        <Muted>{password && problem ? problem : "At least 12 characters."}</Muted>
+    <>
+      <Group
+        title="Board members"
+        count={list.length}
+        action={
+          <Keyed action="SettingsNew" chord="N">
+            <SmallButton kind="primary" onClick={() => setAdding(true)}>
+              Add board member
+            </SmallButton>
+          </Keyed>
+        }
+      >
+        {list.map((u) => {
+          const you = u.id === user?.id;
+          const off = Boolean(u.disabled_at_ms);
+          return (
+            <Row
+              key={u.id}
+              dim={off}
+              start={<Mark letter={initial(u.username)} color={markColor(u.id)} size={24} radius={6} />}
+              title={
+                <>
+                  {u.username}
+                  {you ? <Chip>You</Chip> : null}
+                  {off ? <Chip>Disabled</Chip> : null}
+                </>
+              }
+              hint={off ? `Since ${when(u.disabled_at_ms)}` : `Board member since ${when(u.created_at_ms)}`}
+            >
+              {you || off ? null : <SmallButton onClick={() => setAccess(u)}>Sessions</SmallButton>}
+              {you || off ? null : (
+                <ConfirmButton
+                  label="Disable"
+                  question={`Disable ${u.username}? They are signed out everywhere and can no longer sign in.`}
+                  disabled={busy}
+                  onConfirm={() =>
+                    void run(() => connection.write("user.disable", { user_id: u.id }, { retry: false }))
+                  }
+                />
+              )}
+            </Row>
+          );
+        })}
         <Problem error={users.error ?? error} />
-        {access ? <MemberAccess user={access.id} name={access.username} onClose={() => setAccess(null)} /> : null}
-      </Part>
-    </Group>
+      </Group>
+      {adding ? <AddMemberDialog onClose={() => setAdding(false)} /> : null}
+      {access ? <MemberAccess user={access.id} name={access.username} onClose={() => setAccess(null)} /> : null}
+    </>
   );
 }
 
@@ -218,7 +272,7 @@ function DefaultModel() {
  * The connection employees' runs use. Where each board member keeps their own model, effort and
  * mode, the company only chooses the connection.
  */
-function DefaultConnection() {
+export function DefaultConnection() {
   const connection = useConnection();
   const { busy, error, run } = useChange();
   const { list, settings } = useDefaults("employee");
@@ -226,8 +280,8 @@ function DefaultConnection() {
   const chosen = settings.connection?.mode === "value" ? settings.connection.value : (connections[0]?.id ?? "");
   if (connections.length === 0) {
     return (
-      <Group title="Company connection">
-        <Row title="No connection yet" hint="Add a connection first." />
+      <Group>
+        <Row title="Company connection" hint="Add a connection first." />
       </Group>
     );
   }
@@ -244,17 +298,14 @@ function DefaultConnection() {
       ),
     );
   return (
-    <Group title="Company connection">
-      <Row
-        title="Connection"
-        hint="What employees run on. Each board member picks their own model under You → My defaults."
-      >
+    <Group>
+      <Row title="Company connection">
         <Selector
           label="Company connection"
           isLabelHidden
           size="sm"
           variant="secondary"
-          width={260}
+          width={220}
           isDisabled={busy}
           value={chosen}
           options={connections.map((c) => ({ value: c.id, label: c.display_name }))}
@@ -360,6 +411,28 @@ export function CompanySection() {
             />
           ) : null}
         </Row>
+        <Row title="Management team">
+          {roots.length === 0 ? <span {...stylex.props(styles.quiet)}>Nobody yet</span> : null}
+          {roots.map((e) => (
+            <span key={e.id} title={e.name} {...stylex.props(styles.member)}>
+              <Mark letter={initial(e.name)} color={markColor(e.id)} size={24} radius={6} />
+              <span {...stylex.props(styles.value)}>{e.name}</span>
+            </span>
+          ))}
+        </Row>
+        <Problem error={company.error ?? null} />
+      </Group>
+      <Group title="How work flows">
+        <Row title="Follow the org chart">
+          <Switch
+            label="Follow the org chart"
+            on={data?.follow_org_chart ?? false}
+            disabled={busy || !data}
+            onChange={(follow) =>
+              void run(() => connection.write("company.set_follow_org_chart", { follow }, { retry: false }))
+            }
+          />
+        </Row>
         <Row title="Management chooses the mode">
           <Switch
             label="Management chooses the mode"
@@ -370,33 +443,7 @@ export function CompanySection() {
             }
           />
         </Row>
-        <Row title="Follow the org chart" hint="Work goes through whom someone reports to.">
-          <Switch
-            label="Follow the org chart"
-            on={data?.follow_org_chart ?? false}
-            disabled={busy || !data}
-            onChange={(follow) =>
-              void run(() => connection.write("company.set_follow_org_chart", { follow }, { retry: false }))
-            }
-          />
-        </Row>
-        <Row title="Management team" hint="Employees that report to no one.">
-          {roots.length === 0 ? <span {...stylex.props(styles.quiet)}>Nobody yet</span> : null}
-          {roots.map((e) => (
-            <span key={e.id} {...stylex.props(styles.member)}>
-              <Mark letter={initial(e.name)} color={markColor(e.id)} />
-              {e.name}
-            </span>
-          ))}
-        </Row>
-        <Problem error={company.error ?? mode.error ?? null} />
-      </Group>
-      <BoardMembers />
-      <Group title="Testing">
-        <Row
-          title="Tester"
-          hint="Runs the full test suite once when the owner reports, in the Testing column. Green goes on to Review; red goes back to Doing with the failures."
-        >
+        <Row title="Tester">
           <Selector
             label="Tester"
             isLabelHidden
@@ -420,12 +467,18 @@ export function CompanySection() {
             }
           />
         </Row>
+        <Problem error={mode.error ?? null} />
       </Group>
       <Group title="Background jobs">
         {background ? (
           <Row
-            title={`Background jobs run on ${mine ? "your" : `${background.username}'s`} Claude login.`}
-            hint="Memory consolidation runs on this login."
+            start={
+              <IconBox>
+                <Icon name="plug" />
+              </IconBox>
+            }
+            title={`Runs on ${mine ? "your" : `${background.username}'s`} Claude login`}
+            hint="Memory consolidation"
           >
             {mine ? (
               <SmallButton
@@ -438,35 +491,29 @@ export function CompanySection() {
             ) : null}
           </Row>
         ) : (
-          <Part>
-            <Banner
-              status="warning"
-              title="No Claude login is chosen: background jobs (memory consolidation) do not run."
-              endContent={
-                <SmallButton
-                  kind="primary"
-                  disabled={busy || claudeLogin?.status !== "linked"}
-                  title={
-                    claudeLogin?.status === "linked"
-                      ? undefined
-                      : "Connect your Claude login first (Settings → Account)."
-                  }
-                  onClick={() =>
-                    void run(() =>
-                      connection.write("company.set_background_login", { enabled: true }, { retry: false }),
-                    )
-                  }
-                >
-                  Use my Claude login
-                </SmallButton>
+          <Row
+            start={
+              <IconBox tone="warn">
+                <Icon name="alert" />
+              </IconBox>
+            }
+            title="No Claude login"
+            hint="Memory consolidation waits for a login"
+          >
+            <SmallButton
+              kind="primary"
+              disabled={busy || claudeLogin?.status !== "linked"}
+              title={claudeLogin?.status === "linked" ? undefined : "Connect your Claude login first (You › Account)."}
+              onClick={() =>
+                void run(() => connection.write("company.set_background_login", { enabled: true }, { retry: false }))
               }
-            />
-          </Part>
+            >
+              Use my login
+            </SmallButton>
+          </Row>
         )}
       </Group>
-      {features.includes(USER_RUN_DEFAULTS_FEATURE) ? (
-        <DefaultConnection />
-      ) : (
+      {features.includes(USER_RUN_DEFAULTS_FEATURE) ? null : (
         <>
           <DefaultModel />
           <SubagentDefault />
@@ -477,10 +524,12 @@ export function CompanySection() {
   );
 }
 
+/** The server's version and its update: Check now, What's new, and Update in one row. */
 function ServerUpdate() {
   const connection = useConnection();
   const client = useQueryClient();
   const { busy, error, run } = useChange();
+  const [notes, setNotes] = useState(false);
   const status = useSetting(
     "update",
     async () => expectBody(await connection.call("update.get", { check: false }), "update").value,
@@ -491,54 +540,70 @@ function ServerUpdate() {
       const body = await connection.call("update.get", { check: true });
       client.setQueryData(["settings", "update"], expectBody(body, "update").value);
     });
+  // Download and install in one go: the staged version is applied, which restarts the server.
+  const update = () =>
+    run(async () => {
+      if (!data?.staged) await connection.write("update.prepare", undefined, { retry: false, timeoutMs: 600_000 });
+      await connection.write("update.apply", undefined, { retry: false });
+    });
   if (!data) return <Problem error={status.error} />;
+  const ready = data.enabled && (data.available || Boolean(data.staged));
+  const title = !data.enabled ? (
+    <>
+      {data.current}
+      <Chip>Updates are off</Chip>
+    </>
+  ) : ready ? (
+    `${data.staged ?? data.latest ?? "A new version"} is available`
+  ) : (
+    <>
+      {data.current}
+      <Chip tone="ok">Up to date</Chip>
+    </>
+  );
   return (
-    <Group title="Server update">
-      <Row title="Installed">
-        <span {...stylex.props(styles.value)}>{data.current}</span>
-      </Row>
-      <Row title="Latest" hint={data.checked_at_ms ? `Checked ${when(data.checked_at_ms)}` : undefined}>
-        <span {...stylex.props(styles.value)}>{data.latest ?? "Unknown"}</span>
-        <Keyed action="SettingsCheckUpdate" chord="C">
-          <SmallButton disabled={busy} onClick={() => void check()}>
-            Check now
+    <Group title="Update">
+      <Row
+        joined={notes}
+        start={
+          <IconBox tone={ready ? "info" : "plain"}>
+            <Icon name="up" />
+          </IconBox>
+        }
+        title={title}
+        hint={
+          data.error ??
+          data.reason ??
+          (data.checked_at_ms ? `Checked ${agoText(data.checked_at_ms, Date.now())}` : undefined)
+        }
+      >
+        {data.notes ? (
+          <SmallButton kind="ghost" onClick={() => setNotes(!notes)}>
+            What's new
           </SmallButton>
-        </Keyed>
-      </Row>
-      <Row title="Status" hint={data.error ?? data.reason ?? undefined}>
-        <span {...stylex.props(styles.status)}>
-          {!data.enabled
-            ? "Updates are off"
-            : data.staged
-              ? `Version ${data.staged} is ready`
-              : data.available
-                ? "An update is available"
-                : "Up to date"}
-        </span>
-        {data.enabled && data.available && !data.staged ? (
-          <Keyed action="SettingsInstallUpdate" chord="U">
-            <SmallButton
-              disabled={busy}
-              onClick={() =>
-                void run(() => connection.write("update.prepare", undefined, { retry: false, timeoutMs: 600_000 }))
-              }
-            >
-              Download update
-            </SmallButton>
-          </Keyed>
         ) : null}
-        {data.staged ? (
+        {ready ? (
           <Keyed action="SettingsInstallUpdate" chord="U">
             <ConfirmButton
-              label="Update server"
+              label="Update"
               question="Answers that are running now are interrupted. Update now?"
               disabled={busy}
-              onConfirm={() => void run(() => connection.write("update.apply", undefined, { retry: false }))}
+              onConfirm={() => void update()}
             />
           </Keyed>
-        ) : null}
+        ) : (
+          <Keyed action="SettingsCheckUpdate" chord="C">
+            <SmallButton disabled={busy} onClick={() => void check()}>
+              Check now
+            </SmallButton>
+          </Keyed>
+        )}
       </Row>
-      {data.notes ? <Row title="What's new" hint={<span {...stylex.props(styles.notes)}>{data.notes}</span>} /> : null}
+      {notes && data.notes ? (
+        <Part>
+          <p {...stylex.props(styles.notes)}>{data.notes}</p>
+        </Part>
+      ) : null}
       <Problem error={error} />
     </Group>
   );
@@ -559,7 +624,7 @@ function Power() {
           ? pending.when === "now"
             ? `The PC powers off ${pending.deadline_ms ? `at ${when(pending.deadline_ms)}` : "shortly"}.`
             : "The PC powers off when all work is done."
-          : "The server is unreachable until someone starts the PC again."
+          : undefined
       }
     >
       {pending ? (
@@ -572,18 +637,18 @@ function Power() {
         </SmallButton>
       ) : (
         <>
+          <Keyed action="SettingsShutdownIdle" chord="G">
+            <SmallButton disabled={busy} onClick={() => void asked("when_idle")}>
+              When idle
+            </SmallButton>
+          </Keyed>
           <Keyed action="SettingsShutdownNow" chord="Q">
             <ConfirmButton
-              label="Shut down now"
+              label="Now"
               question="Powers off after a 60 second countdown; running answers are lost."
               disabled={busy}
               onConfirm={() => void asked("now")}
             />
-          </Keyed>
-          <Keyed action="SettingsShutdownIdle" chord="G">
-            <SmallButton disabled={busy} onClick={() => void asked("when_idle")}>
-              When all work is done
-            </SmallButton>
           </Keyed>
         </>
       )}
@@ -596,7 +661,7 @@ function OtherServers() {
   const { servers } = usePlatform();
   if (servers === null) return null;
   return (
-    <Group title="Servers">
+    <Group title="Other servers">
       <Part xstyle={styles.tight}>
         <ServerChoicesPanel />
       </Part>
@@ -604,10 +669,11 @@ function OtherServers() {
   );
 }
 
+/** Server › Overview: which server this is, its update, its name and power, and the other servers. */
 export function ServerSection() {
   const connection = useConnection();
   const { busy, error, run } = useChange();
-  const { environment, hostId, remote } = useLinkState();
+  const { remote, hostName } = useLinkState();
   const name = useSetting(
     "server_name",
     async () => expectBody(await connection.call("server.get_name"), "server_name").value,
@@ -616,13 +682,44 @@ export function ServerSection() {
     "health",
     async () => expectBody(await connection.call("server.get_health"), "health").value,
   );
+  const load = useSetting("load", async () => expectBody(await connection.call("load.get"), "load").value);
+  const update = useSetting(
+    "update",
+    async () => expectBody(await connection.call("update.get", { check: false }), "update").value,
+  );
+  const { daemonVersion } = useLinkState();
+  const busyNow = load.data
+    ? `${load.data.running} run${load.data.running === 1 ? "" : "s"} · ${load.data.held} waiting`
+    : `${health.data?.active_jobs ?? 0} jobs`;
   return (
     <>
-      <OtherServers />
+      <Group>
+        <Row
+          start={
+            <IconBox large>
+              <Icon name="server" size={18} />
+            </IconBox>
+          }
+          title={<span {...stylex.props(styles.name)}>{name.data?.name || hostName || "Aurelius"}</span>}
+          hint={remote ? "Through remote access" : "On this computer"}
+        >
+          <Chip tone="ok" dot>
+            Connected
+          </Chip>
+        </Row>
+        <Facts
+          facts={[
+            { label: "Version", value: update.data?.current ?? daemonVersion ?? "Unknown" },
+            { label: "Running since", value: uptimeText(health.data?.started_at_ms, Date.now()) },
+            { label: "Busy now", value: busyNow },
+          ]}
+        />
+      </Group>
+      <ServerUpdate />
       <Group title="This server">
         <Row
-          title="Name"
-          hint={name.data ? `Default: ${name.data.computer_name}. Leave it empty to use that again.` : undefined}
+          title="Server name"
+          hint={name.data && !name.data.name ? `Default: ${name.data.computer_name}` : undefined}
         >
           {name.data ? (
             <NameEditor
@@ -633,28 +730,11 @@ export function ServerSection() {
             />
           ) : null}
         </Row>
-        <Row title="Connected through" hint={remote ? "Remote access" : "This computer"}>
-          <span {...stylex.props(styles.value)}>{environment}</span>
-        </Row>
-        <Row title="Running since" hint={hostId ?? undefined}>
-          <span {...stylex.props(styles.status)}>{when(health.data?.started_at_ms)}</span>
-        </Row>
-        <Row title="Busy now">
-          <span {...stylex.props(styles.status)}>
-            {health.data?.active_jobs ?? 0} job{health.data?.active_jobs === 1 ? "" : "s"}
-          </span>
-        </Row>
-      </Group>
-      <ServerUpdate />
-      <Group title="Power">
-        <Row
-          title="Restart server"
-          hint="Answers that are running now are interrupted; agents pick up again afterwards."
-        >
+        <Row title="Restart server">
           <Keyed action="SettingsRestartServer" chord="E">
             <ConfirmButton
               label="Restart"
-              question="Restart the server now?"
+              question="Answers that are running now are interrupted. Restart the server now?"
               disabled={busy}
               onConfirm={() => void run(() => connection.write("server.restart", undefined, { retry: false }))}
             />
@@ -662,23 +742,27 @@ export function ServerSection() {
         </Row>
         <Power />
       </Group>
+      <OtherServers />
       <Problem error={name.error ?? health.error ?? error} />
     </>
   );
 }
 
+/** Phone notifications: on or off, a test, and the Apple key with its ids. */
 function PushKey({ clients, status }: { clients: { id: string; name: string }[]; status: PushStatus }) {
   const connection = useConnection();
   const { busy, error, run } = useChange();
-  const [form, setForm] = useState({
-    team_id: status.team_id ?? "",
-    key_id: status.key_id ?? "",
-    bundle_id: status.bundle_id ?? "",
-  });
+  const saved = { team_id: status.team_id ?? "", key_id: status.key_id ?? "", bundle_id: status.bundle_id ?? "" };
+  const [form, setForm] = useState(saved);
   const [keyFile, setKeyFile] = useState<string | null>(null);
   const [chosenFile, setChosenFile] = useState<File | null>(null);
   const [phone, setPhone] = useState("");
   const [sent, setSent] = useState(false);
+  const changed =
+    keyFile !== null ||
+    form.team_id !== saved.team_id ||
+    form.key_id !== saved.key_id ||
+    form.bundle_id !== saved.bundle_id;
   const save = () =>
     run(() =>
       connection.write("push.configure", { ...form, ...(keyFile ? { key_p8: keyFile } : {}) }, { retry: false }),
@@ -689,45 +773,71 @@ function PushKey({ clients, status }: { clients: { id: string; name: string }[];
         setChosenFile(null);
       }
     });
+  const field = (key: keyof typeof form, label: string, width: number) => (
+    <Row title={label}>
+      <TextInput
+        label={label}
+        mono
+        width={width}
+        value={form[key]}
+        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+      />
+    </Row>
+  );
   return (
     <Group title="Phone notifications">
       <Row
-        title={status.apns ? "Notifications to phones are on" : "Notifications to phones are off"}
-        hint={status.last_error ?? "Needs an Apple APNs key (.p8)."}
+        title={
+          <>
+            Notifications to phones
+            {status.apns ? <Chip tone="ok">On</Chip> : <Chip>Off</Chip>}
+          </>
+        }
+        hint={status.last_error ?? (sent ? "Sent. It should show on that phone." : undefined)}
       >
-        <TextInput
-          label="Team id"
-          placeholder="Team id"
-          width={110}
-          value={form.team_id}
-          onChange={(e) => setForm({ ...form, team_id: e.target.value })}
-        />
-        <TextInput
-          label="Key id"
-          placeholder="Key id"
-          width={110}
-          value={form.key_id}
-          onChange={(e) => setForm({ ...form, key_id: e.target.value })}
-        />
-        <TextInput
-          label="Bundle id"
-          placeholder="Bundle id"
-          width={150}
-          value={form.bundle_id}
-          onChange={(e) => setForm({ ...form, bundle_id: e.target.value })}
-        />
+        {status.apns && clients.length > 0 ? (
+          <>
+            <Selector
+              label="Phone"
+              isLabelHidden
+              size="sm"
+              variant="secondary"
+              width={180}
+              placeholder="Choose a device"
+              {...(phone ? { value: phone } : {})}
+              options={clients.map((c) => ({ value: c.id, label: c.name }))}
+              onChange={setPhone}
+            />
+            <Keyed action="SettingsPushTest" chord="T">
+              <SmallButton
+                disabled={busy || !phone}
+                onClick={() =>
+                  void run(() => connection.write("push.test", { client_id: phone }, { retry: false })).then(setSent)
+                }
+              >
+                Send a test
+              </SmallButton>
+            </Keyed>
+          </>
+        ) : null}
       </Row>
       <Row
-        title="APNs key (.p8)"
+        title="APNs key"
         hint={
-          keyFile ? "Chosen. It is sent when you save." : status.apns ? "Leave it to keep the current key." : undefined
+          keyFile ? (
+            "Chosen. It is sent when you save."
+          ) : status.apns ? (
+            <span {...stylex.props(styles.mono)}>{`AuthKey_${status.key_id ?? ""}.p8`}</span>
+          ) : (
+            "An Apple APNs key (.p8)"
+          )
         }
       >
         <FileInput
           label="APNs key file"
           isLabelHidden
           accept=".p8"
-          width={220}
+          width={180}
           value={chosenFile}
           onChange={(picked) => {
             const file = Array.isArray(picked) ? (picked[0] ?? null) : picked;
@@ -736,44 +846,27 @@ function PushKey({ clients, status }: { clients: { id: string; name: string }[];
             else setKeyFile(null);
           }}
         />
-        <SmallButton
-          kind="primary"
-          disabled={busy || !form.team_id || !form.key_id || !form.bundle_id}
-          onClick={() => void save()}
-        >
-          Save
-        </SmallButton>
       </Row>
-      {status.apns && clients.length > 0 ? (
-        <Row title="Test notification" hint={sent ? "Sent. It should show on that phone." : undefined}>
-          <Selector
-            label="Phone"
-            isLabelHidden
-            size="sm"
-            variant="secondary"
-            width={200}
-            placeholder="Choose a device"
-            {...(phone ? { value: phone } : {})}
-            options={clients.map((c) => ({ value: c.id, label: c.name }))}
-            onChange={setPhone}
-          />
-          <Keyed action="SettingsPushTest" chord="T">
-            <SmallButton
-              disabled={busy || !phone}
-              onClick={() =>
-                void run(() => connection.write("push.test", { client_id: phone }, { retry: false })).then(setSent)
-              }
-            >
-              Send test
-            </SmallButton>
-          </Keyed>
-        </Row>
+      {field("team_id", "Team id", 180)}
+      {field("key_id", "Key id", 180)}
+      {field("bundle_id", "Bundle id", 180)}
+      {changed ? (
+        <Foot>
+          <SmallButton
+            kind="primary"
+            disabled={busy || !form.team_id || !form.key_id || !form.bundle_id}
+            onClick={() => void save()}
+          >
+            Save
+          </SmallButton>
+        </Foot>
       ) : null}
       <Problem error={error} />
     </Group>
   );
 }
 
+/** Server › Remote & phones: remote access, devices waiting or without an owner, and notifications. */
 export function RemoteSection() {
   const platform = usePlatform();
   const connection = useConnection();
@@ -787,6 +880,7 @@ export function RemoteSection() {
   // Each board member's devices are in Account (`own_devices`); here only what is the server's.
   const own = features.includes(OWN_DEVICES);
   const shown = remoteAccessDevices(data?.clients ?? [], own);
+  const now = Date.now();
   if (platform.kind === "web") {
     return (
       <Group>
@@ -801,13 +895,27 @@ export function RemoteSection() {
     <>
       <Group>
         <Row
-          title="Remote access"
+          title={
+            <>
+              Remote access
+              {data?.enabled ? (
+                <Chip tone="ok" dot>
+                  On
+                </Chip>
+              ) : (
+                <Chip>Off</Chip>
+              )}
+            </>
+          }
           hint={
-            data?.tailscale.dns_name ??
-            data?.tailscale.error ??
-            (data?.tailscale.installed === false
-              ? "Tailscale is not installed."
-              : "Through Tailscale, on your own devices only.")
+            data?.tailscale.dns_name ? (
+              <span {...stylex.props(styles.mono)}>{data.tailscale.dns_name}</span>
+            ) : (
+              (data?.tailscale.error ??
+              (data?.tailscale.installed === false
+                ? "Tailscale is not installed."
+                : "Through Tailscale, on your own devices only."))
+            )
           }
         >
           <Keyed action="SettingsRemoteToggle" chord="O">
@@ -821,20 +929,22 @@ export function RemoteSection() {
             />
           </Keyed>
         </Row>
-        {own ? (
-          <Row title="Your devices" hint="Pair and revoke your own phones and computers under Account." />
-        ) : data?.enabled ? (
-          <PairDevice title="Pair a device" />
-        ) : null}
+        {!own && data?.enabled ? <PairDevice title="Pair a device" /> : null}
       </Group>
       {data && !own ? <PendingPairings pending={data.pending} /> : null}
       {shown.length > 0 ? (
-        <Group title={own ? "Devices without an owner" : "Paired devices"}>
-          {own ? (
-            <Muted>Paired before devices belonged to a board member, and nobody signed in on them since.</Muted>
-          ) : null}
+        <Group title={own ? "Devices without an owner" : "Paired devices"} count={shown.length}>
           {shown.map((c) => (
-            <Row key={c.id} title={c.name} hint={deviceHint(c, when)}>
+            <Row
+              key={c.id}
+              start={
+                <IconBox>
+                  <Icon name={/ios|iphone|ipad|android/i.test(c.platform) ? "phone" : "laptop"} />
+                </IconBox>
+              }
+              title={c.name}
+              hint={deviceHint(c, (ms) => agoText(ms, now))}
+            >
               <Keyed action="SettingsRemove" chord="Del">
                 <ConfirmButton
                   label="Revoke"
