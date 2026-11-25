@@ -237,6 +237,20 @@ fn a_design_session_keeps_that_it_is_one() {
 }
 
 #[test]
+fn a_design_session_always_starts_in_auto_whatever_mode_was_asked() {
+    use aurelius_domain::autonomy::AgentMode;
+    let s = setup();
+    let mut cmd = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut cmd {
+        start.design = true;
+        start.run.mode = Some(AgentMode::Plan);
+    }
+    let (conversation, _) = started(exec_as(&s, Some(s.user), cmd).unwrap());
+    let mode = s.service.store().read(|c| aurelius_storage::conversations::agent_mode(c, conversation)).unwrap();
+    assert_eq!(mode, AgentMode::Auto, "a design writes its pages, which Plan or Ask would stop");
+}
+
+#[test]
 fn the_board_member_who_started_a_session_goes_on_in_it_with_chat_send() {
     let s = setup();
     let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());

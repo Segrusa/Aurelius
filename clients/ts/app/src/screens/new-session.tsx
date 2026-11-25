@@ -302,7 +302,8 @@ export function NewSessionScreen() {
           text: withFolders(text, attach.folders),
           model,
           effort,
-          mode,
+          // A design always runs in Auto: the server decides that, so no mode goes along.
+          mode: design ? "default" : mode,
           images: attach.images,
           files: attach.files,
           design,
@@ -387,6 +388,7 @@ export function NewSessionScreen() {
     "CycleTaskMode",
     () =>
       kind !== "quick" &&
+      !design &&
       setMode(
         cycle(
           MODES.map((m) => m.key as string),
@@ -510,7 +512,7 @@ export function NewSessionScreen() {
                     </Chip>
                   }
                 />
-                {kind !== "quick" ? (
+                {kind !== "quick" && !design ? (
                   <Menu
                     label="Mode"
                     value={mode}

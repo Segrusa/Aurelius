@@ -177,7 +177,9 @@ impl CommandService {
             };
             let title = aurelius_domain::conversation::derive_title(&text);
             aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str())), dispatch, design, own_branch)?;
-            if let Some(mode) = run.mode {
+            // A design writes its pages: Plan or Ask would stop it, so a design is always Auto.
+            let mode = if design { Some(aurelius_domain::autonomy::AgentMode::Auto) } else { run.mode };
+            if let Some(mode) = mode {
                 conv::set_agent_mode(tx, conversation_id, mode)?;
             }
             if run.browser_allowed {

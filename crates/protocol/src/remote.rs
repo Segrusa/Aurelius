@@ -235,8 +235,9 @@ fn command_needs(command: &Command) -> Needs {
         // or screen on needs what turning those on later needs.
         Command::SendProjectMessage(m) if m.conversation_id.is_none() && m.start.needs_approve() => Needs::Cap(Approve),
         Command::StartProjectConversation(m) if m.start.needs_approve() => Needs::Cap(Approve),
-        Command::StartWorkSession(m) if m.run.needs_approve() => Needs::Cap(Approve),
-        Command::DispatchWorkSession(m) if m.run.needs_approve() => Needs::Cap(Approve),
+        // A design session always runs in Auto, whatever mode it asks for.
+        Command::StartWorkSession(m) if m.design || m.run.needs_approve() => Needs::Cap(Approve),
+        Command::DispatchWorkSession(m) if m.design || m.run.needs_approve() => Needs::Cap(Approve),
         Command::SendChatMessage(_)
         | Command::RetryReply(_)
         | Command::StopRun(_)
@@ -687,6 +688,14 @@ mod tests {
         let plan = exec(Command::SetAgentMode(SetAgentMode { conversation_id: id, mode: AgentMode::Plan }));
         assert_eq!(required(&auto), cap(Capability::Approve));
         assert_eq!(required(&plan), cap(Capability::Chat));
+    }
+
+    #[test]
+    fn a_design_session_needs_approve_because_it_runs_in_auto() {
+        use aurelius_domain::{EmployeeId, ProjectId, task::RunSettings, work_session::StartWorkSession};
+        let session = |design: bool| StartWorkSession { project_id: ProjectId::new(), employee_id: EmployeeId::new(), text: "Make a page.".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: RunSettings::default(), confirm_secret: false, design };
+        assert_eq!(required(&exec(Command::StartWorkSession(session(true)))), cap(Capability::Approve));
+        assert_eq!(required(&exec(Command::StartWorkSession(session(false)))), cap(Capability::Chat));
     }
 
     #[test]
