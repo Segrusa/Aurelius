@@ -322,6 +322,29 @@ describe("workBlocks", () => {
     expect(blocks[1]?.atMs).toBe(Number.POSITIVE_INFINITY);
   });
 
+  it("finishes a step that a later answer marks done with TaskUpdate", () => {
+    const made = (id: number, subject: string, activeForm: string) => ({
+      ...call("TaskCreate", { subject, activeForm }),
+      output: `Task #${id} created successfully: ${subject}`,
+    });
+    const update = (taskId: string, status: string) => call("TaskUpdate", { taskId, status });
+    const blocks = workBlocks([
+      work([
+        answer("m1", 100, "", [
+          made(1, "Read the design", "Reading the design"),
+          made(2, "Build the page", "Building the page"),
+          update("1", "in_progress"),
+          call("Read", { file_path: "design.html" }),
+        ]),
+        answer("m2", 200, "", [update("1", "completed"), update("2", "in_progress"), edit("page.tsx")]),
+      ]),
+    ]);
+    expect(blocks.map((b) => [b.title, b.state, b.steps.length])).toEqual([
+      ["Read the design", "done", 1],
+      ["Building the page", "open", 1],
+    ]);
+  });
+
   it("leaves out answers without calls and without words", () => {
     expect(workBlocks([work([answer("m1", 100, "", [])])])).toEqual([]);
   });

@@ -24,11 +24,9 @@ function todoOf(content: unknown, activeForm: unknown, status: unknown): Todo | 
   return words ? { text: words, state } : null;
 }
 
-/** The whole list of the newest TodoWrite call (Claude Code before 2.1.318). */
-function fromTodoWrite(calls: readonly ActivityView[]): Todo[] | null {
-  let best: ActivityView | null = null;
-  for (const a of calls) if (a.tool === TODO_TOOL && (!best || a.offset >= best.offset)) best = a;
-  const list = (best?.input as { todos?: unknown } | undefined)?.todos;
+/** The rows of one TodoWrite call (Claude Code before 2.1.318): always the whole list. */
+function fromTodoWrite(call: ActivityView): Todo[] | null {
+  const list = (call.input as { todos?: unknown } | undefined)?.todos;
   if (!Array.isArray(list)) return null;
   const todos: Todo[] = [];
   for (const item of list as unknown[]) {
@@ -40,56 +38,85 @@ function fromTodoWrite(calls: readonly ActivityView[]): Todo[] | null {
   return todos;
 }
 
-/** The list TaskCreate and TaskUpdate build one call at a time (Claude Code 2.1.318). A run
- *  numbers its items 1, 2, 3 in the order it makes them; the result says the number too. */
-function fromTaskCalls(calls: readonly ActivityView[]): Todo[] {
-  type Item = { subject: string | null; activeForm: string | null; status: string };
-  const items = new Map<string, Item>();
-  for (const a of [...calls].sort((x, y) => x.offset - y.offset)) {
-    if (a.ok === false) continue;
-    const input = (a.input ?? {}) as Record<string, unknown>;
-    if (a.tool === CREATE_TOOL) {
-      const id = /#(\d+)/.exec(a.output ?? "")?.[1] ?? String(items.size + 1);
-      items.set(id, { subject: str(input.subject), activeForm: str(input.activeForm), status: "pending" });
-    } else if (a.tool === UPDATE_TOOL) {
-      const id = String(input.taskId ?? "");
-      const item = items.get(id);
-      if (!item) continue;
-      if (input.status === "deleted") {
-        items.delete(id);
-        continue;
+type TaskItem = { subject: string | null; activeForm: string | null; status: string };
+
+/** Where the fold stands: a TodoWrite snapshot, or the items TaskCreate and TaskUpdate built. */
+type Fold =
+  | { kind: "none" }
+  | { kind: "snapshot"; todos: Todo[] }
+  | { kind: "tasks"; items: Map<string, TaskItem>; top: number };
+
+/**
+ * The todo list over a conversation's answers, oldest first. Since Claude Code 2.1.318 a run
+ * makes it one call at a time: TaskCreate numbers its items 1, 2, 3 (the result says the
+ * number) and TaskUpdate changes one later, often in a later answer, so the list carries over
+ * from answer to answer. A TodoWrite (older CLIs) replaces the whole list. Offsets count per
+ * answer, so each answer is sorted on its own.
+ */
+export function todosAcross(answers: readonly (readonly ActivityView[])[]): Todo[] | null {
+  let fold: Fold = { kind: "none" };
+  for (const activity of answers) {
+    for (const a of [...activity].sort((x, y) => x.offset - y.offset)) {
+      if (a.ok === false) continue;
+      const input = (a.input ?? {}) as Record<string, unknown>;
+      if (a.tool === TODO_TOOL) {
+        const todos = fromTodoWrite(a);
+        if (todos) fold = { kind: "snapshot", todos };
+      } else if (a.tool === CREATE_TOOL) {
+        if (fold.kind !== "tasks") fold = { kind: "tasks", items: new Map(), top: 0 };
+        const id = /#(\d+)/.exec(a.output ?? "")?.[1] ?? String(fold.top + 1);
+        // Numbering that starts over is a new session's list.
+        if (fold.items.has(id) || (id === "1" && fold.top > 0)) fold = { kind: "tasks", items: new Map(), top: 0 };
+        fold.items.set(id, { subject: str(input.subject), activeForm: str(input.activeForm), status: "pending" });
+        fold.top = Math.max(fold.top, Number(id) || 0);
+      } else if (a.tool === UPDATE_TOOL && fold.kind === "tasks") {
+        const id = String(input.taskId ?? "");
+        const item = fold.items.get(id);
+        if (!item) continue;
+        if (input.status === "deleted") {
+          fold.items.delete(id);
+          continue;
+        }
+        if (typeof input.status === "string") item.status = input.status;
+        item.subject = str(input.subject) ?? item.subject;
+        item.activeForm = str(input.activeForm) ?? item.activeForm;
       }
-      if (typeof input.status === "string") item.status = input.status;
-      item.subject = str(input.subject) ?? item.subject;
-      item.activeForm = str(input.activeForm) ?? item.activeForm;
     }
   }
-  const todos: Todo[] = [];
-  for (const item of items.values()) {
-    const todo = todoOf(item.subject, item.activeForm, item.status);
-    if (todo) todos.push(todo);
+  let todos: Todo[] = [];
+  if (fold.kind === "snapshot") todos = fold.todos;
+  else if (fold.kind === "tasks") {
+    for (const item of fold.items.values()) {
+      const todo = todoOf(item.subject, item.activeForm, item.status);
+      if (todo) todos.push(todo);
+    }
   }
-  return todos;
+  return todos.length > 0 ? todos : null;
 }
 
 /** The todo list among one answer's calls, or null when there is none. */
 export function todosOf(activity: readonly ActivityView[]): Todo[] | null {
-  const tasks = activity.some((a) => a.tool === CREATE_TOOL) ? fromTaskCalls(activity) : null;
-  const todos = tasks ?? fromTodoWrite(activity);
-  return todos && todos.length > 0 ? todos : null;
+  return todosAcross([activity]);
 }
 
-/** The newest todo list of a conversation: what is streaming first, then the answers from new to old. */
-export function latestTodos(live: readonly ActivityView[][], messages: readonly MessageView[]): Todo[] | null {
-  for (const activity of live) {
-    const found = todosOf(activity);
-    if (found) return found;
-  }
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const found = todosOf(messages[i]?.activity ?? []);
-    if (found) return found;
-  }
-  return null;
+/** What streams in a conversation now: the newest activity of one answer. */
+export interface LiveActivity {
+  message_id: string;
+  activity: readonly ActivityView[];
+}
+
+/**
+ * The todo list of a conversation as it stands now: every answer from old to new, where what
+ * streams (oldest first) is newer than the stored message it belongs to.
+ */
+export function latestTodos(live: readonly LiveActivity[], messages: readonly MessageView[]): Todo[] | null {
+  const liveOf = new Map(live.map((u) => [u.message_id, u.activity]));
+  const answers = messages
+    .filter((m) => m.role === "assistant" && !m.update)
+    .map((m) => liveOf.get(m.id) ?? m.activity ?? []);
+  const known = new Set(messages.map((m) => m.id));
+  for (const u of live) if (!known.has(u.message_id)) answers.push(u.activity);
+  return todosAcross(answers);
 }
 
 /** "45s", "1m 36s", "2h 05m". */

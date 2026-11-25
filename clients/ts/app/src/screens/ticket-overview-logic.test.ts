@@ -8,6 +8,7 @@ import {
   nowLine,
   openTasks,
   taskTally,
+  todosAcross,
   todosOf,
   todoTally,
   workingLine,
@@ -112,14 +113,72 @@ describe("the todo list", () => {
     ]);
   });
 
+  describe("over several answers (Claude Code 2.1.318)", () => {
+    const made = (n: number, subject: string, activeForm?: string) => ({
+      ...call("TaskCreate", { subject, activeForm }, 0),
+      call_id: `c${n}-${subject}`,
+      output: `Task #${n} created successfully: ${subject}`,
+    });
+    const update = (offset: number, taskId: string, more: Record<string, unknown>) => ({
+      ...call("TaskUpdate", { taskId, ...more }, offset),
+      call_id: `u${offset}-${taskId}`,
+    });
+    const reply = (id: string, activity: ActivityView[]) =>
+      ({ id, role: "assistant", activity }) as unknown as MessageView;
+    const first = [made(1, "Read the design"), made(2, "Build the page", "Building the page"), made(3, "Test it")];
+
+    it("an update in a later answer changes the list an earlier one made", () => {
+      const later = [update(0, "1", { status: "completed" }), update(1, "2", { status: "in_progress" })];
+      expect(todosAcross([first, later])).toEqual([
+        { text: "Read the design", state: "done" },
+        { text: "Building the page", state: "doing" },
+        { text: "Test it", state: "open" },
+      ]);
+      expect(latestTodos([], [reply("m1", first), reply("m2", later)])).toEqual(todosAcross([first, later]));
+    });
+
+    it("items added in a later answer join the earlier list", () => {
+      const later = [made(4, "Add line comments"), update(1, "3", { status: "completed" })];
+      expect(todosAcross([first, later])?.map((t) => [t.text, t.state])).toEqual([
+        ["Read the design", "open"],
+        ["Build the page", "open"],
+        ["Test it", "done"],
+        ["Add line comments", "open"],
+      ]);
+    });
+
+    it("numbering that starts again at 1 is a new list", () => {
+      expect(todosAcross([first, [made(1, "Fresh start")]])).toEqual([{ text: "Fresh start", state: "open" }]);
+    });
+
+    it("a later TodoWrite replaces the list", () => {
+      const later = [todoCall(0, [{ content: "Snapshot", status: "pending" }])];
+      expect(todosAcross([first, later])).toEqual([{ text: "Snapshot", state: "open" }]);
+    });
+
+    it("what streams for a stored answer counts once, in its place", () => {
+      const live = { message_id: "m2", activity: [update(0, "1", { status: "completed" })] };
+      const todos = latestTodos([live], [reply("m1", first), reply("m2", [])]);
+      expect(todos?.[0]).toEqual({ text: "Read the design", state: "done" });
+      expect(todos).toHaveLength(3);
+    });
+  });
+
   it("prefers what streams, then the newest answer", () => {
     const answer = (n: number, text: string) =>
-      ({ id: `m${n}`, activity: [todoCall(0, [{ content: text, status: "pending" }])] }) as unknown as MessageView;
-    const plain = { id: "m3", activity: [] } as unknown as MessageView;
+      ({
+        id: `m${n}`,
+        role: "assistant",
+        activity: [todoCall(0, [{ content: text, status: "pending" }])],
+      }) as unknown as MessageView;
+    const plain = { id: "m3", role: "assistant", activity: [] } as unknown as MessageView;
+    const streaming = (id: string, text: string) => ({
+      message_id: id,
+      activity: [todoCall(0, [{ content: text, status: "pending" }])],
+    });
     expect(latestTodos([], [answer(1, "a"), answer(2, "b"), plain])).toEqual([{ text: "b", state: "open" }]);
-    expect(latestTodos([[todoCall(0, [{ content: "live", status: "pending" }])]], [answer(1, "a")])).toEqual([
-      { text: "live", state: "open" },
-    ]);
+    expect(latestTodos([streaming("m9", "live")], [answer(1, "a")])).toEqual([{ text: "live", state: "open" }]);
+    expect(latestTodos([streaming("m1", "newer")], [answer(1, "a")])).toEqual([{ text: "newer", state: "open" }]);
     expect(latestTodos([], [])).toBeNull();
   });
 

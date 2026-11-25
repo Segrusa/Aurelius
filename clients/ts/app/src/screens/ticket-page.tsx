@@ -206,10 +206,7 @@ function taskLive(messages: readonly MessageView[], live: readonly LiveUpdate[])
       ? { text: last.text, activity: last.activity }
       : null;
   return {
-    todos: latestTodos(
-      [...live].reverse().map((u) => u.activity),
-      [...messages],
-    ),
+    todos: latestTodos(live, messages),
     streaming: newest !== null || messages.some((m) => m.status === "partial"),
     latest,
     all,
