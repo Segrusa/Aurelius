@@ -191,6 +191,7 @@ function Devices() {
             <Keyed action="SettingsRemove" chord="Del">
               <ConfirmButton
                 label="Revoke"
+                kind="secondary"
                 question={`Revoke ${d.name}? It is signed out and must be paired again.`}
                 disabled={busy}
                 onConfirm={() =>
@@ -213,6 +214,7 @@ function Devices() {
           >
             <ConfirmButton
               label="Sign out"
+              kind="secondary"
               question={`Sign out ${s.device_name}?`}
               disabled={busy}
               onConfirm={() =>
@@ -374,6 +376,7 @@ function AppVersion() {
           <Keyed action="SettingsInstallAppUpdate" chord="I">
             <ConfirmButton
               label="Update app"
+              kind="primary"
               question="The app closes and comes back as the new version. Update now?"
               disabled={busy}
               onConfirm={() => void install()}

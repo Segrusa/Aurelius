@@ -810,6 +810,7 @@ export function BackupsSection() {
             <Keyed action="SettingsRestore" chord="R">
               <ConfirmButton
                 label="Restore"
+                kind="secondary"
                 question={`Restore the backup of ${when(b.created_at_ms)}? Aurelius restarts and today's data is replaced.`}
                 disabled={busy}
                 onConfirm={() => void run(() => connection.write("backup.restore", { id: b.id }, { retry: false }))}

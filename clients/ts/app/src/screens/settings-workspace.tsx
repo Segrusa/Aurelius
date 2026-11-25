@@ -18,6 +18,7 @@ import { PairDevice, PendingPairings } from "./settings-devices";
 import {
   Chip,
   ConfirmButton,
+  day,
   Facts,
   Foot,
   Group,
@@ -176,7 +177,7 @@ export function BoardMembersSection() {
                   {off ? <Chip>Disabled</Chip> : null}
                 </>
               }
-              hint={off ? `Since ${when(u.disabled_at_ms)}` : `Board member since ${when(u.created_at_ms)}`}
+              hint={off ? `Since ${day(u.disabled_at_ms)}` : `Added ${day(u.created_at_ms)}`}
             >
               {you || off ? null : <SmallButton onClick={() => setAccess(u)}>Sessions</SmallButton>}
               {you || off ? null : (
@@ -586,6 +587,7 @@ function ServerUpdate() {
           <Keyed action="SettingsInstallUpdate" chord="U">
             <ConfirmButton
               label="Update"
+              kind="primary"
               question="Answers that are running now are interrupted. Update now?"
               disabled={busy}
               onConfirm={() => void update()}
@@ -734,6 +736,7 @@ export function ServerSection() {
           <Keyed action="SettingsRestartServer" chord="E">
             <ConfirmButton
               label="Restart"
+              kind="secondary"
               question="Answers that are running now are interrupted. Restart the server now?"
               disabled={busy}
               onConfirm={() => void run(() => connection.write("server.restart", undefined, { retry: false }))}
@@ -948,6 +951,7 @@ export function RemoteSection() {
               <Keyed action="SettingsRemove" chord="Del">
                 <ConfirmButton
                   label="Revoke"
+                  kind="secondary"
                   question={`Revoke ${c.name}?`}
                   disabled={busy}
                   onConfirm={() =>

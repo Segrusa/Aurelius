@@ -376,12 +376,19 @@ function NavEntry({ section, path, flag }: { section: Section; path: string; fla
         <Icon name={section.icon} size={15} />
       </span>
       <span {...stylex.props(styles.label)}>{section.label}</span>
-      {flag ? <span title={FLAG_TITLES[flag]} {...stylex.props(styles.flag, styles[`flag${flag}`])} /> : null}
+      {flag ? (
+        <span aria-hidden="true" title={FLAG_TITLES[flag]} {...stylex.props(styles.flag, styles[`flag${flag}`])} />
+      ) : null}
     </>
   );
   if (section.to) {
     return (
-      <Link to={section.to} aria-current={on ? "page" : undefined} {...stylex.props(styles.link, on && styles.linkOn)}>
+      <Link
+        to={section.to}
+        aria-current={on ? "page" : undefined}
+        aria-description={flag ? FLAG_TITLES[flag] : undefined}
+        {...stylex.props(styles.link, on && styles.linkOn)}
+      >
         {inner}
       </Link>
     );
@@ -391,6 +398,7 @@ function NavEntry({ section, path, flag }: { section: Section; path: string; fla
       to="/settings/$section"
       params={{ section: section.key }}
       aria-current={on ? "page" : undefined}
+      aria-description={flag ? FLAG_TITLES[flag] : undefined}
       {...stylex.props(styles.link, on && styles.linkOn)}
     >
       {inner}

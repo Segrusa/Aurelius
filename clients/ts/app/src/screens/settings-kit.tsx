@@ -84,9 +84,17 @@ const styles = stylex.create({
     color: "var(--precision-text3)",
     overflowWrap: "anywhere",
   },
-  actions: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 8 },
+  // Capped, so a long confirm question wraps instead of squeezing the row's title.
+  actions: {
+    display: "flex",
+    maxWidth: 440,
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
   keyed: { display: "contents" },
-  question: { fontSize: 12, color: "var(--color-text-secondary)" },
+  question: { maxWidth: 260, fontSize: 12, textAlign: "end", color: "var(--color-text-secondary)" },
   form: { display: "flex", alignItems: "center", gap: 8 },
   muted: { margin: 0, fontSize: 12, lineHeight: 1.5, color: "var(--precision-text3)" },
   // The input takes its font from these two, and has no styling of its own to pass.
@@ -442,16 +450,19 @@ export function ConfirmButton({
   question,
   onConfirm,
   disabled,
+  kind = "danger",
 }: {
   label: string;
   question: string;
   onConfirm: () => void;
   disabled?: boolean;
+  /** How the first button looks; the confirming one is always the danger kind. */
+  kind?: keyof typeof VARIANTS;
 }) {
   const [asking, setAsking] = useState(false);
   if (!asking) {
     return (
-      <SmallButton kind="danger" disabled={disabled ?? false} onClick={() => setAsking(true)}>
+      <SmallButton kind={kind} disabled={disabled ?? false} onClick={() => setAsking(true)}>
         {label}
       </SmallButton>
     );
@@ -561,6 +572,11 @@ export function Muted({ children }: { children: ReactNode }) {
 
 export function when(ms: number | null | undefined): string {
   return ms ? new Date(ms).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "Never";
+}
+
+/** "25 Nov": a day without the time, as Settings lists when something began. */
+export function day(ms: number | null | undefined): string {
+  return ms ? new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "Never";
 }
 
 export function bytes(n: number): string {
