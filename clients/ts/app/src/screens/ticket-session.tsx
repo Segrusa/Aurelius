@@ -58,6 +58,7 @@ import { type SessionSlots, TicketSessionBody } from "./chat";
 import { readOnlyBar } from "./chat-logic";
 import { parseDeadline, parseLabels, useModels } from "./dialogs";
 import { isQuick } from "./quick-logic";
+import { type Finish, FinishCard, finishRunText, useFinish } from "./review-finish";
 import {
   DesignPagesSection,
   FilesWritten,
@@ -148,6 +149,7 @@ const styles = stylex.create({
     paddingInline: 24,
     paddingBottom: 8,
   },
+  gateFlush: { maxWidth: "none", maxHeight: "none", overflowY: "visible", paddingInline: 0, paddingBottom: 0 },
   centre: {
     display: "flex",
     minHeight: 0,
@@ -191,6 +193,9 @@ const styles = stylex.create({
   mono: { fontFamily: "var(--font-family-code)", fontSize: 12 },
   olderPanel: { minHeight: 0, flexGrow: 1, flexBasis: 0, overflowY: "auto" },
   count: { marginInlineStart: 4, color: "var(--precision-text3)" },
+  green: { color: "var(--color-text-success)" },
+  blue: { color: "var(--color-text-info)" },
+  red: { color: "var(--color-text-error)" },
   // DESCRIPTION_LINES: StyleX needs the literal here.
   folded: { display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 3, overflow: "hidden" },
   foldButton: { marginTop: 4 },
@@ -414,9 +419,12 @@ function Session({
   const conversation = features.includes("ticket_channels") ? (t.conversation_id ?? null) : null;
   const closed = readOnly(t, null);
   const dock = usePropertiesDock();
-  const gate = <TicketGate detail={detail} t={t} />;
-  const top = <PageTop t={t} />;
   const work = useTicketWork(detail.tasks);
+  const finish = useFinish(detail, t, work);
+  const gate = <TicketGate detail={detail} t={t} finish={finish} />;
+  // In the Activity tab the card lines up with the Plan under it, as in design/review-finish.html.
+  const panelGate = <TicketGate detail={detail} t={t} finish={finish} flush />;
+  const top = <PageTop t={t} />;
   const asks = useTicketAsks(detail, t, work);
   // A link to a message or a thread opens the Timeline; else the Activity is what a ticket opens on.
   const [tab, setTab] = useState<TicketTab>(message || thread ? "timeline" : "activity");
@@ -437,7 +445,9 @@ function Session({
       t={t}
       work={work}
       asks={asks}
-      gate={gate}
+      gate={panelGate}
+      finish={finish?.kind ?? null}
+      mergeHash={finish?.merge?.hash ?? null}
       description={top}
       onTimeline={(name) => {
         setWho(name);
@@ -447,7 +457,7 @@ function Session({
   );
   const aside = (
     <PropertiesPanel dock={dock} label="Ticket properties" wide>
-      <Properties detail={detail} t={t} />
+      <Properties detail={detail} t={t} finish={finish} />
     </PropertiesPanel>
   );
   const slots: SessionSlots = {
@@ -559,15 +569,31 @@ function Head({
   );
 }
 
-/** The decision of the moment, right above the composer: the column's gate, or what the column says. */
-export function TicketGate({ detail, t }: { detail: TicketDetail; t: TicketView }) {
+/**
+ * The decision of the moment, right above the composer: the column's gate, or what the column says.
+ * Review and Done show the finish card (ticket #89) when `finish` is given.
+ */
+export function TicketGate({
+  detail,
+  t,
+  finish = null,
+  flush = false,
+}: {
+  detail: TicketDetail;
+  t: TicketView;
+  finish?: Finish | null;
+  /** Inside the Activity column: no padding or height cap of its own. */
+  flush?: boolean;
+}) {
   const { status } = useLinkState();
   const { choosing, line } = useDispatcherLine(t);
   const kind = gateOf(t);
   const root = useMessages(kind === "plan" ? detail.root_task?.conversation_id : null);
   const check = doneCheck(detail);
   const body =
-    kind === "review" ? (
+    kind === "review" && finish ? (
+      <FinishCard key={t.version} detail={detail} t={t} finish={finish} />
+    ) : kind === "review" ? (
       <ReviewGate
         key={t.version}
         keyed
@@ -585,13 +611,18 @@ export function TicketGate({ detail, t }: { detail: TicketDetail; t: TicketView 
         t={t}
         plan={root.isPending ? undefined : latestPlan(root.data?.messages ?? [])}
       />
-    ) : t.archived_at_ms ? null : (
+    ) : t.archived_at_ms ? null : t.column === "done" && finish && !isQuick(t) ? (
+      <>
+        <FinishCard detail={detail} t={t} finish={finish} />
+        <StatusBox t={t} choosing={choosing} dispatcherLine={line} session />
+      </>
+    ) : (
       // Status in an open column; on Done only a summary to retry or a quick task's merge.
       <StatusBox t={t} choosing={choosing} dispatcherLine={line} session />
     );
   if (!body) return null;
   return (
-    <section aria-label="Your decision" {...stylex.props(styles.gate)}>
+    <section aria-label="Your decision" {...stylex.props(styles.gate, flush && styles.gateFlush)}>
       {body}
     </section>
   );
@@ -638,7 +669,7 @@ function RunChips({ t }: { t: TicketView }) {
 type Section = "properties" | "files";
 
 /** The details panel: tabs for the ticket's data and its files (its plan and history are the Activity and Timeline tabs). */
-function Properties({ detail, t }: { detail: TicketDetail; t: TicketView }) {
+function Properties({ detail, t, finish }: { detail: TicketDetail; t: TicketView; finish: Finish | null }) {
   const platform = usePlatform();
   const [tab, setTab] = useState<Section>("properties");
   const write = useTicketWrite();
@@ -700,14 +731,14 @@ function Properties({ detail, t }: { detail: TicketDetail; t: TicketView }) {
         {tab === "files" ? (
           <FilesTab detail={detail} t={t} onAddFiles={() => platform.pickFiles().then(addFiles, addFailed)} />
         ) : (
-          <PropertiesTab detail={detail} t={t} />
+          <PropertiesTab detail={detail} t={t} finish={finish} />
         )}
       </div>
     </div>
   );
 }
 
-function PropertiesTab({ detail, t }: { detail: TicketDetail; t: TicketView }) {
+function PropertiesTab({ detail, t, finish }: { detail: TicketDetail; t: TicketView; finish: Finish | null }) {
   const { features, status, user } = useLinkState();
   const employees = useEmployees();
   const members = useMembers();
@@ -734,7 +765,7 @@ function PropertiesTab({ detail, t }: { detail: TicketDetail; t: TicketView }) {
       <TicketDesign detail={detail} t={t} />
       <SideSection title="Run">
         <SideRow name="Status">
-          {root ? <RootState task={root} /> : <span {...stylex.props(styles.third)}>Not started</span>}
+          {root ? <RootState task={root} finish={finish} /> : <span {...stylex.props(styles.third)}>Not started</span>}
         </SideRow>
         <SideRow name="Owner">
           {open && ownerChoosable(t) ? (
@@ -881,10 +912,13 @@ function FilesTab({ detail, t, onAddFiles }: { detail: TicketDetail; t: TicketVi
 }
 
 /** The main task's state with the step of its plan: "Running · step 3 of 4". */
-function RootState({ task }: { task: TaskView }) {
+function RootState({ task, finish }: { task: TaskView; finish: Finish | null }) {
   const messages = useMessages(task.conversation_id ?? null);
   const todos = latestTodos([], messages.data?.messages ?? []);
   const state = taskStateLine(task);
+  // While the ticket finishes, the run's state says what the finish card says (ticket #89).
+  const finishing = finishRunText(finish);
+  if (finishing) return <span {...stylex.props(styles[finishing.tone])}>{finishing.text}</span>;
   return (
     <span style={{ color: state.color }}>
       {todos && todos.length > 0 && state.text === "Running"

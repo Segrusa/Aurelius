@@ -277,7 +277,7 @@ for (const theme of ["dark", "light"] as const) {
       }
       // A ticket opens as its session (ticket #70); the old Board link redirects to it.
       await page.goto(`${site.origin}/board?ticket=t1`);
-      await page.getByText("In review · your decision").waitFor();
+      await page.getByText("Ready for your review").waitFor();
       await shoot("ticket-session");
       await page.goto(`${site.origin}/board`);
       await page
