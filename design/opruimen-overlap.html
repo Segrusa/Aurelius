@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Overlapping concepts — six choices</title>
+<style>
+  :root {
+    color-scheme: light;
+    --body: #f6f6f4; --surface: #ffffff; --sunk: #f1f1ee;
+    --text: #1b1c1e; --text2: #55595f; --text3: #868a90;
+    --line: #e4e4e0; --line2: #ececE8; --line-em: #d3d3ce;
+    --accent: #1f6b45; --accent-soft: #e4f2ea;
+    --warning: #a8650f; --warning-soft: #fbf0de;
+    --error: #b4332e; --error-soft: #fbe7e5;
+    --info: #2f5fc4; --info-soft: #e7eefc;
+    --purple: #6b3fb5; --purple-soft: #efe7fb;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--body); color: var(--text); font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--accent); }
+  code { font-family: var(--mono); font-size: 12.5px; background: var(--sunk); padding: 1px 5px; border-radius: 4px; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  h2 { font-size: 20px; margin: 0; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text3); margin: 28px 0 10px; font-weight: 600; }
+  p { margin: 0 0 10px; }
+  ul { margin: 0 0 10px; padding-left: 20px; }
+  li { margin: 2px 0; }
+
+  .top { position: sticky; top: 0; z-index: 10; background: rgb(246 246 244 / .92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .top nav { max-width: 1240px; margin: 0 auto; display: flex; gap: 4px; padding: 8px 24px; flex-wrap: wrap; }
+  .top a { text-decoration: none; color: var(--text2); padding: 5px 10px; border-radius: 999px; font-size: 13px; font-weight: 500; }
+  .top a:hover { background: var(--sunk); color: var(--text); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 28px 24px 80px; }
+  .lead { color: var(--text2); max-width: 840px; }
+  .note { font-size: 12.5px; color: var(--text3); }
+
+  section.point { margin-top: 44px; padding-top: 28px; border-top: 1px solid var(--line-em); scroll-margin-top: 56px; }
+  .ph { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+  .num { font: 600 13px var(--mono); color: var(--text3); }
+  .q { color: var(--text2); margin-top: 6px; max-width: 900px; }
+
+  .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  figure img { display: block; width: 100%; height: auto; border-bottom: 1px solid var(--line); cursor: zoom-in; }
+  figcaption { padding: 8px 12px 10px; font-size: 12.5px; color: var(--text2); }
+  figcaption b { color: var(--text); }
+
+  .facts { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; margin-top: 14px; }
+  .facts ul { margin: 0; }
+  .facts li { color: var(--text2); }
+  .facts li b { color: var(--text); font-weight: 600; }
+
+  .two { display: grid; grid-template-columns: 1.6fr 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 1000px) { .two { grid-template-columns: 1fr; } }
+
+  .gone { background: var(--error-soft); border: 1px solid #efc9c5; border-radius: 10px; padding: 12px 16px; }
+  .gone ul { margin: 0; }
+  .gone li::marker { content: "−  "; color: var(--error); font-weight: 700; }
+  .stays li::marker { content: "=  "; color: var(--text3); }
+  .adds li::marker { content: "+  "; color: var(--accent); font-weight: 700; }
+
+  .decide { background: var(--surface); border: 1px solid var(--line-em); border-radius: 12px; padding: 14px 16px; margin-top: 22px; }
+  .decide h4 { margin: 0 0 8px; font-size: 14px; }
+  .opt { display: grid; grid-template-columns: 32px 1fr; gap: 6px 10px; padding: 8px 0; border-top: 1px solid var(--line2); }
+  .decide h4 + .opt { border-top: 0; }
+  .opt .k { font: 700 13px var(--mono); color: var(--text3); }
+  .opt.rec .k { color: var(--accent); }
+  .opt .t b { font-weight: 600; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); margin-left: 6px; vertical-align: 1px; }
+
+  table.t { border-collapse: collapse; width: 100%; background: var(--surface); border: 1px solid var(--line); font-size: 13px; }
+  table.t th, table.t td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+  table.t th { font-size: 12px; color: var(--text3); font-weight: 600; background: var(--sunk); }
+  table.t tr:last-child td { border-bottom: 0; }
+  .keep { color: var(--accent); font-weight: 600; white-space: nowrap; }
+  .narrow { color: var(--info); font-weight: 600; white-space: nowrap; }
+  .rename { color: var(--warning); font-weight: 600; white-space: nowrap; }
+  .drop { color: var(--error); font-weight: 600; white-space: nowrap; }
+  .old { color: var(--text3); }
+
+  /* ===== drawn desktop mockups (proposal) ===== */
+  .mock { background: var(--surface); border: 1px solid var(--line-em); border-radius: 12px; overflow: hidden; box-shadow: 0 1px 2px rgb(0 0 0 / .04); font-size: 13px; }
+  .mock .bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); min-height: 44px; flex-wrap: wrap; }
+  .mock .bar .crumb { color: var(--text3); }
+  .mock .bar .title { font-weight: 600; }
+  .mock .bar .end { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-em); background: var(--surface); border-radius: 7px; padding: 4px 10px; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+  .btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+  .chip.live { background: var(--accent-soft); color: var(--accent); }
+  .chip.ro { background: var(--sunk); color: var(--text2); border: 1px solid var(--line-em); }
+  .chip.amber { background: var(--warning-soft); color: var(--warning); }
+  .chip.blue { background: var(--info-soft); color: var(--info); }
+  .chip.purple { background: var(--purple-soft); color: var(--purple); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; display: inline-block; }
+  .feed { padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { display: grid; grid-template-columns: 28px 1fr; gap: 10px; }
+  .av { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+  .av.s { background: #555b62; border-radius: 50%; } .av.f { background: #3e5cc2; } .av.t { background: #2b7a55; }
+  .av.sm { width: 22px; height: 22px; font-size: 11.5px; border-radius: 6px; }
+  .msg .who { font-weight: 600; } .msg .who span { color: var(--text3); font-weight: 400; margin-left: 6px; font-size: 12px; }
+  .tool { font: 12px var(--mono); color: var(--text2); background: var(--sunk); border-radius: 6px; padding: 5px 9px; margin-top: 4px; }
+  .composer { margin: 4px 16px 14px; border: 1px solid var(--line-em); border-radius: 12px; padding: 10px 12px; }
+  .composer .hint { color: var(--text3); }
+  .composer .chips { display: flex; gap: 14px; justify-content: flex-end; font-size: 12px; color: var(--text3); margin-top: 6px; flex-wrap: wrap; }
+  .composer .chips b { color: var(--text); font-weight: 500; }
+  .readonly { margin: 4px 16px 14px; border: 1px dashed var(--line-em); border-radius: 12px; padding: 10px 12px; display: flex; gap: 10px; align-items: center; background: var(--sunk); flex-wrap: wrap; }
+  .readonly .txt { color: var(--text2); flex: 1; min-width: 220px; }
+  .side { border-left: 1px solid var(--line); padding: 12px 14px; font-size: 12.5px; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; }
+  .kv .k { color: var(--text3); }
+  .grid2 { display: grid; grid-template-columns: 1fr 250px; }
+  .pill-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 4px; }
+
+  .rows { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .rows.flat { border: 0; border-radius: 0; }
+  .row { display: flex; gap: 10px; align-items: center; padding: 9px 12px; border-top: 1px solid var(--line2); }
+  .row:first-child { border-top: 0; }
+  .row .main { flex: 1; min-width: 0; }
+  .sub { color: var(--text3); font-size: 12px; }
+  .row .end { margin-left: auto; display: flex; gap: 8px; align-items: center; color: var(--text3); font-size: 12px; white-space: nowrap; }
+  .grp { font-size: 11.5px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .05em; padding: 10px 12px 4px; border-top: 1px solid var(--line2); }
+  .mark { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 11.5px; flex-shrink: 0; }
+  .m-n { background: #3e5cc2; } .m-h { background: #2b7a55; } .m-w { background: #a2661f; } .m-d { background: #8a4fa0; }
+
+  .counts { display: grid; grid-template-columns: repeat(6, 1fr); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .counts > div { padding: 10px 12px; border-left: 1px solid var(--line2); }
+  .counts > div:first-child { border-left: 0; }
+  .counts .n { font-size: 20px; font-weight: 650; }
+  .counts .l { color: var(--text3); font-size: 12px; }
+  .counts .bar2 { height: 3px; border-radius: 2px; margin-top: 6px; }
+
+  .sec-t { font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text3); margin: 14px 0 6px; display: flex; }
+  .sec-t a { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; }
+  .needs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .need { border: 1px solid var(--line); border-left: 3px solid var(--warning); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; }
+  .need .m { color: var(--text3); font-size: 11.5px; }
+  .need b { display: block; }
+
+  /* ===== drawn phones (mobile) ===== */
+  .phones { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+  .phone { width: 262px; border: 8px solid #222; border-radius: 34px; background: #fafaf8; overflow: hidden; font-size: 12.5px; flex-shrink: 0; }
+  .phone .sb { height: 26px; display: flex; justify-content: space-between; padding: 6px 18px 0; font-size: 11px; font-weight: 600; }
+  .phone .nav { padding: 2px 14px 6px; color: var(--accent); font-size: 12.5px; }
+  .phone .lt { font-size: 22px; font-weight: 700; padding: 0 14px 8px; line-height: 1.25; }
+  .phone .body { padding: 0 10px; min-height: 340px; }
+  .phone .grp2 { background: #fff; border-radius: 10px; overflow: hidden; margin: 6px 0 10px; border: 1px solid var(--line2); }
+  .phone .gr { padding: 8px 10px; border-top: 1px solid var(--line2); display: flex; gap: 8px; align-items: center; }
+  .phone .gr:first-child { border-top: 0; }
+  .phone .gr .v { margin-left: auto; color: var(--text3); white-space: nowrap; }
+  .phone .gr .chev::after { content: " ›"; color: var(--text3); }
+  .phone .eb { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); padding: 6px 4px 0; font-weight: 600; }
+  .phone .seg { display: flex; background: #e9e9e5; border-radius: 8px; padding: 2px; margin: 0 0 8px; }
+  .phone .seg span { flex: 1; text-align: center; padding: 4px 0; border-radius: 6px; font-weight: 500; color: var(--text2); }
+  .phone .seg span.on { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+  .phone .tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); background: #fff; padding: 6px 0 12px; font-size: 10px; text-align: center; color: var(--text3); }
+  .phone .tabs .on { color: var(--accent); font-weight: 600; }
+  .phone .tabs i { display: block; font-style: normal; font-size: 15px; line-height: 1.2; }
+  .phone .bub { background: #fff; border: 1px solid var(--line2); border-radius: 10px; padding: 7px 9px; margin: 6px 0; }
+  .phone .bub .w { font-weight: 600; font-size: 11.5px; }
+  .phone .ro { margin: 8px 0; border: 1px dashed var(--line-em); border-radius: 10px; padding: 8px; background: var(--sunk); color: var(--text2); font-size: 11.5px; }
+  .caption { font-size: 12px; color: var(--text2); margin-top: 8px; max-width: 262px; }
+  .drawn { font-size: 11px; color: var(--text3); font-style: italic; }
+  .strike { text-decoration: line-through; color: var(--error); }
+  .new { color: var(--accent); font-weight: 600; }
+  .phone-notes { max-width: 440px; }
+
+  .lightbox { position: fixed; inset: 0; background: rgb(0 0 0 / .8); display: none; place-items: center; z-index: 20; cursor: zoom-out; padding: 24px; }
+  .lightbox.on { display: grid; }
+  .lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div class="top"><nav aria-label="Points">
+  <a href="#words">Words</a>
+  <a href="#p1">1 · Four ways to work</a>
+  <a href="#p2">2 · Needs attention</a>
+  <a href="#p3">3 · Overview, Board, History</a>
+  <a href="#p4">4 · Workspace lists</a>
+  <a href="#p5">5 · Model choice</a>
+  <a href="#p6">6 · Two “Sessions”</a>
+  <a href="#decide">Your choices</a>
+</nav></div>
+
+<main class="wrap">
+  <h1>Overlapping concepts: six choices</h1>
+  <p class="lead">OPR-5 (ticket #91). For each point: today's screens, a proposal, what disappears and what changes on mobile.
+  Each point ends with options. <b>A</b> is my recommendation and the others are real alternatives. You choose per point; nothing is built before you choose.
+  Desktop and mobile use the same words throughout (see <a href="#words">Words</a>).</p>
+  <p class="note">The desktop screenshots come from today's app on <code>main</code> (fe03be1c), rendered against the e2e fake server with made-up data.
+  The mobile app has no screenshot setup, so its screens here are <b>drawn from the Flutter code</b> and marked “Drawn”. Click a screenshot to enlarge it.</p>
+
+  <!-- ================= WORDS ================= -->
+  <section class="point" id="words">
+    <div class="ph"><h2>Words: one list for desktop and mobile</h2></div>
+    <p class="q">If all six recommendations are chosen, the UI uses these words and no others for these concepts. The server keeps its own names (<code>project_id</code>, <code>task</code>, <code>session.list</code>); only UI text changes.</p>
+    <table class="t">
+      <thead><tr><th>Word</th><th>Means</th><th>Replaces in the UI</th></tr></thead>
+      <tbody>
+        <tr><td><b>Workspace</b></td><td>A folder with its board, sessions and settings</td><td class="old">Project (desktop <code>/projects</code>, “New project”, Activity log “All projects”, mobile Profile › Projects)</td></tr>
+        <tr><td><b>Session</b></td><td>You talk with one employee in a workspace and steer it yourself</td><td class="old">Quick task</td></tr>
+        <tr><td><b>Ticket</b></td><td>Work you hand off. It goes over the Board, gets a plan, runs and comes back for review</td><td class="old">—</td></tr>
+        <tr><td><b>Run</b></td><td>One employee's work on a ticket, read-only. You open it from the ticket</td><td class="old">Task run as a page of its own, “Run by Flux”, “Open task”</td></tr>
+        <tr><td><b>Inbox</b></td><td>The bell: everything that waits for you, in every workspace</td><td class="old">—</td></tr>
+        <tr><td><b>Needs you</b></td><td>The Inbox rows that wait for your answer: question, approval, plan, review</td><td class="old">“Needs decision” and “Ready for review” as separate groups</td></tr>
+        <tr><td><b>Queue</b></td><td>What one employee has to do, in order</td><td class="old">The employee page's “Inbox” tab, mobile “At work for Flux”</td></tr>
+        <tr><td><b>Activity log</b></td><td>A technical log of deliveries, queue steps and run steps (Settings › Advanced)</td><td class="old">—</td></tr>
+        <tr><td><b>My defaults</b></td><td>Your model, effort, mode and subagent model for what you start</td><td class="old">Company default model, Workspace › Model &amp; effort, “Employee's default”, “Owner's default”</td></tr>
+        <tr><td><b>Signed in on</b></td><td>The devices where you are signed in</td><td class="old">The mobile account screen titled “Sessions”, the board-member sheet's “Sessions”</td></tr>
+        <tr><td><b>New session</b></td><td>Where you start a session or a ticket</td><td class="old">The mobile tab “Chat”</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ================= 1 ================= -->
+  <section class="point" id="p1">
+    <div class="ph"><span class="num">1</span><h2>Working with an employee: four ways</h2></div>
+    <p class="q">Session, ticket, task run and quick task. On desktop, sessions and task runs share <code>EmployeeChat</code>. Could a task run become a read-only view of a session?</p>
+
+    <h3>Now</h3>
+    <div class="shots">
+      <figure><img src="opruimen-overlap/1-session.webp" alt="A session: chat with Flux, properties, composer with Model, Effort, Mode"><figcaption><b>Session</b> <code>/session/$id</code>: chat, composer with Model · Effort · Mode, Properties.</figcaption></figure>
+      <figure><img src="opruimen-overlap/1-task-run.webp" alt="A task run: the same chat screen with a task head"><figcaption><b>Task run</b> <code>/tasks/$id</code>: <i>the same screen</i>, with the head “Northwind API › #22 › Run by Flux” and a composer you can write in.</figcaption></figure>
+      <figure><img src="opruimen-overlap/1-ticket.webp" alt="A ticket with Plan, a Working now card and properties"><figcaption><b>Ticket</b> <code>/ticket/22</code>: Plan, one card per employee (“Open task” leads to the task run), properties.</figcaption></figure>
+      <figure><img src="opruimen-overlap/1-new-session.webp" alt="New session with a Ticket | Session switch"><figcaption><b>New session</b>: Ticket | Session. <b>Quick task</b> only appears here on a server without sessions.</figcaption></figure>
+    </div>
+    <div class="facts"><ul>
+      <li><b>Session</b>: you start it and steer it. It has its own worktree (<code>session/…</code>), and messages go in with <code>chat.send</code>.</li>
+      <li><b>Ticket</b>: you hand off. The dispatcher or the owner plans and delegates. Board, Review, merge.</li>
+      <li><b>Task run</b>: the conversation of one task of a ticket (the main task or a delegated part). It looks like a session and you can type in it (<code>employee.send_message</code>), so you can steer a part of a ticket <i>past its owner</i>. The plan, review and merge of that work belong to the ticket.</li>
+      <li><b>Quick task</b>: a ticket kind (<code>kind: "quick"</code>) that starts at once and merges on “Approve and merge”. On a server with <code>work_sessions</code> it <i>can no longer be made</i> (<code>quickCreatable</code>). Old quick tickets only keep a “Quick” tag and a “Quick tasks” Board filter.</li>
+    </ul></div>
+
+    <h3>Proposal: two ways to work, and a run is a read-only view</h3>
+    <p>There are only two ways to start work: <b>Session</b> (you talk and steer) and <b>Ticket</b> (you hand off). A <b>run</b> is not a third way. It is the read-only view of one employee's work inside a ticket: the same screen as a session, without the composer. You open it from its ticket, not from a list of its own.</p>
+    <div class="two">
+      <div class="mock" aria-label="Proposal: a run, read-only">
+        <div class="bar"><span class="crumb">Northwind API ›</span><span class="crumb">#22 Fix token refresh race ›</span><span class="title">Trace's run</span><span class="chip live"><span class="dot"></span>Working</span><span class="chip ro">Read-only</span>
+          <span class="end"><span class="btn">Back to #22</span><span class="btn">Stop run</span></span></div>
+        <div class="grid2">
+          <div>
+            <div class="feed">
+              <div class="msg"><span class="av f">F</span><div><div class="who">Flux <span>delegated · 19:30</span></div>Write a test that sends two requests that both get a 401 at the same moment.</div></div>
+              <div class="msg"><span class="av t">T</span><div><div class="who">Trace <span>19:31</span></div>I'm adding <code>refresh_race.test.ts</code> next to the client tests.
+                <div class="tool">Write src/api/refresh_race.test.ts</div><div class="tool">Bash pnpm vitest refresh_race</div></div></div>
+            </div>
+            <div class="readonly"><span class="txt">This is Trace's work on ticket #22. To steer it, write in the ticket: Flux, its owner, reads it and passes it on.</span><span class="btn pri">Write in #22</span></div>
+          </div>
+          <div class="side"><div class="kv">
+            <span class="k">Ticket</span><span>#22 · Doing</span>
+            <span class="k">Employee</span><span>Trace</span>
+            <span class="k">Asked by</span><span>Flux (owner)</span>
+            <span class="k">Model</span><span>Your default · Opus 5.5</span>
+            <span class="k">Branch</span><span>ticket/22-trace-1a2b</span>
+            <span class="k">Started</span><span>19:30</span>
+          </div></div>
+        </div>
+      </div>
+      <div>
+        <ul class="adds">
+          <li>The header becomes “#22 › Trace's run” with a <b>Read-only</b> chip. The composer is replaced by one line and a <b>Write in #22</b> button, which opens the ticket's discussion with the cursor in it.</li>
+          <li>A question or approval the run asks is still answered right in the feed (the existing ApprovalCard and question form), so read-only never blocks the run.</li>
+          <li><b>Stop run</b> stays in the header. Cancel stays on the ticket's Activity card, where the owner sees it.</li>
+          <li>On the ticket's Activity card, “Open task” becomes <b>Open run</b>.</li>
+        </ul>
+        <p><b>Why read-only:</b> a ticket has one owner who plans and delegates. Typing into a part bypasses that owner, and the plan no longer says what happens. In a session nobody else plans, so there you type.</p>
+        <p><b>The main task's run</b> opens the same read-only way. The ticket page already shows its work (Plan, Activity, Timeline).</p>
+      </div>
+    </div>
+
+    <h3>What disappears</h3>
+    <div class="gone"><ul>
+      <li>The composer on a task run (<code>employee.send_message</code> from that screen), with its Model, Effort and Mode chips.</li>
+      <li>The word “task” for this view: “Run by Flux” and “Open task” become “Trace's run” and “Open run”.</li>
+      <li><b>Quick task</b> in the UI: the “Quick tasks” Board filter, the “Quick” tag and the Quick task choice on old servers. Old quick tickets stay readable as normal tickets. Their “Approve and merge” stays while one is still open, because that merge is a server job (<code>ticket.quick_merge</code>).</li>
+      <li>Nothing on the server: <code>quick_task</code> and <code>employee.send_message</code> stay in protocol 5.</li>
+    </ul></div>
+
+    <h3>Mobile</h3>
+    <div class="phones">
+      <div>
+        <div class="phone" aria-label="Mobile: a run, read-only">
+          <div class="sb"><span>9:41</span><span>●●●</span></div>
+          <div class="nav">‹ #22</div>
+          <div class="lt" style="font-size:18px">Trace's run</div>
+          <div class="body">
+            <div class="pill-row"><span class="chip live"><span class="dot"></span>Working</span><span class="chip ro">Read-only</span></div>
+            <div class="bub"><div class="w">Flux</div>Write a test that sends two requests that both get a 401 at once.</div>
+            <div class="bub"><div class="w">Trace</div>I'm adding refresh_race.test.ts next to the client tests.</div>
+            <div class="ro">This is Trace's work on ticket #22. To steer it, write in the ticket.<br><b style="color:var(--accent)">Write in #22</b></div>
+          </div>
+        </div>
+        <p class="caption"><code>/project/:pid/task/:tid</code> (<code>task_page.dart</code>) gets the same header, chip and line, and loses its text field. <span class="drawn">Drawn.</span></p>
+      </div>
+      <div class="phone-notes">
+        <ul>
+          <li>New session already offers <b>Session | Ticket</b> on mobile. The Quick task choice and the “Quick tasks” filter chips (<code>lib/data/quick_task.dart</code>) go, as on desktop.</li>
+          <li>“Open test task” on the ticket bar becomes <b>Open run</b>.</li>
+          <li>The project page's <b>Tasks</b> tab goes (see point 3).</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="decide"><h4>Choose for point 1</h4>
+      <div class="opt rec"><span class="k">A</span><span class="t"><b>A run is read-only, and quick task goes.</b> Two ways to work: Session and Ticket. A run opens from its ticket, without a composer. <span class="tag">Recommended</span></span></div>
+      <div class="opt"><span class="k">B</span><span class="t"><b>A run stays writable, and quick task goes.</b> Only the words change (“Trace's run”, “Open run”). You can still steer a part directly.</span></div>
+      <div class="opt"><span class="k">C</span><span class="t"><b>Keep all four.</b> No change.</span></div>
+    </div>
+  </section>
+
+  <!-- ================= 2 ================= -->
+  <section class="point" id="p2">
+    <div class="ph"><span class="num">2</span><h2>Seven places for “what needs attention”</h2></div>
+    <p class="q">The bell, toasts, the activity bar, Overview › Needs you/Running now, Settings › Activity log, the employee's Inbox tab (really its queue) and the ticket's Activity/Timeline. Which stay, and what does each one do?</p>
+
+    <h3>Now</h3>
+    <div class="shots">
+      <figure><img src="opruimen-overlap/2-bell.webp" alt="The bell dropdown"><figcaption><b>Bell</b>: the groups Needs decision, Ready for review and Updates. The same review also shows in Overview › Needs you, as a red dot in the sidebar and as a badge on the rail.</figcaption></figure>
+      <figure><img src="opruimen-overlap/2-activity-bar.webp" alt="The activity bar popover"><figcaption><b>Activity bar</b> (bottom right): Busy and In line. “In line” also lists <i>Atlas: Waiting for an approval</i>, which belongs to Needs you, not to a slot.</figcaption></figure>
+      <figure><img src="opruimen-overlap/3-overview.webp" alt="Overview with Needs you and Running now"><figcaption><b>Overview › Needs you</b> (3 cards) and <b>Running now</b>. Running now repeats the sidebar's Running groups.</figcaption></figure>
+      <figure><img src="opruimen-overlap/2-employee.webp" alt="Employee page with an Inbox tab"><figcaption><b>Employee › Inbox</b>: Where / What / State / Since. This is the employee's queue, not your inbox.</figcaption></figure>
+      <figure><img src="opruimen-overlap/2-activity-log.webp" alt="Settings Activity log"><figcaption><b>Settings › Activity log</b>: deliveries, queue steps and run steps (empty here, because the fake server has no log). It says “All projects”.</figcaption></figure>
+      <figure><img src="opruimen-overlap/1-ticket.webp" alt="Ticket activity"><figcaption><b>Ticket › Activity/Timeline</b>: the ticket's own story. A question to you sits in the asking employee's card.</figcaption></figure>
+    </div>
+    <div class="facts"><ul>
+      <li><b>Toasts</b> (<code>useNoteToasts</code> in <code>frame.tsx</code>): every new notification that is “yours” shows for a moment, at most 3 at once. Updates toast too, not only Needs you.</li>
+      <li>One review appears in five places: bell, toast, Overview › Needs you, the sidebar's red dot and the rail badge. That is fine as long as they are <i>one list</i> with the same words and the same order.</li>
+    </ul></div>
+
+    <h3>Proposal: one list (the Inbox) with views on it, and one job for each other place</h3>
+    <table class="t">
+      <thead><tr><th>Place</th><th>Verdict</th><th>Its one job</th><th>Changes</th></tr></thead>
+      <tbody>
+        <tr><td>Bell (Inbox)</td><td class="keep">Keep: the source</td><td>Everything that waits for you, in every workspace. The count is Needs you only.</td><td>Two groups: <b>Needs you</b> (question, approval, plan, review; oldest first) and <b>Updates</b> (not counted). “Needs decision” and “Ready for review” merge into Needs you, with the kind as a chip.</td></tr>
+        <tr><td>Toasts</td><td class="narrow">Keep, narrower</td><td>Something <i>new</i> that needs you, while you are elsewhere.</td><td>Only new Needs-you rows and the result of your own action make a toast. Updates do not. Clicking a toast opens the same place as the bell row (<code>rowPlace</code>).</td></tr>
+        <tr><td>Activity bar</td><td class="narrow">Keep, narrower</td><td>The machine: usage, server, “2 busy · 1 waiting for a slot”.</td><td>The popover keeps Busy and In line (slot, machine, limit, login, later). A wait on a person (approval, question, board member) leaves the list and shows as one line: “1 waits for you → Inbox”.</td></tr>
+        <tr><td>Overview › Needs you</td><td class="keep">Keep: a view</td><td>The Inbox's Needs-you rows of this workspace, as cards.</td><td>Same rows, order and words as the bell, so answering in one place clears the other.</td></tr>
+        <tr><td>Overview › Running now</td><td class="drop">Remove</td><td>—</td><td>The sidebar's <b>Running</b> groups (sessions and tickets) already show this per workspace, and the activity bar shows the count.</td></tr>
+        <tr><td>Settings › Activity log</td><td class="keep">Keep</td><td>Troubleshooting: why did something run, or not?</td><td>Never a badge or toast. Reached from a run's menu (“Activity log of this run”) and from the employee's Queue. “All projects” becomes “All workspaces”.</td></tr>
+        <tr><td>Employee › Inbox tab</td><td class="rename">Rename</td><td>What this employee has to do, in order.</td><td>The tab becomes <b>Queue</b>, so “Inbox” and “Needs you” only ever mean <i>yours</i>.</td></tr>
+        <tr><td>Ticket › Activity/Timeline</td><td class="keep">Keep</td><td>The story of one ticket.</td><td>No change. A question answered here also clears its Inbox row (already true: it is one record).</td></tr>
+      </tbody>
+    </table>
+
+    <div class="two" style="margin-top:16px">
+      <div class="mock" aria-label="Proposal: the bell with Needs you and Updates">
+        <div class="bar"><span class="title">Inbox</span><span class="chip amber">3 need you</span><span class="end"><span class="btn">Mark all read</span></span></div>
+        <div class="grp" style="border-top:0">Needs you · 3</div>
+        <div class="rows flat">
+          <div class="row"><span class="chip amber">Approval</span><div class="main">Flux wants to run a command<div class="sub">Northwind API · #22 · kubectl rollout restart</div></div><span class="end">2m</span></div>
+          <div class="row"><span class="chip blue">Plan</span><div class="main">#25 Move uploads to S3<div class="sub">Northwind API · Atlas</div></div><span class="end">1m</span></div>
+          <div class="row"><span class="chip purple">Review</span><div class="main">#21 Export invoices as CSV<div class="sub">Northwind API · Flux</div></div><span class="end">4m</span></div>
+        </div>
+        <div class="grp">Updates</div>
+        <div class="rows flat">
+          <div class="row"><div class="main">#24 Retry the delivery is done<div class="sub">Northwind API</div></div><span class="end">1h</span></div>
+        </div>
+      </div>
+      <div class="mock" aria-label="Proposal: the activity bar popover">
+        <div class="bar"><span class="title">Busy · 2</span></div>
+        <div class="rows flat">
+          <div class="row"><span class="av f sm">F</span><div class="main">Flux<div class="sub">#22 Fix token refresh race · 10 min</div></div></div>
+          <div class="row"><span class="av t sm">T</span><div class="main">Trace<div class="sub">#22 Trace's run · 5 min</div></div></div>
+        </div>
+        <div class="grp">In line</div>
+        <div class="rows flat">
+          <div class="row"><div class="main sub">Nothing waits for a slot.</div></div>
+          <div class="row"><div class="main">1 waits for you</div><span class="end"><a href="#p2">Inbox →</a></span></div>
+        </div>
+      </div>
+    </div>
+
+    <h3>What disappears</h3>
+    <div class="gone"><ul>
+      <li>Overview › <b>Running now</b>.</li>
+      <li>Toasts for plain updates.</li>
+      <li>Waits on a person (approval, question) as rows in the activity bar's popover.</li>
+      <li>“Needs decision” and “Ready for review” as separate bell headings: they become one Needs you list with a kind chip.</li>
+      <li>The word “Inbox” on the employee page.</li>
+    </ul></div>
+
+    <h3>Mobile</h3>
+    <div class="phones">
+      <div>
+        <div class="phone" aria-label="Mobile Inbox tab">
+          <div class="sb"><span>9:41</span><span>●●●</span></div>
+          <div class="lt">Inbox</div>
+          <div class="body">
+            <div class="eb">Needs you · 3</div>
+            <div class="grp2">
+              <div class="gr"><span class="chip amber">Approval</span>Flux wants to run…</div>
+              <div class="gr"><span class="chip blue">Plan</span>#25 Move uploads…</div>
+              <div class="gr"><span class="chip purple">Review</span>#21 Export invoices…</div>
+            </div>
+            <div class="eb">Updates</div>
+            <div class="grp2"><div class="gr">#24 Retry the delivery is done</div></div>
+          </div>
+          <div class="tabs"><span><i>＋</i>New session</span><span><i>☰</i>Sessions</span><span class="on"><i>▭</i>Inbox</span><span><i>◯</i>Profile</span></div>
+        </div>
+        <p class="caption">The Inbox tab is the bell: the same two groups and words. The tab badge counts Needs you. <span class="drawn">Drawn.</span></p>
+      </div>
+      <div class="phone-notes">
+        <ul>
+          <li><b>Push notifications</b> follow the toast rule: only new Needs-you rows. Updates stay quiet and only show in the Inbox.</li>
+          <li>The <b>Sessions</b> tab's “working” badge plays the activity bar's role. The activity chip stays as it is.</li>
+          <li>The employee page's “At work for Flux” list becomes <b>Queue</b>.</li>
+          <li>The project page's Overview (point 3) shows Needs you as desktop does. Running now goes.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="decide"><h4>Choose for point 2</h4>
+      <div class="opt rec"><span class="k">A</span><span class="t"><b>One Inbox with views.</b> Keep six places, each with one job as in the table. Remove Running now. The employee tab becomes Queue. <span class="tag">Recommended</span></span></div>
+      <div class="opt"><span class="k">B</span><span class="t"><b>As A, but keep Running now</b> on the Overview (and on the mobile project Overview).</span></div>
+      <div class="opt"><span class="k">C</span><span class="t"><b>Only rename</b>: the employee's Inbox tab becomes Queue, and nothing else changes.</span></div>
+    </div>
+  </section>
+
+  <!-- ================= 3 ================= -->
+  <section class="point" id="p3">
+    <div class="ph"><span class="num">3</span><h2>Overview vs Board vs History</h2></div>
+    <p class="q">Overview has its own board with 5 lanes and a “Recently done” list. Should it show counts plus links instead?</p>
+
+    <h3>Now</h3>
+    <div class="shots">
+      <figure><img src="opruimen-overlap/3-overview.webp" alt="Overview"><figcaption><b>Overview</b>: Workspace, Needs you, Running now, <b>Board</b> (5 lanes with titles), <b>Recently done</b>.</figcaption></figure>
+      <figure><img src="opruimen-overlap/3-board.webp" alt="Board"><figcaption><b>Board</b>: the working surface, with every column, filters and “Needs you · 3”.</figcaption></figure>
+      <figure><img src="opruimen-overlap/3-history.webp" alt="History"><figcaption><b>History</b>: what got done, per day, with summaries, for tickets and sessions.</figcaption></figure>
+    </div>
+    <div class="facts"><ul>
+      <li>The Overview lanes repeat the Board's ticket titles, but in 5 lanes instead of the Board's columns (no Plan review, no Testing). #25 sits under “Review” on the Overview and under “Plan review” on the Board.</li>
+      <li>“Recently done” is the first rows of History.</li>
+      <li>On mobile the project page has the tabs <b>Overview | Board | Tasks</b>, while <code>/board</code> redirects to the Sessions tab (“the Board is not on the phone”).</li>
+    </ul></div>
+
+    <h3>Proposal: Overview = how this workspace is doing; Board = working on tickets; History = the record</h3>
+    <div class="two">
+      <div class="mock" aria-label="Proposal: Overview with counts">
+        <div style="padding:14px 18px">
+          <div style="display:flex;gap:10px;align-items:center"><span class="mark m-n" style="width:34px;height:34px;font-size:16px">N</span><div><b style="font-size:17px">Northwind API</b> <span class="chip live">Active</span><div class="sub">/srv/p0 · Dispatcher: none</div></div><span style="margin-left:auto" class="btn pri">New session</span></div>
+          <div class="sec-t">Needs you · 3</div>
+          <div class="needs">
+            <div class="need" style="border-left-color:var(--purple)"><span class="m">Review · Flux</span><b>#21 Export invoices as CSV</b></div>
+            <div class="need" style="border-left-color:var(--info)"><span class="m">Plan · Atlas</span><b>#25 Move uploads to S3</b></div>
+            <div class="need"><span class="m">Question · Dispatcher</span><b>#26 Dark mode for the settings</b></div>
+          </div>
+          <div class="sec-t">Board <a href="#p3">Open board →</a></div>
+          <div class="counts">
+            <div><div class="n">1</div><div class="l">Backlog</div><div class="bar2" style="background:#8a8f96"></div></div>
+            <div><div class="n">1</div><div class="l">Todo</div><div class="bar2" style="background:var(--info)"></div></div>
+            <div><div class="n">1</div><div class="l">Doing</div><div class="bar2" style="background:var(--accent)"></div></div>
+            <div><div class="n">1</div><div class="l">Plan review</div><div class="bar2" style="background:var(--purple)"></div></div>
+            <div><div class="n">1</div><div class="l">Review</div><div class="bar2" style="background:var(--warning)"></div></div>
+            <div><div class="n">1</div><div class="l">Done this week</div><div class="bar2" style="background:#c9ccd0"></div></div>
+          </div>
+          <div class="sec-t">Done this week · 1 <a href="#p3">History →</a></div>
+          <div class="rows"><div class="row">✓ <div class="main">#24 Retry the delivery<div class="sub">Failed webhook deliveries are retried three times with backoff.</div></div><span class="end">Today</span></div></div>
+          <div class="sec-t">Designs <a href="#p3">All designs →</a></div>
+          <div class="sub">(the existing Designs block and the Workspace card stay as they are)</div>
+        </div>
+      </div>
+      <div>
+        <ul class="adds">
+          <li><b>Board</b> becomes one row of counts, one per column the Board shows (so Plan review and Testing too, where a workspace has them). A count opens the Board filtered on that column, and “Done this week” opens History for the last 7 days.</li>
+          <li><b>Recently done</b> becomes <b>Done this week</b>: at most 3 rows with their summary, then “History →”.</li>
+        </ul>
+        <ul class="stays">
+          <li>The header, Needs you (point 2), Designs and the Workspace card stay.</li>
+          <li>Board and History do not change.</li>
+        </ul>
+        <p class="note">This also removes the mismatch between the Overview's 5 lanes and the Board's columns.</p>
+      </div>
+    </div>
+
+    <h3>What disappears</h3>
+    <div class="gone"><ul>
+      <li>The ticket titles in the Overview's lanes (the 5-lane board strip).</li>
+      <li>“Recently done” as a list by day: it is the first page of History.</li>
+      <li>Overview › Running now (point 2).</li>
+      <li>Mobile: the project page's <b>Tasks</b> tab.</li>
+    </ul></div>
+
+    <h3>Mobile</h3>
+    <div class="phones">
+      <div>
+        <div class="phone" aria-label="Mobile project page">
+          <div class="sb"><span>9:41</span><span>●●●</span></div>
+          <div class="nav">‹ Workspaces</div>
+          <div class="lt" style="font-size:19px">Northwind API</div>
+          <div class="body">
+            <div class="seg"><span class="on">Overview</span><span>Board</span><span>History</span></div>
+            <div class="eb">Needs you · 3</div>
+            <div class="grp2"><div class="gr">#21 Export invoices <span class="v">Review</span></div><div class="gr">#25 Move uploads <span class="v">Plan</span></div></div>
+            <div class="eb">Board</div>
+            <div class="grp2"><div class="gr">Backlog <span class="v chev">1</span></div><div class="gr">Doing <span class="v chev">1</span></div><div class="gr">Review <span class="v chev">1</span></div><div class="gr">Done this week <span class="v chev">1</span></div></div>
+          </div>
+        </div>
+        <p class="caption">The segments are <b>Overview | Board | History</b>, the same three as the desktop sidebar. <span class="strike">Tasks</span> goes. <span class="drawn">Drawn.</span></p>
+      </div>
+      <div class="phone-notes">
+        <ul>
+          <li>The mobile Overview uses the same blocks as desktop: Needs you, the Board counts and Done this week.</li>
+          <li>A count opens the Board segment filtered on that column. The <code>/board</code> redirect to Sessions › Tickets stays for old links.</li>
+          <li>History on mobile is new, but it is only a list over <code>ticket.history</code> and <code>work_session.history</code>, which already exist.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="decide"><h4>Choose for point 3</h4>
+      <div class="opt rec"><span class="k">A</span><span class="t"><b>Counts plus links.</b> The Overview shows Board counts and Done this week (3 rows). Mobile gets Overview | Board | History. <span class="tag">Recommended</span></span></div>
+      <div class="opt"><span class="k">B</span><span class="t"><b>Counts plus links on desktop only.</b> Mobile keeps Overview | Board | Tasks for now.</span></div>
+      <div class="opt"><span class="k">C</span><span class="t"><b>Keep the lanes, but correct them</b>: the strip shows the Board's real columns, and Recently done stays.</span></div>
+    </div>
+  </section>
+
+  <!-- ================= 4 ================= -->
+  <section class="point" id="p4">
+    <div class="ph"><span class="num">4</span><h2>Three lists of workspaces</h2></div>
+    <p class="q">All workspaces, <code>/projects</code> and the rail. Should they merge into one?</p>
+
+    <h3>Now</h3>
+    <div class="shots">
+      <figure><img src="opruimen-overlap/4-all-workspaces.webp" alt="All workspaces"><figcaption><b>All workspaces</b> (the rail's first tile): find, Pin to rail, “3 need you”, New workspace.</figcaption></figure>
+      <figure><img src="opruimen-overlap/4-projects.webp" alt="Knowledge, Projects table"><figcaption><b><code>/projects</code></b> under Settings › <i>Knowledge</i> › Projects: People, Waiting, Active, Status, ★ (= pin), ⋯ and <i>New project</i>.</figcaption></figure>
+      <figure><img src="opruimen-overlap/3-board.webp" alt="The rail at the far left"><figcaption><b>The rail</b> (far left): your pinned workspaces with a red Needs-you badge, and + New workspace.</figcaption></figure>
+    </div>
+    <div class="facts"><ul>
+      <li>One thing has two names: <b>Workspace</b> (rail, All workspaces, sidebar, Overview) and <b>Project</b> (<code>/projects</code>, “New project”, Activity log “All projects”, mobile Profile › Projects and “New project”, the ticket property “Project”).</li>
+      <li>The ★ in <code>/projects</code> and “Pin to rail” in All workspaces do the same thing (<code>user.rail_pins</code>).</li>
+      <li><code>/projects</code> sits between the Knowledge tabs (Guidelines, Memory), where nobody looks for it.</li>
+    </ul></div>
+
+    <h3>Proposal: one list (All workspaces); the rail is your shortcuts</h3>
+    <div class="two">
+      <div class="mock" aria-label="Proposal: All workspaces with the columns of /projects">
+        <div class="bar"><span class="title">All workspaces</span><span class="crumb">4 workspaces · 2 pinned to your rail</span><span class="end"><span class="btn pri">＋ New workspace</span></span></div>
+        <div style="padding:10px 14px"><span class="btn" style="width:240px;color:var(--text3)">Find a workspace</span></div>
+        <div class="rows" style="margin:0 14px 14px">
+          <div class="row"><span class="mark m-n">N</span><div class="main"><b>Northwind API</b><div class="sub">/srv/p0 · Flux, Atlas, Trace</div></div><span class="end"><span style="color:var(--warning)">3 need you</span> · 2 working <span class="btn" style="color:var(--accent)">Pinned</span> ⋯</span></div>
+          <div class="row"><span class="mark m-h">H</span><div class="main"><b>Halcyon iOS</b><div class="sub">/srv/p1 · nobody yet</div></div><span class="end">Quiet <span class="btn" style="color:var(--accent)">Pinned</span> ⋯</span></div>
+          <div class="row"><span class="mark m-w">W</span><div class="main"><b>Website</b><div class="sub">/srv/p2 · nobody yet</div></div><span class="end">Quiet <span class="btn">Pin to rail</span> ⋯</span></div>
+          <div class="row"><span class="mark m-d">D</span><div class="main"><b>Data pipeline</b><div class="sub">/srv/p3 · nobody yet</div></div><span class="end">Quiet <span class="btn">Pin to rail</span> ⋯</span></div>
+        </div>
+      </div>
+      <div>
+        <ul class="adds">
+          <li>All workspaces takes over what <code>/projects</code> had: who works there (after the folder), “N need you · N working” or Quiet, and the ⋯ menu (Settings, Archive).</li>
+          <li>The word is <b>Workspace</b> everywhere: “New workspace”, “All workspaces” in the Activity log filter, “Workspace” as the ticket property.</li>
+          <li><code>/projects</code> and <code>/projects/$id</code> redirect to All workspaces and to that workspace's settings, so old links keep working.</li>
+        </ul>
+        <ul class="stays">
+          <li>The rail stays exactly as it is: your pinned workspaces, not a list of all of them.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>What disappears</h3>
+    <div class="gone"><ul>
+      <li><code>/projects</code> (the table) and the <b>Projects</b> tab under Knowledge.</li>
+      <li>The ★, which is the same as Pin to rail.</li>
+      <li>The word “Project” in the UI, on desktop and on mobile.</li>
+    </ul></div>
+
+    <h3>Mobile</h3>
+    <div class="phones">
+      <div>
+        <div class="phone" aria-label="Mobile Workspaces list">
+          <div class="sb"><span>9:41</span><span>●●●</span></div>
+          <div class="nav">‹ Profile</div>
+          <div class="lt">Workspaces</div>
+          <div class="body">
+            <div class="grp2">
+              <div class="gr"><span class="mark m-n">N</span>Northwind API<span class="v" style="color:var(--warning)">3 need you</span></div>
+              <div class="gr"><span class="mark m-h">H</span>Halcyon iOS<span class="v">Quiet</span></div>
+              <div class="gr"><span class="mark m-w">W</span>Website<span class="v">Quiet</span></div>
+              <div class="gr"><span class="mark m-d">D</span>Data pipeline<span class="v">Quiet</span></div>
+            </div>
+            <div class="grp2"><div class="gr" style="color:var(--accent)">＋ New workspace</div></div>
+          </div>
+        </div>
+        <p class="caption">Profile › <span class="strike">Projects</span> <span class="new">Workspaces</span>: the same rows and words as All workspaces, without pins (the phone has no rail). <span class="drawn">Drawn.</span></p>
+      </div>
+      <div class="phone-notes">
+        <ul>
+          <li><code>ProjectsPage</code> keeps its route. Its title, the Profile row, “No projects yet” and “New project” switch to the workspace words.</li>
+          <li>The project page's back link and the ticket's “Project” row say <b>Workspace</b>.</li>
+          <li>The empty Board text “Create a project first; work is done in a project.” becomes “Create a workspace first.”</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="decide"><h4>Choose for point 4</h4>
+      <div class="opt rec"><span class="k">A</span><span class="t"><b>One list plus the rail, and one word.</b> All workspaces absorbs <code>/projects</code>, the rail stays, and “Workspace” is used on both clients. <span class="tag">Recommended</span></span></div>
+      <div class="opt"><span class="k">B</span><span class="t"><b>One list on desktop, “Project” stays on mobile</b> for now.</span></div>
+      <div class="opt"><span class="k">C</span><span class="t"><b>Keep both lists</b>, but move <code>/projects</code> out of Knowledge and drop the ★.</span></div>
+    </div>
+  </section>
+
+  <!-- ================= 5 ================= -->
+  <section class="point" id="p5">
+    <div class="ph"><span class="num">5</span><h2>Choosing the model in three places</h2></div>
+    <p class="q">Company default model (old servers), Workspace › Model &amp; effort (now a stub) and My defaults, on desktop and mobile.</p>
+
+    <h3>Now</h3>
+    <div class="shots">
+      <figure><img src="opruimen-overlap/5-my-defaults.webp" alt="My defaults"><figcaption><b>You › My defaults</b>: Model, Effort, Mode, Subagent model. The real place since <code>user_run_defaults</code>.</figcaption></figure>
+      <figure><img src="opruimen-overlap/5-model-effort.webp" alt="Model and effort stub"><figcaption><b>Workspace › Model &amp; effort</b>: one sentence pointing to My defaults. On an old server it is the per-employee effort table.</figcaption></figure>
+      <figure><img src="opruimen-overlap/5-company.webp" alt="Company settings"><figcaption><b>Company</b>: on a server without <code>user_run_defaults</code> this also shows “Employee default model” and the subagent default. On a new server it shows only the connection.</figcaption></figure>
+      <figure><img src="opruimen-overlap/1-session.webp" alt="Session properties showing Employee's default"><figcaption>Per run, the session says <b>“Employee's default”</b>, the ticket says <b>“Owner's default · Default”</b> and New session says <b>“Default”</b>. All three are <i>your</i> default (Opus 5.5).</figcaption></figure>
+    </div>
+    <div class="facts"><ul>
+      <li>Since 2026-11-25 the default model, effort and mode come from the board member who starts the work (the ticket's creator or the session's starter), not from the employee or the workspace.</li>
+      <li>Mobile has the same places: Profile › <b>My defaults</b> (new servers) or <b>Model &amp; effort · Per employee</b> (old servers), the employee page's “Model and effort” and “Subagents” rows (old servers), and the chips in New session, in a session and on the ticket bar (“Model · …”).</li>
+    </ul></div>
+
+    <h3>Proposal: one setting (My defaults) and one way to override it (the chips)</h3>
+    <div class="two">
+      <div class="mock" aria-label="Proposal: chips and properties that say Your default">
+        <div class="feed" style="padding-bottom:0"><div class="msg"><span class="av s">S</span><div><div class="who">Sam <span>19:30</span></div>Why does the login page flash on load?</div></div></div>
+        <div class="composer"><div class="hint">Message Flux</div>
+          <div class="chips"><span>Model <b>Your default · Opus 5.5</b></span><span>Effort <b>Your default · High</b></span><span>Mode <b>Ask</b></span></div></div>
+        <div style="padding:0 16px 14px"><div class="kv">
+          <span class="k">Model</span><span>Your default · Opus 5.5</span>
+          <span class="k">Effort</span><span>Your default · High</span>
+          <span class="k">On Kim's ticket</span><span>Kim's default · Sonnet 5.5</span>
+        </div></div>
+      </div>
+      <div>
+        <ul class="adds">
+          <li><b>Settings › You › My defaults</b> is the only setting. It already has Model, Effort, Mode and Subagent model. Every chip's menu links to it with “Change my defaults”.</li>
+          <li>Every chip and property uses one label: <b>Your default · Opus 5.5</b>. When another board member started the work, it says <b>Kim's default · …</b>, because their default is the one that applies.</li>
+          <li>A value chosen for this run shows as just the value (“Sonnet 5.5”), and the chip's menu starts with “Use your default”.</li>
+        </ul>
+        <ul class="stays">
+          <li>On an <b>old server</b> (no <code>user_run_defaults</code>) the old places still show, because they are real there. Clients hide what a server lacks, so nothing changes for them.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>What disappears</h3>
+    <div class="gone"><ul>
+      <li>Settings › Workspace › <b>Model &amp; effort</b> on a new server (the stub). The section shows only on an old server.</li>
+      <li>The labels “Employee's default” and “Owner's default”, and a bare “Default”, for model and effort.</li>
+      <li>Mobile: on a new server the Profile row “Model &amp; effort · Per employee” and the employee page's “Model and effort”. Both already hide there; this makes it the rule.</li>
+    </ul></div>
+
+    <h3>Mobile</h3>
+    <div class="phones">
+      <div>
+        <div class="phone" aria-label="Mobile My defaults">
+          <div class="sb"><span>9:41</span><span>●●●</span></div>
+          <div class="nav">‹ Profile</div>
+          <div class="lt">My defaults</div>
+          <div class="body">
+            <div class="grp2">
+              <div class="gr">Model<span class="v chev">Opus 5.5</span></div>
+              <div class="gr">Effort<span class="v chev">High</span></div>
+              <div class="gr">Mode<span class="v chev">Ask</span></div>
+              <div class="gr">Subagent model<span class="v chev">Sonnet 5.5</span></div>
+            </div>
+            <p class="note" style="padding:0 4px">For the tickets you make and the sessions you start. Applies to new runs.</p>
+          </div>
+        </div>
+        <p class="caption">Already exists (<code>my_defaults_page.dart</code>) and stays the only setting. <span class="drawn">Drawn.</span></p>
+      </div>
+      <div>
+        <div class="phone" aria-label="Mobile session with model chip">
+          <div class="sb"><span>9:41</span><span>●●●</span></div>
+          <div class="nav">‹ Sessions</div>
+          <div class="lt" style="font-size:16px">Why does the login page flash?</div>
+          <div class="body">
+            <div class="bub"><div class="w">Flux</div>The theme is applied after the first paint.</div>
+            <div style="margin-top:150px" class="grp2"><div class="gr" style="color:var(--text3)">Message Flux</div><div class="gr" style="font-size:11px">Model&nbsp;<b>Your default · Opus 5.5</b></div></div>
+          </div>
+        </div>
+        <p class="caption">The same chip label in a session, in New session and on the ticket bar (<code>chat_view.dart</code>, <code>ticket_gate.dart</code>, <code>ticket_properties.dart</code>). <span class="drawn">Drawn.</span></p>
+      </div>
+    </div>
+
+    <div class="decide"><h4>Choose for point 5</h4>
+      <div class="opt rec"><span class="k">A</span><span class="t"><b>My defaults is the only setting, with one label.</b> “Your default · Opus 5.5” (or “Kim's default · …”) everywhere. The Model &amp; effort stub goes on new servers. <span class="tag">Recommended</span></span></div>
+      <div class="opt"><span class="k">B</span><span class="t"><b>Only remove the stub.</b> The labels stay as they are.</span></div>
+      <div class="opt"><span class="k">C</span><span class="t"><b>Also add a workspace default model</b> above My defaults (for a workspace that must always use Sonnet). That needs a server change and a new level, so it is not cleanup. It is listed only to make the choice explicit.</span></div>
+    </div>
+  </section>
+
+  <!-- ================= 6 ================= -->
+  <section class="point" id="p6">
+    <div class="ph"><span class="num">6</span><h2>Two mobile screens called “Sessions”</h2></div>
+    <p class="q">The Sessions tab (work sessions and tickets) and the account screen that lists where you are signed in. OPR-2 already renamed the account screen's class to <code>SignedInPage</code>, with the title “Signed in on”.</p>
+
+    <h3>Now</h3>
+    <div class="phones">
+      <div>
+        <div class="phone" aria-label="Mobile Sessions tab today">
+          <div class="sb"><span>9:41</span><span>●●●</span></div>
+          <div class="lt">Sessions</div>
+          <div class="body">
+            <div class="seg"><span class="on">Sessions</span><span>Tickets</span></div>
+            <div class="eb">Running</div>
+            <div class="grp2"><div class="gr">Why does the login page flash?</div></div>
+            <div class="eb">Today</div>
+            <div class="grp2"><div class="gr">Sketch the billing page</div></div>
+          </div>
+          <div class="tabs"><span><i>✎</i>Chat</span><span class="on"><i>☰</i>Sessions</span><span><i>▭</i>Inbox</span><span><i>◯</i>Profile</span></div>
+        </div>
+        <p class="caption">The <b>Sessions</b> tab (<code>WorkSessionsPage</code>) with Sessions | Tickets. The first tab is called <b>Chat</b> but opens New session. <span class="drawn">Drawn.</span></p>
+      </div>
+      <div>
+        <div class="phone" aria-label="Mobile account Sessions screen today">
+          <div class="sb"><span>9:41</span><span>●●●</span></div>
+          <div class="nav">‹ Profile</div>
+          <div class="lt">Sessions</div>
+          <div class="body">
+            <div class="grp2"><div class="gr">This iPhone<span class="v">now</span></div><div class="gr">Aurelius on Linux<span class="v">2h</span></div></div>
+            <div class="grp2"><div class="gr" style="color:var(--error)">Sign out all other devices</div></div>
+          </div>
+        </div>
+        <p class="caption">On <code>main</code>, the Profile row <b>“Signed in on”</b> opens a screen titled <b>“Sessions”</b> (<code>account.dart:559</code>). The board-member sheet in onboarding also says “Sessions”. <span class="drawn">Drawn.</span></p>
+      </div>
+      <div class="phone-notes">
+        <div class="facts" style="margin-top:0"><ul>
+          <li>Desktop calls this group <b>Signed in on</b> (Settings › Account), and the mobile Profile row already says “Signed in on”.</li>
+          <li>Desktop calls the start screen <b>New session</b>. Mobile calls the same screen “Chat”.</li>
+          <li>The desktop sidebar has a <b>Sessions</b> and a <b>Tickets</b> section, so the tab's Sessions | Tickets switch already matches it.</li>
+        </ul></div>
+      </div>
+    </div>
+
+    <h3>Proposal: “Session” only means a work session; the account screen is “Signed in on”</h3>
+    <div class="phones">
+      <div>
+        <div class="phone" aria-label="Mobile tabs after">
+          <div class="sb"><span>9:41</span><span>●●●</span></div>
+          <div class="lt">Sessions</div>
+          <div class="body">
+            <div class="seg"><span class="on">Sessions</span><span>Tickets</span></div>
+            <div class="eb">Running</div>
+            <div class="grp2"><div class="gr">Why does the login page flash?</div></div>
+          </div>
+          <div class="tabs"><span><i>＋</i><span class="new">New session</span></span><span class="on"><i>☰</i>Sessions</span><span><i>▭</i>Inbox</span><span><i>◯</i>Profile</span></div>
+        </div>
+        <p class="caption">The tab stays <b>Sessions</b> (Sessions | Tickets, as in the desktop sidebar). The first tab becomes <b>New session</b>. <span class="drawn">Drawn.</span></p>
+      </div>
+      <div>
+        <div class="phone" aria-label="Mobile Signed in on screen">
+          <div class="sb"><span>9:41</span><span>●●●</span></div>
+          <div class="nav">‹ Profile</div>
+          <div class="lt">Signed in on</div>
+          <div class="body">
+            <div class="grp2"><div class="gr">This iPhone<span class="v">now</span></div><div class="gr">Aurelius on Linux<span class="v">2h</span></div></div>
+            <div class="grp2"><div class="gr" style="color:var(--error)">Sign out all other devices</div></div>
+          </div>
+        </div>
+        <p class="caption"><code>SignedInPage</code> with the title <b>Signed in on</b> (OPR-2). The board-member sheet says “Signed in on” too. <span class="drawn">Drawn.</span></p>
+      </div>
+      <div class="phone-notes">
+        <ul class="adds">
+          <li>The “Sessions” item in the onboarding/board-member sheet becomes <b>Signed in on</b> (<code>onboarding.dart:405</code>).</li>
+          <li>The first tab's label becomes <b>New session</b> (icon ＋), the same as the first row of the desktop sidebar. The <code>/chat</code> route stays.</li>
+          <li>Desktop needs nothing: it already uses “Signed in on” and “New session”.</li>
+        </ul>
+        <div class="gone" style="margin-top:10px"><ul>
+          <li>“Sessions” as a title for signed-in devices, anywhere.</li>
+          <li>“Chat” as the name of the New session tab.</li>
+        </ul></div>
+      </div>
+    </div>
+
+    <div class="decide"><h4>Choose for point 6</h4>
+      <div class="opt rec"><span class="k">A</span><span class="t"><b>Signed in on, and the first tab is “New session”.</b> The Sessions tab keeps its name. <span class="tag">Recommended</span></span></div>
+      <div class="opt"><span class="k">B</span><span class="t"><b>Signed in on only</b> (OPR-2's rename plus the onboarding sheet). The tab stays “Chat”.</span></div>
+      <div class="opt"><span class="k">C</span><span class="t"><b>Also rename the Sessions tab to “Work”</b>, because it holds tickets too. Desktop has no such word, so this breaks the same-words rule unless desktop gets it as well.</span></div>
+    </div>
+  </section>
+
+  <!-- ================= SUMMARY ================= -->
+  <section class="point" id="decide">
+    <div class="ph"><h2>Your choices at a glance</h2></div>
+    <table class="t">
+      <thead><tr><th>#</th><th>Point</th><th>A (recommended)</th><th>What it takes to build</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Four ways to work</td><td>Two ways (Session, Ticket). A run is read-only and opens from its ticket. Quick task leaves the UI.</td><td>Desktop <code>task-run.tsx</code> and mobile <code>task_page.dart</code>: the read-only line replaces the composer. Quick-task UI goes (<code>quick-logic.ts</code>, <code>lib/data/quick_task.dart</code>). No server change.</td></tr>
+        <tr><td>2</td><td>Needs attention</td><td>One Inbox with views. Running now goes, the employee tab becomes Queue, and toasts and push are for Needs you only.</td><td>Desktop: <code>inbox-bell</code>, the toasts in <code>frame.tsx</code>, <code>activity-bar</code>, <code>overview</code>, <code>employee-inbox</code>. Mobile: inbox groups, push filter, employee page. No server change.</td></tr>
+        <tr><td>3</td><td>Overview, Board, History</td><td>Board counts and Done this week on the Overview. Mobile: Overview | Board | History.</td><td>Desktop <code>overview.tsx</code>. Mobile project page plus a History segment over existing reads.</td></tr>
+        <tr><td>4</td><td>Workspace lists</td><td>All workspaces absorbs <code>/projects</code>, the rail stays, and “Workspace” is the only word.</td><td>Desktop: <code>projects.tsx</code> becomes a redirect, and the All workspaces rows in <code>overview.tsx</code> gain the extra columns. Mobile: words in <code>projects_page</code>, Profile and Board. No server change.</td></tr>
+        <tr><td>5</td><td>Model choice</td><td>My defaults is the only setting, every label says “Your default · Opus 5.5”, and the stub goes on new servers.</td><td>Desktop <code>settings.tsx</code>, <code>session.tsx</code>, <code>new-session.tsx</code>, ticket properties. Mobile <code>chat_view</code>, <code>ticket_gate</code>, <code>ticket_properties</code>. Uses the existing <code>user.run_defaults</code>.</td></tr>
+        <tr><td>6</td><td>Two “Sessions”</td><td>“Signed in on” everywhere, and the first mobile tab is New session.</td><td>Mobile: the label in <code>shell.dart</code> and <code>onboarding.dart</code>, on top of OPR-2's rename.</td></tr>
+      </tbody>
+    </table>
+    <p class="note" style="margin-top:10px">Every option A leaves protocol 5 as it is: no method, field or migration changes. Old links (<code>/projects</code>, <code>/tasks/$id</code>, <code>/chat</code>, <code>?tab=discussion</code>) keep resolving.</p>
+  </section>
+</main>
+
+<div class="lightbox" id="lb" role="dialog" aria-label="Screenshot"><img alt=""></div>
+<script>
+  const lb = document.getElementById("lb");
+  const big = lb.querySelector("img");
+  document.querySelectorAll("figure img").forEach((img) =>
+    img.addEventListener("click", () => { big.src = img.src; big.alt = img.alt; lb.classList.add("on"); }));
+  lb.addEventListener("click", () => lb.classList.remove("on"));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") lb.classList.remove("on"); });
+</script>
+</body>
+</html>
