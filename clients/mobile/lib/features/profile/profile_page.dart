@@ -12,6 +12,7 @@ import '../../core/widgets/widgets.dart' show Monogram, toast;
 import '../../data/aurelius_repository.dart';
 import '../account/claude_login.dart' show claudeLoginLine;
 import '../account/devices.dart' show ownDevicesFeature;
+import '../my_defaults/my_defaults_bloc.dart' show userRunDefaultsFeature;
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../hosts/hosts_bloc.dart';
@@ -146,7 +147,10 @@ class ProfilePage extends StatelessWidget {
               chevron: true,
               onTap: () => context.push('/settings/board-members'),
             ),
-            if (link.features.contains('employee_run_overview'))
+            // Where each board member keeps their own model, effort and mode, the per-employee page goes.
+            if (link.features.contains(userRunDefaultsFeature))
+              GroupRow(key: const ValueKey('settings-my-defaults'), leading: const IconTile(CupertinoIcons.slider_horizontal_3), title: 'My defaults', subtitle: 'Model, effort and mode', chevron: true, onTap: () => context.push('/settings/my-defaults'))
+            else if (link.features.contains('employee_run_overview'))
               GroupRow(key: const ValueKey('settings-employee-runs'), leading: const IconTile(CupertinoIcons.slider_horizontal_3), title: 'Model & effort', subtitle: 'Per employee', chevron: true, onTap: () => context.push('/settings/employee-runs')),
             GroupRow(key: const ValueKey('settings-board'), leading: const IconTile(CupertinoIcons.square_split_2x1), title: 'Board', subtitle: 'Columns and dispatcher', chevron: true, onTap: () => context.push('/settings/board')),
             GroupRow(key: const ValueKey('profile-paired'), leading: const IconTile(CupertinoIcons.device_laptop), title: 'Paired PCs', value: '$paired', chevron: true, onTap: () => context.push('/hosts')),

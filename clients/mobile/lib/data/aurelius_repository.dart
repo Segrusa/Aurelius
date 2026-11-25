@@ -164,6 +164,13 @@ class AureliusRepository {
   /// The model and effort a new run of each employee uses (feature `employee_run_overview`).
   Future<EmployeeRunsView> employeeRuns() async => (await _ask<ResponseBodyEmployeeRuns>(employeeRunOverview())).value;
 
+  /// The signed-in board member's own model, effort, mode and subagent model
+  /// (feature `user_run_defaults`).
+  Future<UserRunDefaultsView> myRunDefaults() async => (await _ask<ResponseBodyUserRunDefaults>(userRunDefaults())).value;
+
+  /// Replace the signed-in board member's own run defaults as a whole.
+  Future<Receipt> setMyRunDefaults(UserRunDefaults defaults) => write(userSetRunDefaults(defaults: defaults), retry: false);
+
   /// Who follows a ticket (feature `ticket_follow`).
   Future<TicketFollowersView> followers(String ticketId) async => (await _ask<ResponseBodyTicketFollowers>(ticketFollowers(ticketId: ticketId))).value;
 

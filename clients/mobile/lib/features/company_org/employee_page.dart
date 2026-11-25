@@ -21,6 +21,7 @@ import '../connection/connection_banner.dart';
 import '../dashboard/give_work.dart';
 import '../sessions/session_rules.dart' show workSessionsFeature;
 import 'employee_run_sheet.dart';
+import '../my_defaults/my_defaults_bloc.dart' show userRunDefaultsFeature;
 import '../project/tasks_tab.dart';
 import 'employee_widgets.dart';
 
@@ -149,13 +150,16 @@ class EmployeePage extends StatelessWidget {
                       const GroupHeader('Setup'),
                       InsetGroup(
                         children: [
-                          GroupRow(
-                            key: const ValueKey('employee-model'),
-                            title: 'Model and effort',
-                            onTap: () => showEmployeeRunSheet(context, m),
-                          ),
-                          // Its own chat has no page; its group chat answers run there, with these.
-                          GroupRow(key: const ValueKey('employee-mode'), title: 'Mode', value: m.agentMode.label, onTap: () => _pickMode(context, m)),
+                          // Model, effort and mode are each board member's own there (Profile > My defaults).
+                          if (!context.read<AureliusRepository>().linkState.has(userRunDefaultsFeature)) ...[
+                            GroupRow(
+                              key: const ValueKey('employee-model'),
+                              title: 'Model and effort',
+                              onTap: () => showEmployeeRunSheet(context, m),
+                            ),
+                            // Its own chat has no page; its group chat answers run there, with these.
+                            GroupRow(key: const ValueKey('employee-mode'), title: 'Mode', value: m.agentMode.label, onTap: () => _pickMode(context, m)),
+                          ],
                           SwitchListTile(
                             key: const ValueKey('employee-browser'),
                             title: const Text('Browser'),
@@ -405,6 +409,7 @@ class _Advanced extends StatelessWidget {
   Widget build(BuildContext context) {
     final m = employee;
     final versions = context.read<AureliusRepository>().linkState.has(Harness2.instructionProposals);
+    final ownDefaults = context.read<AureliusRepository>().linkState.has(userRunDefaultsFeature);
     return ExpansionTile(
       key: const ValueKey('employee-advanced'),
       tilePadding: const EdgeInsets.symmetric(horizontal: 16),
@@ -413,11 +418,12 @@ class _Advanced extends StatelessWidget {
       collapsedShape: const Border(),
       title: const Text('Advanced'),
       subtitle: Text(
-        ['Subagents', if (m.sequentialTasks) 'one at a time', if (versions) 'instruction versions'].join(' · '),
+        [if (!ownDefaults) 'Subagents', if (m.sequentialTasks) 'one at a time', if (versions) 'instruction versions'].join(' · '),
         style: TextStyle(color: Tokens.muted, fontSize: 12.5),
       ),
       children: [
-        GroupRow(key: const ValueKey('employee-subagents'), title: 'Subagents', subtitle: 'Model of the helpers ${m.name} starts', onTap: () => showEmployeeRunSheet(context, m, subagents: true)),
+        if (!ownDefaults)
+          GroupRow(key: const ValueKey('employee-subagents'), title: 'Subagents', subtitle: 'Model of the helpers ${m.name} starts', onTap: () => showEmployeeRunSheet(context, m, subagents: true)),
         EmployeeSequentialTile(employee: m),
         if (versions) GroupRow(key: const ValueKey('employee-instruction-versions'), title: 'Instruction versions', onTap: () => _showInstructionVersions(context, m)),
       ],
