@@ -88,20 +88,28 @@ export const choiceLine = (
   name: (value: string) => string = (v) => v,
 ): string => (choice === "inherit" ? inheritLabel(inherited) : name(choice));
 
-export type EmployeeTab = "inbox" | "memory" | "guidelines" | "settings";
+export type EmployeeTab = "work" | "profile" | "memory" | "guidelines" | "access";
 
-/** The employee page's tabs. An older server has no mailbox or no guidelines to show. */
-export function employeeTabs(queue: boolean, guidelines: boolean): { key: EmployeeTab; label: string }[] {
+/** The employee page's tabs (design/settings-company.html). An older server has no guidelines to show. */
+export function employeeTabs(guidelines: boolean): { key: EmployeeTab; label: string }[] {
   return [
-    ...(queue ? [{ key: "inbox" as const, label: "Inbox" }] : []),
+    { key: "work", label: "Work" },
+    { key: "profile", label: "Profile" },
     { key: "memory", label: "Memory" },
     ...(guidelines ? [{ key: "guidelines" as const, label: "Guidelines" }] : []),
-    { key: "settings", label: "Settings" },
+    { key: "access", label: "Access" },
   ];
 }
 
-export const isEmployeeTab = (value: unknown): value is EmployeeTab =>
-  value === "inbox" || value === "memory" || value === "guidelines" || value === "settings";
+/** Old links still open a tab: Inbox is now Work, Settings is now Profile. */
+const OLD_TABS: Record<string, EmployeeTab> = { inbox: "work", settings: "profile" };
+
+/** The tab a link's `tab` asks for, or null when it names none. */
+export function employeeTabOf(value: unknown): EmployeeTab | null {
+  if (typeof value !== "string") return null;
+  if (["work", "profile", "memory", "guidelines", "access"].includes(value)) return value as EmployeeTab;
+  return OLD_TABS[value] ?? null;
+}
 
 /** What the dot and word beside an employee say (U6). Colors are CSS values. */
 export interface EmployeeState {

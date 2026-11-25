@@ -9,11 +9,11 @@ import {
   employeeFilterCounts,
   employeeGroups,
   employeeState,
+  employeeTabOf,
   employeeTabs,
   inEmployeeFilter,
   inheritedRun,
   instructionsFold,
-  isEmployeeTab,
   matchesSearch,
   modelAfterProvider,
   modelsFor,
@@ -217,19 +217,20 @@ describe("employeeState", () => {
 });
 
 describe("the employee page's tabs", () => {
-  it("has an Inbox when the server has a mailbox to show", () => {
-    expect(employeeTabs(true, false).map((t) => t.label)).toEqual(["Inbox", "Memory", "Settings"]);
-    expect(employeeTabs(false, false).map((t) => t.label)).toEqual(["Memory", "Settings"]);
+  it("has Work, Profile, Memory and Access on every server", () => {
+    expect(employeeTabs(false).map((t) => t.label)).toEqual(["Work", "Profile", "Memory", "Access"]);
   });
 
   it("has Guidelines when the server has guidelines", () => {
-    expect(employeeTabs(true, true).map((t) => t.label)).toEqual(["Inbox", "Memory", "Guidelines", "Settings"]);
+    expect(employeeTabs(true).map((t) => t.label)).toEqual(["Work", "Profile", "Memory", "Guidelines", "Access"]);
   });
 
-  it("reads only a tab it knows from the URL", () => {
-    expect(isEmployeeTab("memory")).toBe(true);
-    expect(isEmployeeTab("guidelines")).toBe(true);
-    expect(isEmployeeTab("tasks")).toBe(false);
+  it("reads only a tab it knows from the URL, and opens an old tab where it moved", () => {
+    expect(employeeTabOf("memory")).toBe("memory");
+    expect(employeeTabOf("guidelines")).toBe("guidelines");
+    expect(employeeTabOf("inbox")).toBe("work");
+    expect(employeeTabOf("settings")).toBe("profile");
+    expect(employeeTabOf("tasks")).toBeNull();
   });
 });
 
