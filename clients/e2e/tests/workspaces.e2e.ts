@@ -113,12 +113,12 @@ test("a ticket shows its Claude Design link, and an older server shows no field"
     await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible();
     await expect(page.getByText("Styleguide", { exact: true })).toBeHidden();
 
-    // The old Board link opens the ticket's session; the design link is in its properties.
+    // The old Board link opens the ticket's session; its properties no longer show a design link row.
     await page.goto(`${site.origin}/board?ticket=t1`);
     await expect(page).toHaveURL(/\/ticket\/21$/);
     const panel = page.getByRole("complementary", { name: "Ticket properties" });
-    await expect(panel.getByRole("link", { name: "Open", exact: true })).toHaveAttribute("href", link);
-    await expect(panel.getByText("The link only works for people the artifact is shared with.")).toBeVisible();
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText("The link only works for people the artifact is shared with.")).toBeHidden();
 
     await scriptServer(page, script);
     await page.goto(`${site.origin}/projects/${ATLAS}`);

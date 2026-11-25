@@ -56,7 +56,6 @@ import {
 } from "./board-logic";
 import { type SessionSlots, TicketSessionBody } from "./chat";
 import { readOnlyBar } from "./chat-logic";
-import { artifactProblem, DESIGN_FEATURE } from "./design-logic";
 import { parseDeadline, parseLabels, useModels } from "./dialogs";
 import { isQuick } from "./quick-logic";
 import {
@@ -80,7 +79,6 @@ import { PageSection, type Person, useTicketWork } from "./ticket-page";
 import { planStep } from "./ticket-page-logic";
 import {
   Box,
-  DesignRow,
   Editable,
   Followers,
   MODES,
@@ -841,20 +839,6 @@ function PropertiesTab({ detail, t }: { detail: TicketDetail; t: TicketView }) {
             }}
           />
         </SideRow>
-        {features.includes(DESIGN_FEATURE) ? (
-          <DesignRow
-            url={t.design_url ?? null}
-            enabled={open}
-            onSave={async (text) => {
-              const problem = artifactProblem(text);
-              if (problem) {
-                toast(problem);
-                return false;
-              }
-              return update({ design_url: text.trim() });
-            }}
-          />
-        ) : null}
         <SideRow name="Created by">{`${t.created_by_username} · ${time(t.created_at_ms)}`}</SideRow>
         {features.includes("ticket_follow") ? <Followers id={t.id} /> : null}
       </SideProperties>
