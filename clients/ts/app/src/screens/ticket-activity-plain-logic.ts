@@ -328,10 +328,10 @@ export function stepText(todos: readonly Todo[] | null): string {
   const done = todos.filter((t) => t.state === "done").length;
   if (done === todos.length) return `${done} of ${done} done`;
   const doing = todos.flatMap((t, i) => (t.state === "doing" ? [i + 1] : []));
-  if (doing.length === 0) return `Step ${done + 1} of ${todos.length}`;
-  if (doing.length === 1) return `Step ${doing[0]} of ${todos.length}`;
   const first = doing[0];
-  const last = doing[doing.length - 1];
+  const last = doing.at(-1);
+  if (first === undefined || last === undefined) return `Step ${done + 1} of ${todos.length}`;
+  if (doing.length === 1) return `Step ${first} of ${todos.length}`;
   const run = last - first + 1 === doing.length;
   return `Steps ${run ? `${first}–${last}` : doing.join(", ")} of ${todos.length}`;
 }
