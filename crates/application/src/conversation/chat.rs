@@ -47,8 +47,9 @@ impl CommandService {
         let uploaded = if sources.is_empty() {
             None
         } else {
-            let folders = self.store.read(|c| conv::work_folders(c, cmd.conversation_id)).map_err(storage_error)?;
-            let folder = crate::conversation::message_uploads::work_folder(&folders)?;
+            let worktrees = aurelius_domain::work_place::worktrees_dir(self.store.root());
+            let folders = self.store.read(|c| conv::work_folders(c, &worktrees, cmd.conversation_id)).map_err(storage_error)?;
+            let folder = crate::conversation::message_uploads::work_folder_in(&folders, &worktrees)?;
             let uploads = crate::conversation::message_uploads::copy(&folder, &sources)?;
             Some((folder, uploads))
         };

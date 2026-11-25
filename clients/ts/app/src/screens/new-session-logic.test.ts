@@ -25,6 +25,7 @@ import {
   remembered,
   type SessionStart,
   sessionDispatchParams,
+  sessionFilesAllowed,
   sessionKey,
   sessionRequest,
   sessionStartParams,
@@ -448,6 +449,29 @@ describe("where a session works (session_own_branch)", () => {
   it("takes files with the first message on its own branch", () => {
     const ready = { projectId: "p", text: "fix", kind: "session" as const, who: "e", offline: false };
     expect(startProblem({ ...ready, files: 1, sessionFiles: true, worktree: false })).toBeNull();
+  });
+});
+
+describe("only worktrees (worktrees_only, ticket #86)", () => {
+  it("takes files with the first message, as the server keeps them for the worktree", () => {
+    expect(sessionFilesAllowed(true, true, true)).toBe(true);
+    expect(sessionFilesAllowed(true, true, false)).toBe(false);
+    expect(sessionFilesAllowed(true, false, false)).toBe(true);
+    expect(sessionFilesAllowed(false, true, true)).toBe(false);
+  });
+
+  it("starts every session in a worktree of its own", () => {
+    const start = {
+      projectId: "p",
+      employeeId: "e",
+      text: "fix it",
+      model: "default",
+      effort: "default",
+      mode: "default",
+    };
+    expect(shownPlace(null, false)).toBe("worktree");
+    const params = sessionStartParams(start, shownPlace(null, false), false);
+    expect([params.worktree, "own_branch" in params]).toEqual([true, false]);
   });
 });
 

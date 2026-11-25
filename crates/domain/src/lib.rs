@@ -29,6 +29,7 @@ pub mod memory;
 pub mod org;
 pub mod project;
 pub mod project_conversation;
+pub mod work_place;
 pub mod work_session;
 pub mod proposal;
 pub mod remote;

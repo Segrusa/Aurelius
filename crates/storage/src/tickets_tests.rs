@@ -100,7 +100,7 @@ fn a_tickets_discussion_belongs_to_the_tickets_project() {
     let (id, _) = add(&f, f.hermes, "Files");
     let discussion = f.store.read(|c| crate::discussions::ticket_conversation(c, id)).unwrap().expect("a ticket has a discussion");
     assert_eq!(f.store.read(|c| crate::conversations::project_id_of(c, discussion)).unwrap(), Some(f.hermes));
-    assert_eq!(f.store.read(|c| crate::conversations::work_folders(c, discussion)).unwrap(), Vec::<String>::new(), "no folder of its own");
+    assert_eq!(f.store.read(|c| crate::conversations::work_folders(c, std::path::Path::new("/data/worktrees"), discussion)).unwrap(), Vec::<String>::new(), "no folder of its own");
 }
 
 #[test]

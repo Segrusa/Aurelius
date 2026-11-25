@@ -171,6 +171,8 @@ void main() {
       expect(startProblem(offline: false, projectId: 'p', text: 'x', who: 'e1', dispatchOn: false, files: 1, filesOn: false), 'Add files in the session once it has started.');
       expect(startProblem(offline: false, projectId: 'p', text: 'x', who: 'e1', dispatchOn: false, files: 1, filesOn: true, ownBranch: true), isNull);
       expect(startProblem(offline: false, projectId: 'p', text: 'x', who: 'e1', dispatchOn: false, files: 1, filesOn: true), 'Add files once the session works in its own worktree.');
+      // ticket #86: a server that works only in worktrees keeps the files for the worktree.
+      expect(startProblem(offline: false, projectId: 'p', text: 'x', who: 'e1', dispatchOn: false, files: 1, filesOn: true, worktreesOnly: true), isNull);
     });
   });
 

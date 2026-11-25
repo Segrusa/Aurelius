@@ -16,6 +16,10 @@ const chatFilesFeature = 'chat_files';
 /// The server lets a session work on a branch of its own in the project's folder.
 const ownBranchFeature = 'session_own_branch';
 
+/// Every session works in a worktree of its own (ticket #86); files may go with the
+/// first message, as the server keeps them for the worktree.
+const worktreesOnlyFeature = 'worktrees_only';
+
 /// The Who of a session nobody was chosen for: the dispatcher chooses.
 const dispatcherWho = 'dispatcher';
 
@@ -230,14 +234,15 @@ String? startProblem({
   int files = 0,
   bool filesOn = false,
   bool ownBranch = false,
+  bool worktreesOnly = false,
 }) {
   if (offline) return 'Not connected to the server.';
   if (projectId == null) return 'Choose a project.';
   if (text.trim().isEmpty) return 'Describe what needs doing.';
   if (who == null || (who == dispatcherWho && !dispatchOn)) return 'Choose who does it.';
   if (files > 0 && !filesOn) return 'Add files in the session once it has started.';
-  // In a worktree of its own the folder is made only before the first run.
-  if (files > 0 && !ownBranch) return 'Add files once the session works in its own worktree.';
+  // In a worktree of its own the folder is made only before the first run (an older server).
+  if (files > 0 && !ownBranch && !worktreesOnly) return 'Add files once the session works in its own worktree.';
   return null;
 }
 

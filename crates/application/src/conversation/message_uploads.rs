@@ -59,6 +59,19 @@ pub fn work_folder(folders: &[String]) -> Result<PathBuf, AppError> {
         .ok_or_else(|| upload_error("This conversation has no work folder on the server to put files in; give the project or the employee a folder first."))
 }
 
+/// `work_folder`, when the first folder is a worktree Aurelius has not made yet (under
+/// `worktrees`, before its first run): that folder is made for the files, and the daemon
+/// makes the worktree around them (`quick::ensure_worktree`).
+pub fn work_folder_in(folders: &[String], worktrees: &Path) -> Result<PathBuf, AppError> {
+    if let Some(first) = folders.first().map(PathBuf::from)
+        && first.starts_with(worktrees)
+        && !first.is_dir()
+    {
+        std::fs::create_dir_all(&first).map_err(|e| upload_error(format!("Could not make the work folder {}: {e}", first.display())))?;
+    }
+    work_folder(folders)
+}
+
 /// Copy the files into `<folder>/.aurelius/uploads/` under unique names, with
 /// a `.gitignore` that keeps the folder out of git. On failure the files
 /// copied so far are removed again.

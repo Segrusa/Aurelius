@@ -281,19 +281,21 @@ fn a_normal_ticket_is_accepted_straight_to_done_without_a_merge() {
     let CommandResult::TicketChanged { column, .. } = accept(&s, id).unwrap() else { panic!("changed") };
     assert_eq!(column, ColumnKind::Done);
     assert_eq!(jobs(&s, QUICK_MERGE_JOB_KIND), 0);
+    assert_eq!(jobs(&s, QUICK_CLEANUP_JOB_KIND), 1, "its worktrees go (ticket #86)");
     assert!(view(&s, id).kind.is_none(), "its view is as before");
 }
 
 #[test]
-fn cancelling_a_quick_task_queues_the_cleanup_of_its_worktree_and_a_normal_ticket_not() {
+fn cancelling_a_quick_task_or_a_normal_ticket_queues_the_cleanup_of_its_worktrees() {
     let s = setup();
     let normal = normal(&s);
     exec(&s, Command::CancelTicket(CancelTicket { ticket_id: normal })).unwrap();
-    assert_eq!(jobs(&s, QUICK_CLEANUP_JOB_KIND), 0);
+    assert_eq!(jobs(&s, QUICK_CLEANUP_JOB_KIND), 1, "a normal ticket's worktrees go too (ticket #86)");
+    assert!(s.service.quick_repo(normal).unwrap().is_none(), "but it is no quick task: its branches are not deleted with them");
     let id = quick(&s);
     exec(&s, Command::CancelTicket(CancelTicket { ticket_id: id })).unwrap();
     assert_eq!(view(&s, id).column, ColumnKind::Backlog);
-    assert_eq!(jobs(&s, QUICK_CLEANUP_JOB_KIND), 1);
+    assert_eq!(jobs(&s, QUICK_CLEANUP_JOB_KIND), 2);
     let repo = s.service.quick_repo(id).unwrap().unwrap();
     assert!(!repo.working, "a cancelled quick task gets no new worktree");
     assert_eq!(repo.branch, aurelius_domain::ticket::quick_branch(view(&s, id).number));
@@ -343,4 +345,44 @@ fn a_quick_task_gets_its_summary_from_the_same_extraction_once_its_merge_put_it_
     assert_eq!(ticket_jobs, 1);
     let number = view(&s, id).number;
     assert_eq!(history(&s), vec![(number, aurelius_domain::history::HistorySummaryState::Summarizing)], "on Done, its summary on the way");
+}
+
+#[test]
+fn a_tickets_main_task_and_a_delegated_part_each_get_a_worktree_and_the_part_starts_from_its_parents_branch() {
+    let s = setup();
+    let id = normal(&s);
+    let number = view(&s, id).number;
+    let main = root(&s, id);
+    let worktrees = aurelius_domain::work_place::worktrees_dir(s.service.store().root());
+    let (project, ann) = (s.project, s.ann);
+    let part = TaskId::new();
+    s.service
+        .store()
+        .write(move |tx| {
+            let brief: String = tx.query_row("SELECT brief_blob_id FROM tasks WHERE id = ?1", [main.to_string()], |r| r.get(0))?;
+            aurelius_storage::tasks::insert_task(tx, part, project, Some(ann), "A part", &brief, &brief, aurelius_domain::task::TaskStatus::Queued, Some(main))
+        })
+        .unwrap();
+    let places = s.service.store().read(|c| aurelius_storage::work_places::of_ticket_tasks(c, &worktrees, id)).unwrap();
+    assert_eq!(places.len(), 2, "{places:?}");
+    let (main_place, part_place) = (&places[0], &places[1]);
+    assert_eq!((main_place.branch.as_str(), main_place.worktree.clone(), main_place.base.clone()), (format!("ticket/{number}").as_str(), worktrees.join(format!("ticket-{number}")), None));
+    assert!(part_place.branch.starts_with(&format!("ticket/{number}-ann-")), "{}", part_place.branch);
+    assert_eq!(part_place.base.as_deref(), Some(format!("ticket/{number}").as_str()), "from the main task's work, not from main");
+    assert_ne!(part_place.worktree, main_place.worktree);
+    assert!(places.iter().all(|p| p.repo != p.worktree && p.make), "never the project's folder");
+    // A ticket worked on keeps its worktrees; cancelled, they may go.
+    assert!(s.service.ticket_worktrees(id).unwrap().is_empty());
+    exec(&s, Command::CancelTicket(CancelTicket { ticket_id: id })).unwrap();
+    assert_eq!(s.service.ticket_worktrees(id).unwrap().len(), 2);
+}
+
+#[test]
+fn a_task_in_a_project_without_a_git_folder_still_works_in_that_folder() {
+    let s = setup();
+    let made = exec(&s, create(s.plain, None, Some(s.orion), "Plain work", Some("Why"))).unwrap();
+    let CommandResult::TicketCreated { ticket_id, .. } = made else { panic!("{made:?}") };
+    let worktrees = aurelius_domain::work_place::worktrees_dir(s.service.store().root());
+    let main = root(&s, ticket_id);
+    assert!(s.service.store().read(|c| aurelius_storage::work_places::of_task(c, &worktrees, main)).unwrap().is_none());
 }
