@@ -9,6 +9,7 @@ pub mod activity;
 pub mod approval;
 pub mod autonomy;
 pub mod code;
+pub mod code_review;
 pub mod command;
 pub mod company;
 pub mod connection;
@@ -177,6 +178,11 @@ pub enum Command {
     EditMessage(group_chat::EditMessage),
     DeleteMessage(group_chat::DeleteMessage),
     SetRailPins(user::SetRailPins),
+    StartCodeThread(code_review::StartCodeThread),
+    ReplyCodeThread(code_review::ReplyCodeThread),
+    ResolveCodeThread(code_review::ResolveCodeThread),
+    SetCodeViewed(code_review::SetCodeViewed),
+    SubmitCodeReview(code_review::SubmitCodeReview),
 }
 
 /// `(type, method)` for every command: the tag in the JSON of a `Command` and
@@ -281,6 +287,11 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("edit_message", "message.edit"),
     ("delete_message", "message.delete"),
     ("set_rail_pins", "user.set_rail_pins"),
+    ("start_code_thread", "code.start_thread"),
+    ("reply_code_thread", "code.reply"),
+    ("resolve_code_thread", "code.resolve_thread"),
+    ("set_code_viewed", "code.set_viewed"),
+    ("submit_code_review", "code.submit_review"),
 ];
 
 impl Command {

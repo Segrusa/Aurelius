@@ -18,6 +18,14 @@ pub const CODE_BRANCH_COMMITS_MAX: usize = 20;
 pub const CODE_FILES_MAX: usize = 50;
 /// Longest a commit subject travels; a longer one is cut.
 pub const CODE_SUBJECT_MAX_CHARS: usize = 200;
+/// Most files `code.diff` sends; more are left out and the diff says it is `truncated`.
+pub const CODE_DIFF_FILES_MAX: usize = 300;
+/// Most diff lines `code.diff` sends over all files together.
+pub const CODE_DIFF_LINES_MAX: usize = 8_000;
+/// Most diff lines one file sends; a longer file diff is cut (its `truncated`).
+pub const CODE_DIFF_FILE_LINES_MAX: usize = 2_000;
+/// Longest one diff line travels; a longer one (a minified file) is cut.
+pub const CODE_DIFF_LINE_MAX_CHARS: usize = 1_000;
 
 /// The git state of one project's folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -132,6 +140,11 @@ pub struct CodeBranch {
     /// remove or delete such a branch, and Clean up merged leaves it alone.
     #[serde(default)]
     pub open: bool,
+    /// What a merge into main would conflict on (feature `code_review`, ticket #84), from
+    /// `git merge-tree` without touching any worktree: empty when it merges cleanly. None:
+    /// not checked (nothing ahead, git could not tell, or an older server).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conflicts: Option<Vec<String>>,
 }
 
 /// A commit of a branch's own list.
@@ -170,6 +183,71 @@ pub struct CodeCommit {
     /// The listed local branches whose newest commit this is.
     #[serde(default)]
     pub branches: Vec<String>,
+}
+
+/// `code.diff` (feature `code_review`, ticket #84): what merging a branch would bring into
+/// main (`main...branch`), file by file, plus what its worktree changed and did not commit.
+/// The text has passed the vault's redactor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CodeDiff {
+    pub project_id: ProjectId,
+    pub branch: String,
+    /// The commit main and the branch share (`git merge-base`): the left side of the diff.
+    pub base: String,
+    /// The branch's newest commit: the right side, and what a line comment is made on.
+    pub head: String,
+    /// Committed files first (in git's order), then the worktree's uncommitted ones.
+    #[serde(default)]
+    pub files: Vec<CodeDiffFile>,
+    /// Files or lines were left out to stay under `CODE_DIFF_FILES_MAX`/`CODE_DIFF_LINES_MAX`.
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+/// How a file changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CodeFileStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+}
+
+/// One file of a `CodeDiff`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CodeDiffFile {
+    pub path: String,
+    /// A renamed file's earlier path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_path: Option<String>,
+    pub status: CodeFileStatus,
+    pub additions: u32,
+    pub deletions: u32,
+    /// Git shows no lines for it (an image, an archive).
+    #[serde(default)]
+    pub binary: bool,
+    /// The change is in the worktree and not committed yet.
+    #[serde(default)]
+    pub uncommitted: bool,
+    #[serde(default)]
+    pub hunks: Vec<CodeHunk>,
+    /// Lines of this file were left out (`CODE_DIFF_FILE_LINES_MAX` or the whole diff's limit).
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+/// One hunk of a file's unified diff (three lines of context).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CodeHunk {
+    /// The `@@ -a,b +c,d @@ …` line as git wrote it.
+    pub header: String,
+    /// The first line number on the left (main's side) and on the right (the branch's).
+    pub old_start: u32,
+    pub new_start: u32,
+    /// Its lines, each starting with ' ' (both sides), '+' (added) or '-' (removed).
+    #[serde(default)]
+    pub lines: Vec<String>,
 }
 
 /// The ticket number a branch name carries, when it carries one: `ticket-<N>` anywhere

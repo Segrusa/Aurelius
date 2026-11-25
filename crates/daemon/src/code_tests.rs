@@ -373,3 +373,134 @@ fn skip_fetch_all_is_read_from_gits_config_lines() {
     assert_eq!(skipped_remotes(config), vec!["c", "up-stream"]);
     assert!(skipped_remotes("").is_empty());
 }
+
+// ---- Reviewing a branch (ticket #84) ----
+
+#[test]
+fn a_unified_diff_gives_each_file_its_status_hunks_and_counts() {
+    let text = "diff --git a/src/a.rs b/src/a.rs\nindex 1..2 100644\n--- a/src/a.rs\n+++ b/src/a.rs\n\
+                @@ -3,4 +3,5 @@ fn main() {\n keep\n-old\n+new\n+more\n keep\n\\ No newline at end of file\n\
+                diff --git a/new.txt b/new.txt\nnew file mode 100644\nindex 0..3\n--- /dev/null\n+++ b/new.txt\n@@ -0,0 +1 @@\n+hello\n\
+                diff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\n--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n\
+                diff --git a/old name.md b/new name.md\nsimilarity index 90%\nrename from old name.md\nrename to new name.md\n\
+                diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n";
+    let files = parse_diff(text);
+    let summary: Vec<_> = files.iter().map(|f| (f.path.as_str(), f.status, f.additions, f.deletions, f.hunks.len(), f.binary)).collect();
+    assert_eq!(
+        summary,
+        vec![
+            ("src/a.rs", CodeFileStatus::Modified, 2, 1, 1, false),
+            ("new.txt", CodeFileStatus::Added, 1, 0, 1, false),
+            ("gone.txt", CodeFileStatus::Deleted, 0, 1, 1, false),
+            ("new name.md", CodeFileStatus::Renamed, 0, 0, 0, false),
+            ("logo.png", CodeFileStatus::Modified, 0, 0, 0, true),
+        ]
+    );
+    let hunk = &files[0].hunks[0];
+    assert_eq!((hunk.old_start, hunk.new_start), (3, 3));
+    assert_eq!(hunk.lines, vec![" keep", "-old", "+new", "+more", " keep"], "no-newline marker is not a line");
+    assert_eq!(files[3].old_path.as_deref(), Some("old name.md"));
+}
+
+#[test]
+fn a_line_inside_a_hunk_that_looks_like_a_header_stays_a_line() {
+    let text = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n---- a/y\n+++++ b/y\n";
+    let files = parse_diff(text);
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].path, "x");
+    assert_eq!(files[0].hunks[0].lines, vec!["---- a/y", "+++++ b/y"]);
+}
+
+#[test]
+fn a_hunk_header_without_counts_starts_at_its_line() {
+    assert_eq!(parse_hunk_header("@@ -0,0 +1 @@"), (0, 1));
+    assert_eq!(parse_hunk_header("@@ -12,7 +14,9 @@ fn x()"), (12, 14));
+}
+
+#[test]
+fn a_long_diff_is_cut_per_file_and_in_total() {
+    let file = |n: usize| CodeDiffFile {
+        path: format!("f{n}"),
+        old_path: None,
+        status: CodeFileStatus::Added,
+        additions: 0,
+        deletions: 0,
+        binary: false,
+        uncommitted: false,
+        hunks: vec![CodeHunk { header: "@@".into(), old_start: 0, new_start: 1, lines: vec!["+x".into(); CODE_DIFF_FILE_LINES_MAX + 5] }],
+        truncated: false,
+    };
+    let mut files: Vec<_> = (0..CODE_DIFF_FILES_MAX + 2).map(file).collect();
+    assert!(limit_diff(&mut files));
+    assert_eq!(files.len(), CODE_DIFF_FILES_MAX);
+    assert_eq!(files[0].hunks[0].lines.len(), CODE_DIFF_FILE_LINES_MAX);
+    let total: usize = files.iter().flat_map(|f| &f.hunks).map(|h| h.lines.len()).sum();
+    assert_eq!(total, CODE_DIFF_LINES_MAX);
+    assert!(files.last().is_some_and(|f| f.truncated && f.hunks.is_empty()));
+
+    let mut small = vec![file(0)];
+    small[0].hunks[0].lines.truncate(3);
+    assert!(!limit_diff(&mut small), "a small diff is whole");
+}
+
+#[test]
+fn merge_tree_names_each_conflicting_file_once_after_its_tree() {
+    assert_eq!(parse_conflicts("36a3690\nsrc/a.rs\nsrc/a.rs\nREADME.md\n"), vec!["src/a.rs", "README.md"]);
+    assert!(parse_conflicts("36a3690\n").is_empty());
+}
+
+#[test]
+fn a_very_long_diff_line_is_cut_with_an_ellipsis() {
+    let line = format!("+{}", "x".repeat(CODE_DIFF_LINE_MAX_CHARS * 2));
+    let cut = cut_line(&line);
+    assert_eq!(cut.chars().count(), CODE_DIFF_LINE_MAX_CHARS);
+    assert!(cut.ends_with('…'));
+}
+
+#[test]
+fn a_branchs_diff_holds_what_it_committed_and_what_its_worktree_did_not() {
+    let (dir, repo) = repo();
+    run(&repo, &["switch", "--quiet", "-c", "feat/x"]);
+    commit(&repo, "readme.md", "changed on the branch");
+    commit(&repo, "added.txt", "new file");
+    run(&repo, &["switch", "--quiet", "main"]);
+    let wt = dir.path().join("wt");
+    run(&repo, &["worktree", "add", "--quiet", &wt.to_string_lossy(), "feat/x"]);
+    std::fs::write(wt.join("added.txt"), "new file\nnot committed\n").unwrap();
+
+    let diff = read_diff(ProjectId::new(), &repo, "feat/x").unwrap();
+    let files: Vec<_> = diff.files.iter().map(|f| (f.path.as_str(), f.status, f.uncommitted)).collect();
+    assert_eq!(files, vec![("added.txt", CodeFileStatus::Added, false), ("readme.md", CodeFileStatus::Modified, false), ("added.txt", CodeFileStatus::Modified, true)]);
+    assert_eq!(diff.head, run(&repo, &["rev-parse", "refs/heads/feat/x"]));
+    assert_eq!(diff.base, run(&repo, &["rev-parse", "refs/heads/main"]));
+    assert_eq!(diff.files[1].hunks[0].lines, vec!["-base", "+changed on the branch"]);
+    assert!(!diff.truncated);
+
+    let unknown = read_diff(ProjectId::new(), &repo, "nope").expect_err("unknown branch");
+    assert_eq!(unknown.code, ErrorCode::NotFound);
+}
+
+#[test]
+fn the_view_says_which_files_a_merge_into_main_would_conflict_on() {
+    let (_dir, repo) = repo();
+    run(&repo, &["switch", "--quiet", "-c", "clash"]);
+    commit(&repo, "readme.md", "the branch's words");
+    run(&repo, &["switch", "--quiet", "-c", "clean", "main"]);
+    commit(&repo, "other.txt", "elsewhere");
+    run(&repo, &["switch", "--quiet", "-c", "fresh", "main"]);
+    commit(&repo, "fresh.txt", "ahead only");
+    run(&repo, &["switch", "--quiet", "main"]);
+    let before = run(&repo, &["rev-parse", "HEAD"]);
+    let fresh = read_view(ProjectId::new(), &repo).unwrap();
+    assert_eq!(fresh.branches.iter().find(|b| b.name == "fresh").unwrap().conflicts, Some(vec![]), "up to date with main: nothing to check");
+    commit(&repo, "readme.md", "main's words");
+
+    let view = read_view(ProjectId::new(), &repo).unwrap();
+    let of = |name: &str| view.branches.iter().find(|b| b.name == name).unwrap().conflicts.clone();
+    assert_eq!(of("clash"), Some(vec!["readme.md".to_owned()]));
+    assert_eq!(of("clean"), Some(vec![]));
+    assert_eq!(of("main"), None, "main is not merged into itself");
+    // merge-tree touches neither main nor the worktree.
+    assert_ne!(run(&repo, &["rev-parse", "HEAD"]), before);
+    assert_eq!(run(&repo, &["status", "--porcelain"]), "");
+}

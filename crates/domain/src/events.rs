@@ -218,6 +218,11 @@ event_kinds! {
     // `metadata.user_id` and `project_ids`. A client whose board member it is reads
     // `user.rail_pins` again; the others ignore it.
     UserRailPinsChanged => "user.rail_pins_changed",
+    // A branch's review changed (feature `code_review`): a thread or reply was added, a
+    // thread resolved or opened, a file marked viewed, or a review finished. The aggregate
+    // is `<project_id>:<branch>`; `metadata.project_id`, `branch` and `user_id` (who did it).
+    // A client showing that branch reads `code.review` again.
+    CodeReviewChanged => "code.review_changed",
 }
 
 impl EventKind {

@@ -76,3 +76,6 @@ id_type!(SessionId);
 id_type!(VaultItemId);
 id_type!(GuidelineId);
 id_type!(GuidelineProposalId);
+id_type!(CodeThreadId);
+id_type!(CodeCommentId);
+id_type!(CodeReviewId);

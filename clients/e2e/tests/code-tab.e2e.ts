@@ -218,9 +218,12 @@ test("the Code tab shows the repository, merges a ready branch and shows a refus
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(`${site.origin}/code`);
 
-    // The head, the sidebar row with its count, the worktrees and the graph.
+    // The page opens on the review (ticket #84); the lists and the graph are behind All branches and graph.
     await expect(page.getByRole("heading", { level: 1, name: "Code" })).toBeVisible();
-    await expect(page.getByRole("link", { name: /^Code/ })).toContainText("5");
+    // Nothing of this repository is in Review, so the sidebar's review badge stays away.
+    await expect(page.getByRole("link", { name: /^Code/ })).toHaveText("Code");
+    await page.getByRole("button", { name: "All branches and graph →" }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "All branches" })).toBeVisible();
     const worktrees = page.getByRole("region", { name: "Worktrees" });
     await expect(worktrees.getByText("5 active")).toBeVisible();
     await expect(page.getByText("Fetched 2m ago")).toBeVisible();
@@ -300,6 +303,7 @@ test("the Code tab shows the repository, merges a ready branch and shows a refus
       localStorage.setItem("aurelius.appearance", "dark");
     });
     await page.reload();
+    await page.getByRole("button", { name: "All branches and graph →" }).click();
     await expect(page.getByRole("region", { name: "Worktrees" })).toBeVisible();
     await page.waitForLoadState("networkidle");
     await page.screenshot({ path: join(SHOTS, "code-dark.png"), animations: "disabled" });

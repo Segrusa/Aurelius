@@ -41,11 +41,18 @@ export const METHODS = {
   "claude_login.status": "read",
   "claude_login.unlink": "host",
   "code.delete_branch": "host",
+  "code.diff": "read",
   "code.fetch": "host",
   "code.get": "read",
   "code.merge": "host",
   "code.prune_merged": "host",
   "code.remove_worktree": "host",
+  "code.reply": "command",
+  "code.resolve_thread": "command",
+  "code.review": "read",
+  "code.set_viewed": "command",
+  "code.start_thread": "command",
+  "code.submit_review": "command",
   "command.applied": "read",
   "compaction.get_setting": "read",
   "compaction.set_threshold": "host",
@@ -378,6 +385,11 @@ export interface MethodParams {
    */
   "code.delete_branch": { branch: string; force?: boolean; project_id: string };
   /**
+   * What merging a branch would bring into main, file by file with its hunks, plus what
+   * its worktree has not committed (feature `code_review`, ticket #84). Redacted.
+   */
+  "code.diff": { branch: string; project_id: string };
+  /**
    * `git fetch --prune` of the project's repository (feature `code_view`, ticket #77);
    * answers `HostResult::Code`. Never a prompt for credentials: a remote that wants
    * one fails with git's reason.
@@ -408,6 +420,40 @@ export interface MethodParams {
    * changes or an employee works in it now. The branch stays. Answers `Code`.
    */
   "code.remove_worktree": { path: string; project_id: string };
+  /**
+   * `code.reply`: a reply in a thread, pending until its writer finishes their review.
+   * Answers `CodeCommented`.
+   */
+  "code.reply": { body: string; thread_id: string };
+  /**
+   * `code.resolve_thread`: mark a thread resolved (it folds) or open again. Answers
+   * `CodeThreadResolved`; the same state again changes nothing.
+   */
+  "code.resolve_thread": { resolved: boolean; thread_id: string };
+  /**
+   * A branch's review as the board member of the session sees it: line threads (with
+   * only their own pending comments), finished reviews, and the files they viewed at
+   * `head` (feature `code_review`, ticket #84). Not for apps.
+   */
+  "code.review": { branch: string; head?: string | null; project_id: string };
+  /**
+   * `code.set_viewed`: the board member of the session viewed a file of a branch at a head
+   * (or not any more). A new head starts unviewed. Answers `CodeViewedSet`.
+   */
+  "code.set_viewed": { branch: string; head: string; path: string; project_id: string; viewed: boolean };
+  /**
+   * `code.start_thread`: a board member's first comment on a line of a branch's diff. It is
+   * pending until they finish their review. Answers `CodeThreadStarted`.
+   */
+  "code.start_thread": { body: string; branch: string; commit: string; line: number; path: string; project_id: string; side: M.CodeLineSide; snippet?: string[] };
+  /**
+   * `code.submit_review`: finish the board member's review of a branch at `head`. Their
+   * pending comments on it are sent with it. A comment or a request for changes needs a
+   * summary or a pending comment; an approval needs neither. Answers `CodeReviewSubmitted`.
+   * Waking the owner is the client's next write (`ticket.post`, `ticket.send_back` or
+   * `chat.send`), with the text it shows the board member.
+   */
+  "code.submit_review": { body?: string | null; branch: string; head: string; project_id: string; verdict: M.CodeVerdict };
   /**
    * Whether the server committed the write sent with `idempotency_key` (feature
    * `command_applied`), answered with `CommandApplied`. A client asks this after

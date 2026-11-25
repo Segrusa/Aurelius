@@ -337,4 +337,30 @@ pub enum CommandResult {
         project_ids: Vec<crate::ProjectId>,
         changed: bool,
     },
+    /// `code.start_thread` (feature `code_review`): the thread and its first, pending comment.
+    CodeThreadStarted {
+        thread_id: crate::CodeThreadId,
+        comment_id: crate::CodeCommentId,
+    },
+    /// `code.reply`: the pending reply.
+    CodeCommented {
+        thread_id: crate::CodeThreadId,
+        comment_id: crate::CodeCommentId,
+    },
+    /// `code.resolve_thread`; `changed` is false when it already was so.
+    CodeThreadResolved {
+        thread_id: crate::CodeThreadId,
+        resolved: bool,
+        changed: bool,
+    },
+    /// `code.set_viewed`; `changed` is false when it already was so.
+    CodeViewedSet {
+        viewed: bool,
+        changed: bool,
+    },
+    /// `code.submit_review`: the review and how many pending comments went with it.
+    CodeReviewSubmitted {
+        review_id: crate::CodeReviewId,
+        comments: u32,
+    },
 }

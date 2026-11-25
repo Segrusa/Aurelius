@@ -395,6 +395,20 @@ pub enum Method {
     /// rights as `board.get`.
     #[serde(rename = "code.get")]
     CodeGet { project_id: ProjectId },
+    /// What merging a branch would bring into main, file by file with its hunks, plus what
+    /// its worktree has not committed (feature `code_review`, ticket #84). Redacted.
+    #[serde(rename = "code.diff")]
+    CodeDiff { project_id: ProjectId, branch: String },
+    /// A branch's review as the board member of the session sees it: line threads (with
+    /// only their own pending comments), finished reviews, and the files they viewed at
+    /// `head` (feature `code_review`, ticket #84). Not for apps.
+    #[serde(rename = "code.review")]
+    CodeReview {
+        project_id: ProjectId,
+        branch: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head: Option<String>,
+    },
     /// The conversations of a project, most recently active first.
     #[serde(rename = "project_conversation.list")]
     ProjectConversationList { project_id: ProjectId },

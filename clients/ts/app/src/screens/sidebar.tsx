@@ -21,7 +21,7 @@ import { Icon, NAV_ICONS, type NavIcon, NewIcon, PlusIcon, SearchIcon } from "..
 import { KeyHint } from "../ui/key-hint";
 import { initial, Mark, markColor } from "../ui/marks";
 import { useWorkspace } from "../workspace";
-import { useCodeWorktreeCount } from "./code";
+import { useCodeReviewCount } from "./code";
 import { CODE_VIEW } from "./code-logic";
 import { pinnedFirst } from "./employee-logic";
 import { InboxBell } from "./inbox-bell";
@@ -262,6 +262,15 @@ const styles = stylex.create({
   chevron: { display: "flex", color: "var(--precision-text3)", transition: "transform 120ms ease" },
   chevronFolded: { transform: "rotate(-90deg)" },
   count: { fontSize: 11.5, fontWeight: 500, color: "var(--precision-text3)", fontVariantNumeric: "tabular-nums" },
+  reviewCount: {
+    paddingInline: 6,
+    borderRadius: 999,
+    backgroundColor: "var(--color-warning-muted)",
+    color: "var(--color-text-warning)",
+    fontSize: 11,
+    fontWeight: 700,
+    fontVariantNumeric: "tabular-nums",
+  },
   runningCount: {
     display: "flex",
     alignItems: "center",
@@ -319,12 +328,12 @@ const NAV: { to: string; label: string; icon: NavIcon; feature?: Feature; server
   { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
 ];
 
-/** Beside Code: how many worktrees the workspace's repository has besides its folder (none: nothing). */
+/** Beside Code: how many branches wait for the board member's review (none: nothing). */
 function CodeCount() {
-  const n = useCodeWorktreeCount();
+  const n = useCodeReviewCount();
   if (!n) return null;
   return (
-    <span title={`${n} ${n === 1 ? "worktree" : "worktrees"}`} {...stylex.props(styles.count)}>
+    <span title="Waiting for your review" {...stylex.props(styles.reviewCount)}>
       {n}
     </span>
   );

@@ -81,6 +81,9 @@ abstract final class Methods {
   /// employee works on now). A branch with commits main lacks needs `force` (the
   /// client asked the board member first: that work is gone). Answers `Code`.
   static const String codeDeleteBranch = 'code.delete_branch';
+  /// What merging a branch would bring into main, file by file with its hunks, plus what
+  /// its worktree has not committed (feature `code_review`, ticket #84). Redacted.
+  static const String codeDiff = 'code.diff';
   /// `git fetch --prune` of the project's repository (feature `code_view`, ticket #77);
   /// answers `HostResult::Code`. Never a prompt for credentials: a remote that wants
   /// one fails with git's reason.
@@ -102,6 +105,28 @@ abstract final class Methods {
   /// Remove a worktree (not the project's folder). Refused when it has uncommitted
   /// changes or an employee works in it now. The branch stays. Answers `Code`.
   static const String codeRemoveWorktree = 'code.remove_worktree';
+  /// `code.reply`: a reply in a thread, pending until its writer finishes their review.
+  /// Answers `CodeCommented`.
+  static const String codeReply = 'code.reply';
+  /// `code.resolve_thread`: mark a thread resolved (it folds) or open again. Answers
+  /// `CodeThreadResolved`; the same state again changes nothing.
+  static const String codeResolveThread = 'code.resolve_thread';
+  /// A branch's review as the board member of the session sees it: line threads (with
+  /// only their own pending comments), finished reviews, and the files they viewed at
+  /// `head` (feature `code_review`, ticket #84). Not for apps.
+  static const String codeReview = 'code.review';
+  /// `code.set_viewed`: the board member of the session viewed a file of a branch at a head
+  /// (or not any more). A new head starts unviewed. Answers `CodeViewedSet`.
+  static const String codeSetViewed = 'code.set_viewed';
+  /// `code.start_thread`: a board member's first comment on a line of a branch's diff. It is
+  /// pending until they finish their review. Answers `CodeThreadStarted`.
+  static const String codeStartThread = 'code.start_thread';
+  /// `code.submit_review`: finish the board member's review of a branch at `head`. Their
+  /// pending comments on it are sent with it. A comment or a request for changes needs a
+  /// summary or a pending comment; an approval needs neither. Answers `CodeReviewSubmitted`.
+  /// Waking the owner is the client's next write (`ticket.post`, `ticket.send_back` or
+  /// `chat.send`), with the text it shows the board member.
+  static const String codeSubmitReview = 'code.submit_review';
   /// Whether the server committed the write sent with `idempotency_key` (feature
   /// `command_applied`), answered with `CommandApplied`. A client asks this after
   /// the connection dropped or timed out under a write it will not resend, so it
@@ -720,6 +745,16 @@ Map<String, dynamic> claudeLoginStatus() => <String, dynamic>{
   'method': Methods.claudeLoginStatus,
 };
 
+/// What merging a branch would bring into main, file by file with its hunks, plus what
+/// its worktree has not committed (feature `code_review`, ticket #84). Redacted.
+Map<String, dynamic> codeDiff({required String branch, required String projectId}) => <String, dynamic>{
+  'method': Methods.codeDiff,
+  'params': <String, dynamic>{
+    'branch': branch,
+    'project_id': projectId,
+  },
+};
+
 /// The Code tab of a workspace (feature `code_view`, ticket #77): the git state of
 /// the project's folder (worktrees, local branches, recent commits). A folder that is
 /// no git repository answers a view with `problem` set, not an error. The same
@@ -727,6 +762,18 @@ Map<String, dynamic> claudeLoginStatus() => <String, dynamic>{
 Map<String, dynamic> codeGet({required String projectId}) => <String, dynamic>{
   'method': Methods.codeGet,
   'params': <String, dynamic>{
+    'project_id': projectId,
+  },
+};
+
+/// A branch's review as the board member of the session sees it: line threads (with
+/// only their own pending comments), finished reviews, and the files they viewed at
+/// `head` (feature `code_review`, ticket #84). Not for apps.
+Map<String, dynamic> codeReview({required String branch, String? head, required String projectId}) => <String, dynamic>{
+  'method': Methods.codeReview,
+  'params': <String, dynamic>{
+    'branch': branch,
+    if (head != null) 'head': head,
     'project_id': projectId,
   },
 };
@@ -1935,6 +1982,71 @@ Map<String, dynamic> chatRetry(RetryReply params) => <String, dynamic>{
 Map<String, dynamic> chatSend(SendChatMessage params) => <String, dynamic>{
   'method': Methods.chatSend,
   'params': params.toJson(),
+};
+
+/// `code.reply`: a reply in a thread, pending until its writer finishes their review.
+/// Answers `CodeCommented`.
+Map<String, dynamic> codeReply({required String body, required String threadId}) => <String, dynamic>{
+  'method': Methods.codeReply,
+  'params': <String, dynamic>{
+    'body': body,
+    'thread_id': threadId,
+  },
+};
+
+/// `code.resolve_thread`: mark a thread resolved (it folds) or open again. Answers
+/// `CodeThreadResolved`; the same state again changes nothing.
+Map<String, dynamic> codeResolveThread({required bool resolved, required String threadId}) => <String, dynamic>{
+  'method': Methods.codeResolveThread,
+  'params': <String, dynamic>{
+    'resolved': resolved,
+    'thread_id': threadId,
+  },
+};
+
+/// `code.set_viewed`: the board member of the session viewed a file of a branch at a head
+/// (or not any more). A new head starts unviewed. Answers `CodeViewedSet`.
+Map<String, dynamic> codeSetViewed({required String branch, required String head, required String path, required String projectId, required bool viewed}) => <String, dynamic>{
+  'method': Methods.codeSetViewed,
+  'params': <String, dynamic>{
+    'branch': branch,
+    'head': head,
+    'path': path,
+    'project_id': projectId,
+    'viewed': viewed,
+  },
+};
+
+/// `code.start_thread`: a board member's first comment on a line of a branch's diff. It is
+/// pending until they finish their review. Answers `CodeThreadStarted`.
+Map<String, dynamic> codeStartThread({required String body, required String branch, required String commit, required int line, required String path, required String projectId, required CodeLineSide side, List<String> snippet = const []}) => <String, dynamic>{
+  'method': Methods.codeStartThread,
+  'params': <String, dynamic>{
+    'body': body,
+    'branch': branch,
+    'commit': commit,
+    'line': line,
+    'path': path,
+    'project_id': projectId,
+    'side': side.toJson(),
+    'snippet': snippet,
+  },
+};
+
+/// `code.submit_review`: finish the board member's review of a branch at `head`. Their
+/// pending comments on it are sent with it. A comment or a request for changes needs a
+/// summary or a pending comment; an approval needs neither. Answers `CodeReviewSubmitted`.
+/// Waking the owner is the client's next write (`ticket.post`, `ticket.send_back` or
+/// `chat.send`), with the text it shows the board member.
+Map<String, dynamic> codeSubmitReview({String? body, required String branch, required String head, required String projectId, required CodeVerdict verdict}) => <String, dynamic>{
+  'method': Methods.codeSubmitReview,
+  'params': <String, dynamic>{
+    if (body != null) 'body': body,
+    'branch': branch,
+    'head': head,
+    'project_id': projectId,
+    'verdict': verdict.toJson(),
+  },
 };
 
 /// The company's background jobs (memory consolidation, B6) run on the Claude

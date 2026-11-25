@@ -1,7 +1,8 @@
-// The Code tab of a workspace (ticket #77): the git state of the project's folder. Its worktrees, its branches
-// with where each stands against main, the newest commits of all of them as a graph, and beside it the
+// The Code tab of a workspace. It opens on the review of what waits for the board member (ticket #84,
+// code-review.tsx). Behind "All branches and graph" stays the full git state of ticket #77: its worktrees, its
+// branches with where each stands against main, the newest commits of all of them as a graph, and beside it the
 // details of one branch with what can be done with it (merge, open its ticket, remove its worktree, delete it).
-// What it decides is in code-logic.ts; git itself runs on the server.
+// What it decides is in code-logic.ts and code-review-logic.ts; git itself runs on the server.
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
@@ -17,6 +18,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
+import { useTickets, useWorkSessions } from "../data";
 import { Icon } from "../ui/icons";
 import { initial, Mark, markColor } from "../ui/marks";
 import { useWorkspace } from "../workspace";
@@ -53,6 +55,8 @@ import {
   worktreeCards,
   writtenView,
 } from "./code-logic";
+import { CodeReview } from "./code-review";
+import { mainlineText, reviewQueue } from "./code-review-logic";
 import { Confirm, failureOf, Loading, Page } from "./org-kit";
 import { ticketPlace } from "./ticket-session-logic";
 
@@ -78,6 +82,19 @@ const styles = stylex.create({
     color: "var(--color-text-secondary)",
   },
   muted: { fontSize: 12, color: "var(--precision-text3)", fontVariantNumeric: "tabular-nums" },
+  mainline: {
+    display: { default: "inline-block", "@media (max-width: 760px)": "none" },
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    paddingInline: 9,
+    paddingBlock: 2,
+    borderRadius: 999,
+    backgroundColor: "var(--color-background-muted)",
+    fontSize: 12,
+    color: "var(--color-text-secondary)",
+    whiteSpace: "nowrap",
+  },
   path: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   spacer: { flexGrow: 1 },
   body: { display: "flex", minHeight: 0, flexGrow: 1, flexShrink: 1, flexBasis: "0%" },
@@ -332,12 +349,17 @@ function useCode(projectId: string | null, live: boolean) {
   return query;
 }
 
-/** The sidebar's count beside Code: the worktrees besides the project's folder. */
-export function useCodeWorktreeCount(): number | null {
+/** The sidebar's badge beside Code (ticket #84): how many branches wait for the board member's review. */
+export function useCodeReviewCount(): number | null {
   const { id } = useWorkspace();
   const code = useCode(id, false);
-  const n = code.data?.problem ? 0 : (code.data?.worktrees ?? []).filter((w) => !w.is_main).length;
-  return id === null || !code.data ? null : n;
+  const tickets = useTickets(id !== null);
+  const sessions = useWorkSessions(id);
+  const view = code.data;
+  if (id === null || !view) return null;
+  if (view.problem) return 0;
+  const mine = (tickets.data ?? []).filter((t) => t.project_id === id);
+  return reviewQueue(view, mine, sessions.data ?? []).ready.length;
 }
 
 type CodeWrite = "code.fetch" | "code.merge" | "code.remove_worktree" | "code.delete_branch" | "code.prune_merged";
@@ -832,6 +854,8 @@ export function CodeScreen() {
   const write = useCodeWrite(projectId);
   const [wanted, setWanted] = useState<string | null>(null);
   const [detailsShown, setDetailsShown] = useState(true);
+  // The page opens on the review; the full lists and graph are one click away.
+  const [all, setAll] = useState(false);
   const [asking, setAsking] = useState<Asking>(null);
   const now = Date.now();
   const view = code.data;
@@ -874,10 +898,19 @@ export function CodeScreen() {
   const head = (
     <LayoutHeader hasDivider padding={0} data-titlebar>
       <div {...stylex.props(styles.head)}>
+        {all ? <Button size="sm" variant="ghost" label="‹ Review" onClick={() => setAll(false)} /> : null}
         <Heading level={1} xstyle={styles.title}>
-          Code
+          {all ? "All branches" : "Code"}
         </Heading>
-        {view ? (
+        {view && !all && !view.problem ? (
+          <span
+            title={`${view.repo_path}: main compared to its remote after the last fetch`}
+            {...stylex.props(styles.mainline)}
+          >
+            {mainlineText(view, now)}
+          </span>
+        ) : null}
+        {view && all ? (
           <>
             <span title={view.repo_path} {...stylex.props(styles.repo)}>
               {repoName(view.repo_path)}
@@ -890,7 +923,7 @@ export function CodeScreen() {
         <span {...stylex.props(styles.spacer)} />
         {view && !view.problem ? (
           <>
-            <span {...stylex.props(styles.muted)}>{fetchedText(view, now)}</span>
+            {all ? <span {...stylex.props(styles.muted)}>{fetchedText(view, now)}</span> : null}
             <Button
               size="sm"
               variant="secondary"
@@ -900,14 +933,16 @@ export function CodeScreen() {
               tooltip={view.has_remote ? "git fetch --prune" : "This repository has no remote."}
               onClick={() => projectId && void write.run("code.fetch", { project_id: projectId })}
             />
-            <Button
-              size="sm"
-              variant="ghost"
-              isIconOnly
-              label={detailsShown ? "Hide details" : "Show details"}
-              icon={<Icon name="properties" size={16} />}
-              onClick={() => setDetailsShown(!detailsShown)}
-            />
+            {all ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                isIconOnly
+                label={detailsShown ? "Hide details" : "Show details"}
+                icon={<Icon name="properties" size={16} />}
+                onClick={() => setDetailsShown(!detailsShown)}
+              />
+            ) : null}
           </>
         ) : null}
       </div>
@@ -980,14 +1015,37 @@ export function CodeScreen() {
     );
   }
 
-  const showDetails = supported && view && !view.problem && detailsShown && selected;
+  const showDetails = supported && all && view && !view.problem && detailsShown && selected;
+  const reviewing = supported && !all && projectId !== null && view && !view.problem;
   return (
     <Page>
       {head}
+      {reviewing && write.error ? (
+        <Banner
+          status="error"
+          role="alert"
+          title={write.error}
+          isDismissable
+          dismissLabel="Dismiss"
+          onDismiss={write.clearError}
+        />
+      ) : null}
       <div {...stylex.props(styles.body)}>
-        <div {...stylex.props(styles.scroll)}>
-          <div {...stylex.props(styles.main)}>{content}</div>
-        </div>
+        {reviewing ? (
+          <CodeReview
+            view={view}
+            projectId={projectId}
+            now={now}
+            busy={busy}
+            onMerge={(branch) => void write.run("code.merge", { project_id: projectId, branch })}
+            onCleanUp={() => setAsking({ kind: "prune" })}
+            onShowAll={() => setAll(true)}
+          />
+        ) : (
+          <div {...stylex.props(styles.scroll)}>
+            <div {...stylex.props(styles.main)}>{content}</div>
+          </div>
+        )}
         {showDetails ? (
           <Details
             branch={selected}
