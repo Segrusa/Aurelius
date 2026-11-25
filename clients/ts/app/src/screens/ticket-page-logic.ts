@@ -2,7 +2,6 @@
 // shows, how far a plan is, and whether a task is at work. Pure, so it can be tested on its own.
 
 import type { ActivityView, MessageView, TaskView } from "@aurelius/protocol";
-import type { Todo } from "./chat-logic";
 
 /** What the Activity list of a ticket shows. */
 export type ActivityFilter = "all" | "changes" | "messages";
@@ -31,21 +30,6 @@ export function inFilter(
   if (filter === "changes") return line || writes(m.activity);
   if (filter === "messages") return !line && (m.role === "user" || m.role === "assistant");
   return true;
-}
-
-/** Where a plan stands: the step at work (1-based), the steps done, and how many there are. */
-export interface PlanStep {
-  at: number;
-  done: number;
-  total: number;
-}
-
-export function planStep(todos: readonly Todo[] | null): PlanStep | null {
-  if (!todos || todos.length === 0) return null;
-  const done = todos.filter((t) => t.state === "done").length;
-  const doing = todos.findIndex((t) => t.state === "doing");
-  const at = doing >= 0 ? doing + 1 : Math.min(done + 1, todos.length);
-  return { at, done, total: todos.length };
 }
 
 /** A task that has something to say right now: at work, or waiting on someone. */

@@ -536,6 +536,9 @@ function PlanCard({
   const todos = live.todos;
   // On a Done ticket nothing is at work any more, whatever the last list said.
   const segs = segments(todos, ask !== null).map((x) => (done && x === "now" ? "open" : x));
+  // The latest answer is the main task's own; it belongs under the first step at work, not under
+  // every step that runs in parallel.
+  const firstNow = segs.indexOf("now");
   const who = root.employee_name ?? "The owner";
   const said = live.latest ? nowSentence(live.latest.text, live.latest.activity) : null;
   const meta = [
@@ -565,7 +568,7 @@ function PlanCard({
                 step={step}
                 n={i + 1}
                 seg={segs[i] ?? "open"}
-                sub={segs[i] === "ask" ? "Asked you a question" : segs[i] === "now" && !done ? said : null}
+                sub={segs[i] === "ask" ? "Asked you a question" : i === firstNow && !done ? said : null}
               />
             ))}
           </ol>

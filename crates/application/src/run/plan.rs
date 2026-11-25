@@ -212,7 +212,7 @@ pub const REPORT_GUIDANCE: &str = "You own the main task of this ticket. The tic
 
 /// The owner of a ticket's main task plans first: the ticket's Plan card shows its todo list,
 /// and without one the board member sees "No plan yet" while the work goes on.
-pub const PLAN_FIRST_GUIDANCE: &str = "Plan first: before you read code, change anything or delegate, make your todo list with TaskCreate (TodoWrite if that is the tool you have), one item per step you will take. The ticket's Plan card shows that list to the board member. Keep it current as you work: mark the step you are on as in progress and each finished step as completed, and add or remove steps when the plan changes. When a later run continues the work, update the existing list instead of starting a new one.";
+pub const PLAN_FIRST_GUIDANCE: &str = "Plan first: before you read code, change anything or delegate, make your todo list with TaskCreate (TodoWrite if that is the tool you have), one item per step you will take. The ticket's Plan card shows that list to the board member. Keep it current as you work: mark the step you are on as in progress and each finished step as completed, and add or remove steps when the plan changes. Steps that run at the same time are all in progress at once: when you delegate several parts in parallel, mark each of their steps in progress, not only the first. A delegated step stays in progress until its result is in and handled; mark it completed only then. When a later run continues the work, update the existing list instead of starting a new one.";
 
 /// The note for a ticket's run: the general rule, and who to mention.
 fn discussion_first_note(responsible_username: Option<&str>) -> String {
@@ -986,7 +986,7 @@ mod tests {
 
     #[test]
     fn the_owner_of_a_main_task_is_told_to_make_its_todo_list_first() {
-        for needed in ["Plan first", "before you read code", "TaskCreate", "TodoWrite", "Plan card", "completed", "update the existing list"] {
+        for needed in ["Plan first", "before you read code", "TaskCreate", "TodoWrite", "Plan card", "completed", "update the existing list", "all in progress at once", "until its result is in"] {
             assert!(PLAN_FIRST_GUIDANCE.contains(needed), "{needed}");
         }
     }
