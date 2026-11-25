@@ -1,11 +1,11 @@
 // Features this client keeps out of its menus, tabs, buttons, shortcuts and the command palette
-// (ticket #19, and the simplification of 2026-11-09). Nothing is removed: the server's data and the
-// protocol stay, so showing a feature again is deleting its line here.
+// (ticket #19, and the simplification of 2026-11-09). Their code stays, so showing one again is deleting
+// its line here. Only the Vault is left (Owner decision): the other hidden features were removed in OPR-4.
 
-export type Feature = "ChatAttachments" | "ActivityInSidebar" | "Vault" | "SequentialTasks";
+export type Feature = "Vault";
 
 /** The one list. */
-export const HIDDEN_FEATURES: readonly Feature[] = ["ChatAttachments", "ActivityInSidebar", "Vault", "SequentialTasks"];
+export const HIDDEN_FEATURES: readonly Feature[] = ["Vault"];
 
 export function hidden(feature: Feature): boolean {
   return HIDDEN_FEATURES.includes(feature);

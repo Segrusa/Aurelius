@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hidden, shown } from "./hidden";
+import { HIDDEN_FEATURES, hidden, shown } from "./hidden";
 import { noteScreen, parseScreenUse, type ScreenUse, screenKey, screenUseJson } from "./screen-use";
 
 describe("the screen counter", () => {
@@ -36,14 +36,9 @@ describe("the screen counter", () => {
 });
 
 describe("hidden features", () => {
-  it("are the desktop's", () => {
-    expect(hidden("ChatAttachments")).toBe(true);
-  });
-
-  it("are the simplification's", () => {
-    for (const feature of ["ActivityInSidebar", "Vault", "SequentialTasks"] as const) {
-      expect(hidden(feature)).toBe(true);
-    }
+  it("are only the Vault, which stays hidden but in the code (OPR-4)", () => {
+    expect(HIDDEN_FEATURES).toEqual(["Vault"]);
+    expect(hidden("Vault")).toBe(true);
   });
 
   it("leave only what is shown of a list", () => {

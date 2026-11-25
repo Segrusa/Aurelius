@@ -323,7 +323,6 @@ const NAV: { to: string; label: string; icon: NavIcon; feature?: Feature; server
   { to: "/code", label: "Code", icon: "code", server: CODE_VIEW },
   { to: "/history", label: "History", icon: "history", server: "ticket_history" },
   { to: "/designs", label: "Designs", icon: "design", server: "designs" },
-  { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
 ];
 
 /** Beside Code: how many branches wait for the board member's review (none: nothing). */

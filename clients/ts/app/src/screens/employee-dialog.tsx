@@ -1,5 +1,4 @@
 import { Button } from "@astryxdesign/core/Button";
-import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Field } from "@astryxdesign/core/Field";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { TextArea } from "@astryxdesign/core/TextArea";
@@ -20,7 +19,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useEmployees, useKeyed } from "../data";
-import { hidden } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
@@ -120,7 +118,8 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const [instructions, setInstructions] = useState(employee?.instructions ?? "");
   const [folder, setFolder] = useState("");
   const [mode, setMode] = useState<AgentMode>(employee?.agent_mode ?? "ask");
-  const [sequential, setSequential] = useState(employee?.sequential_tasks ?? false);
+  // The switch is gone (OPR-4); an edit sends back what the employee already has.
+  const sequential = employee?.sequential_tasks ?? false;
   const [access, setAccess] = useState<AccessLevel>(accessOf(employee));
   const [policy, setPolicy] = useState<ToolPolicy>(employee?.tool_policy ?? {});
   const [profile, setProfile] = useState<StartProfile | null>(null);
@@ -293,7 +292,6 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
     }
   };
   useAction("ConfirmPrimary", () => void save());
-  useAction("ToggleManagerSequential", () => setSequential(!sequential), !hidden("SequentialTasks"));
   useAction("CycleReportsTo", () => setReportsTo(cycle(["", ...candidates.map((c) => c.id)], reportsTo)));
   useAction(
     "CycleTaskEffort",
@@ -518,7 +516,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
               size="sm"
               variant="ghost"
               aria-expanded={more}
-              label={`${more ? "Less ▴" : "More ▾"} Advanced: ${[ownDefaults ? null : "Subagents", hidden("SequentialTasks") ? null : `run one at a time${sequential ? " (on)" : ""}`, hasVersions ? "instruction versions" : null].filter(Boolean).join(", ")}`}
+              label={`${more ? "Less ▴" : "More ▾"} Advanced: ${[ownDefaults ? null : "Subagents", hasVersions ? "instruction versions" : null].filter(Boolean).join(", ")}`}
               onClick={() => setMore(!more)}
             />
           </div>
@@ -542,14 +540,6 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
                     }))}
                   />
                 </div>
-              )}
-              {hidden("SequentialTasks") ? null : (
-                <CheckboxInput
-                  label="Run tasks one at a time"
-                  description="Tasks wait in line and start one after the other."
-                  value={sequential}
-                  onChange={(checked) => setSequential(checked)}
-                />
               )}
               {hasVersions ? (
                 <div {...stylex.props(styles.versions)}>
