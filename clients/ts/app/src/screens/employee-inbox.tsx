@@ -15,7 +15,6 @@ import { toast } from "../ui/toast";
 import { firstInLine, queueState, queueWhat } from "./activity-logic";
 import { Entry, ReviseDialog } from "./memory";
 import { Confirm, Eyebrow, failureOf, Hint, Loading, Problem } from "./org-kit";
-import { ScratchpadSection } from "./scratchpad";
 import { when } from "./settings-kit";
 
 const styles = stylex.create({
@@ -113,7 +112,6 @@ export function EmployeeMemoryTab({ employeeId, name }: { employeeId: string; na
     );
   return (
     <div {...stylex.props(styles.column)}>
-      <ScratchpadSection employeeId={employeeId} />
       {memory.isPending ? <Loading rows={2} /> : null}
       {memory.error ? <Problem>{`The memory did not load: ${failureOf(memory.error)}`}</Problem> : null}
       {memory.data && items.length === 0 ? (

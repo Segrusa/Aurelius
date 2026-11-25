@@ -41,14 +41,7 @@ describe("hidden features", () => {
   });
 
   it("are the simplification's", () => {
-    for (const feature of [
-      "ActivityInSidebar",
-      "Vault",
-      "EmployeeTools",
-      "MemoryProposals",
-      "SequentialTasks",
-      "RunScratchpad",
-    ] as const) {
+    for (const feature of ["ActivityInSidebar", "Vault", "MemoryProposals", "SequentialTasks"] as const) {
       expect(hidden(feature)).toBe(true);
     }
   });

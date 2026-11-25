@@ -41,7 +41,6 @@ import {
   reportsCandidates,
   usableConnections,
 } from "./employee-logic";
-import { EmployeeTools } from "./employee-tools";
 import { isDefaultPolicy, nameAfterProfile, profileOption, samePolicy } from "./employee-tools-logic";
 import { DialogSelector, FormDialog, failureOf, Hint, Problem, shortDay } from "./org-kit";
 import { useFolderChooser } from "./run-tools";
@@ -111,8 +110,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const connections = usableConnections(list.data?.connections ?? []);
   const inherited = inheritedRun(list.data);
   const hasAccess = features.includes("employee_access");
-  // Hidden, its block is gone but the policy stays in the state: save only sends a change.
-  const hasTools = features.includes("employee_tools") && !hidden("EmployeeTools");
+  // The tools block is gone (OPR-4), but a start profile's policy stays in the state: save only sends a change.
   const employees = useEmployees();
   const [name, setName] = useState(employee?.name ?? "");
   const [role, setRole] = useState(employee?.role ?? "");
@@ -440,7 +438,6 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
       {employee ? null : (
         <>
           {accessField}
-          {hasTools ? <EmployeeTools policy={policy} access={access} onChange={setPolicy} /> : null}
           <div {...stylex.props(styles.folder)}>
             <span {...stylex.props(styles.grow)}>
               <TextInput
@@ -516,7 +513,6 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
             </div>
           )}
           {accessField}
-          {hasTools ? <EmployeeTools policy={policy} access={access} onChange={setPolicy} /> : null}
           <div>
             <Button
               size="sm"

@@ -96,17 +96,9 @@ test("employees, projects, guidelines, memory and the vault over a real daemon",
     await page.getByRole("option", { name: "QA", exact: true }).click();
     await expect(page.getByPlaceholder("Name, for example Alex")).toHaveValue("Quinn");
     await expect(page.getByLabel("Instructions")).toHaveValue(/You are QA/);
-    if (!hidden("EmployeeTools")) {
-      await page.getByRole("button", { name: /Tools: / }).click();
-      await expect(page.getByRole("checkbox", { name: "Edit files", exact: true })).not.toBeChecked();
-      await expect(page.getByRole("checkbox", { name: "Run commands", exact: true })).toBeChecked();
-      await expect(page.getByRole("checkbox", { name: "Move tickets asks first" })).toBeChecked();
-      await page.getByRole("checkbox", { name: "Run commands asks first" }).click();
-    }
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Quinn", exact: true })).toBeVisible();
     await page.getByRole("tab", { name: "Settings" }).click();
-    if (!hidden("EmployeeTools")) await expect(page.getByText("9 on, 2 ask first")).toBeVisible();
 
     // The profile says it was hired, and its name is not offered twice.
     await openCompanyPage(page, "Employees");
