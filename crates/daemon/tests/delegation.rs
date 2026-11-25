@@ -409,7 +409,7 @@ async fn delegated_work_starts_in_the_mode_of_the_one_who_gave_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn delegated_tasks_and_subagents_run_on_their_own_defaults() {
+async fn delegated_tasks_hand_overs_and_subagents_run_on_the_board_members_defaults() {
     use aurelius_domain::connection::{ConfigScope, Purpose, RunDefaults, SetRunDefaults};
     use aurelius_domain::employee::Setting;
     let dir = tempfile::tempdir().unwrap();
@@ -451,26 +451,29 @@ async fn delegated_tasks_and_subagents_run_on_their_own_defaults() {
             panic!("no run of that employee on the task");
         }
     };
+    // The employees' and the company's own models no longer count (migration 52).
     set(ConfigScope::Employee(iris), Purpose::Employee, "fake-iris-own", Some("high")).await.unwrap();
     set(ConfigScope::Employee(alex), Purpose::Subagent, "opus", None).await.unwrap();
     set(ConfigScope::Global, Purpose::Subagent, "haiku", None).await.unwrap();
+    let mine = aurelius_domain::user::UserRunDefaults { model: Some("fake-mine".into()), effort: Some("low".into()), subagent_model: Some("sonnet".into()), ..Default::default() };
+    client.set_user_run_defaults(mine).await.unwrap();
 
-    // The user's own task for Alex: the employee defaults, Alex's subagent model.
+    // The board member's own task for Alex: their defaults, also for the subagents.
     let own = create(&client, project, Some(alex), "Eigen werk").await;
     let alex_config = config(own, alex).await;
-    assert_eq!(alex_config["subagent_model"], "opus");
+    assert_eq!((alex_config["model"].as_str(), alex_config["subagent_model"].as_str()), (Some("fake-mine"), Some("sonnet")), "{alex_config}");
     let alex_run = running_run(dir.path(), own).await;
 
-    // A delegated task runs on the colleague's own model, effort and subagent model.
+    // A delegated task runs on the same board member's model, effort and subagent model, not Iris's own.
     let (ok, text) = act(dir.path(), alex_run, EmployeeTaskOp::Delegate { employee: "Iris".into(), title: "Gedeeld".into(), goal: "Deel een".into(), criteria: vec![], project: None, ticket: Some("#1".into()) }).await.unwrap();
     assert!(ok, "{text}");
     let delegated = config(task_named("Gedeeld").await, iris).await;
-    assert_eq!((delegated["model"].as_str(), delegated["effort"].as_str()), (Some("fake-iris-own"), Some("high")), "{delegated}");
-    assert_eq!(delegated["subagent_model"], "haiku", "the global subagent model");
+    assert_eq!((delegated["model"].as_str(), delegated["effort"].as_str()), (Some("fake-mine"), Some("low")), "{delegated}");
+    assert_eq!(delegated["subagent_model"], "sonnet", "the board member's subagent model");
 
-    // A task the user gives Iris keeps her own model.
+    // A task the board member gives Iris: their model too.
     let direct = create(&client, project, Some(iris), "Direct").await;
-    assert_eq!(config(direct, iris).await["model"], "fake-iris-own");
+    assert_eq!(config(direct, iris).await["model"], "fake-mine");
 
     // A hand-over too (Iris starts once Bob's run has ended).
     let bobs = create(&client, project, Some(bob), "Overdracht").await;
@@ -478,7 +481,7 @@ async fn delegated_tasks_and_subagents_run_on_their_own_defaults() {
     let (ok, text) = act(dir.path(), bob_run, EmployeeTaskOp::HandOver { employee: "Iris".into(), reason: "UI".into() }).await.unwrap();
     assert!(ok, "{text}");
     release.notify_waiters();
-    assert_eq!(config(bobs, iris).await["model"], "fake-iris-own");
+    assert_eq!(config(bobs, iris).await["model"], "fake-mine");
 
     wait_task(&client, own, |t| t.status.is_terminal()).await;
     stop(dir.path(), daemon).await;
