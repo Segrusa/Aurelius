@@ -370,7 +370,7 @@ function Feedback({
 }
 
 /** Enter stays "open"; deciding takes the stronger chord, never while it would send a filled field's words. */
-function GateKeys({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
+export function GateKeys({ onYes, onNo }: { onYes: () => void; onNo: () => void }) {
   useKeyContext("Decision");
   useAction("DecideYes", () => {
     if (gateKeyAllowed(document.activeElement as HTMLInputElement | null)) onYes();
@@ -707,7 +707,7 @@ function GateHead({
 }
 
 /** A long report or plan starts at eight lines; the rest on request. */
-function Clamped({ text, more }: { text: string; more: string }) {
+export function Clamped({ text, more }: { text: string; more: string }) {
   const [all, setAll] = useState(false);
   const long = text.split("\n").length > 8 || text.length > 640;
   return (

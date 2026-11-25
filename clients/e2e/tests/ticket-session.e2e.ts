@@ -275,7 +275,7 @@ test.describe("a ticket's session", () => {
     );
     await page.goto(`${site.origin}/ticket/70`);
     const gate = page.getByRole("region", { name: "Your decision" });
-    await expect(gate.getByText("In review · your decision")).toBeVisible();
+    await expect(gate.getByText("Ready for your review")).toBeVisible();
     await expect(gate.getByText("The session screen is built.")).toBeVisible();
     // The composer under it is the reply; the timeline is the discussion.
     await expect(gate.getByRole("button", { name: /^Reply to/ })).toHaveCount(0);
@@ -288,7 +288,10 @@ test.describe("a ticket's session", () => {
     await timeline(page);
     await expect(page.getByText("#70 is Done · read-only.")).toBeVisible();
     await expect(box(page)).toHaveCount(0);
-    await expect(page.getByRole("region", { name: "Your decision" })).toHaveCount(0);
+    // On Done the finish card stays as its last step (ticket #89), with nothing left to decide.
+    const finish = page.getByRole("region", { name: "Finish" });
+    await expect(finish.getByText("Done", { exact: true })).toBeVisible();
+    await expect(finish.getByRole("button", { name: /^Mark done/ })).toHaveCount(0);
     await expect(page.getByText("Ready for review.")).toBeVisible();
     await expect(page.getByRole("button", { name: "Add files…" })).toHaveCount(0);
   });
@@ -495,7 +498,7 @@ test("shots", async ({ page }) => {
     await shot("doing.png");
 
     await page.goto(`${site.origin}/ticket/72`);
-    await expect(page.getByText("In review · your decision")).toBeVisible();
+    await expect(page.getByText("Ready for your review")).toBeVisible();
     await shot("review.png");
 
     await page.goto(`${site.origin}/ticket/71`);

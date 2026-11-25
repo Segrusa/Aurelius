@@ -178,16 +178,18 @@ export interface TaskLive {
   /** Something streams or a partial answer is open: the run is at work this moment. */
   streaming: boolean;
   /** The employee's latest answer, streaming or not: its text and its calls. */
-  latest: { text: string; activity: ActivityView[] } | null;
+  latest: { text: string; activity: ActivityView[]; atMs: number } | null;
   /** Every call of the conversation, for the task's facts. */
   all: ActivityView[];
   /** The runs of the conversation, to know which posts in the discussion are this task's. */
   runIds: Set<string>;
+  /** The run that streams or writes its answer now, to stop it; null when none does. */
+  liveRun: string | null;
 }
 
 type LiveUpdate = ReturnType<typeof useLiveAll>[number];
 
-const EMPTY: TaskLive = { todos: null, streaming: false, latest: null, all: [], runIds: new Set() };
+const EMPTY: TaskLive = { todos: null, streaming: false, latest: null, all: [], runIds: new Set(), liveRun: null };
 
 function taskLive(messages: readonly MessageView[], live: readonly LiveUpdate[]): TaskLive {
   const liveOf = new Map(live.map((u) => [u.message_id, u]));
@@ -201,16 +203,18 @@ function taskLive(messages: readonly MessageView[], live: readonly LiveUpdate[])
   const newest = live.at(-1) ?? null;
   const last = answers.at(-1);
   const latest = newest
-    ? { text: newest.text, activity: newest.activity }
+    ? { text: newest.text, activity: newest.activity, atMs: Number.POSITIVE_INFINITY }
     : last
-      ? { text: last.text, activity: last.activity }
+      ? { text: last.text, activity: last.activity, atMs: last.created_at_ms }
       : null;
+  const partial = [...messages].reverse().find((m) => m.status === "partial" && m.run_id);
   return {
     todos: latestTodos(live, messages),
-    streaming: newest !== null || messages.some((m) => m.status === "partial"),
+    streaming: newest !== null || partial !== undefined,
     latest,
     all,
     runIds: new Set(messages.flatMap((m) => m.run_id ?? [])),
+    liveRun: newest?.run_id ?? partial?.run_id ?? null,
   };
 }
 

@@ -272,7 +272,7 @@ test.describe("states a test daemon cannot produce", () => {
     await card("Screenshots in review").click();
     await expect(page).toHaveURL(/\/ticket\/21$/);
     const review = page.getByRole("region", { name: "Your decision" });
-    await expect(review.getByText("In review · your decision")).toBeVisible();
+    await expect(review.getByText("Ready for your review")).toBeVisible();
     await expect(review.getByText("All")).toBeVisible();
     // Send back needs feedback.
     await review.getByRole("button", { name: "Send back to Doing" }).click();
@@ -1357,7 +1357,7 @@ test("shots", async ({ page }) => {
     approvals: [approval("a1", { task_id: "k3", conversation_id: "c3", run_id: "r3" })],
   });
   await page.goto(`${site.origin}/board?ticket=t1`);
-  await expect(page.getByText("In review · your decision")).toBeVisible();
+  await expect(page.getByText("Ready for your review")).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({ path: join(out, "board.png") });
   await page.goto(`${site.origin}/tasks`);

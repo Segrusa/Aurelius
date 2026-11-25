@@ -17,6 +17,7 @@ import { initial, Mark, markColor } from "../ui/marks";
 import { toast } from "../ui/toast";
 import { ApprovalCard, QUESTION_TOOL, questionsOf } from "./approval-card";
 import { quickReplies, type Todo } from "./chat-logic";
+import type { FinishKind } from "./review-finish-logic";
 import {
   type Ask,
   askOf,
@@ -141,6 +142,15 @@ const styles = stylex.create({
   stepName: { fontWeight: 500, color: "var(--color-text-primary)" },
   stepNameDone: { color: "var(--color-text-secondary)" },
   stepSub: { display: "block", fontSize: 12, color: "var(--precision-text3)" },
+  // The follow-up the board member asked after the plan (ticket #89): Merge into main.
+  afterStep: { gridTemplateColumns: "22px minmax(0, 1fr) auto" },
+  dotAfter: { borderColor: "transparent", color: "var(--color-text-info)", backgroundColor: "var(--color-info-muted)" },
+  dotStopped: {
+    borderColor: "transparent",
+    color: "var(--color-text-error)",
+    backgroundColor: "var(--color-error-muted)",
+  },
+  afterTag: { fontSize: 11, color: "var(--precision-text3)" },
   making: { margin: 0, paddingInline: 14, paddingBlock: 12, color: "var(--precision-text3)" },
   // Status lines.
   segs: { display: "flex", gap: 3 },
@@ -415,6 +425,8 @@ export function ActivityPanel({
   work,
   asks,
   gate,
+  finish = null,
+  mergeHash = null,
   description,
   onTimeline,
 }: {
@@ -423,6 +435,10 @@ export function ActivityPanel({
   work: TicketWork;
   asks: Map<string, Ask>;
   gate: ReactNode;
+  /** Where the ticket's finish card is, for the Merge step after the plan. */
+  finish?: FinishKind | null;
+  /** The merge commit on main, once merged. */
+  mergeHash?: string | null;
   description: ReactNode;
   onTimeline: (who: string) => void;
 }) {
@@ -443,7 +459,15 @@ export function ActivityPanel({
     <div {...stylex.props(styles.col)}>
       {gate}
       {root ? (
-        <PlanCard root={root} live={work.live(root.id)} ask={asks.get(root.id) ?? null} done={done} now={now} t={t} />
+        <PlanCard
+          root={root}
+          live={work.live(root.id)}
+          ask={asks.get(root.id) ?? null}
+          done={done}
+          now={now}
+          t={t}
+          after={afterStep(finish, mergeHash)}
+        />
       ) : null}
       {done ? (
         cards.length > 0 ? (
@@ -517,6 +541,27 @@ function StatusLine({ segs }: { segs: Segment[] }) {
   );
 }
 
+/** The Merge step after the plan, once the board member asked for it; null before. */
+interface AfterStep {
+  state: "now" | "done" | "stopped";
+  tag: string;
+}
+
+function afterStep(finish: FinishKind | null, mergeHash: string | null): AfterStep | null {
+  switch (finish) {
+    case "merging":
+      return { state: "now", tag: "you asked · running" };
+    case "merged":
+      return { state: "done", tag: mergeHash ? `you asked · ${mergeHash.slice(0, 8)}` : "you asked" };
+    case "done":
+      return mergeHash ? { state: "done", tag: `you asked · ${mergeHash.slice(0, 8)}` } : null;
+    case "conflict":
+      return { state: "stopped", tag: "you asked · stopped" };
+    default:
+      return null;
+  }
+}
+
 /** The ticket's plan: the main task's todo list, with what its current step does now. */
 function PlanCard({
   root,
@@ -525,6 +570,7 @@ function PlanCard({
   done,
   now,
   t,
+  after = null,
 }: {
   root: TaskView;
   live: TaskLive;
@@ -532,6 +578,8 @@ function PlanCard({
   done: boolean;
   now: number;
   t: TicketView;
+  /** A follow-up after the plan (Merge into main), so "4 of 4 done" and a running merge agree. */
+  after?: AfterStep | null;
 }) {
   const todos = live.todos;
   // On a Done ticket nothing is at work any more, whatever the last list said.
@@ -568,6 +616,25 @@ function PlanCard({
                 sub={segs[i] === "ask" ? "Asked you a question" : segs[i] === "now" && !done ? said : null}
               />
             ))}
+            {after ? (
+              <li {...stylex.props(styles.planStep, styles.afterStep)}>
+                <span
+                  aria-hidden="true"
+                  {...stylex.props(
+                    styles.dotMark,
+                    after.state === "now" && styles.dotAfter,
+                    after.state === "done" && styles.dotDone,
+                    after.state === "stopped" && styles.dotStopped,
+                  )}
+                >
+                  {after.state === "now" ? "↻" : after.state === "done" ? "✓" : "!"}
+                </span>
+                <div {...stylex.props(styles.stepTxt)}>
+                  <b {...stylex.props(styles.stepName)}>Merge into main</b>
+                </div>
+                <span {...stylex.props(styles.afterTag)}>{after.tag}</span>
+              </li>
+            ) : null}
           </ol>
         </>
       ) : (
