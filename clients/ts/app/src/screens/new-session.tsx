@@ -24,6 +24,7 @@ import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { cycle, EFFORTS, MODES, titleOfGoal } from "./dialog-logic";
 import { Held, useModels, useOpenCreated, useSend } from "./dialogs";
+import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 import {
   columnLabel,
   composerRows,
@@ -52,6 +53,7 @@ import {
   sessionKey,
   sessionRequest,
   sessionStartParams,
+  shownPlace,
   shownProjects,
   startedSession,
   startProblem,
@@ -205,10 +207,10 @@ export function NewSessionScreen() {
   const designsOn = other === "session" && features.includes(DESIGN_SESSIONS_FEATURE);
   const [chosenDesign, setDesign] = useState(() => defaultDesign(storage.get(sessionKey("kind", hostId)), true));
   const design = designsOn && kind === "session" && chosenDesign;
-  const [chosenPlace, setPlace] = useState<SessionPlace>("folder");
-  // Own branch only where the server has it; a server without it falls back to the project folder.
+  const [chosenPlace, setPlace] = useState<SessionPlace | null>(null);
+  // Always a branch of its own: Own branch unless chosen otherwise, a worktree where the server lacks it.
   const ownBranchOn = features.includes(OWN_BRANCH_FEATURE);
-  const place: SessionPlace = chosenPlace === "branch" && !ownBranchOn ? "folder" : chosenPlace;
+  const place = shownPlace(chosenPlace, ownBranchOn);
   const worktree = place === "worktree";
   // A ticket takes files of any type; a session's first message where the server has `chat_files`.
   const sessionFiles = features.includes(CHAT_FILES_FEATURE);
@@ -230,6 +232,12 @@ export function NewSessionScreen() {
     models.length > 1,
   );
   const run = { model, effort, mode };
+  // Without a choice: the board member's own default where the server keeps one (My defaults).
+  const defaultMode = features.includes(USER_RUN_DEFAULTS_FEATURE)
+    ? "My default"
+    : kind === "session"
+      ? "Employee's default"
+      : "Owner's default";
 
   const shown = useMemo(() => shownProjects(projects.data ?? [], workspace.id), [projects.data, workspace.id]);
   const recent = parseRecent(storage.get(sessionKey("recent", hostId)));
@@ -272,6 +280,7 @@ export function NewSessionScreen() {
     files: attach.files.length,
     sessionFiles,
     worktree,
+    ownBranch: ownBranchOn,
     sessionDispatch,
   });
   // Lands where the dialogs land since #58: the new ticket's chat, else its panel on the Board.
@@ -302,7 +311,8 @@ export function NewSessionScreen() {
           text: withFolders(text, attach.folders),
           model,
           effort,
-          mode,
+          // A design always runs in Auto: the server decides that, so no mode goes along.
+          mode: design ? "default" : mode,
           images: attach.images,
           files: attach.files,
           design,
@@ -387,6 +397,7 @@ export function NewSessionScreen() {
     "CycleTaskMode",
     () =>
       kind !== "quick" &&
+      !design &&
       setMode(
         cycle(
           MODES.map((m) => m.key as string),
@@ -510,23 +521,18 @@ export function NewSessionScreen() {
                     </Chip>
                   }
                 />
-                {kind !== "quick" ? (
+                {kind !== "quick" && !design ? (
                   <Menu
                     label="Mode"
                     value={mode}
                     options={MODES.map((m) => ({
                       key: m.key as string,
-                      label:
-                        m.key === "default" ? (kind === "session" ? "Employee's default" : "Owner's default") : m.label,
+                      label: m.key === "default" ? defaultMode : m.label,
                     }))}
                     onPick={setMode}
                     trigger={
                       <Chip name="Mode" quiet>
-                        {mode === "default"
-                          ? kind === "session"
-                            ? "Employee's default"
-                            : "Owner's default"
-                          : MODES.find((m) => m.key === mode)?.label}
+                        {mode === "default" ? defaultMode : MODES.find((m) => m.key === mode)?.label}
                       </Chip>
                     }
                   />

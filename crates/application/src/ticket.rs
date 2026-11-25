@@ -565,7 +565,8 @@ impl CommandService {
                 check!(check_responsible(tx, responsible)?);
             }
             // "Make ticket" from a chat message (MU2-10 AC1/AC3): it must exist, in a channel, a
-            // ticket's discussion, a chat with an employee, the project assistant or a task;
+            // ticket's discussion, a chat with an employee, the project assistant, a task or a
+            // work session;
             // one that belongs to a project (its channel, a ticket's discussion, a task, its
             // assistant) only for a ticket of that same project.
             let source = match cmd.from_message {

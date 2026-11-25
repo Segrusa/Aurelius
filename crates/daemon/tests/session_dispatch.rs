@@ -87,7 +87,7 @@ async fn company(choices: Vec<Option<&'static str>>) -> Company {
     let daemon = common::start_with(&root, runtime.clone()).await;
     let client = common::connect_as(&root, "grace").await;
     let folder = root.join("atlas");
-    std::fs::create_dir_all(&folder).unwrap();
+    common::git_repo(&folder);
     let made = client.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: Some(folder.to_string_lossy().into_owned()) }), None)).await.unwrap().result;
     let CommandResult::ProjectCreated { project_id, .. } = made else { panic!("{made:?}") };
     let orion = employee(&client, "Orion", "Project Manager").await;
@@ -97,7 +97,7 @@ async fn company(choices: Vec<Option<&'static str>>) -> Company {
 }
 
 async fn dispatch(c: &Company) -> ConversationId {
-    let command = Command::DispatchWorkSession(DispatchWorkSession { project_id: c.project, text: "The login page is blank.".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: Default::default(), confirm_secret: false, design: false });
+    let command = Command::DispatchWorkSession(DispatchWorkSession { project_id: c.project, text: "The login page is blank.".into(), images: vec![], files: vec![], worktree: false, own_branch: true, run: Default::default(), confirm_secret: false, design: false });
     let made = c.client.execute(aurelius_client::envelope(command, None)).await.unwrap().result;
     let CommandResult::WorkSessionDispatching { conversation_id, .. } = made else { panic!("{made:?}") };
     conversation_id

@@ -213,8 +213,8 @@ impl CommandService {
         let Some((heading, messages)) = read else {
             return Ok(None);
         };
-        let mut config = self.store.write(move |tx| crate::run::connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee)).map_err(storage_error)?;
-        config.login_user = Some(reader);
+        // On the asker's login, with their own defaults.
+        let config = self.store.write(move |tx| crate::run::connections::resolve(tx, conversation, aurelius_domain::connection::Purpose::Employee, Some(reader))).map_err(storage_error)?;
         Ok(Some(SideContext { heading, messages, config }))
     }
 }

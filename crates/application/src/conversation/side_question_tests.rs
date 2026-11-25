@@ -36,8 +36,9 @@ fn setup() -> Setup {
         .store()
         .write(move |tx| aurelius_storage::users::insert(tx, &aurelius_storage::users::NewUser { id: &grace.to_string(), username: "grace", created_by_user: None, now_ms: 1 }, PHC))
         .unwrap();
+    // A git folder: a session works on a branch of its own.
     let folder = dir.path().join("planora");
-    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::create_dir_all(folder.join(".git")).unwrap();
     let mut s = Setup { _dir: dir, service, project: ProjectId::new(), grace, orion: EmployeeId::new() };
     let made = exec(&s, Command::CreateProject(CreateProject { name: "Planora".into(), description: None, folder: Some(folder.to_string_lossy().into_owned()) }));
     let CommandResult::ProjectCreated { project_id, .. } = made else { panic!("{made:?}") };
@@ -67,7 +68,7 @@ fn session(s: &Setup) -> ConversationId {
         images: vec![],
         files: vec![],
         worktree: false,
-        own_branch: false,
+        own_branch: true,
         run: RunSettings::default(),
         confirm_secret: false,
         design: false,

@@ -363,4 +363,10 @@ pub enum CommandResult {
         review_id: crate::CodeReviewId,
         comments: u32,
     },
+    /// `user.set_run_defaults` (feature `user_run_defaults`): the defaults as
+    /// stored now. `changed` is false when they already were these.
+    UserRunDefaultsSet {
+        defaults: crate::user::UserRunDefaults,
+        changed: bool,
+    },
 }

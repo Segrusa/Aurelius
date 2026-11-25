@@ -574,6 +574,9 @@ abstract final class Methods {
   /// The workspaces the board member of the session pinned to their rail
   /// (feature `rail_pins`), never another's. Not for apps.
   static const String userRailPins = 'user.rail_pins';
+  /// The run defaults of the board member of the session (feature
+  /// `user_run_defaults`), never another's. Not for apps.
+  static const String userRunDefaults = 'user.run_defaults';
   /// Change a password. Own (no `user_id`, or the session's): with the old
   /// password; the other sessions end, this one stays. Another board member's
   /// (B10): a temporary password, changed at their next sign-in
@@ -585,6 +588,10 @@ abstract final class Methods {
   /// reordering and unpinning are the same write; an empty list is a choice too
   /// ("none"). Answers `RailPinsSet`.
   static const String userSetRailPins = 'user.set_rail_pins';
+  /// `user.set_run_defaults` (feature `user_run_defaults`): the board member of
+  /// the session sets their own defaults. Replaces them as a whole; an empty one
+  /// clears them. Answers `UserRunDefaultsSet`.
+  static const String userSetRunDefaults = 'user.set_run_defaults';
   /// Whether the server has board members, and this connection's session's one.
   /// Works without a session.
   static const String userWhoami = 'user.whoami';
@@ -1435,6 +1442,12 @@ Map<String, dynamic> userLogout() => <String, dynamic>{
 /// (feature `rail_pins`), never another's. Not for apps.
 Map<String, dynamic> userRailPins() => <String, dynamic>{
   'method': Methods.userRailPins,
+};
+
+/// The run defaults of the board member of the session (feature
+/// `user_run_defaults`), never another's. Not for apps.
+Map<String, dynamic> userRunDefaults() => <String, dynamic>{
+  'method': Methods.userRunDefaults,
 };
 
 /// Whether the server has board members, and this connection's session's one.
@@ -2635,6 +2648,16 @@ Map<String, dynamic> userSetRailPins({required List<String> projectIds}) => <Str
   'method': Methods.userSetRailPins,
   'params': <String, dynamic>{
     'project_ids': projectIds,
+  },
+};
+
+/// `user.set_run_defaults` (feature `user_run_defaults`): the board member of
+/// the session sets their own defaults. Replaces them as a whole; an empty one
+/// clears them. Answers `UserRunDefaultsSet`.
+Map<String, dynamic> userSetRunDefaults({required UserRunDefaults defaults}) => <String, dynamic>{
+  'method': Methods.userSetRunDefaults,
+  'params': <String, dynamic>{
+    'defaults': defaults.toJson(),
   },
 };
 

@@ -27,8 +27,9 @@ fn code<T: std::fmt::Debug>(result: Result<T, ClientError>) -> ErrorCode {
 
 /// Grace starts a session with Orion in project Atlas and waits for his answer.
 async fn session(root: &Path, grace: &Client) -> ConversationId {
+    // A git repository: a session works on a branch of its own.
     let folder = root.join("atlas");
-    std::fs::create_dir_all(&folder).unwrap();
+    common::git_repo(&folder);
     let made = grace
         .execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: Some(folder.to_string_lossy().into_owned()) }), None))
         .await
@@ -55,7 +56,7 @@ async fn session(root: &Path, grace: &Client) -> ConversationId {
         images: vec![],
         files: vec![],
         worktree: false,
-        own_branch: false,
+        own_branch: true,
         run: Default::default(),
         confirm_secret: false,
         design: false,

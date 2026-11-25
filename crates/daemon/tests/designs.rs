@@ -87,6 +87,7 @@ async fn a_page_an_employee_writes_in_a_session_is_listed_as_a_design_of_its_pro
     assert!(aurelius_protocol::FEATURES.contains(&feature::DESIGNS));
     let dir = tempfile::tempdir().unwrap();
     let folder = tempfile::tempdir().unwrap();
+    git_repo(folder.path());
     let daemon = start_with(
         dir.path(),
         Arc::new(Designer {
@@ -124,7 +125,7 @@ async fn a_page_an_employee_writes_in_a_session_is_listed_as_a_design_of_its_pro
         images: vec![],
         files: vec![],
         worktree: false,
-        own_branch: false,
+        own_branch: true,
         run: Default::default(),
         confirm_secret: false,
         design: true,

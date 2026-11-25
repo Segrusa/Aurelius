@@ -32,6 +32,7 @@ import {
   when,
 } from "./settings-kit";
 import { deviceHint, OWN_DEVICES, remoteAccessDevices } from "./settings-logic";
+import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 
 const styles = stylex.create({
   form: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 },
@@ -213,6 +214,51 @@ function DefaultModel() {
   );
 }
 
+/**
+ * The connection employees' runs use. Where each board member keeps their own model, effort and
+ * mode, the company only chooses the connection.
+ */
+function DefaultConnection() {
+  const connection = useConnection();
+  const { busy, error, run } = useChange();
+  const { list, settings } = useDefaults("employee");
+  const connections = list?.connections ?? [];
+  const chosen = settings.connection?.mode === "value" ? settings.connection.value : (connections[0]?.id ?? "");
+  if (connections.length === 0) {
+    return (
+      <Group title="Company connection">
+        <Row title="No connection yet" hint="Add a connection first." />
+      </Group>
+    );
+  }
+  const choose = (id: string) =>
+    run(() =>
+      connection.write(
+        "connection.set_defaults",
+        { purpose: "employee", scope: { kind: "global" }, settings: { ...settings, connection: { mode: "value", value: id } } },
+        { retry: false },
+      ),
+    );
+  return (
+    <Group title="Company connection">
+      <Row title="Connection" hint="What employees run on. Each board member picks their own model under You → My defaults.">
+        <Selector
+          label="Company connection"
+          isLabelHidden
+          size="sm"
+          variant="secondary"
+          width={260}
+          isDisabled={busy}
+          value={chosen}
+          options={connections.map((c) => ({ value: c.id, label: c.display_name }))}
+          onChange={(id) => void choose(id)}
+        />
+      </Row>
+      <Problem error={error} />
+    </Group>
+  );
+}
+
 const SUB_EFFORTS = [
   ["inherit", "Effort: follows the employee"],
   ["low", "Low"],
@@ -283,7 +329,7 @@ const NO_TESTER = "none";
 export function CompanySection() {
   const connection = useConnection();
   const { busy, error, run } = useChange();
-  const { user, claudeLogin } = useLinkState();
+  const { user, claudeLogin, features } = useLinkState();
   const company = useSetting("company", async () => expectBody(await connection.call("company.get"), "company").value);
   const mode = useSetting(
     "management_mode",
@@ -411,8 +457,14 @@ export function CompanySection() {
           </Part>
         )}
       </Group>
-      <DefaultModel />
-      <SubagentDefault />
+      {features.includes(USER_RUN_DEFAULTS_FEATURE) ? (
+        <DefaultConnection />
+      ) : (
+        <>
+          <DefaultModel />
+          <SubagentDefault />
+        </>
+      )}
       <Problem error={error} />
     </>
   );

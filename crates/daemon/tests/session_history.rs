@@ -27,12 +27,12 @@ async fn row(client: &Client, conversation: ConversationId) -> SessionHistoryEnt
 /// Grace starts a session with Orion in project Atlas; it waits for Orion's answer.
 async fn session(root: &std::path::Path, grace: &Client) -> ConversationId {
     let folder = root.join("atlas");
-    std::fs::create_dir_all(&folder).unwrap();
+    common::git_repo(&folder);
     let made = grace.execute(aurelius_client::envelope(Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: Some(folder.to_string_lossy().into_owned()) }), None)).await.unwrap().result;
     let CommandResult::ProjectCreated { project_id, .. } = made else { panic!("{made:?}") };
     let create = CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Orion".into(), role: "Project Manager".into(), title: None, reports_to: None, instructions: None, folder: None };
     let CommandResult::EmployeeCreated { employee_id, .. } = grace.execute(aurelius_client::envelope(Command::CreateEmployee(create), None)).await.unwrap().result else { panic!() };
-    let start = StartWorkSession { project_id, employee_id, text: "Make the export faster.".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: Default::default(), confirm_secret: false, design: false };
+    let start = StartWorkSession { project_id, employee_id, text: "Make the export faster.".into(), images: vec![], files: vec![], worktree: false, own_branch: true, run: Default::default(), confirm_secret: false, design: false };
     let made = grace.execute(aurelius_client::envelope(Command::StartWorkSession(start), None)).await.unwrap().result;
     let CommandResult::WorkSessionStarted { conversation_id, .. } = made else { panic!("{made:?}") };
     for _ in 0..400 {

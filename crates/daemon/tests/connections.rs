@@ -11,6 +11,7 @@ use aurelius_domain::{
     employee::{CreateEmployee, Setting},
     project::CreateProject,
     task::CreateTask,
+    user::UserRunDefaults,
 };
 use aurelius_protocol::CommandResult;
 use common::*;
@@ -86,7 +87,8 @@ async fn builtin_connection_and_inheritance_with_origin() {
     assert_eq!(config["connection_origin"], "global default");
     assert_eq!(config["provider"], "fake");
 
-    // Project override of the model for employees; the employee's task inherits it.
+    // A project's model no longer counts (migration 54): the board member's own
+    // default does, while the connection still comes from the scopes.
     let CommandResult::ProjectCreated { project_id, .. } =
         exec(&client, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })).await
     else {
@@ -94,11 +96,12 @@ async fn builtin_connection_and_inheritance_with_origin() {
     };
     let settings = RunDefaults { connection: Setting::Inherit, model: Setting::Value("fake-project-model".into()), persona: Setting::Inherit, effort: Setting::Inherit };
     exec(&client, Command::SetRunDefaults(SetRunDefaults { scope: ConfigScope::Project(project_id), purpose: Purpose::Employee, settings })).await;
+    client.set_user_run_defaults(UserRunDefaults { model: Some("fake-own-model".into()), ..Default::default() }).await.unwrap();
     let alex = employee(&client, project_id, "Alex").await;
     exec(&client, new_task(project_id, alex, "Inherit")).await;
     let config = task_run_config(dir.path(), "Inherit").await;
-    assert_eq!(config["model"], "fake-project-model");
-    assert_eq!(config["model_origin"], "project Atlas");
+    assert_eq!(config["model"], "fake-own-model");
+    assert_eq!(config["model_origin"], "the board member's default");
     assert_eq!(config["connection_origin"], "global default");
 
     // The run still answers via the snapshot's connection.
@@ -166,7 +169,7 @@ async fn api_connection_needs_a_key_and_disabled_means_no_fallback() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_delegated_task_runs_with_the_model_and_effort_of_the_employee_who_does_it() {
+async fn a_delegated_task_runs_with_the_model_and_effort_of_the_board_member_whose_work_it_is() {
     use aurelius_client::bridge::{BridgeClient, EmployeeTaskOp};
     let dir = tempfile::tempdir().unwrap();
     // Slow answers: Jean's task is still running when he delegates.
@@ -178,8 +181,8 @@ async fn a_delegated_task_runs_with_the_model_and_effort_of_the_employee_who_doe
     else {
         panic!()
     };
-    backlog_ticket(&client, project_id, "Shared work").await;
     let (jean, simon) = (employee(&client, project_id, "Jean").await, employee(&client, project_id, "Simon").await);
+    // The company's, the project's and the employees' models and efforts no longer count.
     let set = |scope: ConfigScope, model: &str, effort: &str| {
         let settings = RunDefaults { connection: Setting::Inherit, model: Setting::Value(model.into()), persona: Setting::Inherit, effort: Setting::Value(effort.into()) };
         exec(&client, Command::SetRunDefaults(SetRunDefaults { scope, purpose: Purpose::Employee, settings }))
@@ -188,14 +191,16 @@ async fn a_delegated_task_runs_with_the_model_and_effort_of_the_employee_who_doe
     set(ConfigScope::Project(project_id), "fake-project-model", "medium").await;
     set(ConfigScope::Employee(jean), "fake-jean-model", "max").await;
     set(ConfigScope::Employee(simon), "fake-simon-model", "low").await;
-    // Clients see the employees' own defaults.
-    let snapshot = client.connections().await.unwrap();
-    assert!(snapshot.defaults.iter().any(|d| d.scope == ConfigScope::Employee(simon) && d.purpose == Purpose::Employee && d.settings.model == Setting::Value("fake-simon-model".into())));
+    client.set_user_run_defaults(UserRunDefaults { model: Some("fake-mine".into()), effort: Some("max".into()), ..Default::default() }).await.unwrap();
+    let robin = connect_as(dir.path(), "robin").await;
+    robin.set_user_run_defaults(UserRunDefaults { model: Some("fake-robins".into()), effort: Some("low".into()), ..Default::default() }).await.unwrap();
+    // Robin's ticket, for the part Jean gives away.
+    backlog_ticket(&robin, project_id, "Robin's work").await;
 
-    // Jean works on a task and gives Simon a part of it.
-    exec(&client, new_task(project_id, jean, "Plan")).await;
+    // Robin gives Jean a task; Jean gives Simon a part of it.
+    exec(&robin, new_task(project_id, jean, "Plan")).await;
     let config = task_run_config(dir.path(), "Plan").await;
-    assert_eq!((config["model"].as_str(), config["effort"].as_str()), (Some("fake-jean-model"), Some("max")));
+    assert_eq!((config["model"].as_str(), config["effort"].as_str()), (Some("fake-robins"), Some("low")));
     let jean_run: String = db(dir.path())
         .query_row("SELECT r.id FROM runs r JOIN tasks t ON t.conversation_id = r.conversation_id WHERE t.title = 'Plan' ORDER BY r.rowid LIMIT 1", [], |r| r.get(0))
         .unwrap();
@@ -206,76 +211,63 @@ async fn a_delegated_task_runs_with_the_model_and_effort_of_the_employee_who_doe
         .unwrap();
     assert!(ok, "{text}");
 
-    // Simon's task conversation runs with Simon's model and effort, not Jean's.
+    // Simon's part runs with Robin's model and effort too: neither Simon's nor the company's, nor mine.
     let config = task_run_config(dir.path(), "Server").await;
-    assert_eq!(config["model"], "fake-simon-model");
-    assert_eq!(config["effort"], "low");
-    assert_eq!(config["model_origin"], "employee Simon");
+    assert_eq!((config["model"].as_str(), config["effort"].as_str()), (Some("fake-robins"), Some("low")));
+    assert_eq!(config["model_origin"], "the board member's default");
     stop(dir.path(), daemon).await;
 }
 
-/// Ticket #49: what Settings shows is what the next run uses, it survives a
-/// restart, Default brings the company's back and a level the model lacks is refused.
+/// What My defaults shows is what the next run uses, it survives a restart and
+/// clearing it leaves the model's own effort; the overview shows the reader's.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_chosen_effort_is_shown_kept_used_by_the_next_run_and_can_be_reset() {
-    use aurelius_domain::views::RunValueSource;
+async fn my_chosen_effort_is_shown_kept_used_by_the_next_run_and_can_be_cleared() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
     let CommandResult::ProjectCreated { project_id, .. } = exec(&client, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })).await else { panic!() };
     let alex = employee(&client, project_id, "Alex").await;
     let line = |runs: &aurelius_domain::views::EmployeeRunsView| runs.employees.iter().find(|e| e.employee_id == alex).unwrap().clone();
-    let set = |scope, effort: Setting<String>| Command::SetRunDefaults(SetRunDefaults { scope, purpose: Purpose::Employee, settings: RunDefaults { effort, ..RunDefaults::default() } });
 
-    // Nothing chosen: no effort goes to the run and the overview says so.
-    let before = line(&client.employee_runs().await.unwrap());
-    assert_eq!((before.effort.as_deref(), before.effort_source), (None, RunValueSource::Runtime));
+    // Nothing chosen: no effort goes to the run.
+    let before = client.user_run_defaults().await.unwrap();
+    assert_eq!(before.defaults, UserRunDefaults::default());
     exec(&client, new_task(project_id, alex, "Nothing")).await;
     assert_eq!(task_run_config(dir.path(), "Nothing").await["effort"], serde_json::Value::Null);
 
-    // The employee's own choice, kept over a restart and used by its next run.
-    exec(&client, set(ConfigScope::Employee(alex), Setting::Value("max".into()))).await;
+    // My own choice, kept over a restart and used by the next run, also in the overview.
+    client.set_user_run_defaults(UserRunDefaults { effort: Some("max".into()), ..Default::default() }).await.unwrap();
     stop(dir.path(), daemon).await;
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
-    let own = line(&client.employee_runs().await.unwrap());
-    assert_eq!((own.effort.as_deref(), own.effort_source), (Some("max"), RunValueSource::Employee));
+    let mine = client.user_run_defaults().await.unwrap();
+    assert_eq!(mine.defaults.effort.as_deref(), Some("max"));
+    assert_eq!(line(&client.employee_runs().await.unwrap()).effort.as_deref(), Some("max"));
     exec(&client, new_task(project_id, alex, "Own")).await;
     assert_eq!(task_run_config(dir.path(), "Own").await["effort"], "max");
+    // Another board member sees their own, not mine.
+    let robin = connect_as(dir.path(), "robin").await;
+    assert_eq!(robin.user_run_defaults().await.unwrap().defaults, UserRunDefaults::default());
+    assert_eq!(line(&robin.employee_runs().await.unwrap()).effort, None);
 
-    // Default: the company's level again.
-    exec(&client, set(ConfigScope::Global, Setting::Value("low".into()))).await;
-    exec(&client, set(ConfigScope::Employee(alex), Setting::Inherit)).await;
-    let reset = line(&client.employee_runs().await.unwrap());
-    assert_eq!((reset.effort.as_deref(), reset.effort_source), (Some("low"), RunValueSource::Company));
-    exec(&client, new_task(project_id, alex, "Reset")).await;
-    assert_eq!(task_run_config(dir.path(), "Reset").await["effort"], "low");
+    // Cleared: the model's own effort again.
+    client.set_user_run_defaults(UserRunDefaults::default()).await.unwrap();
+    exec(&client, new_task(project_id, alex, "Cleared")).await;
+    assert_eq!(task_run_config(dir.path(), "Cleared").await["effort"], serde_json::Value::Null);
     stop(dir.path(), daemon).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_effort_the_model_lacks_is_refused_and_a_stored_one_is_left_out_of_the_run() {
+async fn an_effort_my_model_lacks_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
-    let CommandResult::ProjectCreated { project_id, .. } = exec(&client, Command::CreateProject(CreateProject { name: "Atlas".into(), description: None, folder: None })).await else { panic!() };
-    let alex = employee(&client, project_id, "Alex").await;
-    let settings = |model: &str, effort: &str| RunDefaults { model: Setting::Value(model.into()), effort: Setting::Value(effort.into()), ..RunDefaults::default() };
-    let write = |settings| Command::SetRunDefaults(SetRunDefaults { scope: ConfigScope::Employee(alex), purpose: Purpose::Employee, settings });
-
-    let refused = client.execute(envelope(write(settings("claude-haiku-4-5", "high")), None)).await.unwrap_err();
+    let own = |model: &str, effort: &str| UserRunDefaults { model: Some(model.into()), effort: Some(effort.into()), ..Default::default() };
+    let refused = client.set_user_run_defaults(own("claude-haiku-4-5", "high")).await.unwrap_err();
     assert!(refused.to_string().contains("claude-haiku-4-5 has no effort setting."), "{refused}");
-    let unknown = client.execute(envelope(write(settings("claude-opus-5-5", "ludicrous")), None)).await.unwrap_err();
-    assert!(unknown.to_string().contains("Effort must be one of"), "{unknown}");
-
-    // Moving to a model without it is allowed; the run and the overview drop the level.
-    exec(&client, write(settings("claude-opus-5-5", "high"))).await;
-    exec(&client, write(settings("claude-haiku-4-5", "high"))).await;
-    let runs = client.employee_runs().await.unwrap();
-    let line = runs.employees.iter().find(|e| e.employee_id == alex).unwrap();
-    assert_eq!((line.effort.as_deref(), line.unsupported_effort.as_deref()), (None, Some("high")));
-    assert!(line.supported_efforts.is_empty());
-    exec(&client, new_task(project_id, alex, "Dropped")).await;
-    assert_eq!(task_run_config(dir.path(), "Dropped").await["effort"], serde_json::Value::Null);
+    let unknown = client.set_user_run_defaults(own("claude-opus-5-5", "ludicrous")).await.unwrap_err();
+    assert!(unknown.to_string().contains("effort"), "{unknown}");
+    client.set_user_run_defaults(own("claude-opus-5-5", "high")).await.unwrap();
+    assert_eq!(client.user_run_defaults().await.unwrap().defaults.effort.as_deref(), Some("high"));
     stop(dir.path(), daemon).await;
 }

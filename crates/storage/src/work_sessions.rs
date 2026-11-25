@@ -78,6 +78,11 @@ pub fn of_conversation(conn: &Connection, conversation: ConversationId) -> Resul
     }))
 }
 
+/// Whether a run answers in a design session, which always stays in Auto.
+pub fn is_design_run(conn: &Connection, run: RunId) -> Result<bool, StorageError> {
+    Ok(conn.query_row("SELECT EXISTS(SELECT 1 FROM runs r JOIN work_sessions s ON s.conversation_id = r.conversation_id WHERE r.id = ?1 AND s.design)", [run.to_string()], |r| r.get(0))?)
+}
+
 /// When the session `s` (a `work_sessions` row) last did something: its latest message,
 /// or later, the latest step (tool call) or end of one of its runs. An answer is one
 /// message from its start, so a long one that keeps building counts from its last step.

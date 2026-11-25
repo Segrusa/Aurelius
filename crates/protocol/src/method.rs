@@ -273,6 +273,10 @@ pub enum Method {
     /// (feature `rail_pins`), never another's. Not for apps.
     #[serde(rename = "user.rail_pins")]
     UserRailPins,
+    /// The run defaults of the board member of the session (feature
+    /// `user_run_defaults`), never another's. Not for apps.
+    #[serde(rename = "user.run_defaults")]
+    UserRunDefaults,
     /// Sign in (protocol 5): a right username and password give this connection a
     /// session and answer `Login` with its token, shown once (keep it for the
     /// server and give it in every hello). A wrong password, an unknown username

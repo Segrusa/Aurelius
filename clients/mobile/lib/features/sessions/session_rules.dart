@@ -13,6 +13,9 @@ const sessionDispatchFeature = 'session_dispatch';
 /// The server takes files with a session's first message.
 const chatFilesFeature = 'chat_files';
 
+/// The server lets a session work on a branch of its own in the project's folder.
+const ownBranchFeature = 'session_own_branch';
+
 /// The Who of a session nobody was chosen for: the dispatcher chooses.
 const dispatcherWho = 'dispatcher';
 
@@ -128,18 +131,20 @@ String sessionFolder(WorkSessionView s) {
   return worktree == null || worktree.isEmpty ? 'Project folder' : worktree;
 }
 
-/// What a session start says under the composer.
-String sessionNote(String? whoName, bool worktree) {
+/// What a session start says under the composer. A session never works on what
+/// the project's folder has checked out: its own branch where the server has
+/// [ownBranchFeature], else a worktree of its own.
+String sessionNote(String? whoName, bool ownBranch) {
   final who = whoName ?? 'The employee';
-  return worktree
-      ? '$who works in a worktree of its own, on its own branch. No ticket: you talk with them in the session.'
-      : "$who works in the project's folder itself. No ticket: you talk with them in the session.";
+  return ownBranch
+      ? "$who works on a branch of its own in the project's folder. No ticket: you talk with them in the session."
+      : '$who works in a worktree of its own, on its own branch. No ticket: you talk with them in the session.';
 }
 
 /// The dispatcher chooses who takes a session: its words after Start.
-String dispatchedNote(bool worktree) => worktree
-    ? 'The dispatcher chooses who takes it, in a worktree of its own on its own branch. No ticket: you talk with them in the session.'
-    : "The dispatcher chooses who takes it, in the project's folder itself. No ticket: you talk with them in the session.";
+String dispatchedNote(bool ownBranch) => ownBranch
+    ? "The dispatcher chooses who takes it, on a branch of its own in the project's folder. No ticket: you talk with them in the session."
+    : 'The dispatcher chooses who takes it, in a worktree of its own on its own branch. No ticket: you talk with them in the session.';
 
 /// The composer's hint on New session (desktop: placeholderOf("session")).
 const newSessionHint = 'What do you want to work on?';
@@ -224,12 +229,15 @@ String? startProblem({
   required bool dispatchOn,
   int files = 0,
   bool filesOn = false,
+  bool ownBranch = false,
 }) {
   if (offline) return 'Not connected to the server.';
   if (projectId == null) return 'Choose a project.';
   if (text.trim().isEmpty) return 'Describe what needs doing.';
   if (who == null || (who == dispatcherWho && !dispatchOn)) return 'Choose who does it.';
   if (files > 0 && !filesOn) return 'Add files in the session once it has started.';
+  // In a worktree of its own the folder is made only before the first run.
+  if (files > 0 && !ownBranch) return 'Add files once the session works in its own worktree.';
   return null;
 }
 
@@ -270,26 +278,29 @@ TaskRun? _run(SessionStartInput start) {
   return TaskRun(mode: mode == null ? null : AgentMode.fromJson(mode), model: model, effort: effort);
 }
 
-/// `work_session.start`: the employee, the project and the first message. The
-/// mobile app starts in the project's folder (no worktree choice yet).
-StartWorkSession sessionStartParams(SessionStartInput start, {required String employeeId, required bool confirmSecret}) => StartWorkSession(
+/// `work_session.start`: the employee, the project and the first message. It
+/// works on its own branch where the server has [ownBranchFeature], else in a
+/// worktree of its own; never on what the project's folder has checked out.
+StartWorkSession sessionStartParams(SessionStartInput start, {required String employeeId, required bool confirmSecret, required bool ownBranch}) => StartWorkSession(
       projectId: start.projectId,
       employeeId: employeeId,
       text: start.text.trim(),
       images: start.images,
       files: start.files,
-      worktree: false,
+      worktree: !ownBranch,
+      ownBranch: ownBranch ? true : null,
       run: _run(start),
       confirmSecret: confirmSecret,
     );
 
 /// `work_session.dispatch`: a session start without the employee; the dispatcher chooses.
-DispatchWorkSession sessionDispatchParams(SessionStartInput start, {required bool confirmSecret}) => DispatchWorkSession(
+DispatchWorkSession sessionDispatchParams(SessionStartInput start, {required bool confirmSecret, required bool ownBranch}) => DispatchWorkSession(
       projectId: start.projectId,
       text: start.text.trim(),
       images: start.images,
       files: start.files,
-      worktree: false,
+      worktree: !ownBranch,
+      ownBranch: ownBranch ? true : null,
       run: _run(start),
       confirmSecret: confirmSecret,
     );

@@ -66,8 +66,9 @@ fn setup() -> Setup {
     Setup { _dir: dir, service, repo, repo_folder, plain, user, other, orion }
 }
 
+/// A session in a worktree of its own, or else on a branch of its own: never in the project's folder as it is.
 fn start(project: ProjectId, employee: EmployeeId, worktree: bool) -> Command {
-    Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], files: vec![], worktree, own_branch: false, run: RunSettings::default(), confirm_secret: false, design: false })
+    Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], files: vec![], worktree, own_branch: !worktree, run: RunSettings::default(), confirm_secret: false, design: false })
 }
 
 fn started(result: CommandResult) -> (ConversationId, aurelius_domain::RunId) {
@@ -106,7 +107,7 @@ fn only_the_board_member_who_started_a_session_lists_it() {
     let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
     let mine = s.service.store().read(|c| aurelius_storage::work_sessions::list(c, s.user, None)).unwrap();
     assert_eq!(mine.iter().map(|v| v.conversation_id).collect::<Vec<_>>(), [conversation]);
-    assert_eq!((mine[0].employee_name.as_str(), mine[0].project_name.as_str(), mine[0].branch.as_deref()), ("Orion", "Planora", None));
+    assert_eq!((mine[0].employee_name.as_str(), mine[0].project_name.as_str(), mine[0].branch.as_deref()), ("Orion", "Planora", Some(branch_of(conversation).as_str())));
     assert!(mine[0].running, "its first run is queued");
     assert!(s.service.store().read(|c| aurelius_storage::work_sessions::list(c, s.other, None)).unwrap().is_empty());
     assert!(s.service.store().read(|c| aurelius_storage::work_sessions::list(c, s.user, Some(s.plain))).unwrap().is_empty(), "another project's");
@@ -133,8 +134,22 @@ fn a_worktree_needs_a_project_folder_that_is_a_git_repository() {
     // Nothing was made.
     let sessions: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'session'", [], |r| r.get(0))?)).unwrap();
     assert_eq!(sessions, 0);
-    // Without a worktree the same project is fine.
-    started(exec_as(&s, Some(s.user), start(s.plain, s.orion, false)).unwrap());
+}
+
+#[test]
+fn a_session_without_a_branch_or_worktree_of_its_own_is_refused() {
+    let s = setup();
+    let mut command = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut command {
+        start.own_branch = false;
+    }
+    let refused = exec_as(&s, Some(s.user), command).unwrap_err();
+    assert!(refused.message.contains("branch of its own or in a worktree of its own"), "{}", refused.message);
+    let dispatch = Command::DispatchWorkSession(aurelius_domain::work_session::DispatchWorkSession { project_id: s.repo, text: "Kijk eens.".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: RunSettings::default(), confirm_secret: false, design: false });
+    let refused = exec_as(&s, Some(s.user), dispatch).unwrap_err();
+    assert!(refused.message.contains("branch of its own or in a worktree of its own"), "{}", refused.message);
+    let sessions: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'session'", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(sessions, 0, "nothing was made");
 }
 
 #[test]
@@ -234,6 +249,64 @@ fn a_design_session_keeps_that_it_is_one() {
     assert!(session.design);
     let listed = s.service.store().read(|c| aurelius_storage::work_sessions::list(c, s.user, None)).unwrap();
     assert!(listed.iter().any(|v| v.conversation_id == conversation && v.design), "{listed:?}");
+}
+
+#[test]
+fn a_design_session_always_starts_in_auto_whatever_mode_was_asked() {
+    use aurelius_domain::autonomy::AgentMode;
+    let s = setup();
+    let mut cmd = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut cmd {
+        start.design = true;
+        start.run.mode = Some(AgentMode::Plan);
+    }
+    let (conversation, _) = started(exec_as(&s, Some(s.user), cmd).unwrap());
+    let mode = s.service.store().read(|c| aurelius_storage::conversations::agent_mode(c, conversation)).unwrap();
+    assert_eq!(mode, AgentMode::Auto, "a design writes its pages, which Plan or Ask would stop");
+}
+
+#[test]
+fn a_design_sessions_mode_cannot_leave_auto_but_a_plain_session_can() {
+    use aurelius_domain::autonomy::{AgentMode, SetAgentMode};
+    let s = setup();
+    let mut cmd = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut cmd {
+        start.design = true;
+    }
+    let (design, _) = started(exec_as(&s, Some(s.user), cmd).unwrap());
+    for mode in [AgentMode::Plan, AgentMode::Ask, AgentMode::AcceptEdits] {
+        let refused = exec_as(&s, Some(s.user), Command::SetAgentMode(SetAgentMode { conversation_id: design, mode }));
+        let refused = refused.expect_err("a design stays in Auto");
+        assert_eq!(refused.code, aurelius_domain::ErrorCode::Validation, "{mode:?}: {refused:?}");
+    }
+    exec_as(&s, Some(s.user), Command::SetAgentMode(SetAgentMode { conversation_id: design, mode: AgentMode::Auto })).unwrap();
+    assert_eq!(s.service.store().read(|c| aurelius_storage::conversations::agent_mode(c, design)).unwrap(), AgentMode::Auto);
+    let (plain, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
+    exec_as(&s, Some(s.user), Command::SetAgentMode(SetAgentMode { conversation_id: plain, mode: AgentMode::Plan })).unwrap();
+}
+
+#[test]
+fn approving_a_designs_plan_with_accept_edits_keeps_it_in_auto() {
+    use aurelius_domain::approval::{DecidePlan, PlanDecision};
+    use aurelius_domain::autonomy::AgentMode;
+    let s = setup();
+    let mut cmd = start(s.repo, s.orion, false);
+    if let Command::StartWorkSession(start) = &mut cmd {
+        start.design = true;
+    }
+    let (_, run) = started(exec_as(&s, Some(s.user), cmd).unwrap());
+    // Running, so its job is claimed by the dispatcher.
+    s.service
+        .store()
+        .write(move |tx| {
+            tx.execute("UPDATE runs SET status = 'running' WHERE id = ?1", [run.to_string()])?;
+            Ok(tx.execute("UPDATE jobs SET state = 'leased', lease_owner = 'test', lease_until_ms = 0 WHERE id = ?1", [run.to_string()])?)
+        })
+        .unwrap();
+    let input = serde_json::json!({ "plan": "# Plan\n\n1. Make the page" });
+    let crate::run::approvals::RuntimePermission::Pending { approval_id, .. } = s.service.request_runtime_permission(run, Some("p1".into()), "ExitPlanMode", &input).unwrap() else { panic!("a plan waits for the user") };
+    exec_as(&s, Some(s.user), Command::DecidePlan(DecidePlan { confirm_secret: false, approval_id, decision: PlanDecision::ApproveEdits, feedback: None })).unwrap();
+    assert_eq!(s.service.run_mode(run).unwrap(), AgentMode::Auto);
 }
 
 #[test]
@@ -370,4 +443,47 @@ fn only_a_design_sessions_run_may_render_its_pages_and_is_told_to_look_at_them()
     assert_eq!(plan.conversation_id, conversation);
     assert!(!plan.design_session, "a plain session does not");
     assert!(!plan.system.as_deref().unwrap_or("").contains("view_design"));
+}
+
+fn ticket_from(s: &Setup, project: ProjectId, message: aurelius_domain::MessageId) -> Result<CommandResult, AppError> {
+    let create = aurelius_domain::ticket::CreateTicket {
+        responsible_user_id: None,
+        confirm_secret: false,
+        project_id: project,
+        title: "Build pricing.html".into(),
+        description: None,
+        priority: Default::default(),
+        labels: vec![],
+        deadline_ms: None,
+        owner_employee_id: None,
+        run: Default::default(),
+        files: vec![],
+        start: false,
+        from_message: Some(message),
+        from_idea: None,
+        kind: None,
+    };
+    exec_as(s, Some(s.user), Command::CreateTicket(create))
+}
+
+#[test]
+fn a_ticket_made_from_a_sessions_message_is_marked_in_the_session() {
+    // "Create ticket" in a (design) session: the session gets ticket_created at the
+    // message, so the client stops offering the button for it.
+    let s = setup();
+    let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
+    let list = |s: &Setup| {
+        let st = s.service.store().clone();
+        s.service.store().read(move |c| aurelius_storage::conversations::list_messages(c, conversation, &|k| st.blobs().read(k).ok().and_then(|b| String::from_utf8(b).ok()))).unwrap()
+    };
+    let message = list(&s).first().expect("the session's first message").id;
+    let refused = ticket_from(&s, s.plain, message).unwrap_err();
+    assert!(refused.message.contains("another project"), "{}", refused.message);
+
+    let CommandResult::TicketCreated { ticket_id, number } = ticket_from(&s, s.repo, message).unwrap() else { panic!("no ticket") };
+    let marks: Vec<_> = list(&s).into_iter().filter(|m| m.system.as_ref().is_some_and(|l| l.kind == aurelius_domain::views::SystemLineKind::TicketCreated)).collect();
+    assert_eq!(marks.len(), 1);
+    let line = marks[0].system.clone().unwrap();
+    assert_eq!((line.ticket_id, line.message_id), (Some(ticket_id), Some(message)));
+    assert_eq!(marks[0].text, format!("grace created #{number} from a message"));
 }

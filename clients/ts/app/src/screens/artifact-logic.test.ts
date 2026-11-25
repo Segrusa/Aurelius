@@ -9,6 +9,7 @@ import {
   designPagesAcross,
   designsOf,
   designTicket,
+  designTicketSource,
   designTitle,
   designToOpen,
   draftHasContent,
@@ -387,6 +388,18 @@ describe("designTicket", () => {
       description:
         "Build this page as designed in design/pricing.html. The design is attached: follow its layout, colours and texts.",
     });
+  });
+});
+
+describe("designTicketSource", () => {
+  const on = ["ticket_from_session"];
+  it("is the answer that kept the page, in a one-employee conversation on a server that takes it", () => {
+    expect(designTicketSource(on, "m1", true)).toBe("m1");
+  });
+  it("is none in a channel, on an older server or without a kept answer", () => {
+    expect(designTicketSource(on, "m1", false)).toBeNull();
+    expect(designTicketSource([], "m1", true)).toBeNull();
+    expect(designTicketSource(on, undefined, true)).toBeNull();
   });
 });
 

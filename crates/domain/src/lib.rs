@@ -183,6 +183,7 @@ pub enum Command {
     ResolveCodeThread(code_review::ResolveCodeThread),
     SetCodeViewed(code_review::SetCodeViewed),
     SubmitCodeReview(code_review::SubmitCodeReview),
+    SetUserRunDefaults(user::SetUserRunDefaults),
 }
 
 /// `(type, method)` for every command: the tag in the JSON of a `Command` and
@@ -292,6 +293,7 @@ pub const COMMAND_METHODS: &[(&str, &str)] = &[
     ("resolve_code_thread", "code.resolve_thread"),
     ("set_code_viewed", "code.set_viewed"),
     ("submit_code_review", "code.submit_review"),
+    ("set_user_run_defaults", "user.set_run_defaults"),
 ];
 
 impl Command {

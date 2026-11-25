@@ -28,6 +28,7 @@ import {
   sessionKey,
   sessionRequest,
   sessionStartParams,
+  shownPlace,
   shownProjects,
   startedSession,
   startProblem,
@@ -371,7 +372,7 @@ describe("work sessions", () => {
       run: { mode: "auto", model: null, effort: "high" },
       confirm_secret: false,
     });
-    expect(sessionStartParams({ ...start, mode: "default" }, "folder", true).run).toEqual({
+    expect(sessionStartParams({ ...start, mode: "default" }, "branch", true).run).toEqual({
       model: null,
       effort: "high",
     });
@@ -386,9 +387,9 @@ describe("work sessions", () => {
       effort: "default",
       mode: "default",
     };
-    expect(sessionStartParams({ ...start, images: [], files: [] }, "folder", false)).not.toHaveProperty("images");
-    expect(sessionStartParams({ ...start, images: [], files: [] }, "folder", false)).not.toHaveProperty("files");
-    const sent = sessionStartParams({ ...start, images: ["/a.png"], files: ["/b.pdf"] }, "folder", false);
+    expect(sessionStartParams({ ...start, images: [], files: [] }, "branch", false)).not.toHaveProperty("images");
+    expect(sessionStartParams({ ...start, images: [], files: [] }, "branch", false)).not.toHaveProperty("files");
+    const sent = sessionStartParams({ ...start, images: ["/a.png"], files: ["/b.pdf"] }, "branch", false);
     expect([sent.images, sent.files]).toEqual([["/a.png"], ["/b.pdf"]]);
   });
 
@@ -405,13 +406,28 @@ describe("work sessions", () => {
 
 describe("where a session works (session_own_branch)", () => {
   it("offers Own branch only where the server has it", () => {
-    expect(placeOptions(false).map((o) => o.key)).toEqual(["folder", "worktree"]);
+    expect(placeOptions(false).map((o) => o.key)).toEqual(["worktree"]);
     expect(placeOptions(true).map((o) => [o.key, o.label])).toEqual([
-      ["folder", "Project folder"],
-      ["worktree", "Own worktree"],
       ["branch", "Own branch"],
+      ["worktree", "Own worktree"],
     ]);
     expect(placeLabel("branch")).toBe("Own branch");
+  });
+
+  it("never works in the project folder as it is: own branch unless chosen, else a worktree", () => {
+    expect(shownPlace(null, true)).toBe("branch");
+    expect(shownPlace("worktree", true)).toBe("worktree");
+    expect(shownPlace(null, false)).toBe("worktree");
+    expect(shownPlace("branch", false)).toBe("worktree");
+  });
+
+  it("names Own branch as the way to send files only where the server has it", () => {
+    const ready = { projectId: "p", text: "fix", kind: "session" as const, who: "e", offline: false };
+    const files = { ...ready, files: 1, sessionFiles: true, worktree: true };
+    expect(startProblem({ ...files, ownBranch: true })).toBe(
+      "Add files once the session works in its own worktree, or start it on its own branch.",
+    );
+    expect(startProblem(files)).toBe("Add files once the session works in its own worktree.");
   });
 
   it("sends own_branch for a branch of its own, and nothing new otherwise", () => {
@@ -426,11 +442,10 @@ describe("where a session works (session_own_branch)", () => {
     const own = sessionStartParams(start, "branch", false);
     expect([own.worktree, own.own_branch]).toEqual([false, true]);
     expect("own_branch" in sessionStartParams(start, "worktree", false)).toBe(false);
-    expect("own_branch" in sessionStartParams(start, "folder", false)).toBe(false);
     expect(sessionDispatchParams(start, "branch", false).own_branch).toBe(true);
   });
 
-  it("takes files with the first message on its own branch, as in the project folder", () => {
+  it("takes files with the first message on its own branch", () => {
     const ready = { projectId: "p", text: "fix", kind: "session" as const, who: "e", offline: false };
     expect(startProblem({ ...ready, files: 1, sessionFiles: true, worktree: false })).toBeNull();
   });
@@ -457,10 +472,11 @@ describe("a session the dispatcher gives to someone (session_dispatch)", () => {
 
   it("sends a session start without an employee, and reads the session from its receipt", () => {
     const start = { projectId: "p", text: " fix it ", model: "sonnet", effort: "default", mode: "default" };
-    expect(sessionDispatchParams(start, "folder", false)).toEqual({
+    expect(sessionDispatchParams(start, "branch", false)).toEqual({
       project_id: "p",
       text: "fix it",
       worktree: false,
+      own_branch: true,
       run: { model: "sonnet", effort: null },
       confirm_secret: false,
     });
@@ -480,9 +496,9 @@ describe("a design", () => {
   };
 
   it("is a session that asks for a design, and leaves the flag out otherwise", () => {
-    expect(sessionStartParams({ ...first, design: true }, "folder", false).design).toBe(true);
-    expect("design" in sessionStartParams(first, "folder", false)).toBe(false);
-    expect(sessionDispatchParams({ ...first, design: true }, "folder", false).design).toBe(true);
+    expect(sessionStartParams({ ...first, design: true }, "branch", false).design).toBe(true);
+    expect("design" in sessionStartParams(first, "branch", false)).toBe(false);
+    expect(sessionDispatchParams({ ...first, design: true }, "branch", false).design).toBe(true);
   });
 
   it("is chosen again next time, as a session, only where the server has designs", () => {

@@ -26,7 +26,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useConnection } from "../connection";
+import { useConnection, useLinkState } from "../connection";
 import { useKeyed } from "../data";
 import type { ArtifactPick, ArtifactSlot, Platform } from "../platform";
 import { saveBlob } from "../ui/download";
@@ -46,6 +46,7 @@ import {
   type DesignPage,
   DIALOG_SELECTOR,
   designTicket,
+  designTicketSource,
   designTitle,
   draftPhase,
   htmlOf,
@@ -60,6 +61,7 @@ import {
   viewportWidth,
   withDrag,
 } from "./artifact-logic";
+import { ticketFrom } from "./chat-logic";
 import { FormDialog, Hint } from "./org-kit";
 import { overlays } from "./overlays-store";
 
@@ -667,6 +669,7 @@ export function ArtifactViewer({
   const [reloads, setReloads] = useState(0);
   const [exporting, setExporting] = useState<"pdf" | "png" | null>(null);
   const [commenting, setCommenting] = useState(false);
+  const { features } = useLinkState();
   const current = pages.find((p) => p.name === pageName) ?? pages[0];
   const file = useArtifactFile(live ? null : (current?.file.id ?? null));
   // While a page loads (another page, or the kept file after the design was written), the page
@@ -758,12 +761,16 @@ export function ArtifactViewer({
     else if (url !== null && exporting === null) void exportAs(key);
   };
 
-  // A ticket to build this page, with the page as its file.
+  // A ticket to build this page, with the page as its file. Made from the answer that kept the
+  // page, the conversation marks that answer, and then Create ticket is not offered again.
+  const source = designTicketSource(features, current?.messageId, send !== null);
+  const ticketMade = current ? ticketFrom(messages, current.messageId) !== null : false;
   const ticket = () => {
     if (html === undefined) return;
     overlays.open("ticket", {
       ...designTicket(pageTitle, artifactName),
       files: [new File([html], name, { type: "text/html" })],
+      ...(source ? { fromMessage: source } : {}),
     });
   };
 
@@ -806,7 +813,7 @@ export function ArtifactViewer({
           }}
         />
       </span>
-      <Button label="Create ticket" isDisabled={html === undefined || writing} onClick={ticket} />
+      {ticketMade ? null : <Button label="Create ticket" isDisabled={html === undefined || writing} onClick={ticket} />}
       <Menu
         label="Export"
         options={exportOptions}

@@ -105,13 +105,13 @@ fn source_of<T>(resolved: &Resolved<T>, fallback: RunValueSource) -> RunValueSou
     }
 }
 
-/// What a new run of each employee uses: its own choice, else the company's,
-/// else the connection's and the model's. A project, a task or a chat can still
-/// choose differently for itself; the chat's choice is included per employee.
-pub fn employee_runs(conn: &Connection) -> Result<EmployeeRunsView, StorageError> {
+/// What a new run of each employee on `reader`'s login uses: `reader`'s own
+/// defaults, else the connection's and the model's. A project, a task or a chat
+/// can still choose differently for itself; the chat's choice is included per employee.
+pub fn employee_runs(conn: &Connection, reader: Option<aurelius_domain::UserId>) -> Result<EmployeeRunsView, StorageError> {
     let mut employees = Vec::new();
     for employee in aurelius_storage::employees::list_employees(conn, &|_| None)? {
-        let layers = store_conn::employee_layers(conn, employee.id, &employee.name, Purpose::Employee)?;
+        let layers = store_conn::employee_layers(conn, employee.id, &employee.name, Purpose::Employee, reader)?;
         let picked = pick(conn, &layers)?;
         let provider = picked.row.as_ref().map(|r| r.provider);
         let model = picked.model_value.as_deref();
@@ -150,6 +150,28 @@ pub fn employee_runs(conn: &Connection) -> Result<EmployeeRunsView, StorageError
     })
 }
 
+/// `user.run_defaults`: what `user` chose and what a run of theirs comes to
+/// without a choice of its own, with the company's connection.
+pub fn user_runs(conn: &Connection, user: aurelius_domain::UserId) -> Result<aurelius_domain::user::UserRunDefaultsView, StorageError> {
+    let defaults = aurelius_storage::user_run_defaults::get(conn, user)?;
+    let mut layers: Vec<_> = store_conn::user_layer(conn, Some(user), Purpose::Employee)?.into_iter().collect();
+    if let Some(company) = store_conn::defaults_at(conn, ConfigScope::Global, Purpose::Employee)? {
+        // Only its connection still counts (migration 54).
+        let connection_only = RunDefaults { connection: company.connection, ..Default::default() };
+        layers.push((Origin { scope: ConfigScope::Global, label: "global default".into() }, connection_only));
+    }
+    let picked = pick(conn, &layers)?;
+    let provider = picked.row.as_ref().map(|r| r.provider);
+    let model = picked.model_value.as_deref();
+    Ok(aurelius_domain::user::UserRunDefaultsView {
+        unsupported_effort: picked.effort.resolved.value.clone().filter(|_| picked.effort.usable.is_none()),
+        supported_efforts: connection::supported_efforts(provider, model).into_iter().map(str::to_owned).collect(),
+        model_default_effort: connection::model_default_effort(provider, model).map(str::to_owned),
+        model: picked.model_value.clone(),
+        defaults,
+    })
+}
+
 /// The provider and model of `settings`, with what they inherit from `below`.
 fn scope_model(conn: &Connection, settings: &RunDefaults, below: Option<&RunDefaults>) -> Result<(Option<ProviderKind>, Option<String>), StorageError> {
     let origin = Origin { scope: ConfigScope::Global, label: String::new() };
@@ -159,17 +181,20 @@ fn scope_model(conn: &Connection, settings: &RunDefaults, below: Option<&RunDefa
     Ok((picked.row.as_ref().map(|r| r.provider), picked.model_value))
 }
 
-/// Resolve connection and model for a new run in `conversation` (employee → project → global).
-/// Explicit `Disabled` stays disabled; there is never a silent fallback to another provider.
-pub fn resolve(tx: &Tx<'_>, conversation: ConversationId, purpose: Purpose) -> Result<ResolvedRunConfig, StorageError> {
-    let layers = store_conn::layers_for(tx, conversation, purpose)?;
+/// Resolve connection and model for a new run in `conversation` on `login`'s
+/// Claude login: the conversation's and its task's choice, then `login`'s own
+/// defaults, then the connection's default model. The connection comes from
+/// employee → project → global. Explicit `Disabled` stays disabled; there is
+/// never a silent fallback to another provider.
+pub fn resolve(tx: &Tx<'_>, conversation: ConversationId, purpose: Purpose, login: Option<aurelius_domain::UserId>) -> Result<ResolvedRunConfig, StorageError> {
+    let layers = store_conn::layers_for(tx, conversation, purpose, login)?;
     let Picked { conn, row, model, model_value, effort: chosen, .. } = pick(tx, &layers)?;
     let effort = chosen.usable;
     let model_origin = match (&model.origin, &model.value) {
         (Some(o), Some(_)) => Some(o.label.clone()),
         _ => row.as_ref().map(|r| format!("default of connection {}", r.display_name)),
     };
-    let subagents = store_conn::layers_for(tx, conversation, Purpose::Subagent)?;
+    let subagents = store_conn::layers_for(tx, conversation, Purpose::Subagent, login)?;
     let (_, subagent_models) = store_conn::split_layers(&subagents);
     let subagent = resolve_field(&subagent_models);
     let subagent_model = match (subagent.value, subagent.origin) {
@@ -190,7 +215,7 @@ pub fn resolve(tx: &Tx<'_>, conversation: ConversationId, purpose: Purpose) -> R
         subagent_model,
         connection_origin: conn.origin.map(|o| o.label),
         model_origin,
-        login_user: None,
+        login_user: login,
     })
 }
 
@@ -208,6 +233,20 @@ fn refused_effort(conn: &Connection, cmd: &connection::SetRunDefaults) -> Result
     }
     let company = store_conn::defaults_at(conn, ConfigScope::Global, cmd.purpose)?;
     let (provider, model) = scope_model(conn, &cmd.settings, company.as_ref().filter(|_| cmd.scope != ConfigScope::Global))?;
+    Ok(connection::effort_refusal(effort, provider, model.as_deref()))
+}
+
+/// Why `user`'s new defaults cannot be stored: an effort their model does not
+/// take (their own model, else the company connection's default). Only a newly
+/// chosen effort is judged, as for `SetRunDefaults`.
+pub(crate) fn refused_user_effort(conn: &Connection, user: aurelius_domain::UserId, defaults: &aurelius_domain::user::UserRunDefaults) -> Result<Option<String>, StorageError> {
+    let Some(effort) = defaults.effort.as_deref() else { return Ok(None) };
+    if aurelius_storage::user_run_defaults::get(conn, user)?.effort == defaults.effort {
+        return Ok(None);
+    }
+    let own = RunDefaults { model: defaults.model.clone().map(Setting::Value).unwrap_or_default(), ..Default::default() };
+    let company = store_conn::defaults_at(conn, ConfigScope::Global, Purpose::Employee)?.map(|c| RunDefaults { connection: c.connection, ..Default::default() });
+    let (provider, model) = scope_model(conn, &own, company.as_ref())?;
     Ok(connection::effort_refusal(effort, provider, model.as_deref()))
 }
 

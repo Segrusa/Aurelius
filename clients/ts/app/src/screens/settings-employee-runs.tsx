@@ -5,6 +5,7 @@ import { useConnection, useLinkState } from "../connection";
 import { asChoice } from "./employee-logic";
 import { Group, Muted, modelName, Problem, Row, useChange, useSetting } from "./settings-kit";
 import { defaultEffortLabel, effortOptions, employeeRunHint } from "./settings-logic";
+import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 
 const WIDTH = 260;
 
@@ -23,6 +24,9 @@ export function EmployeeRunsSection() {
     has ? expectBody(await connection.call("employee.run_overview"), "employee_runs").value : null,
   );
   if (!has) return <Muted>This server is too old to show this. Update the server first.</Muted>;
+  // Model, effort and mode belong to each board member now (You → My defaults).
+  if (features.includes(USER_RUN_DEFAULTS_FEATURE))
+    return <Muted>Model, effort and mode are set per board member now: see You → My defaults.</Muted>;
   const data = view.data;
   if (!data) return <Problem error={view.error} />;
   const save = (scope: { kind: "global" } | { kind: "employee"; id: string }, settings: RunSettings, value: string) =>

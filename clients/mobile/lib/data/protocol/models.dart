@@ -2414,6 +2414,10 @@ sealed class Command {
           responsibleUserId: (json['responsible_user_id'] == null ? null : (json['responsible_user_id'] as String)),
           ticketId: (json['ticket_id'] as String),
         );
+      case 'set_user_run_defaults':
+        return CommandSetUserRunDefaults(
+          defaults: UserRunDefaults.fromJson(json['defaults'] as Map<String, dynamic>),
+        );
       case 'start_code_thread':
         return CommandStartCodeThread(
           body: (json['body'] as String),
@@ -3877,6 +3881,23 @@ final class CommandSetTicketResponsible extends Command {
     };
 }
 
+/// `user.set_run_defaults` (feature `user_run_defaults`): the board member of
+/// the session sets their own defaults. Replaces them as a whole; an empty one
+/// clears them. Answers `UserRunDefaultsSet`.
+final class CommandSetUserRunDefaults extends Command {
+  const CommandSetUserRunDefaults({
+    required this.defaults,
+  });
+
+  final UserRunDefaults defaults;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'set_user_run_defaults',
+      'defaults': defaults.toJson(),
+    };
+}
+
 /// `code.start_thread`: a board member's first comment on a line of a branch's diff. It is
 /// pending until they finish their review. Answers `CodeThreadStarted`.
 final class CommandStartCodeThread extends Command {
@@ -4622,6 +4643,11 @@ sealed class CommandResult {
       case 'user_created':
         return CommandResultUserCreated(
           userId: (json['user_id'] as String),
+        );
+      case 'user_run_defaults_set':
+        return CommandResultUserRunDefaultsSet(
+          changed: (json['changed'] as bool),
+          defaults: UserRunDefaults.fromJson(json['defaults'] as Map<String, dynamic>),
         );
       case 'verification_started':
         return CommandResultVerificationStarted(
@@ -5887,6 +5913,25 @@ final class CommandResultUserCreated extends CommandResult {
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'user_created',
       'user_id': userId,
+    };
+}
+
+/// `user.set_run_defaults` (feature `user_run_defaults`): the defaults as
+/// stored now. `changed` is false when they already were these.
+final class CommandResultUserRunDefaultsSet extends CommandResult {
+  const CommandResultUserRunDefaultsSet({
+    required this.changed,
+    required this.defaults,
+  });
+
+  final bool changed;
+  final UserRunDefaults defaults;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'user_run_defaults_set',
+      'changed': changed,
+      'defaults': defaults.toJson(),
     };
 }
 
@@ -7885,6 +7930,7 @@ enum EventKind {
   userCreated('user.created'),
   userDisabled('user.disabled'),
   userRailPinsChanged('user.rail_pins_changed'),
+  userRunDefaultsChanged('user.run_defaults_changed'),
   vaultItemArchived('vault.item_archived'),
   vaultItemCreated('vault.item_created'),
   vaultItemUpdated('vault.item_updated'),
@@ -12537,6 +12583,8 @@ sealed class Method {
         return const MethodUserLogout();
       case 'user.rail_pins':
         return const MethodUserRailPins();
+      case 'user.run_defaults':
+        return const MethodUserRunDefaults();
       case 'user.whoami':
         return const MethodUserWhoami();
       case 'vault.audit':
@@ -14202,6 +14250,17 @@ final class MethodUserRailPins extends Method {
     };
 }
 
+/// The run defaults of the board member of the session (feature
+/// `user_run_defaults`), never another's. Not for apps.
+final class MethodUserRunDefaults extends Method {
+  const MethodUserRunDefaults();
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.run_defaults',
+    };
+}
+
 /// Whether the server has board members, and this connection's session's one.
 /// Works without a session.
 final class MethodUserWhoami extends Method {
@@ -15854,6 +15913,8 @@ sealed class ResponseBody {
         return ResponseBodyUsageHours(value: UsageHours.fromJson(json['value'] as Map<String, dynamic>));
       case 'usage_totals':
         return ResponseBodyUsageTotals(value: UsageTotals.fromJson(json['value'] as Map<String, dynamic>));
+      case 'user_run_defaults':
+        return ResponseBodyUserRunDefaults(value: UserRunDefaultsView.fromJson(json['value'] as Map<String, dynamic>));
       case 'users':
         return ResponseBodyUsers(value: UsersSnapshot.fromJson(json['value'] as Map<String, dynamic>));
       case 'vault':
@@ -17232,6 +17293,21 @@ final class ResponseBodyUsageTotals extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'usage_totals',
+      'value': value.toJson(),
+    };
+}
+
+/// `user.run_defaults`.
+final class ResponseBodyUserRunDefaults extends ResponseBody {
+  const ResponseBodyUserRunDefaults({
+    required this.value,
+  });
+
+  final UserRunDefaultsView value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'user_run_defaults',
       'value': value.toJson(),
     };
 }
@@ -21632,6 +21708,80 @@ final class UserRef {
   Map<String, dynamic> toJson() => <String, dynamic>{
     'id': id,
     'username': username,
+  };
+}
+
+/// A board member's own defaults for the runs that work for them (feature
+/// `user_run_defaults`): runs on their login (the tickets they made, the sessions
+/// they started) use these unless the conversation or the task chose otherwise.
+/// They replace the employee's and the company's model and effort. None: not
+/// chosen, so the connection's default model, the model's own effort and Ask.
+final class UserRunDefaults {
+  const UserRunDefaults({
+    this.effort,
+    this.mode,
+    this.model,
+    this.subagentModel,
+  });
+
+  final String? effort;
+  final AgentMode? mode;
+  final String? model;
+  /// The model of the subagents a run starts itself (Claude Code's Agent tool).
+  final String? subagentModel;
+
+  factory UserRunDefaults.fromJson(Map<String, dynamic> json) => UserRunDefaults(
+    effort: (json['effort'] == null ? null : (json['effort'] as String)),
+    mode: (json['mode'] == null ? null : AgentMode.fromJson(json['mode'] as String)),
+    model: (json['model'] == null ? null : (json['model'] as String)),
+    subagentModel: (json['subagent_model'] == null ? null : (json['subagent_model'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    if (effort != null) 'effort': effort,
+    if (mode != null) 'mode': mode?.toJson(),
+    if (model != null) 'model': model,
+    if (subagentModel != null) 'subagent_model': subagentModel,
+  };
+}
+
+/// `user.run_defaults` (feature `user_run_defaults`): the defaults of the board
+/// member of the session, never another's, and what a run of theirs comes to.
+final class UserRunDefaultsView {
+  const UserRunDefaultsView({
+    required this.defaults,
+    this.model,
+    this.modelDefaultEffort,
+    this.supportedEfforts = const [],
+    this.unsupportedEffort,
+  });
+
+  /// What they chose.
+  final UserRunDefaults defaults;
+  /// The model a run of theirs uses without a choice of its own: theirs, else
+  /// the connection's default.
+  final String? model;
+  /// The model's own effort, shown as "Default (…)".
+  final String? modelDefaultEffort;
+  /// The effort levels that model takes, for the effort picker.
+  final List<String> supportedEfforts;
+  /// A chosen effort the model does not take: a run leaves it out.
+  final String? unsupportedEffort;
+
+  factory UserRunDefaultsView.fromJson(Map<String, dynamic> json) => UserRunDefaultsView(
+    defaults: UserRunDefaults.fromJson(json['defaults'] as Map<String, dynamic>),
+    model: (json['model'] == null ? null : (json['model'] as String)),
+    modelDefaultEffort: (json['model_default_effort'] == null ? null : (json['model_default_effort'] as String)),
+    supportedEfforts: (json['supported_efforts'] == null ? const [] : (json['supported_efforts'] as List<dynamic>).map((x0) => (x0 as String)).toList()),
+    unsupportedEffort: (json['unsupported_effort'] == null ? null : (json['unsupported_effort'] as String)),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'defaults': defaults.toJson(),
+    if (model != null) 'model': model,
+    if (modelDefaultEffort != null) 'model_default_effort': modelDefaultEffort,
+    'supported_efforts': supportedEfforts,
+    if (unsupportedEffort != null) 'unsupported_effort': unsupportedEffort,
   };
 }
 

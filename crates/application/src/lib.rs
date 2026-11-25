@@ -79,6 +79,7 @@ pub mod task;
 pub mod server_name;
 pub mod rail_pins;
 pub mod code_review;
+pub mod user_run_defaults;
 pub mod ticket;
 pub(crate) mod ticket_follow;
 pub mod user;
@@ -308,6 +309,7 @@ impl CommandService {
             Command::ResolveCodeThread(cmd) => self.resolve_code_thread(ctx, &envelope, hash, cmd),
             Command::SetCodeViewed(cmd) => self.set_code_viewed(ctx, &envelope, hash, cmd),
             Command::SubmitCodeReview(cmd) => self.submit_code_review(ctx, &envelope, hash, cmd),
+            Command::SetUserRunDefaults(cmd) => self.set_user_run_defaults(ctx, &envelope, hash, cmd),
         };
         COMMAND_METHOD.set("");
         result

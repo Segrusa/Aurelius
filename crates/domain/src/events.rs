@@ -223,6 +223,10 @@ event_kinds! {
     // is `<project_id>:<branch>`; `metadata.project_id`, `branch` and `user_id` (who did it).
     // A client showing that branch reads `code.review` again.
     CodeReviewChanged => "code.review_changed",
+    // A board member changed their own run defaults (feature `user_run_defaults`); the
+    // aggregate is the user. `metadata.user_id` and `defaults`. A client whose board
+    // member it is reads `user.run_defaults` again; the others ignore it.
+    UserRunDefaultsChanged => "user.run_defaults_changed",
 }
 
 impl EventKind {

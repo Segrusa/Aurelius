@@ -26,9 +26,13 @@ import '../connection/connection_bloc.dart';
 import '../project/new_task_page.dart' show maxTaskFileBytes, maxTaskFiles;
 import '../runtime/runtime_bloc.dart';
 import 'session_rules.dart';
+import '../my_defaults/my_defaults_bloc.dart' show userRunDefaultsFeature;
 
 /// The label of a run choice left to the employee (desktop: "Employee's default").
 const employeeDefault = "Employee's default";
+
+/// The label of a run choice left to the board member's own defaults (feature `user_run_defaults`).
+const myDefault = 'My default';
 
 /// The visible gap between the composer and the tab bar's glass.
 const _barGap = 10.0;
@@ -210,7 +214,8 @@ class _NewSessionPageState extends State<NewSessionPage> {
     setState(() => _tried = true);
     final link = context.read<ConnectionBloc>().state;
     final dispatchOn = link.has(sessionDispatchFeature);
-    final problem = startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: link.has(chatFilesFeature));
+    final ownBranch = link.has(ownBranchFeature);
+    final problem = startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: link.has(chatFilesFeature), ownBranch: ownBranch);
     final project = _project;
     final who = _who;
     if (problem != null || _busy || _uploading || project == null || who == null) return;
@@ -226,8 +231,8 @@ class _NewSessionPageState extends State<NewSessionPage> {
       files: [for (final f in _files) f.path],
     );
     final request = who == dispatcherWho
-        ? workSessionDispatch(sessionDispatchParams(start, confirmSecret: false))
-        : workSessionStart(sessionStartParams(start, employeeId: who, confirmSecret: false));
+        ? workSessionDispatch(sessionDispatchParams(start, confirmSecret: false, ownBranch: ownBranch))
+        : workSessionStart(sessionStartParams(start, employeeId: who, confirmSecret: false, ownBranch: ownBranch));
     setState(() => _busy = true);
     try {
       final receipt = await writeConfirmingSecret(repository, request, sendAnywayDialog(context), retry: false);
@@ -329,6 +334,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
   /// The run sheet: model, effort and mode in one slide-up sheet. A choice
   /// applies at once and the sheet stays open, so all three can be set in one go.
   Future<void> _pickRun(List<String> models) async {
+    final fallback = context.read<AureliusRepository>().linkState.has(userRunDefaultsFeature) ? myDefault : employeeDefault;
     await showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
@@ -360,9 +366,9 @@ class _NewSessionPageState extends State<NewSessionPage> {
             child: ConstrainedBox(
               constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.8),
               child: ListView(shrinkWrap: true, children: [
-                section('Model', [('default', employeeDefault), for (final m in models) (m, ModelCatalog.friendly(m))], _modelOf(models), (v) => _model = v),
-                section('Effort', [('default', employeeDefault), for (final (v, label, _) in ModelCatalog.efforts) (v, label)], _effort, (v) => _effort = v),
-                section('Mode', [('default', employeeDefault), for (final m in agentModes) (m.wire, m.label)], _mode, (v) => _mode = v),
+                section('Model', [('default', fallback), for (final m in models) (m, ModelCatalog.friendly(m))], _modelOf(models), (v) => _model = v),
+                section('Effort', [('default', fallback), for (final (v, label, _) in ModelCatalog.efforts) (v, label)], _effort, (v) => _effort = v),
+                section('Mode', [('default', fallback), for (final m in agentModes) (m.wire, m.label)], _mode, (v) => _mode = v),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                   child: FilledButton(key: const ValueKey('run-sheet-done'), onPressed: () => Navigator.pop(sheet), child: const Text('Done')),
@@ -394,6 +400,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
     final kind = sessionsOn ? _kind : StartKind.ticket;
     final dispatchOn = link.has(sessionDispatchFeature);
     final filesOn = link.has(chatFilesFeature);
+    final ownBranch = link.has(ownBranchFeature);
     final models = context.select<RuntimeBloc, List<String>>((b) => b.state.choice(Purpose.employee)?.connection.models ?? const []);
     final model = _modelOf(models);
     final projects = company.openProjects;
@@ -401,12 +408,12 @@ class _NewSessionPageState extends State<NewSessionPage> {
     final whoName = _who == dispatcherWho ? 'Dispatcher' : company.employee(_who ?? '')?.name;
     final problem = kind == StartKind.ticket
         ? null
-        : startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: filesOn);
+        : startProblem(offline: !link.isOnline, projectId: _project, text: _text.text, who: _who, dispatchOn: dispatchOn, files: _files.length, filesOn: filesOn, ownBranch: ownBranch);
     final note = kind == StartKind.ticket
         ? 'Opens New ticket with this text, to add an owner, labels and more.'
         : _who == dispatcherWho
-            ? dispatchedNote(false)
-            : sessionNote(whoName, false);
+            ? dispatchedNote(ownBranch)
+            : sessionNote(whoName, ownBranch);
     final can = !_busy && !_uploading && (kind == StartKind.ticket ? _text.text.trim().isNotEmpty : problem == null);
     final keyboard = MediaQuery.viewInsetsOf(context).bottom > 0;
     final project = projects.where((p) => p.id == _project).firstOrNull;

@@ -35,12 +35,13 @@ impl CommandService {
         let (project_id, start) = (cmd.project_id, aurelius_domain::task::RunSettings::from(cmd.start.clone()));
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
+        let login = ctx.user_id;
         self.commit(command_id, hash, move |tx| {
             if let Err(err) = open_project(tx, project_id)? {
                 return Ok(Err(err));
             }
             let conversation_id = ConversationId::new();
-            let notices = create(tx, &meta, command_id, project_id, conversation_id, "", &start)?;
+            let notices = create(tx, &meta, command_id, project_id, conversation_id, "", &start, login)?;
             Ok(Ok((CommandResult::ProjectConversationStarted { project_id, conversation_id }, notices)))
         })
     }
@@ -103,6 +104,7 @@ impl CommandService {
         let message_id = MessageId::new();
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
+        let login = ctx.user_id;
         let actor = ctx.principal_id.to_string();
         let store = self.store.clone();
         self.commit(command_id, hash, move |tx| {
@@ -114,7 +116,7 @@ impl CommandService {
             let conversation_id = match thread {
                 None => {
                     let id = ConversationId::new();
-                    notices.extend(create(tx, &meta, command_id, project_id, id, &title, &start)?);
+                    notices.extend(create(tx, &meta, command_id, project_id, id, &title, &start, login)?);
                     id
                 }
                 Some(id) => {
@@ -172,6 +174,8 @@ fn open_project(tx: &aurelius_storage::Tx<'_>, project: ProjectId) -> Result<Res
 }
 
 /// Make a project conversation with its starting settings; the notices.
+/// Without a mode of its own it starts in `login`'s default mode.
+#[allow(clippy::too_many_arguments)]
 fn create(
     tx: &aurelius_storage::Tx<'_>,
     meta: &serde_json::Value,
@@ -180,11 +184,14 @@ fn create(
     conversation: ConversationId,
     title: &str,
     start: &aurelius_domain::task::RunSettings,
+    login: Option<aurelius_domain::UserId>,
 ) -> Result<Vec<aurelius_domain::EventNotice>, aurelius_storage::StorageError> {
     conv::insert_project_conversation(tx, conversation, project, title)?;
-    if let Some(mode) = start.mode {
-        conv::set_agent_mode(tx, conversation, mode)?;
-    }
+    let mode = match start.mode {
+        Some(mode) => mode,
+        None => crate::user_run_defaults::start_mode(tx, login)?,
+    };
+    conv::set_agent_mode(tx, conversation, mode)?;
     if start.browser_allowed {
         conv::set_browser_allowed(tx, conversation, true)?;
     }

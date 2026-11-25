@@ -1368,6 +1368,12 @@ export type Command =
    */
   | ({ type: "set_ticket_responsible"; responsible_user_id?: string | null; ticket_id: string })
   /**
+   * `user.set_run_defaults` (feature `user_run_defaults`): the board member of
+   * the session sets their own defaults. Replaces them as a whole; an empty one
+   * clears them. Answers `UserRunDefaultsSet`.
+   */
+  | ({ type: "set_user_run_defaults"; defaults: UserRunDefaults })
+  /**
    * `code.start_thread`: a board member's first comment on a line of a branch's diff. It is
    * pending until they finish their review. Answers `CodeThreadStarted`.
    */
@@ -1599,6 +1605,11 @@ export type CommandResult =
    * A new board member (`user.create`).
    */
   | ({ type: "user_created"; user_id: string })
+  /**
+   * `user.set_run_defaults` (feature `user_run_defaults`): the defaults as
+   * stored now. `changed` is false when they already were these.
+   */
+  | ({ type: "user_run_defaults_set"; changed: boolean; defaults: UserRunDefaults })
   | ({ type: "verification_started"; connection_id: string })
   /**
    * A work session was made; the dispatcher chooses who answers its first message.
@@ -2651,6 +2662,7 @@ export type EventKind =
   | "user.created"
   | "user.disabled"
   | "user.rail_pins_changed"
+  | "user.run_defaults_changed"
   | "vault.item_archived"
   | "vault.item_created"
   | "vault.item_updated"
@@ -4595,6 +4607,11 @@ export type Method =
    */
   | ({ method: "user.rail_pins" })
   /**
+   * The run defaults of the board member of the session (feature
+   * `user_run_defaults`), never another's. Not for apps.
+   */
+  | ({ method: "user.run_defaults" })
+  /**
    * Whether the server has board members, and this connection's session's one.
    * Works without a session.
    */
@@ -5395,6 +5412,10 @@ export type ResponseBody =
   | ({ type: "usage"; value: UsageSnapshot })
   | ({ type: "usage_hours"; value: UsageHours })
   | ({ type: "usage_totals"; value: UsageTotals })
+  /**
+   * `user.run_defaults`.
+   */
+  | ({ type: "user_run_defaults"; value: UserRunDefaultsView })
   | ({ type: "users"; value: UsersSnapshot })
   /**
    * `vault.list`.
@@ -7483,6 +7504,51 @@ export interface UserCreateParams {
 export interface UserRef {
   id: string;
   username: string;
+}
+
+/**
+ * A board member's own defaults for the runs that work for them (feature
+ * `user_run_defaults`): runs on their login (the tickets they made, the sessions
+ * they started) use these unless the conversation or the task chose otherwise.
+ * They replace the employee's and the company's model and effort. None: not
+ * chosen, so the connection's default model, the model's own effort and Ask.
+ */
+export interface UserRunDefaults {
+  effort?: string | null;
+  mode?: AgentMode | null;
+  model?: string | null;
+  /**
+   * The model of the subagents a run starts itself (Claude Code's Agent tool).
+   */
+  subagent_model?: string | null;
+}
+
+/**
+ * `user.run_defaults` (feature `user_run_defaults`): the defaults of the board
+ * member of the session, never another's, and what a run of theirs comes to.
+ */
+export interface UserRunDefaultsView {
+  /**
+   * What they chose.
+   */
+  defaults: UserRunDefaults;
+  /**
+   * The model a run of theirs uses without a choice of its own: theirs, else
+   * the connection's default.
+   */
+  model?: string | null;
+  /**
+   * The model's own effort, shown as "Default (…)".
+   */
+  model_default_effort?: string | null;
+  /**
+   * The effort levels that model takes, for the effort picker.
+   */
+  supported_efforts?: string[];
+  /**
+   * A chosen effort the model does not take: a run leaves it out.
+   */
+  unsupported_effort?: string | null;
 }
 
 /**

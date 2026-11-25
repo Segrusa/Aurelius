@@ -64,6 +64,7 @@ class _SessionBody extends StatelessWidget {
             key: ValueKey('session-chat-$conversationId'),
             floating: true,
             topInset: sessionHeadInset(context),
+            modeFixed: session.design ?? false,
             emptyTitle: 'This session is starting.',
             emptyDetail: 'The first answer appears here. Talk with the employee as in a chat; there is no ticket.',
             composer: session.dispatch == null,

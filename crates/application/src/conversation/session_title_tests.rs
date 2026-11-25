@@ -35,7 +35,8 @@ fn setup() -> Setup {
     let grace = UserId::new();
     service.store().write(move |tx| aurelius_storage::users::insert(tx, &aurelius_storage::users::NewUser { id: &grace.to_string(), username: "grace", created_by_user: None, now_ms: 1 }, PHC)).unwrap();
     let folder = dir.path().join("planora");
-    std::fs::create_dir_all(&folder).unwrap();
+    // A git repository: a session works on a branch of its own there.
+    std::fs::create_dir_all(folder.join(".git")).unwrap();
     let mut s = Setup { _dir: dir, service, project: ProjectId::new(), grace, orion: EmployeeId::new() };
     let made = exec(&s, Command::CreateProject(CreateProject { name: "Planora".into(), description: None, folder: Some(folder.to_string_lossy().into_owned()) }));
     let CommandResult::ProjectCreated { project_id, .. } = made else { panic!("{made:?}") };
@@ -47,7 +48,7 @@ fn setup() -> Setup {
 }
 
 fn session(s: &Setup) -> (ConversationId, aurelius_domain::RunId) {
-    let start = StartWorkSession { project_id: s.project, employee_id: s.orion, text: "kan je eens kijken waarom de export zo traag is".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: RunSettings::default(), confirm_secret: false, design: false };
+    let start = StartWorkSession { project_id: s.project, employee_id: s.orion, text: "kan je eens kijken waarom de export zo traag is".into(), images: vec![], files: vec![], worktree: false, own_branch: true, run: RunSettings::default(), confirm_secret: false, design: false };
     let result = exec(s, Command::StartWorkSession(start));
     let CommandResult::WorkSessionStarted { conversation_id, run_id, .. } = result else { panic!("{result:?}") };
     (conversation_id, run_id)

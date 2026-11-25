@@ -140,6 +140,21 @@ pub async fn stop(root: &Path, handle: Daemon) {
     tokio::time::timeout(Duration::from_secs(10), handle).await.expect("daemon stops").expect("join").expect("clean stop");
 }
 
+/// Make `folder` a git repository with one commit on main: a work session works on a
+/// branch of its own there (or in a worktree of its own), never on what it has checked out.
+pub fn git_repo(folder: &Path) {
+    std::fs::create_dir_all(folder).unwrap();
+    for args in [
+        &["init", "--quiet", "--initial-branch=main"][..],
+        &["config", "user.name", "Test"],
+        &["config", "user.email", "test@example.com"],
+        &["commit", "--quiet", "--allow-empty", "-m", "first"],
+    ] {
+        let out = std::process::Command::new("git").arg("-C").arg(folder).args(args).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+}
+
 /// The daemon's database, read-only.
 pub fn db(root: &Path) -> rusqlite::Connection {
     rusqlite::Connection::open_with_flags(root.join("data/aurelius.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap()

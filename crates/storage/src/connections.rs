@@ -187,22 +187,53 @@ pub fn defaults_at(conn: &Connection, scope: ConfigScope, purpose: Purpose) -> R
     }
 }
 
-/// An employee's own layers, most specific first: the employee, then the company.
-/// No conversation, task or project: what a new run of it starts from.
-pub fn employee_layers(conn: &Connection, employee: aurelius_domain::EmployeeId, name: &str, purpose: Purpose) -> Result<Vec<(Origin, RunDefaults)>, StorageError> {
-    let mut layers = Vec::new();
+/// The label of the layer of a board member's own run defaults.
+pub const USER_LAYER_LABEL: &str = "the board member's default";
+
+/// The layer of `login`'s own run defaults for `purpose` (migration 54): their
+/// model and effort, or for subagents their subagent model. None without a login
+/// or for memory work, which keeps the scoped defaults.
+pub fn user_layer(conn: &Connection, login: Option<aurelius_domain::UserId>, purpose: Purpose) -> Result<Option<(Origin, RunDefaults)>, StorageError> {
+    let Some(user) = login else { return Ok(None) };
+    let own = crate::user_run_defaults::get(conn, user)?;
+    let value = |v: Option<String>| v.map(Setting::Value).unwrap_or_default();
+    let settings = match purpose {
+        Purpose::Employee => RunDefaults { model: value(own.model), effort: value(own.effort), ..Default::default() },
+        Purpose::Subagent => RunDefaults { model: value(own.subagent_model), ..Default::default() },
+        Purpose::Memory => return Ok(None),
+    };
+    Ok(Some((Origin { scope: ConfigScope::Global, label: USER_LAYER_LABEL.to_owned() }, settings)))
+}
+
+/// The model and effort of a stored employee, project or company row no longer
+/// count for runs (migration 54): the board member's own defaults replace them.
+/// Its connection and persona still do. Memory work keeps the row as it is.
+fn without_run_choice(settings: RunDefaults, purpose: Purpose) -> RunDefaults {
+    match purpose {
+        Purpose::Memory => settings,
+        Purpose::Employee | Purpose::Subagent => RunDefaults { model: Setting::Inherit, effort: Setting::Inherit, ..settings },
+    }
+}
+
+/// An employee's own layers, most specific first: `login`'s defaults, the
+/// employee, then the company. No conversation, task or project: what a new run
+/// of it on that login starts from.
+pub fn employee_layers(conn: &Connection, employee: aurelius_domain::EmployeeId, name: &str, purpose: Purpose, login: Option<aurelius_domain::UserId>) -> Result<Vec<(Origin, RunDefaults)>, StorageError> {
+    let mut layers: Vec<_> = user_layer(conn, login, purpose)?.into_iter().collect();
     if let Some(s) = defaults_at(conn, ConfigScope::Employee(employee), purpose)? {
-        layers.push((Origin { scope: ConfigScope::Employee(employee), label: format!("employee {name}") }, s));
+        layers.push((Origin { scope: ConfigScope::Employee(employee), label: format!("employee {name}") }, without_run_choice(s, purpose)));
     }
     if let Some(s) = defaults_at(conn, ConfigScope::Global, purpose)? {
-        layers.push((Origin { scope: ConfigScope::Global, label: "global default".to_owned() }, s));
+        layers.push((Origin { scope: ConfigScope::Global, label: "global default".to_owned() }, without_run_choice(s, purpose)));
     }
     Ok(layers)
 }
 
-/// Layers for a conversation, most specific first: employee, project, global.
-/// Subagents get only their own scoped defaults, not what was chosen for the conversation.
-pub fn layers_for(conn: &Connection, conversation: ConversationId, purpose: Purpose) -> Result<Vec<(Origin, RunDefaults)>, StorageError> {
+/// Layers for a conversation, most specific first: what was chosen for the
+/// conversation and its task, then `login`'s own defaults, then employee, project
+/// and global for the connection and persona. Subagents get only the subagent
+/// model of `login` and the scoped connection, not what was chosen for the conversation.
+pub fn layers_for(conn: &Connection, conversation: ConversationId, purpose: Purpose, login: Option<aurelius_domain::UserId>) -> Result<Vec<(Origin, RunDefaults)>, StorageError> {
     let (project, employee, employee_name, project_name): (Option<String>, Option<String>, Option<String>, Option<String>) = conn
         .query_row(
             "SELECT c.project_id, c.employee_id, m.name, p.name FROM conversations c
@@ -248,22 +279,23 @@ pub fn layers_for(conn: &Connection, conversation: ConversationId, purpose: Purp
             }
         }
     }
+    layers.extend(user_layer(conn, login, purpose)?);
     let mut scoped = |purpose: Purpose, what: &str| -> Result<(), StorageError> {
         if let (Some(m), Some(name)) = (employee.as_deref(), employee_name.as_deref()) {
             if let Some(s) = stored_defaults(conn, "employee", Some(m), purpose)? {
                 let id = aurelius_domain::EmployeeId::parse(m).map_err(|e| StorageError::Rejected(e.to_string()))?;
-                layers.push((Origin { scope: ConfigScope::Employee(id), label: format!("{what}employee {name}") }, s));
+                layers.push((Origin { scope: ConfigScope::Employee(id), label: format!("{what}employee {name}") }, without_run_choice(s, purpose)));
             }
         }
         if let (Some(p), Some(name)) = (project.as_deref(), project_name.as_deref()) {
             if let Some(s) = stored_defaults(conn, "project", Some(p), purpose)? {
                 let id = aurelius_domain::ProjectId::parse(p).map_err(|e| StorageError::Rejected(e.to_string()))?;
-                layers.push((Origin { scope: ConfigScope::Project(id), label: format!("{what}project {name}") }, s));
+                layers.push((Origin { scope: ConfigScope::Project(id), label: format!("{what}project {name}") }, without_run_choice(s, purpose)));
             }
         }
         if let Some(s) = stored_defaults(conn, "global", None, purpose)? {
             let label = if what.is_empty() { "global default".to_owned() } else { format!("{what}global default") };
-            layers.push((Origin { scope: ConfigScope::Global, label }, s));
+            layers.push((Origin { scope: ConfigScope::Global, label }, without_run_choice(s, purpose)));
         }
         Ok(())
     };

@@ -17,17 +17,19 @@ export const DESIGN_SESSIONS_FEATURE = "design_sessions";
 /** The server lets a session work on a branch of its own in the project's folder. */
 export const OWN_BRANCH_FEATURE = "session_own_branch";
 
-/** Where a session works: the project's folder, a worktree of its own, or its own branch in the project's folder. */
-export type SessionPlace = "folder" | "worktree" | "branch";
+/**
+ * Where a session works: its own branch in the project's folder, or a worktree of its own. Never on
+ * whatever the project's folder has checked out, so a session's work always stays on a branch of its own.
+ */
+export type SessionPlace = "branch" | "worktree";
 
 const PLACES: { key: SessionPlace; label: string; description: string }[] = [
-  { key: "folder", label: "Project folder", description: "Works in the project's folder itself" },
-  { key: "worktree", label: "Own worktree", description: "A worktree and branch of its own" },
   {
     key: "branch",
     label: "Own branch",
     description: "A branch of its own, checked out in the project's folder",
   },
+  { key: "worktree", label: "Own worktree", description: "A worktree and branch of its own" },
 ];
 
 /** The Where menu's choices; Own branch only where the server has `session_own_branch`. */
@@ -35,8 +37,14 @@ export function placeOptions(ownBranch: boolean): { key: SessionPlace; label: st
   return PLACES.filter((p) => p.key !== "branch" || ownBranch);
 }
 
+/** The place a session starts in unless chosen: its own branch, or a worktree where the server lacks that. */
+export function shownPlace(chosen: SessionPlace | null, ownBranch: boolean): SessionPlace {
+  if (!ownBranch) return "worktree";
+  return chosen ?? "branch";
+}
+
 export function placeLabel(place: SessionPlace): string {
-  return PLACES.find((p) => p.key === place)?.label ?? "Project folder";
+  return PLACES.find((p) => p.key === place)?.label ?? "Own worktree";
 }
 /** The server makes a ticket's title from its description when the title is empty. */
 export const MADE_TITLE_FEATURE = "ticket_made_title";
@@ -287,6 +295,8 @@ export function startProblem(state: {
   sessionFiles?: boolean;
   /** A session in a worktree of its own: that folder is made only before the first run. */
   worktree?: boolean;
+  /** The server offers Own branch (`session_own_branch`), where files can go with the first message. */
+  ownBranch?: boolean;
   /** The server's dispatcher can choose who takes a session. */
   sessionDispatch?: boolean;
 }): string | null {
@@ -299,7 +309,9 @@ export function startProblem(state: {
   if (state.kind === "session" && (state.files ?? 0) > 0) {
     if (!state.sessionFiles) return "Add files in the session once it has started.";
     if (state.worktree)
-      return "Add files once the session works in its own worktree, or start it in the project folder.";
+      return state.ownBranch
+        ? "Add files once the session works in its own worktree, or start it on its own branch."
+        : "Add files once the session works in its own worktree.";
   }
   return null;
 }

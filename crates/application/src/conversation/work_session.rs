@@ -23,17 +23,24 @@ use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
 
 /// Refused: a worktree needs a project folder that is a git repository.
-pub const WORKTREE_NEEDS_GIT: &str = "A worktree of its own needs a project folder that is a git repository; start the session without one, or set the project's folder.";
+pub const WORKTREE_NEEDS_GIT: &str = "A worktree of its own needs a project folder that is a git repository; set the project's folder to one.";
 
 /// Refused: a branch of its own needs a project folder that is a git repository.
-pub const OWN_BRANCH_NEEDS_GIT: &str = "A branch of its own needs a project folder that is a git repository; start the session without one, or set the project's folder.";
+pub const OWN_BRANCH_NEEDS_GIT: &str = "A branch of its own needs a project folder that is a git repository; set the project's folder to one.";
+
+/// Refused: a design writes its pages, so its mode stays Auto.
+pub const DESIGN_STAYS_AUTO: &str = "A design session always works in Auto: it writes its pages, which Plan or Ask would stop.";
 
 /// Refused: a session works either in a worktree of its own or on its own branch.
 pub const WORKTREE_OR_OWN_BRANCH: &str = "Choose a worktree of its own or a branch of its own, not both.";
 
+/// Refused: a session never works on what the project's folder has checked out, so it
+/// needs a branch of its own or a worktree of its own.
+pub const BRANCH_OR_WORKTREE_NEEDED: &str = "A session works on a branch of its own or in a worktree of its own; choose one. Update the app if it does not offer them.";
+
 /// Refused: files with the first message of a session in a worktree of its own (that
 /// folder is made only before the first run).
-pub const FILES_NEED_FOLDER: &str = "Files can go with a later message of a session in its own worktree; start it without files, or in the project folder.";
+pub const FILES_NEED_FOLDER: &str = "Files can go with a later message of a session in its own worktree; start it without files, or on a branch of its own.";
 
 /// Why `user` cannot write in `conversation` now, if so: a work session of another
 /// board member (or one whose employee is not at work, or still being chosen), an
@@ -109,6 +116,9 @@ impl CommandService {
         if cmd.worktree && cmd.own_branch {
             return Err(domain_error(DomainError::OutOfRange { field: "own_branch".into(), detail: WORKTREE_OR_OWN_BRANCH.into() }));
         }
+        if !cmd.worktree && !cmd.own_branch {
+            return Err(domain_error(DomainError::OutOfRange { field: "own_branch".into(), detail: BRANCH_OR_WORKTREE_NEEDED.into() }));
+        }
         if cmd.worktree && !cmd.files.is_empty() {
             return Err(domain_error(DomainError::OutOfRange { field: "files".into(), detail: FILES_NEED_FOLDER.into() }));
         }
@@ -177,9 +187,13 @@ impl CommandService {
             };
             let title = aurelius_domain::conversation::derive_title(&text);
             aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str())), dispatch, design, own_branch)?;
-            if let Some(mode) = run.mode {
-                conv::set_agent_mode(tx, conversation_id, mode)?;
-            }
+            // A design writes its pages: Plan or Ask would stop it, so a design is always Auto.
+            let mode = match (design, run.mode) {
+                (true, _) => aurelius_domain::autonomy::AgentMode::Auto,
+                (false, Some(mode)) => mode,
+                (false, None) => crate::user_run_defaults::start_mode(tx, Some(user))?,
+            };
+            conv::set_agent_mode(tx, conversation_id, mode)?;
             if run.browser_allowed {
                 conv::set_browser_allowed(tx, conversation_id, true)?;
             }

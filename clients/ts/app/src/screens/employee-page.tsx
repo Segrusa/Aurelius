@@ -47,6 +47,7 @@ import { Confirm, Eyebrow, failureOf, Hint, Loading, Page, PageHead, shortDay } 
 import { overlays } from "./overlays-store";
 import { useFolderChooser } from "./run-tools";
 import { modelName, useSetting } from "./settings-kit";
+import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 import { taskStateLine } from "./tasks-logic";
 
 const styles = stylex.create({
@@ -137,7 +138,8 @@ function EmployeeKeys({
 }: {
   onBrowser: () => void;
   onScreen: () => void;
-  onMode: () => void;
+  /** None where the mode is each board member's own (You → My defaults). */
+  onMode?: () => void;
   onFolder: () => void;
   onPick: (key: string) => void;
 }) {
@@ -146,7 +148,7 @@ function EmployeeKeys({
   useAction("OpenProjectFolder", () => onPick("open"));
   useAction("ToggleBrowser", onBrowser);
   useAction("ToggleScreen", onScreen);
-  useAction("CycleAgentMode", onMode);
+  useAction("CycleAgentMode", () => onMode?.(), onMode !== undefined);
   useAction("ChangeProjectFolder", onFolder);
   return null;
 }
@@ -227,6 +229,8 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
   const providerChoice = asChoice(own.connection);
   const providerName =
     connections.data?.connections?.find((c) => c.id === providerChoice)?.display_name ?? "A removed connection";
+  // Model, effort and mode belong to each board member there, not to the employee.
+  const ownDefaults = features.includes(USER_RUN_DEFAULTS_FEATURE);
   const setMode = () => {
     if (!e.conversation_id) return;
     const mode: AgentMode = nextMode(e.agent_mode);
@@ -252,7 +256,7 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
   const menu = [
     { key: "edit", label: "Edit employee…" },
     { key: "pin", label: pinned ? "Unpin from the list" : "Pin to the list" },
-    { key: "mode", label: "Switch mode" },
+    ...(ownDefaults ? [] : [{ key: "mode", label: "Switch mode" }]),
     { key: "browser", label: e.browser_allowed ? "Browser off" : "Browser on" },
     { key: "screen", label: e.screen_allowed ? "Screen off" : "Screen on" },
     { key: "folder", label: "Choose workspace folder…" },
@@ -348,17 +352,19 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
                 {tab === "settings" ? (
                   <>
                     <MetadataList orientation="horizontal" label={{ position: "start" }}>
-                      <MetadataListItem label="Mode">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          label={`Mode: ${MODE_LABELS[e.agent_mode]}`}
-                          tooltip="Its mode for new work"
-                          onClick={setMode}
-                        >
-                          {MODE_LABELS[e.agent_mode]}
-                        </Button>
-                      </MetadataListItem>
+                      {ownDefaults ? null : (
+                        <MetadataListItem label="Mode">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            label={`Mode: ${MODE_LABELS[e.agent_mode]}`}
+                            tooltip="Its mode for new work"
+                            onClick={setMode}
+                          >
+                            {MODE_LABELS[e.agent_mode]}
+                          </Button>
+                        </MetadataListItem>
+                      )}
                       <MetadataListItem label="Browser">
                         <Button
                           size="sm"
@@ -386,12 +392,20 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
                       <MetadataListItem label="Provider">
                         {providerChoice === "inherit" ? choiceLine("inherit", inherited.provider) : providerName}
                       </MetadataListItem>
-                      <MetadataListItem label="Model">
-                        {choiceLine(asChoice(own.model), inherited.model && modelName(inherited.model), modelName)}
-                      </MetadataListItem>
-                      <MetadataListItem label="Effort">
-                        {choiceLine(asChoice(own.effort), inherited.effort && effortName(inherited.effort), effortName)}
-                      </MetadataListItem>
+                      {ownDefaults ? null : (
+                        <>
+                          <MetadataListItem label="Model">
+                            {choiceLine(asChoice(own.model), inherited.model && modelName(inherited.model), modelName)}
+                          </MetadataListItem>
+                          <MetadataListItem label="Effort">
+                            {choiceLine(
+                              asChoice(own.effort),
+                              inherited.effort && effortName(inherited.effort),
+                              effortName,
+                            )}
+                          </MetadataListItem>
+                        </>
+                      )}
                       {features.includes("employee_access") ? (
                         <MetadataListItem label="Access">{accessLabel(accessOf(e))}</MetadataListItem>
                       ) : null}
@@ -480,7 +494,7 @@ export function EmployeePage({ id, tab: wanted }: { id: string; tab?: EmployeeTa
         onPick={pick}
         onBrowser={browser}
         onScreen={screen}
-        onMode={setMode}
+        {...(ownDefaults ? {} : { onMode: setMode })}
         onFolder={() => pick("folder")}
       />
       {editing ? <EmployeeDialog employee={e} onClose={() => setEditing(false)} /> : null}

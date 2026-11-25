@@ -166,16 +166,14 @@ pub(crate) fn open_returning(tx: &Tx<'_>, blobs_store: &Store, task: TaskId, emp
     tx.execute("UPDATE conversations SET title = ?2 WHERE id = ?1", rusqlite::params![conversation.to_string(), title])?;
     store::set_task_conversation(tx, task, conversation)?;
     // The mode chosen for the task, for this conversation only.
-    match store::task_run(tx, task)?.mode {
-        Some(mode) => {
-            tx.execute("UPDATE conversations SET agent_mode = ?2 WHERE id = ?1", rusqlite::params![conversation.to_string(), mode.as_str()])?;
-        }
+    let mode = match store::task_run(tx, task)?.mode {
+        Some(mode) => mode,
         // Management that chooses its own mode starts in Plan (read only) and picks Auto with set_mode.
-        None if aurelius_storage::management_mode::chooses_own_mode(tx, employee)? => {
-            tx.execute("UPDATE conversations SET agent_mode = 'plan' WHERE id = ?1", [conversation.to_string()])?;
-        }
-        None => {}
-    }
+        None if aurelius_storage::management_mode::chooses_own_mode(tx, employee)? => aurelius_domain::autonomy::AgentMode::Plan,
+        // Else the default of the board member whose work it is, not the employee's.
+        None => crate::user_run_defaults::start_mode(tx, crate::run::login::of_task(tx, task)?)?,
+    };
+    tx.execute("UPDATE conversations SET agent_mode = ?2 WHERE id = ?1", rusqlite::params![conversation.to_string(), mode.as_str()])?;
     let (_, mut started) = emit(tx, Ev {
         aggregate_type: "conversation",
         aggregate_id: conversation.to_string(),

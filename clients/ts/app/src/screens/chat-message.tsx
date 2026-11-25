@@ -1405,12 +1405,13 @@ function RowBar({
   name: string;
 }) {
   const platform = usePlatform();
-  const { caps, openThread, features, place } = useChat();
+  const { caps, openThread, features, place, messages } = useChat();
   const actions = rowActions(m, caps);
   const react = useReact(m);
   const [copied, setCopied] = useState(false);
   const editable = canChange(m, features.includes("message_edits"));
-  const makeTicket = features.includes("ticket_discussion") && canMakeTicket(m);
+  // A message a ticket was already made from shows "→ #N" instead.
+  const makeTicket = features.includes("ticket_discussion") && canMakeTicket(m) && ticketFrom(messages, m.id) === null;
   const { hostId } = useLinkState();
   const linkable = hostId !== null && features.includes("message_locate") && actions.react && !m.deleted_at_ms;
   const more = [

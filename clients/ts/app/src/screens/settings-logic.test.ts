@@ -4,6 +4,7 @@ import {
   compactFieldOf,
   compactThresholdOf,
   defaultEffortLabel,
+  defaultModelLabel,
   deviceHint,
   effortOptions,
   employeeRunHint,
@@ -13,7 +14,9 @@ import {
   recurrenceOf,
   recurrenceText,
   remoteAccessDevices,
+  runDefaultValue,
   screenUseRows,
+  withRunDefault,
 } from "./settings-logic";
 
 describe("recurrence", () => {
@@ -158,5 +161,22 @@ describe("paired devices", () => {
     const clients = [device("mine", "u1"), device("old")];
     expect(remoteAccessDevices(clients, true).map((c) => c.name)).toEqual(["old"]);
     expect(remoteAccessDevices(clients, false).map((c) => c.name)).toEqual(["mine", "old"]);
+  });
+});
+
+describe("my run defaults", () => {
+  it("shows default for an unset field and clears a field set back to default", () => {
+    const defaults = { model: "claude-opus-5-5", mode: "plan" as const };
+    expect(runDefaultValue(defaults, "model")).toBe("claude-opus-5-5");
+    expect(runDefaultValue(defaults, "effort")).toBe("default");
+    expect(withRunDefault(defaults, "effort", "high")).toEqual({ model: "claude-opus-5-5", mode: "plan", effort: "high" });
+    expect(withRunDefault(defaults, "model", "default")).toEqual({ mode: "plan" });
+  });
+
+  it("names the connection's model as the default model", () => {
+    expect(defaultModelLabel("claude-opus-5-5", (m) => m.toUpperCase())).toBe(
+      "Default · CLAUDE-OPUS-5-5 (connection's default)",
+    );
+    expect(defaultModelLabel(null, (m) => m)).toBe("Default · the connection's model");
   });
 });

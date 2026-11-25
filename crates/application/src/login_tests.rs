@@ -690,3 +690,142 @@ fn a_time_reads_as_the_servers_clock() {
     let later = crate::run::login_wait::clock(now + 3 * 86_400_000, now);
     assert!(["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].iter().any(|m| later.contains(m)), "{later}");
 }
+
+/// The snapshot of `run`: what it resolved to.
+fn config_of(s: &Setup, run: RunId) -> crate::run::connections::ResolvedRunConfig {
+    let text: String = s.service.store().read(move |c| Ok(c.query_row("SELECT resolved_config_json FROM runs WHERE id = ?1", [run.to_string()], |r| r.get(0))?)).unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+/// `by` sets their own run defaults.
+fn set_defaults(s: &Setup, by: UserId, defaults: aurelius_domain::user::UserRunDefaults) {
+    let CommandResult::UserRunDefaultsSet { changed: true, .. } = exec(s, by, Command::SetUserRunDefaults(aurelius_domain::user::SetUserRunDefaults { defaults })) else { panic!("set") };
+}
+
+/// The company and the employee `employee` each chose a model and effort, as before migration 54.
+fn old_scoped_models(s: &Setup, employee: EmployeeId) {
+    use aurelius_domain::connection::{ConfigScope, Purpose, RunDefaults, SetRunDefaults};
+    use aurelius_domain::employee::Setting;
+    for (scope, model) in [(ConfigScope::Global, "company-model"), (ConfigScope::Employee(employee), "employee-model")] {
+        let settings = RunDefaults { model: Setting::Value(model.into()), effort: Setting::Value("low".into()), ..Default::default() };
+        exec(s, s.alex, Command::SetRunDefaults(SetRunDefaults { scope, purpose: Purpose::Employee, settings }));
+    }
+}
+
+#[test]
+fn a_ticket_and_its_delegations_run_with_the_ticket_creators_model_and_effort_not_the_employees_or_the_companys() {
+    use aurelius_domain::user::UserRunDefaults;
+    let s = setup();
+    old_scoped_models(&s, s.iris.0);
+    set_defaults(&s, s.robin, UserRunDefaults { model: Some("claude-opus-5-5".into()), effort: Some("high".into()), subagent_model: Some("claude-haiku-5-5".into()), ..Default::default() });
+    set_defaults(&s, s.alex, UserRunDefaults { model: Some("claude-sonnet-5-5".into()), ..Default::default() });
+    let (_, root) = ticket_of(&s, s.robin, s.ada.0);
+    let main = start_task(&s, root, s.ada.0);
+    let (_, part) = delegate(&s, main, "Iris", s.iris.0);
+    for run in [main, part] {
+        let config = config_of(&s, run);
+        assert_eq!((config.model.as_deref(), config.effort.as_deref()), (Some("claude-opus-5-5"), Some("high")), "Robin's, the ticket's creator");
+        assert_eq!(config.subagent_model.as_deref(), Some("claude-haiku-5-5"));
+        assert_eq!(config.login_user, Some(s.robin));
+    }
+}
+
+#[test]
+fn without_own_defaults_a_run_ignores_the_employees_and_the_companys_model_and_effort() {
+    let s = setup();
+    old_scoped_models(&s, s.ada.0);
+    let send = SendEmployeeMessage { confirm_secret: false, employee_id: s.ada.0, text: "Hi Ada".into(), conversation_id: s.ada.1, images: vec![], files: vec![], interrupt: false };
+    let CommandResult::EmployeeMessageSent { run_id, .. } = exec(&s, s.robin, Command::SendEmployeeMessage(send)) else { panic!() };
+    let config = config_of(&s, run_id);
+    assert!(!matches!(config.model.as_deref(), Some("employee-model" | "company-model")), "{:?}", config.model);
+    assert_eq!(config.effort, None, "the model's own effort");
+}
+
+#[test]
+fn a_chat_runs_with_the_writers_defaults_and_a_choice_on_the_conversation_still_wins() {
+    use aurelius_domain::user::UserRunDefaults;
+    let s = setup();
+    set_defaults(&s, s.robin, UserRunDefaults { model: Some("claude-opus-5-5".into()), effort: Some("high".into()), ..Default::default() });
+    let say = |by: UserId| {
+        let send = SendEmployeeMessage { confirm_secret: false, employee_id: s.ada.0, text: "Hi".into(), conversation_id: s.ada.1, images: vec![], files: vec![], interrupt: false };
+        let CommandResult::EmployeeMessageSent { run_id, .. } = exec(&s, by, Command::SendEmployeeMessage(send)) else { panic!() };
+        config_of(&s, run_id)
+    };
+    assert_eq!(say(s.robin).model.as_deref(), Some("claude-opus-5-5"));
+    assert_ne!(say(s.alex).model.as_deref(), Some("claude-opus-5-5"), "Alex chose nothing: not Robin's");
+    exec(&s, s.robin, Command::SetConversationRun(aurelius_domain::autonomy::SetConversationRun { conversation_id: s.ada.1, model: Some("claude-sonnet-5-5".into()), effort: None }));
+    let chosen = say(s.robin);
+    assert_eq!((chosen.model.as_deref(), chosen.effort.as_deref()), (Some("claude-sonnet-5-5"), Some("high")), "the conversation's model, Robin's effort");
+}
+
+#[test]
+fn own_run_defaults_need_a_board_member_and_the_same_ones_again_are_no_change() {
+    use aurelius_domain::user::{SetUserRunDefaults, UserRunDefaults};
+    let s = setup();
+    let defaults = UserRunDefaults { mode: Some(aurelius_domain::autonomy::AgentMode::Plan), ..Default::default() };
+    let set = |user: Option<UserId>| s.service.execute(&ctx(user), CommandEnvelope { command_id: CommandId::new(), expected_version: None, command: Command::SetUserRunDefaults(SetUserRunDefaults { defaults: defaults.clone() }) });
+    assert_eq!(set(None).err().map(|e| e.code), Some(aurelius_domain::ErrorCode::BoardMemberRequired));
+    let CommandResult::UserRunDefaultsSet { changed, .. } = set(Some(s.robin)).unwrap().receipt.result else { panic!() };
+    assert!(changed);
+    let CommandResult::UserRunDefaultsSet { changed, .. } = set(Some(s.robin)).unwrap().receipt.result else { panic!() };
+    assert!(!changed, "the same defaults again");
+    let alex = s.alex;
+    assert_eq!(s.service.store().read(move |c| aurelius_storage::user_run_defaults::get(c, alex)).unwrap(), UserRunDefaults::default(), "Alex's stay their own");
+}
+
+/// The mode of the conversation `run` answers in.
+fn mode_of(s: &Setup, run: RunId) -> aurelius_domain::autonomy::AgentMode {
+    s.service.store().read(move |c| aurelius_storage::conversations::mode_for_run(c, run)).unwrap()
+}
+
+#[test]
+fn a_ticket_task_and_a_session_start_in_their_board_members_default_mode() {
+    use aurelius_domain::autonomy::AgentMode;
+    use aurelius_domain::user::UserRunDefaults;
+    let s = setup();
+    set_defaults(&s, s.robin, UserRunDefaults { mode: Some(AgentMode::AcceptEdits), ..Default::default() });
+    // The employee's own mode (its main chat) no longer counts.
+    // Iris and Otto are no management (Ada, the oldest root, is the CEO), so no Plan rule.
+    exec(&s, s.alex, Command::SetAgentMode(aurelius_domain::autonomy::SetAgentMode { conversation_id: s.iris.1, mode: AgentMode::Plan }));
+    let (_, root) = ticket_of(&s, s.robin, s.iris.0);
+    let main = start_task(&s, root, s.iris.0);
+    assert_eq!(mode_of(&s, main), AgentMode::AcceptEdits, "Robin's, the ticket's creator");
+    let (_, part) = delegate(&s, main, "Otto", s.otto.0);
+    assert_eq!(mode_of(&s, part), AgentMode::AcceptEdits, "a part runs on Robin's login too");
+    // Alex chose no mode: Ask, not Robin's and not the employee's Plan.
+    let (_, alexs) = ticket_of(&s, s.alex, s.iris.0);
+    assert_eq!(mode_of(&s, start_task(&s, alexs, s.iris.0)), AgentMode::Ask);
+
+    // A session works on a branch of its own, so its project needs a git folder.
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+    let CommandResult::ProjectCreated { project_id: repo_project, .. } = exec(&s, s.alex, Command::CreateProject(CreateProject { name: "Repo".into(), description: None, folder: Some(repo.path().to_string_lossy().into_owned()) })) else { panic!() };
+    let session = |by: UserId, run: aurelius_domain::task::RunSettings| {
+        let start = aurelius_domain::work_session::StartWorkSession { project_id: repo_project, employee_id: s.otto.0, text: "Look at it".into(), images: vec![], files: vec![], worktree: false, own_branch: true, run, confirm_secret: false, design: false };
+        let CommandResult::WorkSessionStarted { run_id, .. } = exec(&s, by, Command::StartWorkSession(start)) else { panic!() };
+        mode_of(&s, run_id)
+    };
+    assert_eq!(session(s.robin, Default::default()), AgentMode::AcceptEdits, "the starter's default");
+    assert_eq!(session(s.robin, aurelius_domain::task::RunSettings { mode: Some(AgentMode::Plan), ..Default::default() }), AgentMode::Plan, "a choice at the start wins");
+    assert_eq!(session(s.alex, Default::default()), AgentMode::Ask);
+}
+
+#[test]
+fn a_manager_still_starts_in_plan_and_a_tasks_own_mode_still_wins_over_the_default() {
+    use aurelius_domain::autonomy::AgentMode;
+    use aurelius_domain::user::UserRunDefaults;
+    let s = setup();
+    set_defaults(&s, s.robin, UserRunDefaults { mode: Some(AgentMode::AcceptEdits), ..Default::default() });
+    let create = |run: aurelius_domain::task::RunSettings| {
+        let create = CreateTask { confirm_secret: false, project_id: s.project, employee_id: Some(s.ada.0), title: "Report".into(), goal: "Write it".into(), acceptance_criteria: vec![], run, files: vec![] };
+        let CommandResult::TaskCreated { task_id } = exec(&s, s.robin, Command::CreateTask(create)) else { panic!() };
+        task_id
+    };
+    let chosen = create(aurelius_domain::task::RunSettings { mode: Some(AgentMode::Auto), ..Default::default() });
+    assert_eq!(mode_of(&s, start_task(&s, chosen, s.ada.0)), AgentMode::Auto);
+    // Ada leads the company and management chooses its own mode: Plan first.
+    exec(&s, s.alex, Command::SetFollowOrgChart(aurelius_domain::employee::SetFollowOrgChart { follow: true }));
+    if s.service.store().read(move |c| aurelius_storage::management_mode::chooses_own_mode(c, s.ada.0)).unwrap() {
+        assert_eq!(mode_of(&s, start_task(&s, create(Default::default()), s.ada.0)), AgentMode::Plan);
+    }
+}

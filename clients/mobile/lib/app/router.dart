@@ -14,6 +14,7 @@ import '../core/push/push_action.dart';
 import '../core/widgets/widgets.dart' show toast;
 import '../data/aurelius_repository.dart';
 import '../features/employee_runs/employee_runs_page.dart';
+import '../features/my_defaults/my_defaults_page.dart';
 import '../features/account/account.dart';
 import '../features/account/claude_login.dart' show ClaudeLoginPage;
 import '../features/account/devices.dart' show DevicesPage;
@@ -174,6 +175,7 @@ class AppRouter {
         routes: [
           GoRoute(parentNavigatorKey: _root, path: 'board', pageBuilder: (context, state) => routePage(state, const BoardSettingsPage())),
           GoRoute(parentNavigatorKey: _root, path: 'employee-runs', pageBuilder: (context, state) => routePage(state, const EmployeeRunsPage())),
+          GoRoute(parentNavigatorKey: _root, path: 'my-defaults', pageBuilder: (context, state) => routePage(state, const MyDefaultsPage())),
           GoRoute(
             parentNavigatorKey: _root,
             path: 'board-members',

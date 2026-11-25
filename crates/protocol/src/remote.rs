@@ -147,6 +147,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::UserWhoami
         // One's own rail, from every own device.
         | Method::UserRailPins
+        // One's own run defaults.
+        | Method::UserRunDefaults
         | Method::UserLogin(_)
         | Method::UserLogout
         | Method::SessionList { .. }
@@ -240,8 +242,9 @@ fn command_needs(command: &Command) -> Needs {
         // or screen on needs what turning those on later needs.
         Command::SendProjectMessage(m) if m.conversation_id.is_none() && m.start.needs_approve() => Needs::Cap(Approve),
         Command::StartProjectConversation(m) if m.start.needs_approve() => Needs::Cap(Approve),
-        Command::StartWorkSession(m) if m.run.needs_approve() => Needs::Cap(Approve),
-        Command::DispatchWorkSession(m) if m.run.needs_approve() => Needs::Cap(Approve),
+        // A design session always runs in Auto, whatever mode it asks for.
+        Command::StartWorkSession(m) if m.design || m.run.needs_approve() => Needs::Cap(Approve),
+        Command::DispatchWorkSession(m) if m.design || m.run.needs_approve() => Needs::Cap(Approve),
         Command::SendChatMessage(_)
         | Command::RetryReply(_)
         | Command::StopRun(_)
@@ -381,6 +384,10 @@ fn command_needs(command: &Command) -> Needs {
         Command::StartCodeThread(_) | Command::ReplyCodeThread(_) | Command::ResolveCodeThread(_) | Command::SubmitCodeReview(_) => Needs::Cap(Chat),
         // One's own viewed marks, like marking one's own notifications read.
         Command::SetCodeViewed(_) => Needs::Cap(Read),
+        // One's own run defaults steer the runs on one's login: like choosing a run's
+        // model and mode in a chat, and Auto as default like switching to Auto.
+        Command::SetUserRunDefaults(d) if d.defaults.needs_approve() => Needs::Cap(Approve),
+        Command::SetUserRunDefaults(_) => Needs::Cap(Chat),
     }
 }
 
@@ -696,6 +703,23 @@ mod tests {
         let plan = exec(Command::SetAgentMode(SetAgentMode { conversation_id: id, mode: AgentMode::Plan }));
         assert_eq!(required(&auto), cap(Capability::Approve));
         assert_eq!(required(&plan), cap(Capability::Chat));
+    }
+
+    #[test]
+    fn own_run_defaults_need_chat_and_auto_as_default_needs_approve() {
+        use aurelius_domain::{autonomy::AgentMode, user::{SetUserRunDefaults, UserRunDefaults}};
+        let set = |mode| exec(Command::SetUserRunDefaults(SetUserRunDefaults { defaults: UserRunDefaults { mode, ..Default::default() } }));
+        assert_eq!(required(&set(Some(AgentMode::Auto))), cap(Capability::Approve));
+        assert_eq!(required(&set(Some(AgentMode::Plan))), cap(Capability::Chat));
+        assert_eq!(required(&read(Method::UserRunDefaults)), cap(Capability::Read));
+    }
+
+    #[test]
+    fn a_design_session_needs_approve_because_it_runs_in_auto() {
+        use aurelius_domain::{EmployeeId, ProjectId, task::RunSettings, work_session::StartWorkSession};
+        let session = |design: bool| StartWorkSession { project_id: ProjectId::new(), employee_id: EmployeeId::new(), text: "Make a page.".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: RunSettings::default(), confirm_secret: false, design };
+        assert_eq!(required(&exec(Command::StartWorkSession(session(true)))), cap(Capability::Approve));
+        assert_eq!(required(&exec(Command::StartWorkSession(session(false)))), cap(Capability::Chat));
     }
 
     #[test]

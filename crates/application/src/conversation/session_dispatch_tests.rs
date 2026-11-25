@@ -52,7 +52,8 @@ fn setup() -> Setup {
     let user = add_user(&service, "grace");
     let other = add_user(&service, "ada");
     let folder = dir.path().join("planora");
-    std::fs::create_dir_all(&folder).unwrap();
+    // A git repository: a session works on a branch of its own there.
+    std::fs::create_dir_all(folder.join(".git")).unwrap();
     let command = Command::CreateProject(CreateProject { name: "Planora".into(), description: None, folder: Some(folder.to_string_lossy().into_owned()) });
     let made = service.execute(&ctx(Some(user)), CommandEnvelope { command_id: aurelius_domain::CommandId::new(), expected_version: None, command }).unwrap().receipt.result;
     let CommandResult::ProjectCreated { project_id: project, .. } = made else { panic!("{made:?}") };
@@ -68,7 +69,7 @@ fn set_dispatcher(service: &CommandService, dispatcher: Option<EmployeeId>) {
 }
 
 fn dispatch(s: &Setup) -> ConversationId {
-    let command = Command::DispatchWorkSession(DispatchWorkSession { project_id: s.project, text: TEXT.into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: Default::default(), confirm_secret: false, design: false });
+    let command = Command::DispatchWorkSession(DispatchWorkSession { project_id: s.project, text: TEXT.into(), images: vec![], files: vec![], worktree: false, own_branch: true, run: Default::default(), confirm_secret: false, design: false });
     let result = exec_as(s, Some(s.user), command).unwrap();
     let CommandResult::WorkSessionDispatching { conversation_id, .. } = result else { panic!("{result:?}") };
     conversation_id
@@ -132,7 +133,7 @@ fn a_dispatched_session_waits_for_the_dispatcher_and_answers_nothing_yet() {
 fn without_an_active_dispatcher_a_dispatched_session_is_refused_and_nothing_is_made() {
     let s = setup();
     set_dispatcher(&s.service, None);
-    let command = Command::DispatchWorkSession(DispatchWorkSession { project_id: s.project, text: TEXT.into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: Default::default(), confirm_secret: false, design: false });
+    let command = Command::DispatchWorkSession(DispatchWorkSession { project_id: s.project, text: TEXT.into(), images: vec![], files: vec![], worktree: false, own_branch: true, run: Default::default(), confirm_secret: false, design: false });
     let refused = exec_as(&s, Some(s.user), command).unwrap_err();
     assert!(refused.message.contains("no active dispatcher"), "{}", refused.message);
     let sessions: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'session'", [], |r| r.get(0))?)).unwrap();

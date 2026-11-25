@@ -43,7 +43,8 @@ fn setup() -> Setup {
     let grace = add_user(&service, "grace");
     let ada = add_user(&service, "ada");
     let folder = dir.path().join("planora");
-    std::fs::create_dir_all(&folder).unwrap();
+    // A git repository: a session works on a branch of its own there.
+    std::fs::create_dir_all(folder.join(".git")).unwrap();
     let command = Command::CreateProject(CreateProject { name: "Planora".into(), description: None, folder: Some(folder.to_string_lossy().into_owned()) });
     let made = service.execute(&ctx(Some(grace)), CommandEnvelope { command_id: aurelius_domain::CommandId::new(), expected_version: None, command }).unwrap().receipt.result;
     let CommandResult::ProjectCreated { project_id: project, .. } = made else { panic!("{made:?}") };
@@ -54,7 +55,7 @@ fn setup() -> Setup {
 }
 
 fn session(s: &Setup) -> (ConversationId, aurelius_domain::RunId) {
-    let start = Command::StartWorkSession(StartWorkSession { project_id: s.project, employee_id: s.orion, text: "Maak de export sneller.".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: RunSettings::default(), confirm_secret: false, design: false });
+    let start = Command::StartWorkSession(StartWorkSession { project_id: s.project, employee_id: s.orion, text: "Maak de export sneller.".into(), images: vec![], files: vec![], worktree: false, own_branch: true, run: RunSettings::default(), confirm_secret: false, design: false });
     let result = exec_as(s, Some(s.grace), start).unwrap();
     let CommandResult::WorkSessionStarted { conversation_id, run_id, .. } = result else { panic!("{result:?}") };
     (conversation_id, run_id)
