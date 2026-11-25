@@ -154,6 +154,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::ClaudeLoginInput(_) => Needs::Cap(Read),
         // Showing or copying a secret controls what it unlocks, like managing items.
         Method::VaultReveal { .. } => Needs::Cap(TaskControl),
+        // A side question spends the asker's Claude login, like starting work does.
+        Method::ConversationSideAsk(_) | Method::ConversationSideCancel { .. } => Needs::Cap(TaskControl),
         // The vault key opens every secret of a backup: like backups, only on an owner's device.
         Method::VaultKeyExport(_) => Needs::Owner,
         Method::BackupList

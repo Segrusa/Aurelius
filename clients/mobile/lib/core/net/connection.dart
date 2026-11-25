@@ -566,6 +566,8 @@ class AureliusConnection {
         unawaited(_endSession(_signingOut && message.reason == SignOutReason.loggedOut ? null : message.reason));
       case ServerMessageStream():
         break; // local IPC only
+      case ServerMessageSideAnswer():
+        break; // the app asks no side questions yet (desktop only)
     }
   }
 

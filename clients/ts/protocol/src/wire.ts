@@ -55,6 +55,7 @@ const MESSAGE_TYPES: Record<ServerMessage["type"], true> = {
   load_changed: true,
   power_changed: true,
   response: true,
+  side_answer: true,
   signed_out: true,
   stream: true,
   stream_append: true,

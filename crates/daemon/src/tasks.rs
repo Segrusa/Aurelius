@@ -16,6 +16,9 @@ use std::sync::Arc;
 
 const PARK_POLL_MS: i64 = 60_000;
 
+/// `StepError::Failed` of a step that was stopped (its canceller fired).
+pub(crate) const INTERRUPTED: &str = "onderbroken";
+
 pub(crate) enum StepError {
     Runtime(RuntimeError),
     Failed(String),
@@ -40,6 +43,12 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 /// Run one text-only step to completion and return (text, reported model)
 /// (memory extraction and summaries).
 pub(crate) async fn complete_text(shared: &Arc<Shared>, config: &ResolvedRunConfig, run_id: RunId, system: String, prompt: String) -> Result<(String, Option<String>), StepError> {
+    stream_text(shared, config, run_id, system, prompt, |_| {}).await
+}
+
+/// `complete_text` that also hands the whole text so far to `on_text` after each
+/// streamed piece (side questions show the answer while it is written).
+pub(crate) async fn stream_text(shared: &Arc<Shared>, config: &ResolvedRunConfig, run_id: RunId, system: String, prompt: String, mut on_text: impl FnMut(&str) + Send) -> Result<(String, Option<String>), StepError> {
     let runtime = runtimes::runtime_for_config(shared, config).map_err(step_error)?;
     let request = RunRequest {
         run_id,
@@ -71,9 +80,12 @@ pub(crate) async fn complete_text(shared: &Arc<Shared>, config: &ResolvedRunConf
                 }
             }
             RuntimeEvent::ModelReported(m) => model = Some(m),
-            RuntimeEvent::TextDelta(d) => text.push_str(&d),
+            RuntimeEvent::TextDelta(d) => {
+                text.push_str(&d);
+                on_text(&text);
+            }
             RuntimeEvent::Completed => break Ok(()),
-            RuntimeEvent::Interrupted => break Err(StepError::Failed("onderbroken".into())),
+            RuntimeEvent::Interrupted => break Err(StepError::Failed(INTERRUPTED.into())),
             RuntimeEvent::Quota { .. } => break Err(StepError::Failed("rate_limit: the usage limit is reached".into())),
             RuntimeEvent::Failed { code, .. } if claude && code == aurelius_runtime::claude_code::parse::AUTH_FAILED => {
                 // Claude refused the login (a 401): expired until reconnected.

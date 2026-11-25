@@ -97,7 +97,7 @@ pub fn reject_unparsed(value: Option<&serde_json::Value>, err: &dyn std::fmt::Di
 /// Methods whose params may hold a value, a password or a code: an error never
 /// repeats what serde said about them.
 pub fn quotes_no_params(name: &str) -> bool {
-    name.starts_with("vault.") || matches!(name, "user.login" | "user.create" | "user.set_password" | "claude_login.input" | "session.hello" | "message.edit")
+    name.starts_with("vault.") || matches!(name, "user.login" | "user.create" | "user.set_password" | "claude_login.input" | "session.hello" | "message.edit" | "conversation.side_ask")
 }
 
 impl<'de> Deserialize<'de> for Call {
@@ -482,6 +482,11 @@ pub mod feature {
     /// the write `user.set_rail_pins` and the event `user.rail_pins_changed`. A client
     /// without it keeps the pins on the device.
     pub const RAIL_PINS: &str = "rail_pins";
+    /// Side questions (protocol 5, additive), like Claude Code's `/btw`:
+    /// `conversation.side_ask` and `conversation.side_cancel`, the answer streamed
+    /// to the asking connection only as `ServerMessage::SideAnswer`. Nothing is
+    /// stored. A client without this feature shows no side-question button.
+    pub const SIDE_QUESTION: &str = "side_question";
 }
 
 /// Every feature this build has.
@@ -547,6 +552,7 @@ pub const FEATURES: &[&str] = &[
     feature::SESSION_OWN_BRANCH,
     feature::OWN_DEVICES,
     feature::RAIL_PINS,
+    feature::SIDE_QUESTION,
 ];
 
 /// The answer of `command.applied`.
@@ -583,6 +589,29 @@ pub enum ServerMessage {
     /// right after. The client shows "You were signed out on this device." and
     /// its sign-in screen (a logout of its own needs no message).
     SignedOut { reason: aurelius_domain::user::SignOutReason },
+    /// The answer to a side question so far (`conversation.side_ask`), only to the
+    /// connection that asked; never an event, never stored.
+    SideAnswer(SideAnswer),
+}
+
+/// `ServerMessage::SideAnswer`: one side question's answer as it grows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SideAnswer {
+    pub side_id: String,
+    /// The whole answer so far (not a delta), through the vault redactor.
+    pub text: String,
+    /// The answer is complete, failed or was stopped: no more messages for this id.
+    pub done: bool,
+    /// Why there is no (whole) answer: a fixed text of Aurelius, never the
+    /// model's or the CLI's output. Comes with `done`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// `ResponseBody::SideAsked`: the id the answer of a side question will carry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SideAsked {
+    pub side_id: String,
 }
 
 /// `ServerMessage::ClaudeLoginPrompt`: the sign-in link to open and/or the
@@ -693,6 +722,9 @@ pub enum ResponseBody {
     Login(aurelius_domain::user::LoginResult),
     Sessions(aurelius_domain::user::SessionsSnapshot),
     ClaudeLogin(aurelius_domain::user::ClaudeLoginView),
+    /// `conversation.side_ask` (the answer follows as `ServerMessage::SideAnswer`)
+    /// and `conversation.side_cancel`.
+    SideAsked(SideAsked),
     /// `vault.list`.
     Vault(aurelius_domain::vault::VaultList),
     /// `vault.reveal`: never printed.

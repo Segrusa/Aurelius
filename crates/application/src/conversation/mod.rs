@@ -12,5 +12,6 @@ pub mod work_session;
 pub mod session_dispatch;
 pub mod session_history;
 pub mod session_title;
+pub mod side_question;
 pub(crate) mod scheduled;
 pub mod ticket_channel;

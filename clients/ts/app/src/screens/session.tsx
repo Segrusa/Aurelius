@@ -35,6 +35,7 @@ import {
 } from "./run-side";
 import { chooserText, runChange, runChipLabel, sessionFolder, sessionStatus } from "./session-logic";
 import { modelName } from "./settings-kit";
+import { SideQuestionButton } from "./side-question";
 import { SubagentsAtWork } from "./subagents";
 import { filesWritten } from "./tasks-logic";
 
@@ -43,6 +44,7 @@ export const OTHERS_SESSION = "Another board member started this session. Only t
 
 const styles = stylex.create({
   body: { display: "flex", minWidth: 0, minHeight: 0, flexGrow: 1, flexBasis: 0 },
+  actions: { display: "flex", flexShrink: 0, alignItems: "center", gap: 6 },
   chooser: {
     display: "flex",
     alignItems: "center",
@@ -113,7 +115,12 @@ export function SessionScreen({ conversationId, design = null }: { conversationI
           footer: (snapshot) => <RunChips snapshot={snapshot} />,
           ...(session?.dispatch ? { instead: <Chooser session={session} /> } : {}),
           ...(othersSession ? { instead: <p {...stylex.props(styles.chooser)}>{OTHERS_SESSION}</p> } : {}),
-          actions: <PropertiesToggle dock={dock} label="Session properties" />,
+          actions: (
+            <div {...stylex.props(styles.actions)}>
+              <SideQuestionButton conversationId={conversationId} />
+              <PropertiesToggle dock={dock} label="Session properties" />
+            </div>
+          ),
           aside: <SessionDetails dock={dock} conversationId={conversationId} session={session} />,
           design,
         }}

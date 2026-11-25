@@ -59,6 +59,14 @@ describe("server messages", () => {
     expect(message.reason).toBe("revoked");
   });
 
+  it("reads a side answer", () => {
+    const message = parse({ type: "side_answer", side_id: "s1", text: "Working on the export", done: false });
+    if (message?.type !== "side_answer") throw new Error("expected a side answer");
+    expect(message.side_id).toBe("s1");
+    expect(message.text).toBe("Working on the export");
+    expect(message.done).toBe(false);
+  });
+
   it("leaves what it cannot read", () => {
     expect(parseServerMessage("not json")).toBeNull();
     expect(parseServerMessage("[]")).toBeNull();

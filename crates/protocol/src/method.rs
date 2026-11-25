@@ -567,6 +567,20 @@ pub enum Method {
     #[serde(rename = "connection.detect_runtime")]
     ProviderDetectRuntime,
 
+    /// A side question about a conversation (feature `side_question`), like
+    /// Claude Code's `/btw`: answered from what the conversation holds, without
+    /// tools, on the asker's own Claude login, and never stored: no message, no
+    /// event, the employee never sees it and its run goes on. Answers at once with
+    /// `SideAsked`; the text follows to this connection only as
+    /// `ServerMessage::SideAnswer`. Board members only; not for apps.
+    #[serde(rename = "conversation.side_ask")]
+    ConversationSideAsk(SideAskParams),
+    /// Stop a side question of this connection that is still answering. Unknown
+    /// or finished ids are fine (nothing to stop). Answers `SideAsked` with the
+    /// same id; the answer ends with a `SideAnswer` that is `done`.
+    #[serde(rename = "conversation.side_cancel")]
+    ConversationSideCancel { side_id: String },
+
     /// Replay events after `after_seq`, then stream live events (and load/power pushes).
     #[serde(rename = "event.subscribe")]
     EventSubscribe { after_seq: u64 },
@@ -668,6 +682,23 @@ impl std::fmt::Debug for ClaudeLoginInputParams {
         f.debug_struct("ClaudeLoginInputParams").field("link_id", &self.link_id).field("text", &"<redacted>").finish()
     }
 }
+
+/// `conversation.side_ask`. The question is never stored, so it is not printed either.
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SideAskParams {
+    pub conversation_id: ConversationId,
+    /// At most `SIDE_QUESTION_MAX_CHARS` characters, not blank.
+    pub question: String,
+}
+
+impl std::fmt::Debug for SideAskParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SideAskParams").field("conversation_id", &self.conversation_id).field("question", &"<not printed>").finish()
+    }
+}
+
+/// The longest side question, in characters.
+pub const SIDE_QUESTION_MAX_CHARS: usize = 2_000;
 
 /// What `HelloParams::accepts` names.
 pub mod client_feature {

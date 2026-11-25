@@ -139,6 +139,17 @@ abstract final class Methods {
   static const String conversationSetBrowserAllowed = 'conversation.set_browser_allowed';
   static const String conversationSetRun = 'conversation.set_run';
   static const String conversationSetScreenAllowed = 'conversation.set_screen_allowed';
+  /// A side question about a conversation (feature `side_question`), like
+  /// Claude Code's `/btw`: answered from what the conversation holds, without
+  /// tools, on the asker's own Claude login, and never stored: no message, no
+  /// event, the employee never sees it and its run goes on. Answers at once with
+  /// `SideAsked`; the text follows to this connection only as
+  /// `ServerMessage::SideAnswer`. Board members only; not for apps.
+  static const String conversationSideAsk = 'conversation.side_ask';
+  /// Stop a side question of this connection that is still answering. Unknown
+  /// or finished ids are fine (nothing to stop). Answers `SideAsked` with the
+  /// same id; the answer ends with a `SideAnswer` that is `done`.
+  static const String conversationSideCancel = 'conversation.side_cancel';
   /// The designs of a project, or of all without one: the kept HTML pages of each
   /// conversation, the latest first (feature `designs`).
   static const String designList = 'design.list';
@@ -757,6 +768,27 @@ Map<String, dynamic> conversationGet({required String conversationId}) => <Strin
   'method': Methods.conversationGet,
   'params': <String, dynamic>{
     'conversation_id': conversationId,
+  },
+};
+
+/// A side question about a conversation (feature `side_question`), like
+/// Claude Code's `/btw`: answered from what the conversation holds, without
+/// tools, on the asker's own Claude login, and never stored: no message, no
+/// event, the employee never sees it and its run goes on. Answers at once with
+/// `SideAsked`; the text follows to this connection only as
+/// `ServerMessage::SideAnswer`. Board members only; not for apps.
+Map<String, dynamic> conversationSideAsk(SideAskParams params) => <String, dynamic>{
+  'method': Methods.conversationSideAsk,
+  'params': params.toJson(),
+};
+
+/// Stop a side question of this connection that is still answering. Unknown
+/// or finished ids are fine (nothing to stop). Answers `SideAsked` with the
+/// same id; the answer ends with a `SideAnswer` that is `done`.
+Map<String, dynamic> conversationSideCancel({required String sideId}) => <String, dynamic>{
+  'method': Methods.conversationSideCancel,
+  'params': <String, dynamic>{
+    'side_id': sideId,
   },
 };
 

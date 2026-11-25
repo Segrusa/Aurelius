@@ -51,7 +51,7 @@ async fn a_session_revoked_in_the_database_alone_signs_its_connection_out() {
     let reason = loop {
         match tokio::time::timeout(Duration::from_secs(5), pushes.recv()).await.expect("signed out").expect("pushes") {
             SessionPush::SignedOut(reason) => break reason,
-            SessionPush::ClaudeLoginPrompt(_) => {}
+            SessionPush::ClaudeLoginPrompt(_) | SessionPush::SideAnswer(_) => {}
         }
     };
     assert_eq!(reason, SignOutReason::Revoked);

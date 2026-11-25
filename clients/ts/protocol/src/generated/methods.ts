@@ -67,6 +67,8 @@ export const METHODS = {
   "conversation.set_browser_allowed": "command",
   "conversation.set_run": "command",
   "conversation.set_screen_allowed": "command",
+  "conversation.side_ask": "read",
+  "conversation.side_cancel": "read",
   "design.list": "read",
   "device.list": "read",
   "device.revoke": "host",
@@ -457,6 +459,21 @@ export interface MethodParams {
   "conversation.set_browser_allowed": M.SetBrowserAllowed;
   "conversation.set_run": M.SetConversationRun;
   "conversation.set_screen_allowed": M.SetScreenAllowed;
+  /**
+   * A side question about a conversation (feature `side_question`), like
+   * Claude Code's `/btw`: answered from what the conversation holds, without
+   * tools, on the asker's own Claude login, and never stored: no message, no
+   * event, the employee never sees it and its run goes on. Answers at once with
+   * `SideAsked`; the text follows to this connection only as
+   * `ServerMessage::SideAnswer`. Board members only; not for apps.
+   */
+  "conversation.side_ask": M.SideAskParams;
+  /**
+   * Stop a side question of this connection that is still answering. Unknown
+   * or finished ids are fine (nothing to stop). Answers `SideAsked` with the
+   * same id; the answer ends with a `SideAnswer` that is `done`.
+   */
+  "conversation.side_cancel": { side_id: string };
   /**
    * The designs of a project, or of all without one: the kept HTML pages of each
    * conversation, the latest first (feature `designs`).
