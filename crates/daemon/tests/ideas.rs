@@ -1,4 +1,5 @@
-//! Ideas per project: noted by the user or an employee, made into a ticket or started as a task, or dropped.
+//! Ideas per project: noted by the user or an employee, made into a ticket, or dropped
+//! (`idea.start` answers gone: tests/gone_methods.rs).
 
 mod common;
 
@@ -6,11 +7,10 @@ use aurelius_client::bridge::BridgeClient;
 use aurelius_client::envelope;
 use aurelius_domain::{
     Command, RunId,
-    autonomy::AgentMode,
-    idea::{AddIdea, DeleteIdea, IdeaKind, IdeaStatus, SetIdeaStatus, StartIdea, UpdateIdea},
+    idea::{AddIdea, DeleteIdea, IdeaKind, IdeaStatus, SetIdeaStatus, UpdateIdea},
     employee::CreateEmployee,
     project::CreateProject,
-    task::{RunSettings, TaskStatus},
+    task::CreateTask,
     ticket::CreateTicket,
 };
 use aurelius_protocol::{CommandResult, EmployeeTaskOp};
@@ -18,7 +18,7 @@ use common::*;
 use std::time::Duration;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn ideas_are_noted_started_as_tasks_or_dropped() {
+async fn ideas_are_noted_by_the_user_and_an_employee_or_dropped() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
@@ -43,8 +43,9 @@ async fn ideas_are_noted_started_as_tasks_or_dropped() {
     let CommandResult::IdeaAdded { idea_id: export } = client.execute(envelope(add("CSV export", None), None)).await.unwrap().result else { panic!() };
     client.execute(envelope(Command::UpdateIdea(UpdateIdea { confirm_secret: false, idea_id: export, title: "CSV-export".into(), note: Some("Per project".into()), kind: Some(IdeaKind::Bug), add_files: vec![], remove_files: vec![] }), None)).await.unwrap();
 
-    // An employee notes one while working (the bridge's add_idea tool).
-    let CommandResult::IdeaStarted { task_id, .. } = client.execute(envelope(Command::StartIdea(StartIdea { idea_id: dark, employee_id, run: Default::default() }), None)).await.unwrap().result else { panic!() };
+    // An employee notes one while working on a task (the bridge's add_idea tool).
+    let task = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: "Dark mode".into(), goal: "Voor 's avonds".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
+    let CommandResult::TaskCreated { task_id, .. } = client.execute(envelope(Command::CreateTask(task), None)).await.unwrap().result else { panic!() };
     for _ in 0..400 {
         if client.tasks(None).await.unwrap().tasks.iter().any(|t| t.id == task_id && t.status.is_terminal()) {
             break;
@@ -55,10 +56,6 @@ async fn ideas_are_noted_started_as_tasks_or_dropped() {
     let (ok, text) = BridgeClient::connect(dir.path()).await.unwrap().employee_act(RunId::parse(&run).unwrap(), EmployeeTaskOp::AddIdea { title: "Thema per gebruiker".into(), note: "Kwam op tijdens dark mode".into(), kind: Default::default(), project: None }).await.unwrap();
     assert!(ok, "{text}");
 
-    // Started: a task with the idea's title and note; the idea is done and points at it.
-    let task = client.tasks(None).await.unwrap().tasks.into_iter().find(|t| t.id == task_id).unwrap();
-    assert_eq!((task.title.as_str(), task.goal.as_str(), task.employee_id), ("Dark mode", "Voor 's avonds", Some(employee_id)));
-    assert!(client.execute(envelope(Command::StartIdea(StartIdea { idea_id: dark, employee_id, run: Default::default() }), None)).await.is_err(), "only once");
 
     client.execute(envelope(Command::SetIdeaStatus(SetIdeaStatus { idea_id: export, status: IdeaStatus::Dropped }), None)).await.unwrap();
     let ideas = client.ideas(project_id).await.unwrap().ideas;
@@ -72,29 +69,11 @@ async fn ideas_are_noted_started_as_tasks_or_dropped() {
     assert_eq!(ideas[0].title, "Thema per gebruiker", "open ideas first");
     assert_eq!((ideas[0].author.as_str(), ideas[0].status, ideas[0].employee_id), ("Alex", IdeaStatus::Open, Some(employee_id)));
     assert!(ideas[0].by_employee(), "an employee's idea is told apart from the user's");
-    let started = ideas.iter().find(|i| i.id == dark).unwrap();
-    assert_eq!((started.status, started.task_id, started.task_status), (IdeaStatus::Done, Some(task_id), Some(TaskStatus::Succeeded)));
+    let noted = ideas.iter().find(|i| i.id == dark).unwrap();
+    assert_eq!((noted.status, noted.task_id, noted.note.as_deref()), (IdeaStatus::Open, None, Some("Voor 's avonds")));
     let dropped = ideas.iter().find(|i| i.id == export).unwrap();
     assert_eq!((dropped.title.as_str(), dropped.note.as_deref(), dropped.status, dropped.author.as_str()), ("CSV-export", Some("Per project"), IdeaStatus::Dropped, "You"));
     assert!(dropped.employee_id.is_none() && !dropped.by_employee());
-
-    // Started in a chosen mode, the task conversation runs in it; without one it follows the employee
-    // (Alex is the only employee, so the CEO: management starts in Plan and chooses itself).
-    for mode in [Some(AgentMode::Plan), Some(AgentMode::Auto), Some(AgentMode::AcceptEdits), None] {
-        let CommandResult::IdeaAdded { idea_id } = client.execute(envelope(add(&format!("Idee {mode:?}"), None), None)).await.unwrap().result else { panic!() };
-        let run = RunSettings { mode, ..RunSettings::default() };
-        let CommandResult::IdeaStarted { task_id, .. } = client.execute(envelope(Command::StartIdea(StartIdea { idea_id, employee_id, run }), None)).await.unwrap().result else { panic!() };
-        let mut conversation = None;
-        for _ in 0..400 {
-            conversation = client.tasks(None).await.unwrap().tasks.into_iter().find(|t| t.id == task_id).and_then(|t| t.conversation_id);
-            if conversation.is_some() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        let mode_now = client.messages(conversation.expect("the task got its conversation")).await.unwrap().agent_mode;
-        assert_eq!(mode_now, mode.unwrap_or(AgentMode::Plan), "{mode:?}");
-    }
 
     // The project's timeline tells it.
     let page = client.timeline(aurelius_protocol::TimelineQuery { project_id: Some(project_id), before_seq: None, limit: 100, correlation_id: None, activity: false }).await.unwrap();
@@ -103,9 +82,9 @@ async fn ideas_are_noted_started_as_tasks_or_dropped() {
 }
 
 /// Files on an idea: kept in the project's uploads area, fetched by id, copied
-/// to the task the idea becomes, and removed with the idea.
+/// to the ticket the idea becomes, and removed with the idea.
 #[tokio::test(flavor = "multi_thread")]
-async fn ideas_keep_files_that_go_with_them_into_the_task() {
+async fn ideas_keep_files_that_go_with_them_into_the_ticket() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = start(dir.path()).await;
     let client = connect(dir.path()).await;
@@ -117,14 +96,6 @@ async fn ideas_keep_files_that_go_with_them_into_the_task() {
     };
     let folder = std::path::PathBuf::from(client.projects().await.unwrap().projects.into_iter().find(|p| p.id == project_id).unwrap().folder.expect("folder"));
     let uploads = folder.join(".aurelius").join("uploads");
-    let CommandResult::EmployeeCreated { employee_id, .. } = client
-        .execute(envelope(Command::CreateEmployee(CreateEmployee { access_level: None, tool_policy: None, start_profile: None, description: None, name: "Alex".into(), role: "Developer".into(), title: None, reports_to: None, instructions: None, folder: None }), None))
-        .await
-        .unwrap()
-        .result
-    else {
-        panic!()
-    };
     let (sketch, notes) = (dir.path().join("sketch.png"), dir.path().join("notes.txt"));
     let mut png = Vec::new();
     image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(400, 200, image::Rgb([10, 120, 200]))).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
@@ -158,15 +129,14 @@ async fn ideas_keep_files_that_go_with_them_into_the_task() {
     assert!(client.execute(envelope(too_many, None)).await.is_err());
     assert_eq!(std::fs::read_dir(&uploads).unwrap().count(), 2, "nothing left behind by the refused update: .gitignore and notes.txt");
 
-    // Started: the task has its own copy, named to the employee like a task attachment.
-    let CommandResult::IdeaStarted { task_id, .. } = client.execute(envelope(Command::StartIdea(StartIdea { idea_id, employee_id, run: Default::default() }), None)).await.unwrap().result else { panic!() };
-    let task = client.tasks(None).await.unwrap().tasks.into_iter().find(|t| t.id == task_id).unwrap();
-    assert_eq!(task.goal, note);
-    assert_eq!(task.attachments.len(), 1);
-    assert_eq!((task.attachments[0].name.as_str(), task.attachments[0].id.clone()), ("notes (2).txt", Some(format!("t:{task_id}:0"))));
-    assert_eq!(client.upload(&format!("t:{task_id}:0")).await.unwrap().2, b"first line\nsecond line");
+    // A ticket from it has its own copy, next to the idea's.
+    let CommandResult::TicketCreated { ticket_id, .. } = client.execute(envelope(ticket_from(project_id, idea_id, "Dark mode", false), None)).await.unwrap().result else { panic!() };
+    let attachments = client.ticket(ticket_id).await.unwrap().ticket.attachments;
+    assert_eq!(attachments.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["notes (2).txt"]);
+    let copy = attachments[0].id.clone().expect("an upload id");
+    assert_eq!(client.upload(&copy).await.unwrap().2, b"first line\nsecond line");
 
-    // Deleted: the idea and its files go; the task keeps its copy.
+    // Deleted: the idea and its files go; the ticket keeps its copy.
     client.execute(envelope(Command::DeleteIdea(DeleteIdea { idea_id }), None)).await.unwrap();
     assert!(client.ideas(project_id).await.unwrap().ideas.iter().all(|i| i.id != idea_id));
     assert!(!uploads.join("notes.txt").exists() && uploads.join("notes (2).txt").exists());
@@ -255,16 +225,18 @@ async fn a_refused_ticket_leaves_the_idea_open_and_an_idea_with_a_ticket_or_task
     assert_eq!((open.status, open.ticket_id), (IdeaStatus::Open, None));
     assert!(client.board(None).await.unwrap().columns.iter().all(|c| c.tickets.is_empty()), "no ticket was made");
 
-    // Started: it goes to Todo, and the idea closes with it. A second ticket or a task (an older client) is refused.
+    // Started: it goes to Todo, and the idea closes with it. A second ticket is refused.
     client.execute(envelope(ticket_from(project_id, idea_id, "One", true), None)).await.unwrap();
     let twice = client.execute(envelope(ticket_from(project_id, idea_id, "One again", false), None)).await.unwrap_err().to_string();
     assert!(twice.contains("already became a ticket"), "{twice}");
-    let task = client.execute(envelope(Command::StartIdea(StartIdea { idea_id, employee_id, run: Default::default() }), None)).await.unwrap_err().to_string();
-    assert!(task.contains("already became a ticket"), "{task}");
 
-    // An idea that became a task before keeps that link: no ticket on top of it.
+    // An idea that became a task before `idea.start` went keeps that link: no ticket on top of it.
     let CommandResult::IdeaAdded { idea_id: started } = client.execute(envelope(add("Two"), None)).await.unwrap().result else { panic!() };
-    client.execute(envelope(Command::StartIdea(StartIdea { idea_id: started, employee_id, run: Default::default() }), None)).await.unwrap();
+    let task = CreateTask { confirm_secret: false, project_id, employee_id: Some(employee_id), title: "Two".into(), goal: "Two".into(), acceptance_criteria: vec![], run: Default::default(), files: vec![] };
+    let CommandResult::TaskCreated { task_id, .. } = client.execute(envelope(Command::CreateTask(task), None)).await.unwrap().result else { panic!() };
+    let db = rusqlite::Connection::open(dir.path().join("data/aurelius.sqlite")).unwrap();
+    db.busy_timeout(Duration::from_secs(5)).unwrap();
+    db.execute("UPDATE ideas SET status = 'done', task_id = ?2 WHERE id = ?1", [started.to_string(), task_id.to_string()]).unwrap();
     let on_task = client.execute(envelope(ticket_from(project_id, started, "Two", false), None)).await.unwrap_err().to_string();
     assert!(on_task.contains("already became a task"), "{on_task}");
     stop(dir.path(), daemon).await;

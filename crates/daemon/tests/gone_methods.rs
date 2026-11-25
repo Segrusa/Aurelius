@@ -5,8 +5,10 @@
 mod common;
 
 use aurelius_application::conversation::project_chat::PROJECT_CONVERSATIONS_GONE;
+use aurelius_application::task::ideas::IDEA_START_GONE;
 use aurelius_client::{Client, ClientError, envelope};
 use aurelius_domain::employee::{CreateEmployee, OpenEmployeeChat};
+use aurelius_domain::idea::{AddIdea, IdeaStatus, StartIdea};
 use aurelius_domain::project::CreateProject;
 use aurelius_domain::project_conversation::{SendProjectMessage, StartProjectConversation};
 use aurelius_domain::{Command, CommandResult, EmployeeId, ErrorCode, ProjectId};
@@ -90,5 +92,23 @@ async fn project_conversation_start_answers_gone() {
     // project_conversation.send still makes a conversation with its first message (mobile uses it).
     let send = SendProjectMessage { confirm_secret: false, project_id, text: "Hello".into(), conversation_id: None, images: vec![], files: vec![], interrupt: false, start: Default::default() };
     assert!(matches!(client.execute(envelope(Command::SendProjectMessage(send), None)).await.unwrap().result, CommandResult::ProjectMessageSent { .. }));
+    stop(dir.path(), daemon).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn idea_start_answers_gone() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = start(dir.path()).await;
+    let client = connect(dir.path()).await;
+    let project_id = project(&client).await;
+    let employee_id = hire(&client, "Ann").await;
+    let add = AddIdea { confirm_secret: false, project_id, title: "Dark mode".into(), note: None, kind: Default::default(), files: vec![] };
+    let CommandResult::IdeaAdded { idea_id } = client.execute(envelope(Command::AddIdea(add), None)).await.unwrap().result else { panic!() };
+    let err = client.execute(envelope(Command::StartIdea(StartIdea { idea_id, employee_id, run: Default::default() }), None)).await.unwrap_err();
+    assert_eq!(refusal(err), gone(IDEA_START_GONE));
+    // Nothing changed: the idea is still open, and no task was made.
+    let idea = client.ideas(project_id).await.unwrap().ideas.into_iter().find(|i| i.id == idea_id).unwrap();
+    assert_eq!((idea.status, idea.task_id), (IdeaStatus::Open, None));
+    assert!(client.tasks(None).await.unwrap().tasks.is_empty());
     stop(dir.path(), daemon).await;
 }

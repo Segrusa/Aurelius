@@ -235,7 +235,7 @@ impl CommandService {
             Command::AddIdea(cmd) => self.add_idea(&envelope, hash, cmd),
             Command::UpdateIdea(cmd) => self.update_idea(&envelope, hash, cmd),
             Command::SetIdeaStatus(cmd) => self.set_idea_status(&envelope, hash, cmd),
-            Command::StartIdea(cmd) => self.start_idea(ctx, &envelope, hash, cmd),
+            Command::StartIdea(_) => Err(AppError::new(ErrorCode::NotFound, task::ideas::IDEA_START_GONE)),
             Command::DeleteIdea(cmd) => self.delete_idea(&envelope, hash, cmd),
             Command::CreateTaskSchedule(cmd) => self.create_task_schedule(ctx, &envelope, hash, cmd),
             Command::UpdateTaskSchedule(cmd) => self.update_task_schedule(ctx, &envelope, hash, cmd),
