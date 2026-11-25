@@ -11446,6 +11446,15 @@ sealed class Method {
           conversationId: (src['conversation_id'] as String),
         );
         }
+      case 'conversation.side_ask':
+        return MethodConversationSideAsk(params: SideAskParams.fromJson(json['params'] as Map<String, dynamic>));
+      case 'conversation.side_cancel':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodConversationSideCancel(
+          sideId: (src['side_id'] as String),
+        );
+        }
       case 'design.list':
         {
           final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
@@ -12211,6 +12220,45 @@ final class MethodConversationGet extends Method {
       'method': 'conversation.get',
       'params': <String, dynamic>{
       'conversation_id': conversationId,
+    },
+    };
+}
+
+/// A side question about a conversation (feature `side_question`), like
+/// Claude Code's `/btw`: answered from what the conversation holds, without
+/// tools, on the asker's own Claude login, and never stored: no message, no
+/// event, the employee never sees it and its run goes on. Answers at once with
+/// `SideAsked`; the text follows to this connection only as
+/// `ServerMessage::SideAnswer`. Board members only; not for apps.
+final class MethodConversationSideAsk extends Method {
+  const MethodConversationSideAsk({
+    required this.params,
+  });
+
+  final SideAskParams params;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'conversation.side_ask',
+      'params': params.toJson(),
+    };
+}
+
+/// Stop a side question of this connection that is still answering. Unknown
+/// or finished ids are fine (nothing to stop). Answers `SideAsked` with the
+/// same id; the answer ends with a `SideAnswer` that is `done`.
+final class MethodConversationSideCancel extends Method {
+  const MethodConversationSideCancel({
+    required this.sideId,
+  });
+
+  final String sideId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'conversation.side_cancel',
+      'params': <String, dynamic>{
+      'side_id': sideId,
     },
     };
 }
@@ -15043,6 +15091,8 @@ sealed class ResponseBody {
         return ResponseBodySessionHistory(value: SessionHistoryPage.fromJson(json['value'] as Map<String, dynamic>));
       case 'sessions':
         return ResponseBodySessions(value: SessionsSnapshot.fromJson(json['value'] as Map<String, dynamic>));
+      case 'side_asked':
+        return ResponseBodySideAsked(value: SideAsked.fromJson(json['value'] as Map<String, dynamic>));
       case 'starter_set':
         return ResponseBodyStarterSet(value: StarterSet.fromJson(json['value'] as Map<String, dynamic>));
       case 'subagents':
@@ -16158,6 +16208,22 @@ final class ResponseBodySessions extends ResponseBody {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'type': 'sessions',
+      'value': value.toJson(),
+    };
+}
+
+/// `conversation.side_ask` (the answer follows as `ServerMessage::SideAnswer`)
+/// and `conversation.side_cancel`.
+final class ResponseBodySideAsked extends ResponseBody {
+  const ResponseBodySideAsked({
+    required this.value,
+  });
+
+  final SideAsked value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'side_asked',
       'value': value.toJson(),
     };
 }
@@ -17335,6 +17401,8 @@ sealed class ServerMessage {
           ok: (json['ok'] == null ? null : ResponseBody.fromJson(json['ok'] as Map<String, dynamic>)),
           requestId: (json['request_id'] as num).toInt(),
         );
+      case 'side_answer':
+        return ServerMessageSideAnswer(value: SideAnswer.fromJson(json as Map<String, dynamic>));
       case 'signed_out':
         return ServerMessageSignedOut(
           reason: SignOutReason.fromJson(json['reason'] as String),
@@ -17429,6 +17497,22 @@ final class ServerMessageResponse extends ServerMessage {
       if (error != null) 'error': error?.toJson(),
       if (ok != null) 'ok': ok?.toJson(),
       'request_id': requestId,
+    };
+}
+
+/// The answer to a side question so far (`conversation.side_ask`), only to the
+/// connection that asked; never an event, never stored.
+final class ServerMessageSideAnswer extends ServerMessage {
+  const ServerMessageSideAnswer({
+    required this.value,
+  });
+
+  final SideAnswer value;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'type': 'side_answer',
+      ...value.toJson(),
     };
 }
 
@@ -18190,6 +18274,78 @@ enum ShutdownWhen {
       );
 
   String toJson() => wire;
+}
+
+/// `ServerMessage::SideAnswer`: one side question's answer as it grows.
+final class SideAnswer {
+  const SideAnswer({
+    required this.done,
+    this.error,
+    required this.sideId,
+    required this.text,
+  });
+
+  /// The answer is complete, failed or was stopped: no more messages for this id.
+  final bool done;
+  /// Why there is no (whole) answer: a fixed text of Aurelius, never the
+  /// model's or the CLI's output. Comes with `done`.
+  final String? error;
+  final String sideId;
+  /// The whole answer so far (not a delta), through the vault redactor.
+  final String text;
+
+  factory SideAnswer.fromJson(Map<String, dynamic> json) => SideAnswer(
+    done: (json['done'] as bool),
+    error: (json['error'] == null ? null : (json['error'] as String)),
+    sideId: (json['side_id'] as String),
+    text: (json['text'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'done': done,
+    if (error != null) 'error': error,
+    'side_id': sideId,
+    'text': text,
+  };
+}
+
+/// `conversation.side_ask`. The question is never stored, so it is not printed either.
+final class SideAskParams {
+  const SideAskParams({
+    required this.conversationId,
+    required this.question,
+  });
+
+  final String conversationId;
+  /// At most `SIDE_QUESTION_MAX_CHARS` characters, not blank.
+  final String question;
+
+  factory SideAskParams.fromJson(Map<String, dynamic> json) => SideAskParams(
+    conversationId: (json['conversation_id'] as String),
+    question: (json['question'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'conversation_id': conversationId,
+    'question': question,
+  };
+}
+
+/// `ResponseBody::SideAsked`: the id the answer of a side question will carry.
+final class SideAsked {
+  const SideAsked({
+    required this.sideId,
+  });
+
+  final String sideId;
+
+  factory SideAsked.fromJson(Map<String, dynamic> json) => SideAsked(
+    sideId: (json['side_id'] as String),
+  );
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'side_id': sideId,
+  };
 }
 
 /// Why the server ended a connection's session (`ServerMessage::SignedOut`).

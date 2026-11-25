@@ -3995,6 +3995,21 @@ export type Method =
    */
   | ({ method: "conversation.get"; params: { conversation_id: string } })
   /**
+   * A side question about a conversation (feature `side_question`), like
+   * Claude Code's `/btw`: answered from what the conversation holds, without
+   * tools, on the asker's own Claude login, and never stored: no message, no
+   * event, the employee never sees it and its run goes on. Answers at once with
+   * `SideAsked`; the text follows to this connection only as
+   * `ServerMessage::SideAnswer`. Board members only; not for apps.
+   */
+  | ({ method: "conversation.side_ask"; params: SideAskParams })
+  /**
+   * Stop a side question of this connection that is still answering. Unknown
+   * or finished ids are fine (nothing to stop). Answers `SideAsked` with the
+   * same id; the answer ends with a `SideAnswer` that is `done`.
+   */
+  | ({ method: "conversation.side_cancel"; params: { side_id: string } })
+  /**
    * The designs of a project, or of all without one: the kept HTML pages of each
    * conversation, the latest first (feature `designs`).
    */
@@ -5086,6 +5101,11 @@ export type ResponseBody =
   | ({ type: "session_history"; value: SessionHistoryPage })
   | ({ type: "sessions"; value: SessionsSnapshot })
   /**
+   * `conversation.side_ask` (the answer follows as `ServerMessage::SideAnswer`)
+   * and `conversation.side_cancel`.
+   */
+  | ({ type: "side_asked"; value: SideAsked })
+  /**
    * `guideline.starter_set`.
    */
   | ({ type: "starter_set"; value: StarterSet })
@@ -5581,6 +5601,11 @@ export type ServerMessage =
   | ({ type: "power_changed" } & PowerState)
   | ({ type: "response"; error?: AppError | null; ok?: ResponseBody | null; request_id: number })
   /**
+   * The answer to a side question so far (`conversation.side_ask`), only to the
+   * connection that asked; never an event, never stored.
+   */
+  | ({ type: "side_answer" } & SideAnswer)
+  /**
    * The session of this connection ended (`user.logout`, `session.revoke`, a
    * new password, `user.disable`, expiry); the server closes the connection
    * right after. The client shows "You were signed out on this device." and
@@ -5886,6 +5911,44 @@ export type ShutdownWhen =
    */
   | "when_idle"
 ;
+
+/**
+ * `ServerMessage::SideAnswer`: one side question's answer as it grows.
+ */
+export interface SideAnswer {
+  /**
+   * The answer is complete, failed or was stopped: no more messages for this id.
+   */
+  done: boolean;
+  /**
+   * Why there is no (whole) answer: a fixed text of Aurelius, never the
+   * model's or the CLI's output. Comes with `done`.
+   */
+  error?: string | null;
+  side_id: string;
+  /**
+   * The whole answer so far (not a delta), through the vault redactor.
+   */
+  text: string;
+}
+
+/**
+ * `conversation.side_ask`. The question is never stored, so it is not printed either.
+ */
+export interface SideAskParams {
+  conversation_id: string;
+  /**
+   * At most `SIDE_QUESTION_MAX_CHARS` characters, not blank.
+   */
+  question: string;
+}
+
+/**
+ * `ResponseBody::SideAsked`: the id the answer of a side question will carry.
+ */
+export interface SideAsked {
+  side_id: string;
+}
 
 /**
  * Why the server ended a connection's session (`ServerMessage::SignedOut`).
