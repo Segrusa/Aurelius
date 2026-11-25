@@ -14,7 +14,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useConnection } from "../connection";
 import { useAllTasks, useMessages, useProjects } from "../data";
-import { hidden } from "../hidden";
 import { useAction, useKeyContext } from "../keys/provider";
 import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
@@ -360,11 +359,7 @@ function TaskDetails({ dock, task, conversationId }: { dock: PropertiesDock; tas
         <SideRow name="Model">{runChipLabel(model, modelName)}</SideRow>
         <SideRow name="Effort">{runChipLabel(effort)}</SideRow>
         {mode ? <SideRow name="Mode">{MODE_LABELS[mode]}</SideRow> : null}
-        {task.schedule_id ? (
-          <SideRow name="From schedule">
-            {hidden("RecurringTasks") ? "Recurring task" : <Link href="/settings/schedules">Recurring task</Link>}
-          </SideRow>
-        ) : null}
+        {task.schedule_id ? <SideRow name="From schedule">Recurring task</SideRow> : null}
         <SideRow name="Created">
           {new Date(task.created_at_ms).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
         </SideRow>

@@ -17,7 +17,6 @@ import {
   ConnectionsSection,
   LoadSection,
   McpSection,
-  SchedulesSection,
   TraceSection,
 } from "./settings-advanced";
 import { EmployeeRunsSection } from "./settings-employee-runs";
@@ -192,7 +191,6 @@ const ALL_GROUPS: { label: string; sections: Section[] }[] = [
     sections: [
       { key: "connections", label: "Connections", body: () => <ConnectionsSection /> },
       { key: "mcp", label: "MCP & tools", body: () => <McpSection /> },
-      { key: "schedules", label: "Recurring schedules", body: () => <SchedulesSection />, feature: "RecurringTasks" },
       { key: "backups", label: "Backups", body: () => <BackupsSection /> },
       { key: "load", label: "Load limits", body: () => <LoadSection /> },
       { key: "compaction", label: "Context compaction", body: () => <CompactionSection /> },

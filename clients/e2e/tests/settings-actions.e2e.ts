@@ -42,7 +42,6 @@ async function scripted(page: Page, script: Parameters<typeof scriptServer>[1], 
 }
 
 const sent = (writes: Record<string, unknown>[], method: string) => writes.filter((w) => w.method === method);
-const CONNECTIONS = { type: "connections", value: { connections: [], defaults: [] } };
 
 test.describe("settings actions", () => {
   test("a Claude login connects with the code, and shows when the server says so", async ({ page }) => {
@@ -188,35 +187,6 @@ test.describe("settings actions", () => {
     await stop();
   });
 
-  test("a recurring task checks its time before it is sent", async ({ page }) => {
-    test.skip(hidden("RecurringTasks"), "hidden in hidden.ts");
-    const { writes, stop } = await scripted(
-      page,
-      {
-        reads: {
-          "recurring_task.list": () => ({ type: "task_schedules", value: { schedules: [] } }),
-          "connection.list": () => CONNECTIONS,
-        },
-      },
-      "/settings/schedules",
-    );
-    await page.getByRole("button", { name: "New recurring task" }).click();
-    await page.getByLabel("Title").fill("Weekly report");
-    await page.getByLabel("What to do").fill("Write it.");
-    await page.getByLabel("Time").fill("late");
-    await page.getByRole("button", { name: "Save recurring task" }).click();
-    await expect(page.getByText("Enter the time as HH:MM.")).toBeVisible();
-    expect(sent(writes, "recurring_task.create")).toHaveLength(0);
-    await page.getByLabel("Time").fill("09:30");
-    await page.getByRole("button", { name: "Save recurring task" }).click();
-    await expect
-      .poll(() => sent(writes, "recurring_task.create").map((w) => w.params as Record<string, unknown>))
-      .toMatchObject([
-        { title: "Weekly report", project_id: "p1", employee_id: "e1", recurrence: { kind: "daily", at_minute: 570 } },
-      ]);
-    await stop();
-  });
-
   test("a server's folder is chosen from what the server lists", async ({ page }) => {
     const { writes, stop } = await scripted(
       page,
@@ -247,34 +217,6 @@ test.describe("settings actions", () => {
 });
 
 test.describe("around the work", () => {
-  test("a recurring task opens to what it does", async ({ page }) => {
-    test.skip(hidden("RecurringTasks"), "hidden in hidden.ts");
-    const schedule = {
-      id: "s1",
-      title: "Weekly report",
-      goal: "Write the report.",
-      criteria: ["It is sent"],
-      employee_id: "e1",
-      employee_name: "Orion",
-      project_id: "p1",
-      paused: false,
-      recurrence: { kind: "daily", at_minute: 60 },
-      run: { mode: "ask" },
-      attachments: [],
-    };
-    const { stop } = await scripted(
-      page,
-      { reads: { "recurring_task.list": () => ({ type: "task_schedules", value: { schedules: [schedule] } }) } },
-      "/settings/schedules",
-    );
-    await expect(page.getByText("Write the report.")).toBeHidden();
-    await page.getByRole("button", { name: /Weekly report/ }).click();
-    await expect(page.getByText("Write the report.")).toBeVisible();
-    await expect(page.getByText("It is sent")).toBeVisible();
-    await expect(page.getByText(/Mode ask/)).toBeVisible();
-    await stop();
-  });
-
   test("memory answers to the keys of the selected entry", async ({ page }) => {
     test.skip(hidden("MemoryProposals"), "hidden in hidden.ts");
     const memory = (id: string, status: string, content: string) => ({

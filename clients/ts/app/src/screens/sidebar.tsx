@@ -324,7 +324,6 @@ const NAV: { to: string; label: string; icon: NavIcon; feature?: Feature; server
   { to: "/history", label: "History", icon: "history", server: "ticket_history" },
   { to: "/designs", label: "Designs", icon: "design", server: "designs" },
   { to: "/tasks", label: "Tasks", icon: "tasks", feature: "TasksInSidebar" },
-  { to: "/scheduled", label: "Scheduled", icon: "clock", feature: "ScheduledInSidebar" },
   { to: "/activity", label: "Activity log", icon: "note", feature: "ActivityInSidebar" },
 ];
 

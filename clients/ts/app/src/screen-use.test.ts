@@ -43,10 +43,8 @@ describe("hidden features", () => {
   it("are the simplification's", () => {
     for (const feature of [
       "TasksInSidebar",
-      "ScheduledInSidebar",
       "ActivityInSidebar",
       "Trace",
-      "RecurringTasks",
       "Vault",
       "EmployeeTools",
       "MemoryProposals",

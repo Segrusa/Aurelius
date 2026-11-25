@@ -5,10 +5,8 @@
 export type Feature =
   | "ChatAttachments"
   | "TasksInSidebar"
-  | "ScheduledInSidebar"
   | "ActivityInSidebar"
   | "Trace"
-  | "RecurringTasks"
   | "Vault"
   | "EmployeeTools"
   | "MemoryProposals"
@@ -19,10 +17,8 @@ export type Feature =
 export const HIDDEN_FEATURES: readonly Feature[] = [
   "ChatAttachments",
   "TasksInSidebar",
-  "ScheduledInSidebar",
   "ActivityInSidebar",
   "Trace",
-  "RecurringTasks",
   "Vault",
   "EmployeeTools",
   "MemoryProposals",

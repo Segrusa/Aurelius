@@ -43,7 +43,6 @@ import { MemoryBody } from "./screens/memory";
 import { NewSessionScreen } from "./screens/new-session";
 import { OverviewScreen } from "./screens/overview";
 import { ProjectPage, ProjectsScreen, projectTabShown } from "./screens/projects";
-import { ScheduledScreen } from "./screens/scheduled";
 import { SessionScreen } from "./screens/session";
 import { SettingsScreen } from "./screens/settings";
 import { TaskRunScreen } from "./screens/task-run";
@@ -260,7 +259,14 @@ const history = createRoute({
 // The Code tab of the current workspace (ticket #77); the screen says so when the server lacks it.
 const code = createRoute({ getParentRoute: () => root, path: "/code", component: CodeScreen });
 const usage = createRoute({ getParentRoute: () => root, path: "/usage", component: UsageScreen });
-const scheduled = createRoute({ getParentRoute: () => root, path: "/scheduled", component: ScheduledScreen });
+// Scheduled is gone (OPR-4); an old link opens New session.
+const scheduled = createRoute({
+  getParentRoute: () => root,
+  path: "/scheduled",
+  beforeLoad: () => {
+    throw redirect({ to: "/new" });
+  },
+});
 // The workspace's designs; the screen says so when the server lacks them.
 const designs = createRoute({ getParentRoute: () => root, path: "/designs", component: DesignsScreen });
 // The log lives in Settings now; an old link keeps what it narrowed on.

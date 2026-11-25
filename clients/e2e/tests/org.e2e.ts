@@ -3,7 +3,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { _electron, expect, type Page, test } from "@playwright/test";
 import { hidden } from "../../ts/app/src/hidden";
 import { openCompanyPage } from "./company";
@@ -180,28 +179,6 @@ test("employees, projects, guidelines, memory and the vault over a real daemon",
       await page.getByRole("button", { name: "Done" }).click();
       await expect(page.getByLabel("The vault key, shown once")).toBeHidden();
     }
-    // The Scheduled page over the real daemon: what an employee planned (no real run here,
-    // so a row in the store), then taken back through the real write.
-    const store = new DatabaseSync(join(daemon.data, "data", "aurelius.sqlite"));
-    store
-      .prepare(
-        `INSERT INTO scheduled_messages(id, from_employee_id, to_employee_id, content, thread_key, place, planned_by_run, due_at_ms, created_at_ms)
-         SELECT '00000000-0000-7000-8000-00000000e701', id, id, 'Check the deploy again.', 'chat:x', 'its own chat', 'r1', ?, ? FROM employees LIMIT 1`,
-      )
-      .run(Date.now() + 3_600_000, Date.now());
-    store.close();
-    // The Scheduled page is reached from an employee's Inbox tab.
-    await openCompanyPage(page, "Employees");
-    await page.getByRole("link", { name: /Quinn/ }).first().click();
-    await page.getByRole("tab", { name: "Inbox" }).click();
-    await page.getByRole("link", { name: "Scheduled messages" }).click();
-    const waiting = page.getByRole("region", { name: "Scheduled messages" });
-    await expect(waiting.getByText("Check the deploy again.")).toBeVisible();
-    await waiting.getByRole("button", { name: "Cancel" }).click();
-    await page.getByRole("button", { name: "Take back" }).click();
-    await expect(page.getByRole("region", { name: "What came of them" }).getByText("Taken back")).toBeVisible();
-    await expect(waiting.getByText("No messages are scheduled.")).toBeVisible();
-    await expect(page.getByRole("region", { name: "Recurring tasks" })).toHaveCount(hidden("RecurringTasks") ? 0 : 1);
   } finally {
     await app.close().catch(() => undefined);
     await daemon.stop();
@@ -496,81 +473,6 @@ test.describe("scripted organisation", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
     await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Refused.");
     expect(writes.filter((w) => w.method === "vault.create")).toHaveLength(1);
-    await stop();
-  });
-
-  test("the Scheduled page lists what comes back and a chat shows who waits for it", async ({ page }) => {
-    const planned = {
-      from_employee: "e1",
-      from_name: "Orion",
-      to_employee: "e1",
-      to_name: "Orion",
-      created_at_ms: 1,
-      due_at_ms: Date.now() + 3_600_000,
-      place: "the discussion of ticket #21",
-      ticket_id: "t1",
-    };
-    const { writes, stop } = await scripted(
-      page,
-      {
-        features: ["scheduled_messages"],
-        reads: {
-          "scheduled_message.list": () => ({
-            type: "scheduled_messages",
-            value: {
-              as_of_seq: 1,
-              messages: [
-                { ...planned, id: "s1", text: "Check the CI of PR 12.", state: "scheduled" },
-                {
-                  ...planned,
-                  id: "s2",
-                  text: "Look at the deploy.",
-                  to_employee: "e2",
-                  to_name: "Pixel",
-                  state: "not_delivered",
-                  outcome: "Pixel is paused.",
-                },
-              ],
-            },
-          }),
-          "recurring_task.list": () => ({
-            type: "task_schedules",
-            value: {
-              as_of_seq: 1,
-              schedules: [
-                {
-                  id: "r1",
-                  title: "Weekly report",
-                  goal: "Report",
-                  criteria: [],
-                  employee_id: "e1",
-                  employee_name: "Orion",
-                  recurrence: { kind: "daily", at_minute: 540 },
-                  paused: false,
-                  run: {},
-                  attachments: [],
-                  created_at_ms: 1,
-                },
-              ],
-            },
-          }),
-        },
-      },
-      "/scheduled",
-    );
-    await expect(page.getByRole("heading", { name: "Scheduled" })).toBeVisible();
-    const waiting = page.getByRole("region", { name: "Scheduled messages" });
-    await expect(waiting.getByRole("row", { name: /Check the CI of PR 12/ })).toContainText("Orion");
-    await expect(waiting.getByRole("link", { name: "the discussion of ticket #21" })).toBeVisible();
-    await expect(
-      page.getByRole("region", { name: "What came of them" }).getByText("Not delivered: Pixel is paused."),
-    ).toBeVisible();
-    await expect(page.getByRole("region", { name: "Recurring tasks" })).toHaveCount(hidden("RecurringTasks") ? 0 : 1);
-
-    await waiting.getByRole("button", { name: "Cancel" }).click();
-    await page.getByRole("button", { name: "Take back" }).click();
-    await expect.poll(() => writes.filter((w) => w.method === "scheduled_message.cancel").length).toBe(1);
-    expect(writes.find((w) => w.method === "scheduled_message.cancel")?.params).toMatchObject({ message_id: "s1" });
     await stop();
   });
 

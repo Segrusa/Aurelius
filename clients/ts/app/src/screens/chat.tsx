@@ -68,7 +68,7 @@ import { Held } from "./dialogs";
 import { usePlanDock } from "./plan-dock";
 import { approvalsFor } from "./run-card-logic";
 import { LoadBanner, useRetryAnswer } from "./run-tools";
-import { ThreadWaiting } from "./scheduled";
+import { ThreadWaiting } from "./thread-waiting";
 import { mergeByTime, workInFilter } from "./ticket-activity-logic";
 import { byWho, holdNew, type WorkBlock } from "./ticket-activity-plain-logic";
 import { ProgressCard, useTicketProgress } from "./ticket-overview";
