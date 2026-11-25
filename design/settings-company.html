@@ -485,8 +485,7 @@
         <p class="grp-name">Knowledge</p>
         <div class="grp">
           <button class="nav-item" data-to="guidelines" data-keys="guidelines rules coding starter set"><svg class="ic" width="15" height="15"><use href="#i-rules"/></svg><span class="lab">Guidelines</span><span class="flag warn" title="1 proposal waits for you"></span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
-          <button class="nav-item" data-to="memory" data-keys="memory memories remember consolidate context decisions lessons"><svg class="ic" width="15" height="15"><use href="#i-brain"/></svg><span class="lab">Memory</span><span class="flag warn" title="3 proposals wait for you"></span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
-          <button class="nav-item" data-to="vault" data-keys="vault secrets tokens passwords keys audit"><svg class="ic" width="15" height="15"><use href="#i-lock"/></svg><span class="lab">Vault</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="memory" data-keys="memory memories remember consolidate context decisions lessons"><svg class="ic" width="15" height="15"><use href="#i-brain"/></svg><span class="lab">Memory</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
         </div>
       </div>
       <div class="grp-wrap" data-grp>
@@ -607,7 +606,7 @@
         <div class="tabs" role="tablist" id="emp-tabs">
           <button role="tab" aria-selected="true" data-tab="t-work">Work <span class="cnt warn">1</span></button>
           <button role="tab" data-tab="t-profile">Profile</button>
-          <button role="tab" data-tab="t-memory">Memory <span class="cnt warn">1</span></button>
+          <button role="tab" data-tab="t-memory">Memory <span class="cnt">6</span></button>
           <button role="tab" data-tab="t-guide">Guidelines <span class="cnt">4</span></button>
           <button role="tab" data-tab="t-access">Access</button>
         </div>
@@ -672,12 +671,6 @@ Je escaleert ontbrekende specs naar Titan.</textarea><span class="hint">Changes 
 
         <!-- Memory -->
         <div class="tabpanel" id="t-memory" hidden>
-          <section class="sec">
-            <div class="sec-h"><span class="wait-dot"></span><h2>Proposed by Flux</h2><span class="n">1</span></div>
-            <div class="card">
-              <div class="mem"><div class="grow"><span class="tx">The mobile app reads its UI words from lib/l10n/en.arb; desktop words live in the screens. Check both before naming a button.</span><span class="me"><span class="kind">Lesson</span>from #93 · today 11:20</span></div><div class="ctl"><button class="btn ghost">Reject</button><button class="btn primary">Accept</button></div></div>
-            </div>
-          </section>
           <section class="sec">
             <div class="sec-h"><h2>In use</h2><span class="n">6</span><span class="grow"></span><button class="btn ghost" data-go="memory">Open in Memory ›</button></div>
             <div class="card">
@@ -830,15 +823,6 @@ Je escaleert ontbrekende specs naar Titan.</textarea><span class="hint">Changes 
           <button class="btn primary" data-dlg="dlg-remember"><svg width="12" height="12"><use href="#i-plus"/></svg>Remember</button>
         </div>
 
-        <section class="sec">
-          <div class="sec-h"><span class="wait-dot"></span><h2>Proposals</h2><span class="n">3</span><span class="grow"></span><button class="btn ghost">Accept all 3</button></div>
-          <div class="card">
-            <div class="mem"><span class="mark c2" style="width:22px;height:22px;font-size:10px">F</span><div class="grow"><span class="tx">The mobile app reads its UI words from lib/l10n/en.arb; desktop words live in the screens. Check both before naming a button.</span><span class="me"><span class="kind">Lesson</span>Flux · from #93 · today 11:20</span></div><div class="ctl"><button class="btn ghost">Reject</button><button class="btn primary">Accept</button></div></div>
-            <div class="mem"><span class="mark c4" style="width:22px;height:22px;font-size:10px">F</span><div class="grow"><span class="tx">Migration numbers are taken across all open branches; 0031 is reserved by #95.</span><span class="me"><span class="kind">Decision</span>Forge · from #95 · today 10:08</span></div><div class="ctl"><button class="btn ghost">Reject</button><button class="btn primary">Accept</button></div></div>
-            <div class="mem"><span class="mark c6" style="width:22px;height:22px;font-size:10px">T</span><div class="grow"><span class="tx">Review findings are written as Blocker, Major or Minor with a file:line reference.</span><span class="me"><span class="kind">Knowledge</span>Trace · from #93 · yesterday</span></div><div class="ctl"><button class="btn ghost">Reject</button><button class="btn primary">Accept</button></div></div>
-          </div>
-        </section>
-
         <div class="card">
           <div class="budget">
             <div class="l"><b>What a run in Aurelius gets</b><span class="grow"></span><span class="mono">2 340 / 4 000 tokens</span></div>
@@ -887,26 +871,9 @@ Je escaleert ontbrekende specs naar Titan.</textarea><span class="hint">Changes 
             </tbody>
           </table>
         </div>
-        <p class="lede" style="margin:0">A row opens the workspace’s own settings: name, folder, members, guidelines, memory, export, pause and archive.</p>
+        <p class="lede" style="margin:0">A row opens the workspace’s own settings: name, folder, dispatcher, memory and export, archive.</p>
       </div>
 
-      <!-- ============ VAULT ============ -->
-      <div class="page mid" data-page="vault" hidden>
-        <div class="toolbar">
-          <select class="sel" aria-label="Scope"><option>Company · every employee</option><option>Aurelius · its employees</option><option>Orbit · its employees</option></select>
-          <div class="seg"><button aria-pressed="true">Items 4</button><button>Audit log</button></div>
-          <span class="grow"></span>
-          <button class="btn">Export key…</button>
-          <button class="btn primary"><svg width="12" height="12"><use href="#i-plus"/></svg>New item</button>
-        </div>
-        <div class="card">
-          <div class="row"><div class="ico-box"><svg width="15" height="15"><use href="#i-lock"/></svg></div><div class="lbl"><span class="t">GitHub token</span><span class="s">Token · used 6 times this week · last by Titan</span></div><div class="ctl"><span class="secret">••••••••••</span><button class="btn ghost">Show</button><button class="btn ghost">Edit</button></div></div>
-          <div class="row"><div class="ico-box"><svg width="15" height="15"><use href="#i-lock"/></svg></div><div class="lbl"><span class="t">Linear API key</span><span class="s">API key · used yesterday by Orion</span></div><div class="ctl"><span class="secret">••••••••••</span><button class="btn ghost">Show</button><button class="btn ghost">Edit</button></div></div>
-          <div class="row"><div class="ico-box"><svg width="15" height="15"><use href="#i-lock"/></svg></div><div class="lbl"><span class="t">Staging database</span><span class="s">Password · never used</span></div><div class="ctl"><span class="secret">••••••••••</span><button class="btn ghost">Show</button><button class="btn ghost">Edit</button></div></div>
-          <div class="row"><div class="ico-box"><svg width="15" height="15"><use href="#i-lock"/></svg></div><div class="lbl"><span class="t">App Store Connect</span><span class="s">Note · used 18 Nov by Bridge</span></div><div class="ctl"><span class="secret">••••••••••</span><button class="btn ghost">Show</button><button class="btn ghost">Edit</button></div></div>
-        </div>
-        <p class="lede" style="margin:0">Every employee can read every item in Company. A secret stays out of logs, events and memory.</p>
-      </div>
     </div>
   </main>
 </div>
