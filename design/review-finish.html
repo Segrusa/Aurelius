@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review card — merge and finish</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --body: #08090a; --surface: #0f1012; --card: #16171a;
+    --text: #edeef0; --text2: #a0a4ab; --text3: #7d828a;
+    --line: rgb(255 255 255 / 0.07); --line2: rgb(255 255 255 / 0.05); --line-em: rgb(255 255 255 / 0.12);
+    --accent: #1f7a4c; --accent-text: #5fcb95;
+    --warning: #e8a84a; --warning-muted: rgb(229 162 58 / 0.1);
+    --success: #5fcb95; --success-muted: rgb(95 203 149 / 0.12);
+    --error: #f08a8a; --error-muted: rgb(240 138 138 / 0.12);
+    --info: #7ea6f8; --info-muted: rgb(126 166 248 / 0.12);
+    --neutral: rgb(255 255 255 / 0.06);
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; min-height: 100%; }
+  body { background: var(--body); color: var(--text); font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; border-radius: 4px; }
+  code, .mono { font-family: var(--mono); font-size: 12px; }
+
+  /* design-only state switcher */
+  .switch { position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 20px; background: #1b1530; border-bottom: 1px solid #3a2e66; font-size: 12px; color: #c9bff0; }
+  .switch b { font-weight: 600; margin-right: 4px; }
+  .switch button { border: 1px solid #4a3d80; background: transparent; border-radius: 999px; padding: 3px 10px; cursor: pointer; color: #d8d0ff; }
+  .switch button[aria-pressed="true"] { background: #4a3d80; color: #fff; }
+
+  .head { padding: 12px 20px 0; border-bottom: 1px solid var(--line2); }
+  .l1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  h1 { margin: 0; font-size: 15px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hash { color: var(--text3); font-weight: 500; }
+  .chip { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+  .chip.review { background: var(--warning-muted); color: var(--warning); }
+  .chip.done { background: var(--success-muted); color: var(--success); }
+  .tabs { display: flex; gap: 4px; margin-top: 8px; }
+  .tab { padding: 7px 10px 9px; color: var(--text2); border-bottom: 2px solid transparent; font-weight: 500; }
+  .tab.on { color: var(--text); border-bottom-color: var(--accent-text); }
+
+  .page { display: flex; gap: 20px; padding: 16px 20px 40px; align-items: flex-start; }
+  .col { flex: 1; min-width: 0; max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  aside { width: 330px; flex-shrink: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 12px 16px; }
+
+  /* ===== the finish card ===== */
+  .finish { border: 1px solid var(--line); border-radius: 12px; background: var(--card); overflow: hidden; }
+  .finish.t-amber { border-color: rgb(232 168 74 / .45); }
+  .finish.t-live { border-color: rgb(126 166 248 / .45); }
+  .finish.t-ok { border-color: rgb(95 203 149 / .45); }
+  .finish.t-bad { border-color: rgb(240 138 138 / .5); }
+  .f-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
+  .f-head .title { font-weight: 600; font-size: 14px; }
+  .f-head .sub { color: var(--text3); font-size: 12px; }
+  .f-head .end { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.amber { background: var(--warning); }
+  .dot.live { background: var(--info); animation: pulse 1.4s ease-in-out infinite; }
+  .dot.ok { background: var(--success); }
+  .dot.bad { background: var(--error); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .dot.live, .spin { animation: none !important; } }
+
+  /* the finish line: Review → Merge → Push → Done */
+  .track { display: grid; grid-template-columns: repeat(4, 1fr); padding: 0 16px 12px; gap: 6px; }
+  .stp { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .stp .bar { height: 3px; border-radius: 2px; background: var(--line-em); }
+  .stp .lb { font-size: 12px; color: var(--text3); display: flex; gap: 5px; align-items: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stp.d .bar { background: var(--success); } .stp.d .lb { color: var(--text2); }
+  .stp.n .bar { background: linear-gradient(90deg, var(--info) 40%, var(--line-em) 40%); }
+  .stp.n .lb { color: var(--text); font-weight: 600; }
+  .stp.a .bar { background: var(--warning); } .stp.a .lb { color: var(--text); font-weight: 600; }
+  .stp.x .bar { background: var(--error); } .stp.x .lb { color: var(--error); font-weight: 600; }
+  .stp.opt .lb::after { content: "optional"; font-size: 10.5px; color: var(--text3); font-weight: 400; border: 1px solid var(--line-em); border-radius: 999px; padding: 0 5px; }
+
+  .f-body { border-top: 1px solid var(--line2); padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .report { color: var(--text2); }
+  .report p { margin: 0 0 4px; }
+  .more { color: var(--accent-text); background: none; border: 0; padding: 0; cursor: pointer; font-size: 12.5px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fact { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--neutral); color: var(--text2); display: inline-flex; gap: 5px; align-items: center; }
+  .fact.ok { background: var(--success-muted); color: var(--success); }
+  .fact.warn { background: var(--warning-muted); color: var(--warning); }
+  .fact.bad { background: var(--error-muted); color: var(--error); }
+
+  /* what you asked */
+  .asked { display: flex; gap: 10px; align-items: flex-start; }
+  .mark { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0; }
+  .m-s { background: #1f7a4c; } .m-f { background: #c2672b; }
+  .asked .who { font-size: 12px; color: var(--text3); }
+  .asked .msg { display: inline-block; margin-top: 2px; background: var(--neutral); border-radius: 8px; padding: 4px 10px; }
+
+  /* live activity of the follow-up run */
+  .live { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .live li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 3px 0; }
+  .live .i { width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800; }
+  .live .d .i { background: var(--success-muted); color: var(--success); }
+  .live .n .i { border: 2px solid var(--info); border-right-color: transparent; }
+  .live .n .i.spin { animation: spin .9s linear infinite; }
+  .live .x .i { background: var(--error-muted); color: var(--error); }
+  .live .t { color: var(--text3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .live .d span:nth-child(2) { color: var(--text2); }
+  .live code { color: var(--text2); }
+
+  .result { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 14px; }
+  .result dt { color: var(--text3); font-size: 12px; }
+  .result dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .files { margin: 0; padding: 0; list-style: none; }
+  .files li { font-family: var(--mono); font-size: 12px; color: var(--error); }
+
+  .f-foot { border-top: 1px solid var(--line2); padding: 10px 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .why { color: var(--text3); font-size: 12px; }
+  .btn { border: 1px solid var(--line-em); background: var(--neutral); border-radius: 8px; padding: 5px 12px; cursor: pointer; font-weight: 500; display: inline-flex; gap: 8px; align-items: center; white-space: nowrap; }
+  .btn:hover { border-color: rgb(255 255 255 / .22); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--text2); }
+  .btn.ghost:hover { background: var(--neutral); }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; }
+  .kbd { font-size: 10.5px; padding: 0 5px; border-radius: 4px; background: rgb(0 0 0 / .25); font-family: var(--mono); }
+  .link { color: var(--accent-text); text-decoration: none; margin-left: auto; white-space: nowrap; }
+  .check { display: inline-flex; gap: 7px; align-items: center; color: var(--text2); font-size: 12.5px; cursor: pointer; }
+  .check input { accent-color: var(--accent); margin: 0; }
+  .sep { width: 1px; height: 20px; background: var(--line-em); }
+
+  /* plan */
+  .plan { border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+  .p-head { display: flex; align-items: baseline; gap: 10px; padding: 12px 14px 8px; flex-wrap: wrap; }
+  .p-head h2 { margin: 0; font-size: 14px; }
+  .p-head span { color: var(--text3); font-size: 12px; }
+  .p-steps { list-style: none; margin: 0; padding: 0 0 4px; }
+  .p-steps li { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 14px; border-top: 1px solid var(--line2); color: var(--text2); }
+  .p-steps .i { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 800; background: var(--success-muted); color: var(--success); }
+  .p-steps .after { color: var(--text); }
+  .p-steps .after .i { background: var(--info-muted); color: var(--info); }
+  .p-steps .after.ok .i { background: var(--success-muted); color: var(--success); }
+  .p-steps .after.bad .i { background: var(--error-muted); color: var(--error); }
+  .p-steps .tag { font-size: 11px; color: var(--text3); }
+  .desc h3 { font-size: 13px; margin: 6px 0 4px; }
+  .desc p { margin: 0; color: var(--text2); }
+
+  /* side panel */
+  .s-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line2); margin-bottom: 10px; }
+  .s-tabs span { padding: 4px 8px 6px; font-size: 12.5px; color: var(--text2); border-bottom: 2px solid transparent; }
+  .s-tabs span.on { color: var(--text); border-bottom-color: var(--accent-text); }
+  aside h3 { font-size: 13px; margin: 10px 0 6px; }
+  .kv { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 10px; font-size: 12.5px; }
+  .kv dt { color: var(--text3); }
+  .kv dd { margin: 0; }
+  .green { color: var(--success); } .blue { color: var(--info); } .red { color: var(--error); }
+
+  .note { border: 1px dashed #5a4a8a; border-radius: 10px; padding: 10px 14px; color: #c9bff0; font-size: 12.5px; }
+  .note h4 { margin: 0 0 4px; font-size: 12.5px; }
+  .note ul { margin: 0; padding-left: 18px; }
+
+  @media (max-width: 1100px) {
+    .page { flex-direction: column; align-items: stretch; }
+    aside { width: auto; }
+  }
+  @media (max-width: 560px) {
+    .page { padding: 12px 12px 32px; }
+    .head { padding: 10px 12px 0; }
+    .switch { padding: 8px 12px; }
+    .f-head, .f-body, .f-foot { padding-left: 12px; padding-right: 12px; }
+    .track { padding: 0 12px 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .stp.opt .lb::after { display: none; }
+    .f-foot .btn.primary { flex: 1 1 100%; justify-content: center; }
+    .f-foot .sep { display: none; }
+    .link { margin-left: 0; }
+    .result { grid-template-columns: 1fr; }
+    .result dt { margin-top: 4px; }
+    .kv { grid-template-columns: 96px minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body data-state="merging">
+
+<div class="switch" role="group" aria-label="Design state">
+  <b>State (design only):</b>
+  <button data-s="decide">1 · Your decision</button>
+  <button data-s="merging">2 · Merging (after you pressed)</button>
+  <button data-s="merged">3 · Merged</button>
+  <button data-s="conflict">4 · Merge stopped</button>
+  <button data-s="done">5 · Done</button>
+</div>
+
+<header class="head">
+  <div class="l1">
+    <h1><span class="hash">#87</span> Tickets aanmaken voor elke medewerker overal</h1>
+    <span class="chip review" data-show="decide merging merged conflict">Review</span>
+    <span class="chip done" data-show="done">Done</span>
+  </div>
+  <div class="tabs"><span class="tab on">Activity</span><span class="tab">Timeline</span></div>
+</header>
+
+<div class="page">
+  <div class="col">
+
+    <!-- ========== THE FINISH CARD ========== -->
+    <section class="finish" id="finish" aria-live="polite">
+
+      <!-- head per state -->
+      <div class="f-head" data-show="decide">
+        <span class="dot amber"></span>
+        <div><div class="title">Ready for your review</div><div class="sub">Forge finished 4 of 4 steps · 18 min</div></div>
+      </div>
+      <div class="f-head" data-show="merging">
+        <span class="dot live"></span>
+        <div><div class="title">Forge is merging into main</div><div class="sub">You asked at 4:52 PM · 1:12 so far</div></div>
+        <div class="end"><button class="btn ghost">Stop</button></div>
+      </div>
+      <div class="f-head" data-show="merged">
+        <span class="dot ok"></span>
+        <div><div class="title">Merged into main</div><div class="sub">At 4:54 PM · not pushed</div></div>
+      </div>
+      <div class="f-head" data-show="conflict">
+        <span class="dot bad"></span>
+        <div><div class="title">The merge stopped: 2 files conflict</div><div class="sub">Main moved 3 commits since this branch · nothing was changed on main</div></div>
+      </div>
+      <div class="f-head" data-show="done">
+        <span class="dot ok"></span>
+        <div><div class="title">Done</div><div class="sub">You marked it done at 4:55 PM</div></div>
+      </div>
+
+      <!-- finish line -->
+      <div class="track" aria-label="Steps to finish">
+        <div class="stp" data-st="decide:a merging:d merged:d conflict:d done:d"><span class="bar"></span><span class="lb">Review</span></div>
+        <div class="stp" data-st="decide:  merging:n merged:d conflict:x done:d"><span class="bar"></span><span class="lb">Merge</span></div>
+        <div class="stp opt" data-st="decide: merging: merged: conflict: done:"><span class="bar"></span><span class="lb">Push</span></div>
+        <div class="stp" data-st="decide: merging: merged:a conflict: done:d"><span class="bar"></span><span class="lb">Done</span></div>
+      </div>
+
+      <!-- 1 · your decision -->
+      <div class="f-body" data-show="decide">
+        <div class="report">
+          <p>Every employee can now create a ticket from a session, a ticket or a task. <code>create_ticket</code> was only allowed for a board member's session; the check now accepts any employee run and records who created it.</p>
+          <button class="more">Read the whole report</button>
+        </div>
+        <div class="facts">
+          <span class="fact mono">feat/ticket-87-tickets-everywhere</span>
+          <span class="fact">2 commits on main</span>
+          <span class="fact ok">✓ 41 targeted tests</span>
+          <span class="fact warn">Full suite not run</span>
+          <span class="fact">Merges cleanly</span>
+        </div>
+      </div>
+
+      <!-- 2 · merging -->
+      <div class="f-body" data-show="merging">
+        <div class="asked">
+          <span class="mark m-s">S</span>
+          <div><div class="who">You · 4:52 PM</div><span class="msg">Merge into main</span></div>
+        </div>
+        <ul class="live" aria-label="What Forge is doing">
+          <li class="d"><span class="i">✓</span><span>Opened a temporary worktree on main</span><span class="t">0:08</span></li>
+          <li class="d"><span class="i">✓</span><span>Merged <code>feat/ticket-87-tickets-everywhere</code> with --no-ff, no conflicts</span><span class="t">0:21</span></li>
+          <li class="n"><span class="i spin"></span><span>Running <code>cargo xtask gen-dart --check</code></span><span class="t">0:51</span></li>
+        </ul>
+      </div>
+
+      <!-- 3 · merged -->
+      <div class="f-body" data-show="merged">
+        <dl class="result">
+          <dt>Commit</dt><dd><code>7e4ddbe8</code> Merge feat/ticket-87-tickets-everywhere</dd>
+          <dt>Main</dt><dd>2 commits ahead of origin/main</dd>
+          <dt>Checks</dt><dd><span class="green">✓</span> gen-dart --check · <span class="green">✓</span> cargo check</dd>
+          <dt>Cleaned up</dt><dd>Worktree and branch removed</dd>
+        </dl>
+      </div>
+
+      <!-- 4 · conflict -->
+      <div class="f-body" data-show="conflict">
+        <ul class="live">
+          <li class="d"><span class="i">✓</span><span>Opened a temporary worktree on main</span><span class="t">0:08</span></li>
+          <li class="x"><span class="i">!</span><span>Merge stopped and was aborted</span><span class="t">0:19</span></li>
+        </ul>
+        <dl class="result">
+          <dt>Conflicts</dt>
+          <dd><ul class="files"><li>crates/daemon/src/board.rs</li><li>crates/protocol/src/rpc.rs</li></ul></dd>
+          <dt>Caused by</dt><dd>d2a375e2 Merge session/7f705d43 (Ask Trace to review)</dd>
+        </dl>
+      </div>
+
+      <!-- 5 · done -->
+      <div class="f-body" data-show="done">
+        <div class="facts">
+          <span class="fact ok">Merged · 7e4ddbe8</span>
+          <span class="fact">Not pushed</span>
+          <span class="fact">Forge's run ended</span>
+        </div>
+      </div>
+
+      <!-- footers -->
+      <div class="f-foot" data-show="decide">
+        <button class="btn primary" data-go="merging">Merge into main <span class="kbd">Ctrl ↵</span></button>
+        <label class="check"><input type="checkbox" checked> Mark done when merged</label>
+        <span class="sep"></span>
+        <button class="btn">Explain what you did</button>
+        <button class="btn">Send back to Doing</button>
+        <a class="link" href="#">Open run →</a>
+      </div>
+      <div class="f-foot" data-show="merging">
+        <button class="btn primary" disabled>Mark done</button>
+        <span class="why">Marked done automatically when the merge succeeds.</span>
+        <a class="link" href="#">Watch the run →</a>
+      </div>
+      <div class="f-foot" data-show="merged">
+        <button class="btn primary" data-go="done">Mark done <span class="kbd">Ctrl ↵</span></button>
+        <button class="btn">Push to origin</button>
+        <span class="sep"></span>
+        <button class="btn ghost">Undo the merge</button>
+        <a class="link" href="#">Open run →</a>
+      </div>
+      <div class="f-foot" data-show="conflict">
+        <button class="btn primary" data-go="merging">Ask Forge to resolve and merge</button>
+        <button class="btn">Send back to Doing</button>
+        <a class="link" href="#">Open run →</a>
+      </div>
+      <div class="f-foot" data-show="done">
+        <button class="btn">Push to origin</button>
+        <button class="btn ghost">Reopen</button>
+        <a class="link" href="#">Open run →</a>
+      </div>
+    </section>
+
+    <!-- plan -->
+    <section class="plan">
+      <div class="p-head"><h2>Plan</h2><span>Main task · Forge · 4 of 4 done · 18 min</span></div>
+      <ul class="p-steps">
+        <li><span class="i">✓</span><span>Find where create_ticket is restricted</span><span></span></li>
+        <li><span class="i">✓</span><span>Allow create_ticket for every employee in every context</span><span></span></li>
+        <li><span class="i">✓</span><span>Tests and targeted test run</span><span></span></li>
+        <li><span class="i">✓</span><span>Commit and report</span><span></span></li>
+        <li class="after" data-show="merging"><span class="i">↻</span><span>Merge into main</span><span class="tag">you asked · running</span></li>
+        <li class="after ok" data-show="merged done"><span class="i">✓</span><span>Merge into main</span><span class="tag">you asked · 7e4ddbe8</span></li>
+        <li class="after bad" data-show="conflict"><span class="i">!</span><span>Merge into main</span><span class="tag">you asked · stopped</span></li>
+      </ul>
+    </section>
+
+    <section class="desc">
+      <h3>Description</h3>
+      <p>Elke employee en vanwaar ook (sessie/tickets/tasks) zou een ticket moeten kunnen aanmaken.</p>
+    </section>
+
+    <section class="note">
+      <h4>What changed compared with the current card</h4>
+      <ul>
+        <li>After you press it you can see your request: "Merge into main" becomes a live state with your message, Forge's steps and the time so far, instead of the same buttons with "Still at work".</li>
+        <li>The finish line (Review, Merge, Push, Done) shows where the ticket is. Push is optional.</li>
+        <li>One primary action per state. The reply chips that looked like buttons are gone; Merge is the primary action, Explain and Send back are secondary.</li>
+        <li>Mark done says why it waits, and "Mark done when merged" lets you walk away.</li>
+        <li>The follow-up appears as an extra step in the plan, so "4 of 4 done" and "Running" no longer contradict each other.</li>
+        <li>A failed merge gets its own red state with the conflicting files and one clear next step.</li>
+      </ul>
+    </section>
+  </div>
+
+  <aside>
+    <div class="s-tabs"><span class="on">Properties</span><span>Files</span></div>
+    <h3>Run</h3>
+    <dl class="kv">
+      <dt>Status</dt>
+      <dd>
+        <span class="green" data-show="decide">Finished · 4 of 4</span>
+        <span class="blue" data-show="merging">Running · merging into main</span>
+        <span class="green" data-show="merged done">Finished · merged</span>
+        <span class="red" data-show="conflict">Stopped · merge conflict</span>
+      </dd>
+      <dt>Owner</dt><dd><span class="mark m-f" style="display:inline-grid;width:16px;height:16px;font-size:9px;vertical-align:-3px">F</span> Forge</dd>
+      <dt>Mode · Model</dt><dd>Auto · Default</dd>
+      <dt>Started</dt><dd>11/25/26, 4:47 PM</dd>
+      <dt>Runs on</dt><dd>Your Claude login</dd>
+      <dt>Branch</dt><dd class="mono" style="overflow-wrap:anywhere">feat/ticket-87-tickets-everywhere</dd>
+    </dl>
+    <h3>Properties</h3>
+    <dl class="kv">
+      <dt>Priority</dt><dd>Normal</dd>
+      <dt>Responsible</dt><dd>You</dd>
+      <dt>Project</dt><dd>Aurelius</dd>
+      <dt>Labels</dt><dd>None</dd>
+      <dt>Deadline</dt><dd>None</dd>
+      <dt>Created by</dt><dd>Sebastien · 11/25/26, 4:47 PM</dd>
+    </dl>
+  </aside>
+</div>
+
+<script>
+  const body = document.body;
+  function show(state) {
+    body.dataset.state = state;
+    document.querySelectorAll("[data-show]").forEach((el) => {
+      el.hidden = !el.dataset.show.split(" ").includes(state);
+    });
+    document.querySelectorAll("[data-st]").forEach((el) => {
+      el.classList.remove("d", "n", "a", "x");
+      const m = el.dataset.st.match(new RegExp(state + ":(\\w?)"));
+      if (m && m[1]) el.classList.add(m[1]);
+    });
+    document.querySelectorAll(".switch button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.s === state)));
+    const f = document.getElementById("finish");
+    f.className = "finish " + ({ decide: "t-amber", merging: "t-live", merged: "t-ok", conflict: "t-bad", done: "t-ok" })[state];
+  }
+  document.querySelectorAll(".switch button").forEach((b) => b.addEventListener("click", () => show(b.dataset.s)));
+  document.querySelectorAll("[data-go]").forEach((b) => b.addEventListener("click", () => show(b.dataset.go)));
+  const q = new URLSearchParams(location.search).get("state") || location.hash.slice(1);
+  show(q || "merging");
+</script>
+</body>
+</html>
