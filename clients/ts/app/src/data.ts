@@ -44,12 +44,15 @@ export type Area =
   | "memory"
   | "vault"
   | "scheduled"
-  | "rail";
+  | "rail"
+  | "code_review";
 
 /** The areas an event may have changed. An event of a newer server changes nothing here. */
 export function areasOf(kind: EventKind | string): Area[] {
   // One board member's own rail: nothing else changed.
   if (kind === "user.rail_pins_changed") return ["rail"];
+  // A branch's review in the Code tab (ticket #84): only the review reads it again.
+  if (kind === "code.review_changed") return ["code_review"];
   const family = kind.split(".")[0];
   switch (family) {
     case "approval":

@@ -1,20 +1,37 @@
-import type { CodeBranch, CodeWorktree, TicketView, WorkSessionView } from "@aurelius/protocol";
+import type {
+  CodeBranch,
+  CodeReviewEntry,
+  CodeThreadView,
+  CodeWorktree,
+  MessageView,
+  TicketView,
+  WorkSessionView,
+} from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
   behindText,
   canSubmit,
   currentItem,
+  diffRows,
+  fileLabel,
   filterQueue,
   mainlineText,
   mergeBlocked,
   mergeCheck,
+  openThreadsIn,
+  outdated,
+  pendingNotes,
   type ReviewItem,
   reviewCheck,
   reviewPost,
   reviewQueue,
   sizeCheck,
+  snippetAt,
+  testsCheck,
+  threadsOn,
   tidyText,
   tidyUp,
+  verdictAt,
   waited,
 } from "./code-review-logic";
 
@@ -219,8 +236,16 @@ function item(over: Partial<ReviewItem> = {}): ReviewItem {
 
 describe("the checks", () => {
   it("shows the board member's own verdict before anything else", () => {
-    expect(reviewCheck(item(), "approved")).toMatchObject({ tone: "ok", value: "Approved" });
-    expect(reviewCheck(item(), "changes")).toMatchObject({ tone: "warn", value: "Changes requested" });
+    expect(reviewCheck(item(), { verdict: "approved", by: "Sam", mine: true })).toMatchObject({
+      tone: "ok",
+      value: "Approved",
+      sub: "by you",
+    });
+    expect(reviewCheck(item(), { verdict: "changes", by: "Bea", mine: false })).toMatchObject({
+      tone: "warn",
+      value: "Changes requested",
+      sub: "by Bea",
+    });
     expect(reviewCheck(item({ kind: "session" }), null)).toMatchObject({ value: "Not reviewed" });
   });
 
@@ -256,12 +281,19 @@ describe("finishing a review", () => {
     expect(canSubmit("approved", "")).toBe(true);
     expect(canSubmit("comment", "  ")).toBe(false);
     expect(canSubmit("changes", "fix it")).toBe(true);
+    expect(canSubmit("changes", "", 2)).toBe(true);
   });
 
   it("posts the verdict with the summary", () => {
     expect(reviewPost("approved", "", "feat/x")).toBe("Approved feat/x.");
     expect(reviewPost("changes", "Dedupe it.", "feat/x")).toBe("Changes requested on feat/x:\n\nDedupe it.");
     expect(reviewPost("comment", " Looks fine ", "feat/x")).toBe("Looks fine");
+    expect(reviewPost("changes", "", "feat/x", [{ path: "a.ts", line: 3, body: "Rename." }])).toBe(
+      "Changes requested on feat/x:\n\nLine comments:\n- `a.ts:3` Rename.",
+    );
+    expect(reviewPost("comment", "Two things.", "feat/x", [{ path: "a.ts", line: 3, body: "x" }])).toBe(
+      "Two things.\n\nLine comments:\n- `a.ts:3` x",
+    );
   });
 });
 
@@ -281,5 +313,124 @@ describe("the head's line about main", () => {
       mainlineText({ branches: [main], main_branch: "main", has_remote: true, fetched_at_ms: NOW - 12 * MIN }, NOW),
     ).toBe("main · 4 ahead of origin · fetched 12 min ago");
     expect(mainlineText({ branches: [], main_branch: "main", has_remote: false }, NOW)).toBe("main · no remote");
+  });
+});
+
+describe("the review on the server", () => {
+  const entry = (over: Partial<CodeReviewEntry>): CodeReviewEntry => ({
+    id: "r",
+    username: "bea",
+    verdict: "approved",
+    head: "abc1234",
+    created_at_ms: 1,
+    ...over,
+  });
+
+  it("shows the reader's own newest verdict at this head before another's", () => {
+    const reviews = [
+      entry({ id: "1", username: "bea", verdict: "changes", created_at_ms: 3 }),
+      entry({ id: "2", username: "sam", mine: true, verdict: "changes", created_at_ms: 1 }),
+      entry({ id: "3", username: "sam", mine: true, verdict: "approved", created_at_ms: 2 }),
+    ];
+    expect(verdictAt(reviews, "ABC1234")).toEqual({ verdict: "approved", by: "sam", mine: true });
+    expect(verdictAt([entry({ username: "bea", verdict: "changes" })], "abc1234")).toEqual({
+      verdict: "changes",
+      by: "bea",
+      mine: false,
+    });
+  });
+
+  it("forgets a verdict on an older head and a review with only comments", () => {
+    expect(verdictAt([entry({ head: "0000000" })], "abc1234")).toBeNull();
+    expect(verdictAt([entry({ verdict: "comment" })], "abc1234")).toBeNull();
+  });
+
+  const thread = (over: Partial<CodeThreadView>): CodeThreadView => ({
+    id: "t",
+    path: "src/a.ts",
+    line: 4,
+    side: "new",
+    commit: "abc1234",
+    created_at_ms: 1,
+    comments: [],
+    ...over,
+  });
+
+  it("lists the reader's pending comments with their file and line", () => {
+    const review = {
+      threads: [
+        thread({
+          comments: [
+            { id: "c1", username: "sam", mine: true, pending: true, body: "Rename.", created_at_ms: 1 },
+            { id: "c2", username: "bea", pending: false, body: "Sent.", created_at_ms: 2 },
+          ],
+        }),
+      ],
+    };
+    expect(pendingNotes(review)).toEqual([{ path: "src/a.ts", line: 4, body: "Rename." }]);
+  });
+
+  it("finds a line's threads by file, side and line, and counts the open ones per file", () => {
+    const threads = [thread({ id: "a" }), thread({ id: "b", side: "old" }), thread({ id: "c", resolved: true })];
+    expect(threadsOn(threads, "src/a.ts", "new", 4).map((t) => t.id)).toEqual(["a", "c"]);
+    expect(openThreadsIn(threads, "src/a.ts")).toBe(2);
+    expect(outdated(thread({}), "ABC1234")).toBe(false);
+    expect(outdated(thread({}), "def5678")).toBe(true);
+  });
+});
+
+describe("a hunk's rows", () => {
+  it("numbers each side and puts a removed line on main's side", () => {
+    const rows = diffRows({ old_start: 10, new_start: 12, lines: [" keep", "-old", "+new", "+more", " tail"] });
+    expect(rows.map((r) => [r.kind, r.old, r.new, r.side, r.line])).toEqual([
+      ["ctx", 10, 12, "new", 12],
+      ["del", 11, null, "old", 11],
+      ["add", null, 13, "new", 13],
+      ["add", null, 14, "new", 14],
+      ["ctx", 12, 15, "new", 15],
+    ]);
+    expect(snippetAt(rows, 3)).toEqual(["-old", "+new", "+more"]);
+    expect(snippetAt(rows, 0)).toEqual([" keep"]);
+    expect(fileLabel("clients/ts/app/src/screens/sidebar.tsx")).toBe("screens/sidebar.tsx");
+  });
+});
+
+describe("the checks with the server's data", () => {
+  it("says which files a merge would conflict on and turns Merge off", () => {
+    const clash = item({ branch: branch("f", { behind: 2, conflicts: ["sidebar.tsx"] }) });
+    expect(mergeCheck(clash, "main")).toMatchObject({
+      tone: "bad",
+      value: "Conflict",
+      sub: "sidebar.tsx, also changed on main",
+    });
+    expect(mergeBlocked(clash)).toBe("Flux has to resolve the conflict first.");
+    const clean = item({ branch: branch("f", { behind: 2, conflicts: [] }) });
+    expect(mergeCheck(clean, "main")).toMatchObject({
+      tone: "ok",
+      value: "No conflicts",
+      sub: "main moved on by 2 commits",
+    });
+  });
+
+  it("reads the tester's newest verdict from the ticket's discussion", () => {
+    const line = (action: string, text: string, at: number) =>
+      ({
+        id: action,
+        role: "assistant",
+        text,
+        created_at_ms: at,
+        system: { kind: "reported", action },
+      }) as unknown as MessageView;
+    const passed = testsCheck(
+      item(),
+      [
+        line("tested_failed", "Tess: the tests failed · 2 failed", NOW - 3 * HOUR),
+        line("tested_passed", "Tess: the tests passed · 717 passed, 0 failed", NOW - 14 * MIN),
+      ],
+      NOW,
+    );
+    expect(passed).toEqual({ name: "Tests", tone: "ok", value: "Passed", sub: "717 passed, 0 failed · 14 min ago" });
+    expect(testsCheck(item(), [], NOW)).toMatchObject({ value: "Not run" });
+    expect(testsCheck(item({ kind: "session" }), undefined, NOW).sub).toBe("a session has no Testing step");
   });
 });

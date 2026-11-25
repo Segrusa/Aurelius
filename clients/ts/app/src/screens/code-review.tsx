@@ -11,11 +11,12 @@ import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/Segme
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
-import type { CodeView, MessageView } from "@aurelius/protocol";
+import type { CodeReviewView, CodeView, MessageView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
+import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
-import { useConnection } from "../connection";
+import { useConnection, useLinkState } from "../connection";
 import { useEmployees, useMessages, useTicket, useTickets, useWorkSessions } from "../data";
 import { Markdown } from "../ui/markdown";
 import { initial, Mark, markColor } from "../ui/marks";
@@ -31,6 +32,7 @@ import {
   filterQueue,
   mergeBlocked,
   mergeCheck,
+  pendingNotes,
   QUEUE_FILTERS,
   type QueueFilter,
   type ReviewItem,
@@ -39,14 +41,18 @@ import {
   reviewQueue,
   sizeCheck,
   type Tidy,
+  testsCheck,
   tidyText,
   tidyUp,
   traceAsk,
   type Verdict,
+  type VerdictOf,
+  verdictAt,
   waited,
 } from "./code-review-logic";
+import { CODE_REVIEW, FilesChanged, ThreadCard, useCodeDiff, useCodeReviewRead } from "./code-review-threads";
 import { Held, useSend } from "./dialogs";
-import { Confirm, FormDialog } from "./org-kit";
+import { Confirm, FormDialog, Loading } from "./org-kit";
 import { Problem } from "./settings-kit";
 import { ticketPlace } from "./ticket-session-logic";
 
@@ -213,7 +219,7 @@ const styles = stylex.create({
   checks: {
     display: "grid",
     gridTemplateColumns: {
-      default: "repeat(3, minmax(0, 1fr))",
+      default: "repeat(4, minmax(0, 1fr))",
       "@media (max-width: 1180px)": "repeat(2, minmax(0, 1fr))",
     },
     gap: { default: 10, [NARROW]: 8 },
@@ -304,6 +310,9 @@ const styles = stylex.create({
     color: "var(--precision-text3)",
   },
   icWarn: { backgroundColor: "var(--color-warning-muted)", color: "var(--color-text-warning)" },
+  icOk: { backgroundColor: "var(--color-success-muted)", color: "var(--color-text-success)" },
+  rvEv: { display: "flex", flexDirection: "column", gap: 10, marginInlineStart: { default: 38, [NARROW]: 0 } },
+  txt: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
   evc: {
     display: "flex",
     flexDirection: "column",
@@ -433,17 +442,91 @@ function WithReason({ why, children }: { why: string | null; children: ReactNode
   );
 }
 
-/** The board member's verdicts on this device, per branch head: a new commit asks for a new review. */
-function useVerdicts() {
-  const [verdicts, setVerdicts] = useState<Record<string, Verdict>>({});
+/**
+ * The board member's verdicts in this window, per branch head, for a server without `code_review`, which keeps
+ * no reviews: a new commit asks for a new review.
+ */
+function useLocalVerdicts() {
+  const [verdicts, setVerdicts] = useState<Record<string, VerdictOf>>({});
   const keyOf = (item: ReviewItem) => `${item.branch.name}@${item.branch.head}`;
   return {
-    of: (item: ReviewItem): Verdict | null => {
-      const v = verdicts[keyOf(item)];
-      return v === "approved" || v === "changes" ? v : null;
+    of: (item: ReviewItem): VerdictOf | null => verdicts[keyOf(item)] ?? null,
+    set: (item: ReviewItem, v: Verdict) => {
+      if (v !== "approved" && v !== "changes") return;
+      setVerdicts((prev) => ({ ...prev, [keyOf(item)]: { verdict: v, by: "you", mine: true } }));
     },
-    set: (item: ReviewItem, v: Verdict) => setVerdicts((prev) => ({ ...prev, [keyOf(item)]: v })),
   };
+}
+
+/** The verdict to show for an item: the server's review when it keeps one, else this window's. */
+function useVerdictOf(projectId: string, item: ReviewItem, local: VerdictOf | null) {
+  const { features } = useLinkState();
+  const review = useCodeReviewRead(projectId, item.branch.name, item.branch.head);
+  const kept = features.includes(CODE_REVIEW);
+  return {
+    verdict: kept ? verdictAt(review.data?.reviews ?? [], item.branch.head) : local,
+    review: review.data,
+  };
+}
+
+/** One branch that waits for review, with its verdict, merge state, open threads and how long it waits. */
+function ReadyRow({
+  item,
+  projectId,
+  on,
+  main,
+  now,
+  local,
+  onPick,
+}: {
+  item: ReviewItem;
+  projectId: string;
+  on: boolean;
+  main: string;
+  now: number;
+  local: VerdictOf | null;
+  onPick: (key: string) => void;
+}) {
+  const { verdict, review } = useVerdictOf(projectId, item, local);
+  const merge = mergeCheck(item, main);
+  const rev = reviewCheck(item, verdict);
+  const open = (review?.threads ?? []).filter((t) => !t.resolved).length;
+  return (
+    <button
+      type="button"
+      aria-current={on}
+      onClick={() => onPick(item.key)}
+      {...stylex.props(styles.qi, on && styles.qiOn)}
+    >
+      <span {...stylex.props(styles.t1)}>
+        <span title={item.ownerName ?? undefined}>
+          <Owner id={item.ownerId} name={item.ownerName} />
+        </span>
+        <span {...stylex.props(styles.title)}>
+          <Label item={item} />
+        </span>
+        {item.kind === "session" ? (
+          <>
+            <span {...stylex.props(styles.grow)} />
+            <span {...stylex.props(styles.kind)}>Session</span>
+          </>
+        ) : null}
+      </span>
+      <span {...stylex.props(styles.t2)}>
+        <span {...stylex.props(styles.mono)}>{item.branch.name}</span>
+        <span {...stylex.props(styles.grow)} />
+        <Size add={item.branch.insertions ?? 0} del={item.branch.deletions ?? 0} />
+      </span>
+      <span {...stylex.props(styles.t3)}>
+        {rev.tone !== "n" ? <Chip tone={rev.tone}>{rev.value}</Chip> : null}
+        <Chip tone={merge.tone}>{merge.value}</Chip>
+        {open > 0 ? <Chip tone="info">{open} open</Chip> : null}
+        <Chip tone="n">
+          {item.kind === "session" ? "idle" : "waits"} {waited(item.since, now)}
+        </Chip>
+      </span>
+    </button>
+  );
 }
 
 function Queue({
@@ -457,6 +540,7 @@ function Queue({
   main,
   now,
   verdictOf,
+  projectId,
   busy,
   onCleanUp,
   onShowAll,
@@ -471,7 +555,8 @@ function Queue({
   tidy: Tidy;
   main: string;
   now: number;
-  verdictOf: (item: ReviewItem) => Verdict | null;
+  verdictOf: (item: ReviewItem) => VerdictOf | null;
+  projectId: string;
   busy: boolean;
   onCleanUp: () => void;
   onShowAll: () => void;
@@ -494,46 +579,18 @@ function Queue({
         <span {...stylex.props(styles.hint)}>oldest first</span>
       </div>
       {ready.length === 0 ? <div {...stylex.props(styles.empty)}>Nothing waits for your review.</div> : null}
-      {ready.map((item) => {
-        const merge = mergeCheck(item, main);
-        const rev = reviewCheck(item, verdictOf(item));
-        return (
-          <button
-            key={item.key}
-            type="button"
-            aria-current={item.key === current}
-            onClick={() => onPick(item.key)}
-            {...stylex.props(styles.qi, item.key === current && styles.qiOn)}
-          >
-            <span {...stylex.props(styles.t1)}>
-              <span title={item.ownerName ?? undefined}>
-                <Owner id={item.ownerId} name={item.ownerName} />
-              </span>
-              <span {...stylex.props(styles.title)}>
-                <Label item={item} />
-              </span>
-              {item.kind === "session" ? (
-                <>
-                  <span {...stylex.props(styles.grow)} />
-                  <span {...stylex.props(styles.kind)}>Session</span>
-                </>
-              ) : null}
-            </span>
-            <span {...stylex.props(styles.t2)}>
-              <span {...stylex.props(styles.mono)}>{item.branch.name}</span>
-              <span {...stylex.props(styles.grow)} />
-              <Size add={item.branch.insertions ?? 0} del={item.branch.deletions ?? 0} />
-            </span>
-            <span {...stylex.props(styles.t3)}>
-              {rev.tone !== "n" ? <Chip tone={rev.tone}>{rev.value}</Chip> : null}
-              <Chip tone={merge.tone}>{merge.value}</Chip>
-              <Chip tone="n">
-                {item.kind === "session" ? "idle" : "waits"} {waited(item.since, now)}
-              </Chip>
-            </span>
-          </button>
-        );
-      })}
+      {ready.map((item) => (
+        <ReadyRow
+          key={item.key}
+          item={item}
+          projectId={projectId}
+          on={item.key === current}
+          main={main}
+          now={now}
+          local={verdictOf(item)}
+          onPick={onPick}
+        />
+      ))}
       <div {...stylex.props(styles.qHead)}>
         <h2 {...stylex.props(styles.qTitle)}>Being worked on</h2>
         <span {...stylex.props(styles.count)}>{working.length}</span>
@@ -618,7 +675,10 @@ function useReport(item: ReviewItem) {
   if (item.kind === "ticket") {
     const root = ticket.data?.root_task ?? null;
     const at = root?.updated_at_ms ?? item.since;
-    const after = (discussion.data?.messages ?? []).filter((m) => m.created_at_ms >= at && m.text.trim() !== "");
+    // System lines (moved, tested, delegated) are not comments; the Tests check shows the tester's.
+    const after = (discussion.data?.messages ?? []).filter(
+      (m) => m.created_at_ms >= at && m.text.trim() !== "" && !m.system,
+    );
     return { text: root?.result ?? null, at, comments: after, loading: ticket.isPending };
   }
   const messages = session.data?.messages ?? [];
@@ -639,14 +699,19 @@ function authorOf(m: MessageView): string {
 function Conversation({
   item,
   now,
+  review,
   onOpen,
   onAskTrace,
+  onFinish,
   traceBusy,
 }: {
   item: ReviewItem;
   now: number;
+  /** The branch's review on the server; undefined without `code_review`. */
+  review: CodeReviewView | undefined;
   onOpen: () => void;
   onAskTrace: (() => void) | null;
+  onFinish: () => void;
   traceBusy: boolean;
 }) {
   const connection = useConnection();
@@ -659,6 +724,9 @@ function Conversation({
   const isSession = item.kind === "session";
   const owner = item.ownerName ?? "the owner";
   const commits = item.branch.commits ?? [];
+  const pending = pendingNotes(review).length;
+  // Threads not sent with any review yet: the reader's own pending ones.
+  const pendingThreads = (review?.threads ?? []).filter((t) => (t.comments ?? []).every((c) => !c.review_id));
   const post = () => {
     const words = text.trim();
     if (!words || busy) return;
@@ -744,7 +812,62 @@ function Conversation({
           </span>
         </div>
       ) : null}
-      {isSession && onAskTrace ? (
+      {(review?.reviews ?? []).map((r) => {
+        const threads = (review?.threads ?? []).filter((t) => (t.comments ?? []).some((c) => c.review_id === r.id));
+        const what = { approved: "approved these changes", changes: "requested changes", comment: "reviewed" }[
+          r.verdict
+        ];
+        return (
+          <div key={r.id} {...stylex.props(styles.tl)}>
+            <div {...stylex.props(styles.evS)}>
+              <span
+                aria-hidden="true"
+                {...stylex.props(
+                  styles.ic,
+                  r.verdict === "approved" && styles.icOk,
+                  r.verdict === "changes" && styles.icWarn,
+                )}
+              >
+                {r.verdict === "approved" ? "✓" : r.verdict === "changes" ? "!" : "◌"}
+              </span>
+              <span>
+                <span {...stylex.props(styles.strong)}>{r.mine ? "You" : r.username}</span> {what} ·{" "}
+                {ago(r.created_at_ms, now)}
+              </span>
+            </div>
+            <div {...stylex.props(styles.rvEv)}>
+              {r.body ? (
+                <div {...stylex.props(styles.ccard)}>
+                  <div {...stylex.props(styles.cb, styles.txt)}>{r.body}</div>
+                </div>
+              ) : null}
+              {threads.map((t) => (
+                <ThreadCard key={t.id} thread={t} head={item.branch.head} inConversation owner={owner} now={now} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {pendingThreads.length > 0 ? (
+        <div {...stylex.props(styles.tl)}>
+          <div {...stylex.props(styles.evS)}>
+            <span aria-hidden="true" {...stylex.props(styles.ic, styles.icWarn)}>
+              ◌
+            </span>
+            <span>
+              <span {...stylex.props(styles.strong)}>Your review</span> · {pending}{" "}
+              {pending === 1 ? "pending comment" : "pending comments"}, not sent yet
+            </span>
+            <Button size="sm" label="Finish review" onClick={onFinish} />
+          </div>
+          <div {...stylex.props(styles.rvEv)}>
+            {pendingThreads.map((t) => (
+              <ThreadCard key={t.id} thread={t} head={item.branch.head} inConversation owner={owner} now={now} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {isSession && onAskTrace && (review?.reviews ?? []).length === 0 ? (
         <div {...stylex.props(styles.evS)}>
           <span aria-hidden="true" {...stylex.props(styles.ic)}>
             ◎
@@ -822,7 +945,40 @@ function Commits({ item, view, now }: { item: ReviewItem; view: CodeView; now: n
   );
 }
 
-function Files({ item, view }: { item: ReviewItem; view: CodeView }) {
+function Files({
+  item,
+  view,
+  projectId,
+  review,
+  now,
+}: {
+  item: ReviewItem;
+  view: CodeView;
+  projectId: string;
+  review: CodeReviewView | undefined;
+  now: number;
+}) {
+  const { features } = useLinkState();
+  const diff = useCodeDiff(projectId, item.branch.name, item.branch.head, true);
+  if (features.includes(CODE_REVIEW)) {
+    if (diff.data)
+      return (
+        <FilesChanged
+          diff={diff.data}
+          review={review}
+          projectId={projectId}
+          owner={item.ownerName ?? "the owner"}
+          now={now}
+        />
+      );
+    if (diff.isPending) return <Loading rows={6} />;
+    return <Problem error={diff.error instanceof Error ? diff.error.message : "The diff did not load."} />;
+  }
+  return <FilesWithoutDiff item={item} view={view} />;
+}
+
+/** Files changed on a server without `code.diff`: the size and the uncommitted files. */
+function FilesWithoutDiff({ item, view }: { item: ReviewItem; view: CodeView }) {
   const uncommitted = (view.worktrees ?? []).find((w) => w.branch === item.branch.name)?.changed_files ?? [];
   return (
     <div {...stylex.props(styles.tl)}>
@@ -860,15 +1016,28 @@ type Asking = "finish" | "merge" | "commit" | null;
 
 function FinishReview({
   item,
+  projectId,
+  review,
   onClose,
   onDone,
 }: {
   item: ReviewItem;
+  projectId: string;
+  /** The branch's review on the server; undefined without `code_review`. */
+  review: CodeReviewView | undefined;
   onClose: () => void;
   onDone: (v: Verdict) => void;
 }) {
   const connection = useConnection();
-  const [verdict, setVerdict] = useState<Verdict>("comment");
+  const client = useQueryClient();
+  const { features } = useLinkState();
+  const kept = features.includes(CODE_REVIEW);
+  const notes = pendingNotes(review);
+  const pending = notes.length;
+  // With line comments waiting, Request changes is the likely verdict, as in the design.
+  const [verdict, setVerdict] = useState<Verdict>(pending > 0 ? "changes" : "comment");
+  // Once the review is kept, Send again only posts: the server already has it.
+  const [submitted, setSubmitted] = useState(false);
   const [body, setBody] = useState("");
   const isSession = item.kind === "session";
   const owner = item.ownerName ?? "The owner";
@@ -878,9 +1047,26 @@ function FinishReview({
     onClose();
   });
   const go = () => {
-    if (busy || !canSubmit(verdict, body)) return;
-    const text = reviewPost(verdict, body, item.branch.name);
+    if (busy || !canSubmit(verdict, body, pending)) return;
+    const text = reviewPost(verdict, body, item.branch.name, notes);
+    const words = body.trim() !== "" || notes.length > 0;
     send(async (confirmSecret) => {
+      if (kept && !submitted) {
+        await connection.write(
+          "code.submit_review",
+          {
+            project_id: projectId,
+            branch: item.branch.name,
+            head: item.branch.head,
+            verdict,
+            body: body.trim() || null,
+          },
+          { retry: false },
+        );
+        setSubmitted(true);
+        // Its event reads the review again too; this shows it without waiting for it.
+        void client.invalidateQueries({ queryKey: ["code_review"] });
+      }
       if (item.ticket) {
         if (verdict === "changes")
           await connection.write(
@@ -888,13 +1074,13 @@ function FinishReview({
             { ticket_id: item.ticket.id, feedback: text, confirm_secret: confirmSecret },
             { retry: false },
           );
-        else if (verdict === "comment" || body.trim() !== "")
+        else if (verdict === "comment" || words)
           await connection.write(
             "ticket.post",
             { ticket_id: item.ticket.id, text, confirm_secret: confirmSecret },
             { retry: false },
           );
-      } else if (item.session && (verdict !== "approved" || body.trim() !== "")) {
+      } else if (item.session && (verdict !== "approved" || words)) {
         await connection.write(
           "chat.send",
           { conversation_id: item.session.conversation_id, text, confirm_secret: confirmSecret },
@@ -913,10 +1099,20 @@ function FinishReview({
       footer={
         <>
           <Button label="Cancel" onClick={onClose} />
-          <Button variant="primary" label="Submit review" isDisabled={busy || !canSubmit(verdict, body)} onClick={go} />
+          <Button
+            variant="primary"
+            label="Submit review"
+            isDisabled={busy || !canSubmit(verdict, body, pending)}
+            onClick={go}
+          />
         </>
       }
     >
+      <span>
+        {pending > 0
+          ? `${pending} pending ${pending === 1 ? "comment goes" : "comments go"} with it.`
+          : "No line comments; you can still leave a summary."}
+      </span>
       <TextArea
         hasAutoFocus
         label="Summary"
@@ -1021,7 +1217,9 @@ export function CodeReview({
   const tickets = useTickets();
   const sessions = useWorkSessions(projectId);
   const employees = useEmployees();
-  const verdicts = useVerdicts();
+  const verdicts = useLocalVerdicts();
+  const { features } = useLinkState();
+  const kept = features.includes(CODE_REVIEW);
   const [filter, setFilter] = useState<QueueFilter>("all");
   const [wanted, setWanted] = useState<string | null>(null);
   const [tab, setTab] = useState<ReviewTab>("conversation");
@@ -1044,6 +1242,10 @@ export function CodeReview({
   const item = currentItem(ready, wanted);
   const tidy = useMemo(() => tidyUp(view, now), [view, now]);
   const trace = (employees.data ?? []).find((e) => e.name === REVIEWER) ?? null;
+  const reviewRead = useCodeReviewRead(projectId, item?.branch.name ?? "", item?.branch.head ?? "", item !== null);
+  const branchReview = kept && item ? reviewRead.data : undefined;
+  const discussion = useMessages(item?.ticket?.conversation_id ?? null);
+  const diffRead = useCodeDiff(projectId, item?.branch.name ?? "", item?.branch.head ?? "", item !== null);
 
   const pick = (key: string) => {
     setWanted(key);
@@ -1084,13 +1286,19 @@ export function CodeReview({
     );
   } else {
     const isSession = item.kind === "session";
-    const verdict = verdicts.of(item);
+    const verdict = kept ? verdictAt(branchReview?.reviews ?? [], item.branch.head) : verdicts.of(item);
     const blocked = mergeBlocked(item);
     const checks: Check[] = [
       reviewCheck(item, verdict),
+      testsCheck(item, discussion.data?.messages, now),
       mergeCheck(item, main),
       sizeCheck(item.branch, item.uncommitted),
     ];
+    const pending = pendingNotes(branchReview).length;
+    const reviewable = (diffRead.data?.files ?? []).filter((f) => !f.uncommitted);
+    const viewed = new Set(branchReview?.viewed ?? []);
+    const seen = reviewable.filter((f) => viewed.has(f.path)).length;
+    const conflicts = item.branch.conflicts ?? [];
     const status = isSession ? "Idle" : item.ticket?.column === "doing" ? "Doing" : "Review";
     review = (
       <>
@@ -1159,31 +1367,55 @@ export function CodeReview({
                   key={item.key}
                   item={item}
                   now={now}
+                  review={branchReview}
+                  onFinish={() => setAsking("finish")}
                   onOpen={() => open(item)}
                   onAskTrace={trace ? () => askTrace(item) : null}
                   traceBusy={traceBusy}
                 />
               ) : null}
               {tab === "commits" ? <Commits item={item} view={view} now={now} /> : null}
-              {tab === "files" ? <Files item={item} view={view} /> : null}
+              {tab === "files" ? (
+                <Files item={item} view={view} projectId={projectId} review={branchReview} now={now} />
+              ) : null}
             </div>
           </div>
         </div>
         <div {...stylex.props(styles.actbar)}>
           <span {...stylex.props(styles.state)}>
+            {conflicts.length > 0 ? <Chip tone="bad">✕ Conflict in {conflicts.join(", ")}</Chip> : null}
             {item.uncommitted > 0 ? (
               <Chip tone="warn">
                 ! {item.uncommitted} {item.uncommitted === 1 ? "file" : "files"} not committed
               </Chip>
             ) : null}
-            <span>
-              <span {...stylex.props(styles.strong)}>{item.branch.ahead}</span>{" "}
-              {item.branch.ahead === 1 ? "commit" : "commits"} ·{" "}
-              <span {...stylex.props(styles.strong)}>{item.branch.files_changed ?? 0}</span> files
-            </span>
+            {diffRead.data ? (
+              <span>
+                <span {...stylex.props(styles.strong)}>
+                  {seen}/{reviewable.length}
+                </span>{" "}
+                files viewed
+                {pending > 0 ? (
+                  <>
+                    {" "}
+                    · <span {...stylex.props(styles.strong)}>{pending}</span>{" "}
+                    {pending === 1 ? "pending comment" : "pending comments"}
+                  </>
+                ) : null}
+              </span>
+            ) : (
+              <span>
+                <span {...stylex.props(styles.strong)}>{item.branch.ahead}</span>{" "}
+                {item.branch.ahead === 1 ? "commit" : "commits"} ·{" "}
+                <span {...stylex.props(styles.strong)}>{item.branch.files_changed ?? 0}</span> files
+              </span>
+            )}
           </span>
           <span {...stylex.props(styles.actGrow)} />
-          <Button label="Finish review" onClick={() => setAsking("finish")} />
+          <Button
+            label={pending > 0 ? `Finish review (${pending})` : "Finish review"}
+            onClick={() => setAsking("finish")}
+          />
           {item.uncommitted > 0 ? (
             <Button
               variant="primary"
@@ -1218,6 +1450,7 @@ export function CodeReview({
         main={main}
         now={now}
         verdictOf={verdicts.of}
+        projectId={projectId}
         busy={busy}
         onCleanUp={onCleanUp}
         onShowAll={onShowAll}
@@ -1227,7 +1460,13 @@ export function CodeReview({
         {review}
       </section>
       {asking === "finish" && item ? (
-        <FinishReview item={item} onClose={() => setAsking(null)} onDone={(v) => verdicts.set(item, v)} />
+        <FinishReview
+          item={item}
+          projectId={projectId}
+          review={branchReview}
+          onClose={() => setAsking(null)}
+          onDone={(v) => verdicts.set(item, v)}
+        />
       ) : null}
       {asking === "commit" && item ? <AskCommit item={item} onClose={() => setAsking(null)} /> : null}
       {asking === "merge" && item ? (

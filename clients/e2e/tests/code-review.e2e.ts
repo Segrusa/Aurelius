@@ -345,3 +345,209 @@ test("the Code tab opens on what waits for review and reviews a branch", async (
     await site.close();
   }
 });
+
+test("a branch is reviewed line by line: a pending comment, Viewed, and Request changes with it", async ({ page }) => {
+  mkdirSync(SHOTS, { recursive: true });
+  const site = await serveStatic(WEB_DIST);
+  try {
+    const now = Date.now();
+    const head = hash("c7d2a91");
+    // The review on the scripted server: the writes change it, the reads answer it.
+    const state = {
+      threads: [] as Record<string, unknown>[],
+      reviews: [] as Record<string, unknown>[],
+      viewed: [] as string[],
+    };
+    const diff = {
+      project_id: "p",
+      branch: "feat/ticket-83-activity-plain",
+      base: hash("93851c1"),
+      head,
+      truncated: false,
+      files: [
+        {
+          path: "clients/ts/app/src/screens/status-line.tsx",
+          status: "added",
+          additions: 3,
+          deletions: 0,
+          hunks: [
+            {
+              header: "@@ -0,0 +1,3 @@",
+              old_start: 0,
+              new_start: 1,
+              lines: [
+                "+export function StatusLine() {",
+                '+  return <span aria-label="Step 2 of 4">Step 2 of 4</span>;',
+                "+}",
+              ],
+            },
+          ],
+        },
+        {
+          path: "clients/ts/app/src/screens/ticket.tsx",
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          hunks: [
+            {
+              header: "@@ -142,3 +142,3 @@ export function TicketScreen() {",
+              old_start: 142,
+              new_start: 142,
+              lines: [
+                "   const [tab, setTab] = useTicketTab(ticket.id);",
+                '-  const showLive = run?.state === "running";',
+                "+  const showLive = false;",
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const { writes } = await scriptServer(page, {
+      features: ["workspace_filters", "code_view", "work_sessions", "code_review"],
+      projects: [{ id: "p", name: "Aurelius", status: "active", created_at_ms: 0, employees_active: 3, version: 1 }],
+      tickets: [
+        ticket("t83", 83, "review", {
+          title: "Ticket page: Activity and Timeline",
+          owner_name: "Flux",
+          owner_employee_id: "e-flux",
+          project_name: "Aurelius",
+          conversation_id: "c-t83",
+          updated_at_ms: now - 2 * HOUR,
+        }),
+      ],
+      details: {
+        t83: {
+          as_of_seq: 1,
+          ticket: ticket("t83", 83, "review", {
+            title: "Ticket page: Activity and Timeline",
+            conversation_id: "c-t83",
+          }),
+          root_task: task("r83", {
+            status: "done",
+            result: "The ticket page gets an Activity tab.",
+            updated_at_ms: now - 2 * HOUR,
+          }),
+          tasks: [],
+        },
+      },
+      conversations: {
+        "c-t83": messages("c-t83", [
+          message("mt", "assistant", "Tess: the tests passed · 717 passed, 0 failed", {
+            created_at_ms: now - 14 * MIN,
+            system: { kind: "reported", action: "tested_passed" },
+          }),
+        ]),
+      },
+      reads: {
+        "code.get": () => {
+          const v = view(now);
+          for (const b of v.branches as Record<string, unknown>[])
+            if (b.name === "feat/ticket-83-activity-plain") b.conflicts = [];
+          return { type: "code", value: v };
+        },
+        "work_session.list": () => ({ type: "work_sessions", value: { as_of_seq: 1, sessions: [] } }),
+        "code.diff": () => ({ type: "code_diff", value: diff }),
+        "code.review": () => ({ type: "code_review", value: state }),
+      },
+      onWrite: (request) => {
+        const p = request.params as Record<string, unknown>;
+        if (request.method === "code.start_thread") {
+          state.threads.push({
+            id: `t${state.threads.length}`,
+            path: p.path,
+            line: p.line,
+            side: p.side,
+            commit: p.commit,
+            snippet: p.snippet,
+            created_at_ms: Date.now(),
+            comments: [
+              { id: "c1", username: "Sam", mine: true, pending: true, body: p.body, created_at_ms: Date.now() },
+            ],
+          });
+        }
+        if (request.method === "code.set_viewed") state.viewed = p.viewed ? [p.path as string] : [];
+        if (request.method === "code.submit_review") {
+          state.reviews.push({
+            id: "r1",
+            username: "Sam",
+            mine: true,
+            verdict: p.verdict,
+            body: p.body ?? "",
+            head,
+            created_at_ms: Date.now(),
+          });
+          for (const t of state.threads)
+            for (const c of t.comments as Record<string, unknown>[])
+              Object.assign(c, { pending: false, review_id: "r1" });
+        }
+      },
+    });
+    await page.addInitScript(() => localStorage.setItem("aurelius.workspace:h", "p"));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${site.origin}/code`);
+
+    const review = page.getByRole("region", { name: "Review" });
+    await expect(review.getByRole("heading", { name: /#83 Ticket page/ })).toBeVisible();
+    // The tester's verdict and git's conflict check.
+    await expect(review.getByText("717 passed, 0 failed", { exact: false })).toBeVisible();
+    await expect(review.getByText(/No conflicts/)).toBeVisible();
+
+    // Files changed: the tree, a line comment that stays pending, and Viewed.
+    await review.getByRole("tab", { name: /Files changed/ }).click();
+    const tree = review.getByRole("navigation", { name: "Changed files" });
+    await expect(tree.getByText("0 of 2 files viewed")).toBeVisible();
+    await review.getByRole("button", { name: "Comment on clients/ts/app/src/screens/status-line.tsx line 2" }).click();
+    await review.getByRole("textbox", { name: "Comment" }).fill("This is read twice by a screen reader.");
+    await review.getByRole("button", { name: "Add to review" }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "code.start_thread")?.params)
+      .toMatchObject({
+        project_id: "p",
+        branch: "feat/ticket-83-activity-plain",
+        path: "clients/ts/app/src/screens/status-line.tsx",
+        line: 2,
+        side: "new",
+        commit: head,
+        snippet: ["+export function StatusLine() {", '+  return <span aria-label="Step 2 of 4">Step 2 of 4</span>;'],
+      });
+    const thread = review.getByRole("article", {
+      name: "Comments on clients/ts/app/src/screens/status-line.tsx line 2",
+    });
+    await expect(thread.getByText("Pending")).toBeVisible();
+    await review.getByRole("checkbox", { name: "Viewed" }).first().check();
+    await expect
+      .poll(() => writes.find((w) => w.method === "code.set_viewed")?.params)
+      .toMatchObject({ path: "clients/ts/app/src/screens/status-line.tsx", viewed: true, head });
+    await expect(tree.getByText("1 of 2 files viewed")).toBeVisible();
+    await page.screenshot({ path: join(SHOTS, "code-review-files.png"), animations: "disabled" });
+
+    // Finish review: the pending comment goes with it, the server keeps it, the ticket goes back with it.
+    await page.getByRole("button", { name: "Finish review (1)" }).click();
+    const finish = page.getByRole("dialog", { name: "Finish your review" });
+    await expect(finish.getByText("1 pending comment goes with it.")).toBeVisible();
+    await expect(finish.getByRole("radio", { name: /Request changes/ })).toBeChecked();
+    await finish.getByRole("button", { name: "Submit review" }).click();
+    await expect
+      .poll(() => writes.find((w) => w.method === "code.submit_review")?.params)
+      .toMatchObject({ project_id: "p", branch: "feat/ticket-83-activity-plain", head, verdict: "changes" });
+    await expect
+      .poll(() => writes.find((w) => w.method === "ticket.send_back")?.params)
+      .toMatchObject({
+        ticket_id: "t83",
+        feedback:
+          "Changes requested on feat/ticket-83-activity-plain:\n\nLine comments:\n- `clients/ts/app/src/screens/status-line.tsx:2` This is read twice by a screen reader.",
+      });
+    const order = writes.map((w) => w.method).filter((m) => m === "code.submit_review" || m === "ticket.send_back");
+    expect(order).toEqual(["code.submit_review", "ticket.send_back"]);
+
+    // The Conversation shows the review with its thread, and the Review check the verdict.
+    await review.getByRole("tab", { name: /Conversation/ }).click();
+    await expect(review.getByText(/requested changes/).first()).toBeVisible();
+    await expect(review.getByText("Changes requested").first()).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    await page.screenshot({ path: join(SHOTS, "code-review-conversation.png"), animations: "disabled" });
+  } finally {
+    await site.close();
+  }
+});

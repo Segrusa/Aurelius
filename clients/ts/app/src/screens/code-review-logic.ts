@@ -2,7 +2,20 @@
 // review, which are still being worked on, what can be tidied up, and the checks of one branch. Pure functions
 // over what `code.get`, `ticket.list` and `work_session.list` send, so they are tested without a repository.
 
-import type { CodeBranch, CodeView, CodeWorktree, TicketView, WorkSessionView } from "@aurelius/protocol";
+import type {
+  CodeBranch,
+  CodeFileStatus,
+  CodeHunk,
+  CodeLineSide,
+  CodeReviewEntry,
+  CodeReviewView,
+  CodeThreadView,
+  CodeView,
+  CodeWorktree,
+  MessageView,
+  TicketView,
+  WorkSessionView,
+} from "@aurelius/protocol";
 import { branchStatus } from "./code-logic";
 
 export type ReviewKind = "ticket" | "session";
@@ -185,17 +198,41 @@ export interface Check {
 /** The board member's own verdict in this window, before the server keeps reviews (follow-up). */
 export type Verdict = "comment" | "approved" | "changes";
 
-export function reviewCheck(item: ReviewItem, mine: Verdict | null): Check {
-  if (mine === "approved") return { name: "Review", tone: "ok", value: "Approved", sub: "by you" };
-  if (mine === "changes") return { name: "Review", tone: "warn", value: "Changes requested", sub: "by you" };
+/** The verdict the Review check shows: who gave it, and whether it was the reader. */
+export interface VerdictOf {
+  verdict: "approved" | "changes";
+  by: string;
+  mine: boolean;
+}
+
+/**
+ * The verdict at this head: the reader's newest approval or request for changes, else another board member's.
+ * A verdict on an older head is not one on this head; a review with only comments is no verdict.
+ */
+export function verdictAt(reviews: readonly CodeReviewEntry[], head: string): VerdictOf | null {
+  const at = reviews.filter(
+    (r): r is CodeReviewEntry & { verdict: "approved" | "changes" } =>
+      r.head === head.toLowerCase() && (r.verdict === "approved" || r.verdict === "changes"),
+  );
+  const newest = (list: typeof at) =>
+    list.reduce<(typeof at)[number] | null>((a, r) => (!a || r.created_at_ms >= a.created_at_ms ? r : a), null);
+  const pick = newest(at.filter((r) => r.mine)) ?? newest(at);
+  return pick ? { verdict: pick.verdict, by: pick.username, mine: pick.mine ?? false } : null;
+}
+
+export function reviewCheck(item: ReviewItem, v: VerdictOf | null): Check {
+  const by = v?.mine ? "by you" : `by ${v?.by}`;
+  if (v?.verdict === "approved") return { name: "Review", tone: "ok", value: "Approved", sub: by };
+  if (v?.verdict === "changes") return { name: "Review", tone: "warn", value: "Changes requested", sub: by };
   if (item.kind === "session")
     return { name: "Review", tone: "n", value: "Not reviewed", sub: "a session has no review step" };
   return { name: "Review", tone: "n", value: "Waits for you", sub: `ticket #${item.number} is in Review` };
 }
 
-/** Whether the branch can merge, as far as git's numbers tell before a conflict check (follow-up). */
+/** Whether the branch can merge: git's conflict check when the server has one, else how far main moved on. */
 export function mergeCheck(item: ReviewItem, main: string): Check {
-  const { behind } = item.branch;
+  const { behind, conflicts } = item.branch;
+  const moved = `${main} moved on by ${behind} ${behind === 1 ? "commit" : "commits"}`;
   if (item.uncommitted > 0)
     return {
       name: "Merge",
@@ -205,12 +242,34 @@ export function mergeCheck(item: ReviewItem, main: string): Check {
     };
   if (item.branch.ahead === 0)
     return { name: "Merge", tone: "n", value: "Nothing to merge", sub: `no commits ahead of ${main}` };
+  if (conflicts && conflicts.length > 0)
+    return { name: "Merge", tone: "bad", value: "Conflict", sub: `${conflicts.join(", ")}, also changed on ${main}` };
+  if (conflicts)
+    return { name: "Merge", tone: "ok", value: "No conflicts", sub: behind > 0 ? moved : `up to date with ${main}` };
   if (behind === 0) return { name: "Merge", tone: "ok", value: "Up to date", sub: `up to date with ${main}` };
+  return { name: "Merge", tone: "warn", value: `${behind} behind`, sub: `${moved}; git merges or stops on a conflict` };
+}
+
+/** The system line the Testing column writes when its tester gives a verdict. */
+const TESTED = { passed: "tested_passed", failed: "tested_failed" } as const;
+
+/** The tester's newest verdict in a ticket's discussion; a session has no Testing step. */
+export function testsCheck(item: ReviewItem, discussion: readonly MessageView[] | undefined, now: number): Check {
+  if (item.kind === "session")
+    return { name: "Tests", tone: "n", value: "Not run", sub: "a session has no Testing step" };
+  const line = [...(discussion ?? [])]
+    .reverse()
+    .find((m) => m.system?.action === TESTED.passed || m.system?.action === TESTED.failed);
+  if (!line) return { name: "Tests", tone: "n", value: "Not run", sub: "no Testing step ran for this ticket" };
+  const passed = line.system?.action === TESTED.passed;
+  // "Tess: the tests passed · 717 passed, 0 failed": the summary after the dot.
+  const summary = line.text.split(" · ").slice(1).join(" · ").trim();
+  const when = waited(line.created_at_ms, now);
   return {
-    name: "Merge",
-    tone: "warn",
-    value: `${behind} behind`,
-    sub: `${main} moved on by ${behind} ${behind === 1 ? "commit" : "commits"}; git merges or stops on a conflict`,
+    name: "Tests",
+    tone: passed ? "ok" : "bad",
+    value: passed ? "Passed" : "Failed",
+    sub: `${summary ? `${summary} · ` : ""}${when === "now" ? "just now" : `${when} ago`}`,
   };
 }
 
@@ -231,6 +290,8 @@ export function sizeCheck(
 /** Why Merge into main is off, or null when it is on. */
 export function mergeBlocked(item: ReviewItem): string | null {
   if (item.branch.working) return `${item.ownerName ?? "Someone"} is working on it.`;
+  if ((item.branch.conflicts ?? []).length > 0)
+    return `${item.ownerName ?? "The owner"} has to resolve the conflict first.`;
   if (item.uncommitted > 0) return `${item.ownerName ?? "The owner"} has to commit first.`;
   if (item.branch.ahead === 0) return "Nothing to merge.";
   return null;
@@ -241,18 +302,101 @@ export function behindText(b: Pick<CodeBranch, "behind">, main: string): string 
   return b.behind > 0 ? `${b.behind} behind ${main}` : `up to date with ${main}`;
 }
 
-/** What a submitted review posts, in the words the owner reads in the discussion or the session. */
-export function reviewPost(verdict: Verdict, body: string, branch: string): string {
-  const text = body.trim();
-  if (verdict === "approved") return text ? `Approved ${branch}.\n\n${text}` : `Approved ${branch}.`;
-  if (verdict === "changes")
-    return text ? `Changes requested on ${branch}:\n\n${text}` : `Changes requested on ${branch}.`;
-  return text;
+/** A line comment as a review sends it. */
+export interface LineNote {
+  path: string;
+  line: number;
+  body: string;
 }
 
-/** Whether Submit review can go: a comment and a request for changes need words, an approval does not. */
-export function canSubmit(verdict: Verdict, body: string): boolean {
-  return verdict === "approved" || body.trim() !== "";
+/**
+ * What a submitted review posts, in the words the owner reads in the discussion or the session: the verdict, the
+ * summary, then each line comment with its file and line.
+ */
+export function reviewPost(verdict: Verdict, body: string, branch: string, notes: readonly LineNote[] = []): string {
+  const text = body.trim();
+  const lines = notes.map((n) => `- \`${n.path}:${n.line}\` ${n.body.trim()}`).join("\n");
+  const tail = lines ? `${text ? "\n\n" : ""}Line comments:\n${lines}` : "";
+  const words = `${text}${tail}`;
+  if (verdict === "approved") return words ? `Approved ${branch}.\n\n${words}` : `Approved ${branch}.`;
+  if (verdict === "changes")
+    return words ? `Changes requested on ${branch}:\n\n${words}` : `Changes requested on ${branch}.`;
+  return words;
+}
+
+/** Whether Submit review can go: an approval always, a comment or a request for changes with words or a line comment. */
+export function canSubmit(verdict: Verdict, body: string, pending = 0): boolean {
+  return verdict === "approved" || body.trim() !== "" || pending > 0;
+}
+
+/** The reader's comments that wait for Finish review, with where they are. */
+export function pendingNotes(review: Pick<CodeReviewView, "threads"> | undefined): LineNote[] {
+  return (review?.threads ?? []).flatMap((t) =>
+    (t.comments ?? []).filter((c) => c.pending && c.mine).map((c) => ({ path: t.path, line: t.line, body: c.body })),
+  );
+}
+
+/** One row of a file's diff, with its numbers on each side and where a comment on it goes. */
+export interface DiffRow {
+  kind: "ctx" | "add" | "del";
+  old: number | null;
+  new: number | null;
+  /** The line as git wrote it, its ' ', '+' or '-' first. */
+  raw: string;
+  side: CodeLineSide;
+  line: number;
+}
+
+/** The rows of a hunk: a removed line is on main's side, any other on the branch's. */
+export function diffRows(hunk: Pick<CodeHunk, "old_start" | "new_start" | "lines">): DiffRow[] {
+  let o = hunk.old_start;
+  let n = hunk.new_start;
+  return (hunk.lines ?? []).map((raw) => {
+    if (raw.startsWith("+")) return { kind: "add", old: null, new: n, raw, side: "new", line: n++ } as DiffRow;
+    if (raw.startsWith("-")) return { kind: "del", old: o, new: null, raw, side: "old", line: o++ } as DiffRow;
+    const row: DiffRow = { kind: "ctx", old: o, new: n, raw, side: "new", line: n };
+    o++;
+    n++;
+    return row;
+  });
+}
+
+/** The lines a new thread keeps of the code it is on: up to three, the commented one last. */
+export function snippetAt(rows: readonly DiffRow[], index: number): string[] {
+  return rows.slice(Math.max(0, index - 2), index + 1).map((r) => r.raw);
+}
+
+/** The threads on one line of a file. */
+export function threadsOn(
+  threads: readonly CodeThreadView[],
+  path: string,
+  side: CodeLineSide,
+  line: number,
+): CodeThreadView[] {
+  return threads.filter((t) => t.path === path && t.side === side && t.line === line);
+}
+
+/** A thread made on an older head: its line may have moved since. */
+export function outdated(thread: Pick<CodeThreadView, "commit">, head: string): boolean {
+  return thread.commit.toLowerCase() !== head.toLowerCase();
+}
+
+/** "screens/sidebar.tsx" for a long path: the last two parts, as the file tree shows them. */
+export function fileLabel(path: string): string {
+  return path.split("/").slice(-2).join("/");
+}
+
+/** The letter of a file's change, as in the design. */
+export const STATUS_LETTER: Record<CodeFileStatus, "A" | "M" | "D" | "R"> = {
+  added: "A",
+  modified: "M",
+  deleted: "D",
+  renamed: "R",
+};
+
+/** Open threads per file, for the tree's bubble. */
+export function openThreadsIn(threads: readonly CodeThreadView[], path: string): number {
+  return threads.filter((t) => t.path === path && !t.resolved).length;
 }
 
 /** The message Ask … to commit proposes. */
