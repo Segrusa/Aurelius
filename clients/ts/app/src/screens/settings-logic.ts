@@ -8,6 +8,7 @@ import type {
   RemoteClientView,
   RunValueSource,
   Setting2,
+  UserRunDefaults,
 } from "@aurelius/protocol";
 import { effortName } from "./employee-logic";
 
@@ -172,4 +173,23 @@ export function deviceHint(device: RemoteClientView, seen: (ms: number | null | 
  */
 export function remoteAccessDevices(clients: RemoteClientView[], ownDevices: boolean): RemoteClientView[] {
   return ownDevices ? clients.filter((c) => !c.paired_by) : clients;
+}
+
+/** One field of a board member's own run defaults, as My defaults offers it. */
+export type RunDefaultField = "model" | "effort" | "mode" | "subagent_model";
+
+/** What a selector shows for a field: its value, or `default` when nothing is chosen. */
+export function runDefaultValue(defaults: UserRunDefaults, field: RunDefaultField): string {
+  return defaults[field] ?? "default";
+}
+
+/** The defaults with one field changed; `default` clears it. Fields left unset are left out. */
+export function withRunDefault(defaults: UserRunDefaults, field: RunDefaultField, value: string): UserRunDefaults {
+  const next: UserRunDefaults = { ...defaults, [field]: value === "default" ? null : value };
+  return Object.fromEntries(Object.entries(next).filter(([, v]) => v != null)) as UserRunDefaults;
+}
+
+/** The Default choice of a model: what a run uses without one of its own. */
+export function defaultModelLabel(model: string | null | undefined, name: (model: string) => string): string {
+  return model ? `Default · ${name(model)} (connection's default)` : "Default · the connection's model";
 }

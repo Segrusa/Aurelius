@@ -46,6 +46,7 @@ import { isDefaultPolicy, nameAfterProfile, profileOption, samePolicy } from "./
 import { DialogSelector, FormDialog, failureOf, Hint, Problem, shortDay } from "./org-kit";
 import { useFolderChooser } from "./run-tools";
 import { modelName, useSetting } from "./settings-kit";
+import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 
 const EFFORTS = [
   ["inherit", "Inherit"],
@@ -171,6 +172,8 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   const subEffort = picks.subEffort ?? asChoice(stored("subagent").effort);
 
   const hasVersions = features.includes("instruction_proposals");
+  // Model, effort, mode and subagents belong to each board member there (You → My defaults).
+  const ownDefaults = features.includes(USER_RUN_DEFAULTS_FEATURE);
   const versions = useKeyed(
     ["employees", "instructions", employee?.id],
     async () =>
@@ -294,23 +297,29 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
   useAction("ConfirmPrimary", () => void save());
   useAction("ToggleManagerSequential", () => setSequential(!sequential), !hidden("SequentialTasks"));
   useAction("CycleReportsTo", () => setReportsTo(cycle(["", ...candidates.map((c) => c.id)], reportsTo)));
-  useAction("CycleTaskEffort", () =>
-    setPicks({
-      ...picks,
-      effort: cycle(
-        EFFORTS.map(([k]) => k as string),
-        effort,
-      ),
-    }),
+  useAction(
+    "CycleTaskEffort",
+    () =>
+      setPicks({
+        ...picks,
+        effort: cycle(
+          EFFORTS.map(([k]) => k as string),
+          effort,
+        ),
+      }),
+    !ownDefaults,
   );
-  useAction("CycleSubagentModel", () =>
-    setPicks({
-      ...picks,
-      subModel: cycle(
-        models.map((m) => (m.key === "default" ? "inherit" : m.key)),
-        subModel,
-      ),
-    }),
+  useAction(
+    "CycleSubagentModel",
+    () =>
+      setPicks({
+        ...picks,
+        subModel: cycle(
+          models.map((m) => (m.key === "default" ? "inherit" : m.key)),
+          subModel,
+        ),
+      }),
+    !ownDefaults,
   );
   useAction("ChooseDialogFolder", () => folders.choose("Choose a folder for this employee", setFolder));
 
@@ -451,6 +460,15 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
       )}
       {employee ? (
         <>
+          {ownDefaults ? (
+            <DialogSelector
+              label="Provider"
+              labelTooltip="Which connection this employee's runs use. Model, effort and mode are each board member's own (Settings → My defaults)."
+              value={provider}
+              onChange={chooseProvider}
+              options={providerOptions}
+            />
+          ) : (
           <div {...stylex.props(styles.three)}>
             <DialogSelector
               label="Default mode"
@@ -473,6 +491,8 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
               options={ownModels}
             />
           </div>
+          )}
+          {ownDefaults ? null : (
           <div {...stylex.props(styles.field)}>
             <Field isGroupLabel label="Effort" inputID="employee-effort">
               <SegmentedControl
@@ -494,6 +514,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
               </Hint>
             ) : null}
           </div>
+          )}
           {accessField}
           {hasTools ? <EmployeeTools policy={policy} access={access} onChange={setPolicy} /> : null}
           <div>
@@ -501,12 +522,13 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
               size="sm"
               variant="ghost"
               aria-expanded={more}
-              label={`${more ? "Less ▴" : "More ▾"} Advanced: Subagents${hidden("SequentialTasks") ? "" : `, run one at a time${sequential ? " (on)" : ""}`}${hasVersions ? ", instruction versions" : ""}`}
+              label={`${more ? "Less ▴" : "More ▾"} Advanced: ${[ownDefaults ? null : "Subagents", hidden("SequentialTasks") ? null : `run one at a time${sequential ? " (on)" : ""}`, hasVersions ? "instruction versions" : null].filter(Boolean).join(", ")}`}
               onClick={() => setMore(!more)}
             />
           </div>
           {more ? (
             <div {...stylex.props(styles.stack)}>
+              {ownDefaults ? null : (
               <div {...stylex.props(styles.two)}>
                 <DialogSelector
                   label="Subagents of this employee"
@@ -524,6 +546,7 @@ export function EmployeeDialog({ employee, onClose }: { employee: EmployeeSummar
                   }))}
                 />
               </div>
+              )}
               {hidden("SequentialTasks") ? null : (
                 <CheckboxInput
                   label="Run tasks one at a time"

@@ -21,6 +21,7 @@ import {
   TraceSection,
 } from "./settings-advanced";
 import { EmployeeRunsSection } from "./settings-employee-runs";
+import { MyDefaultsSection } from "./settings-run-defaults";
 import { focusField, HINTS_KEY, pressKeyed, stepRow } from "./settings-kit";
 import { CompanySection, RemoteSection, ServerSection } from "./settings-workspace";
 import { AccountSection, AppSection } from "./settings-you";
@@ -167,6 +168,7 @@ const ALL_GROUPS: { label: string; sections: Section[] }[] = [
     sections: [
       { key: "account", label: "Account", body: () => <AccountSection /> },
       { key: "app", label: "App", body: () => <AppSection /> },
+      { key: "run-defaults", label: "My defaults", body: () => <MyDefaultsSection /> },
     ],
   },
   {

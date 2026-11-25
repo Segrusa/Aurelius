@@ -10,7 +10,7 @@ import type { AgentMode, MessagesSnapshot, WorkSessionView } from "@aurelius/pro
 import * as stylex from "@stylexjs/stylex";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { useConnection } from "../connection";
+import { useConnection, useLinkState } from "../connection";
 import { useEmployees, useMessages, useWorkSessions } from "../data";
 import { useAction, useKeyContext } from "../keys/provider";
 import { Chip } from "../ui/chip";
@@ -35,6 +35,7 @@ import {
 } from "./run-side";
 import { chooserText, runChange, runChipLabel, sessionFolder, sessionStatus } from "./session-logic";
 import { modelName } from "./settings-kit";
+import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 import { SubagentsAtWork } from "./subagents";
 import { filesWritten } from "./tasks-logic";
 
@@ -242,6 +243,9 @@ export function RunChips({ snapshot, design = false }: { snapshot: MessagesSnaps
     }
   };
   const modelOf = (key: string) => models.find((m) => m.key === key)?.label ?? key;
+  // Where each board member keeps their own defaults, a run without a choice uses theirs.
+  const { features } = useLinkState();
+  const fallback = features.includes(USER_RUN_DEFAULTS_FEATURE) ? "Board member's default" : "Employee's default";
   const [modelOpen, setModelOpen] = useState(false);
   useAction("CycleModel", () => setModelOpen(true));
   return (
@@ -251,7 +255,7 @@ export function RunChips({ snapshot, design = false }: { snapshot: MessagesSnaps
         open={modelOpen}
         onOpenChange={setModelOpen}
         value={run.model ?? "default"}
-        options={models.map((m) => (m.key === "default" ? { ...m, label: "Employee's default" } : m))}
+        options={models.map((m) => (m.key === "default" ? { ...m, label: fallback } : m))}
         onPick={(model) =>
           void write(connection.write("conversation.set_run", runChange(id, run, { model }), { retry: false }))
         }
@@ -264,7 +268,7 @@ export function RunChips({ snapshot, design = false }: { snapshot: MessagesSnaps
       <Menu
         label="Effort"
         value={run.effort ?? "default"}
-        options={EFFORTS.map((e) => ({ key: e, label: e === "default" ? "Employee's default" : e }))}
+        options={EFFORTS.map((e) => ({ key: e, label: e === "default" ? fallback : e }))}
         onPick={(effort) =>
           void write(connection.write("conversation.set_run", runChange(id, run, { effort }), { retry: false }))
         }
