@@ -24,7 +24,6 @@ import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { cycle, EFFORTS, MODES, titleOfGoal } from "./dialog-logic";
 import { Held, useModels, useOpenCreated, useSend } from "./dialogs";
-import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 import {
   columnLabel,
   composerRows,
@@ -50,6 +49,7 @@ import {
   type SessionKind,
   type SessionPlace,
   sessionDispatchParams,
+  sessionFilesAllowed,
   sessionKey,
   sessionRequest,
   sessionStartParams,
@@ -57,10 +57,12 @@ import {
   shownProjects,
   startedSession,
   startProblem,
+  WORKTREES_ONLY_FEATURE,
 } from "./new-session-logic";
 import { Empty, Loading, Page, PageHead } from "./org-kit";
 import { overlays } from "./overlays-store";
 import { LAST_QUICK, quickEnabled } from "./quick-logic";
+import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 import { ticketPlace } from "./ticket-session-logic";
 import { NoConnectionNote, useNoConnection } from "./tickets-kit";
 
@@ -208,13 +210,18 @@ export function NewSessionScreen() {
   const [chosenDesign, setDesign] = useState(() => defaultDesign(storage.get(sessionKey("kind", hostId)), true));
   const design = designsOn && kind === "session" && chosenDesign;
   const [chosenPlace, setPlace] = useState<SessionPlace | null>(null);
-  // Always a branch of its own: Own branch unless chosen otherwise, a worktree where the server lacks it.
-  const ownBranchOn = features.includes(OWN_BRANCH_FEATURE);
+  // Always a worktree of its own where the server works only in worktrees (no Where to choose);
+  // on an older server Own branch unless chosen otherwise, a worktree where it lacks that.
+  const worktreesOnly = features.includes(WORKTREES_ONLY_FEATURE);
+  const ownBranchOn = !worktreesOnly && features.includes(OWN_BRANCH_FEATURE);
   const place = shownPlace(chosenPlace, ownBranchOn);
   const worktree = place === "worktree";
   // A ticket takes files of any type; a session's first message where the server has `chat_files`.
   const sessionFiles = features.includes(CHAT_FILES_FEATURE);
-  const attach = usePromptAttachments({ files: kind !== "session" || (sessionFiles && !worktree), folders: true });
+  const attach = usePromptAttachments({
+    files: kind !== "session" || sessionFilesAllowed(sessionFiles, worktree, worktreesOnly),
+    folders: true,
+  });
   const [pickedProject, setProject] = useState<string | null>(null);
   const [pickedWho, setWho] = useState<string | null>(null);
   // Model, effort and mode open on what the last start on this server used, while still offered.
@@ -279,7 +286,7 @@ export function NewSessionScreen() {
     offline,
     files: attach.files.length,
     sessionFiles,
-    worktree,
+    worktree: worktree && !worktreesOnly,
     ownBranch: ownBranchOn,
     sessionDispatch,
   });
@@ -591,7 +598,7 @@ export function NewSessionScreen() {
                     </Chip>
                   }
                 />
-                {kind === "session" ? (
+                {kind === "session" && !worktreesOnly ? (
                   <Menu
                     label="Where"
                     value={place}

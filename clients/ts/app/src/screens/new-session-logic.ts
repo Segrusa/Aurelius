@@ -16,6 +16,16 @@ export const SESSION_DISPATCH_FEATURE = "session_dispatch";
 export const DESIGN_SESSIONS_FEATURE = "design_sessions";
 /** The server lets a session work on a branch of its own in the project's folder. */
 export const OWN_BRANCH_FEATURE = "session_own_branch";
+/**
+ * Every session works in a worktree of its own (ticket #86): there is no Where to choose, and files go
+ * with the first message (the server keeps them in the worktree's folder until it is made).
+ */
+export const WORKTREES_ONLY_FEATURE = "worktrees_only";
+
+/** Files may go with a session's first message: the server takes them (`chat_files`) and has a folder for them. */
+export function sessionFilesAllowed(sessionFiles: boolean, worktree: boolean, worktreesOnly: boolean): boolean {
+  return sessionFiles && (worktreesOnly || !worktree);
+}
 
 /**
  * Where a session works: its own branch in the project's folder, or a worktree of its own. Never on
