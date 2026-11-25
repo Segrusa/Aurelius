@@ -255,6 +255,7 @@ export const METHODS = {
   "user.logout": "read",
   "user.rail_pins": "read",
   "user.run_defaults": "read",
+  "user.run_defaults_of": "read",
   "user.set_password": "host",
   "user.set_rail_pins": "command",
   "user.set_run_defaults": "command",
@@ -1136,6 +1137,12 @@ export interface MethodParams {
    * `user_run_defaults`), never another's. Not for apps.
    */
   "user.run_defaults": undefined;
+  /**
+   * What a run on another board member's login comes to without a choice of
+   * its own (feature `run_defaults_of`): shown as "Kim's default · Sonnet 5.5"
+   * on a ticket that runs on Kim's login. Board members only; not for apps.
+   */
+  "user.run_defaults_of": { user_id: string };
   /**
    * Change a password. Own (no `user_id`, or the session's): with the old
    * password; the other sessions end, this one stays. Another board member's

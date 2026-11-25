@@ -577,6 +577,10 @@ abstract final class Methods {
   /// The run defaults of the board member of the session (feature
   /// `user_run_defaults`), never another's. Not for apps.
   static const String userRunDefaults = 'user.run_defaults';
+  /// What a run on another board member's login comes to without a choice of
+  /// its own (feature `run_defaults_of`): shown as "Kim's default · Sonnet 5.5"
+  /// on a ticket that runs on Kim's login. Board members only; not for apps.
+  static const String userRunDefaultsOf = 'user.run_defaults_of';
   /// Change a password. Own (no `user_id`, or the session's): with the old
   /// password; the other sessions end, this one stays. Another board member's
   /// (B10): a temporary password, changed at their next sign-in
@@ -1448,6 +1452,16 @@ Map<String, dynamic> userRailPins() => <String, dynamic>{
 /// `user_run_defaults`), never another's. Not for apps.
 Map<String, dynamic> userRunDefaults() => <String, dynamic>{
   'method': Methods.userRunDefaults,
+};
+
+/// What a run on another board member's login comes to without a choice of
+/// its own (feature `run_defaults_of`): shown as "Kim's default · Sonnet 5.5"
+/// on a ticket that runs on Kim's login. Board members only; not for apps.
+Map<String, dynamic> userRunDefaultsOf({required String userId}) => <String, dynamic>{
+  'method': Methods.userRunDefaultsOf,
+  'params': <String, dynamic>{
+    'user_id': userId,
+  },
 };
 
 /// Whether the server has board members, and this connection's session's one.
