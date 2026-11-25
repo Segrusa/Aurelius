@@ -22,8 +22,9 @@ import { toast } from "../ui/toast";
 import { designPages } from "./artifact-logic";
 import { ContextDialog } from "./chat-message";
 import { type ChatMessage, EmployeeChat } from "./employee-chat";
-import { MODE_LABELS, nextMode } from "./employee-logic";
+import { effortName, MODE_LABELS, nextMode } from "./employee-logic";
 import { Confirm, Page } from "./org-kit";
+import { useRunDefaults, useTicketLogin } from "./run-default";
 import { boardOnlyReason, lastRunOf, usageTotals } from "./run-logic";
 import {
   DesignPagesSection,
@@ -185,6 +186,7 @@ function TaskConversation({
   const [deleting, setDeleting] = useState(false);
   const live = Boolean(task.live_run);
   const name = task.employee_name ?? "The employee";
+  const login = useTicketLogin(task.ticket_id);
 
   const showContext = () => {
     if (lastRun) setContextOf(lastRun);
@@ -251,7 +253,7 @@ function TaskConversation({
                 ),
               }
             : {}),
-          footer: (snapshot) => <RunChips snapshot={snapshot} />,
+          footer: (snapshot) => <RunChips snapshot={snapshot} login={login} />,
           actions: (
             <div {...stylex.props(styles.actions)}>
               <UsageChip taskId={task.id} />
@@ -350,14 +352,15 @@ function TaskDetails({ dock, task, conversationId }: { dock: PropertiesDock; tas
   const model = feed.data?.run.model ?? task.run.model;
   const effort = feed.data?.run.effort ?? task.run.effort;
   const mode = feed.data?.agent_mode;
+  const defaults = useRunDefaults(useTicketLogin(task.ticket_id));
   return (
     <PropertiesPanel dock={dock} label="Run properties">
       <SideProperties usage={usage}>
         <SideRow name="Employee">{name}</SideRow>
         <SideRow name="Status">{taskStateLine(task).text}</SideRow>
         {project ? <SideRow name="Project">{project.name}</SideRow> : null}
-        <SideRow name="Model">{runChipLabel(model, modelName)}</SideRow>
-        <SideRow name="Effort">{runChipLabel(effort)}</SideRow>
+        <SideRow name="Model">{runChipLabel(model, modelName, defaults?.model)}</SideRow>
+        <SideRow name="Effort">{runChipLabel(effort, effortName, defaults?.effort)}</SideRow>
         {mode ? <SideRow name="Mode">{MODE_LABELS[mode]}</SideRow> : null}
         {task.schedule_id ? <SideRow name="From schedule">Recurring task</SideRow> : null}
         <SideRow name="Created">

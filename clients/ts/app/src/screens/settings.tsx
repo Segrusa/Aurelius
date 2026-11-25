@@ -14,7 +14,8 @@ import type { ActivityFilters } from "./activity-logic";
 import { BackupsSection, CompactionSection, ConnectionsSection, LoadSection, McpSection } from "./settings-advanced";
 import { EmployeeRunsSection } from "./settings-employee-runs";
 import { focusField, HINTS_KEY, pressKeyed, stepRow } from "./settings-kit";
-import { MyDefaultsSection } from "./settings-run-defaults";
+import { sectionsFor } from "./settings-logic";
+import { MyDefaultsSection, USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
 import { CompanySection, RemoteSection, ServerSection } from "./settings-workspace";
 import { AccountSection, AppSection } from "./settings-you";
 
@@ -151,6 +152,8 @@ interface Section {
   feature?: Feature;
   /** A table that needs the room. */
   wide?: boolean;
+  /** A server feature that replaced this section: it shows only on a server without it. */
+  replacedBy?: string;
 }
 
 // hidden.ts leads: what it names stays out.
@@ -174,7 +177,13 @@ const ALL_GROUPS: { label: string; sections: Section[] }[] = [
   {
     label: "Workspace",
     sections: [
-      { key: "employee-runs", label: "Model & effort", body: () => <EmployeeRunsSection /> },
+      // My defaults replaced it (OPR-5 point 5); an old server still keeps model and effort per employee.
+      {
+        key: "employee-runs",
+        label: "Model & effort",
+        body: () => <EmployeeRunsSection />,
+        replacedBy: USER_RUN_DEFAULTS_FEATURE,
+      },
       { key: "servers", label: "Servers & PC", body: () => <ServerSection /> },
       { key: "remote", label: "Remote access", body: () => <RemoteSection /> },
     ],
@@ -203,7 +212,7 @@ function companyPageOn(to: string, path: string): boolean {
 
 export function SettingsSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const { hostName, remote } = useLinkState();
+  const { hostName, remote, features } = useLinkState();
   return (
     <aside {...stylex.props(styles.sidebar)}>
       <Link to="/new" {...stylex.props(styles.back)}>
@@ -214,7 +223,7 @@ export function SettingsSidebar() {
         {GROUPS.map((group) => (
           <div key={group.label} {...stylex.props(styles.group)}>
             <p {...stylex.props(styles.groupName)}>{group.label}</p>
-            {group.sections.map((section) => {
+            {sectionsFor(group.sections, features).map((section) => {
               if (section.to) {
                 const on = companyPageOn(section.to, path);
                 return (
@@ -270,14 +279,19 @@ export function SettingsScreen({ section, filters }: { section: string; filters:
     useAction(action, () => pressKeyed(action));
   }
   useAction("Back", () => void navigate({ to: "/new" }));
+  const { features } = useLinkState();
+  const sections = sectionsFor(SECTIONS, features);
   const stepSection = (by: number) => {
-    const at = SECTIONS.findIndex((s) => s.key === section);
-    const next = SECTIONS[(at + by + SECTIONS.length) % SECTIONS.length];
+    const at = sections.findIndex((s) => s.key === section);
+    const next = sections[(at + by + sections.length) % sections.length];
     if (next) void navigate({ to: "/settings/$section", params: { section: next.key } });
   };
   useAction("NextTab", () => stepSection(1));
   useAction("PrevTab", () => stepSection(-1));
-  const found = SECTIONS.find((s) => s.key === section);
+  // An old link to a replaced section opens what replaced it (Model & effort → My defaults).
+  const found =
+    sections.find((s) => s.key === section) ??
+    (SECTIONS.some((s) => s.key === section) ? sections.find((s) => s.key === "run-defaults") : undefined);
   return (
     <>
       <LayoutHeader hasDivider padding={0} data-titlebar>

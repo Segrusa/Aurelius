@@ -28,6 +28,8 @@ import '../../data/views.dart';
 import '../../data/markdown_paths.dart';
 import '../../data/run_config.dart';
 import '../../data/run_decisions.dart';
+import '../my_defaults/run_default_chips.dart';
+import '../my_defaults/run_default_label.dart';
 import '../runtime/runtime_bloc.dart';
 import '../company/company_bloc.dart';
 import 'everyone_audience.dart';
@@ -2056,7 +2058,7 @@ class _Thumbnail extends StatelessWidget {
 /// the default without a choice here (employee → project → global), the task's
 /// own choice in a task conversation, and this conversation's own choice.
 class ConversationRun {
-  const ConversationRun({required this.fallback, required this.task, required this.model, required this.effort});
+  const ConversationRun({required this.fallback, required this.task, required this.model, required this.effort, this.own, this.mine});
 
   /// The employee's (or project's) default.
   final EmployeeRunView fallback;
@@ -2069,6 +2071,13 @@ class ConversationRun {
   final String? model;
   final String? effort;
 
+  /// The board member's own defaults (feature `user_run_defaults`): they
+  /// replace the employee's model and effort there. Null on an older server.
+  final RunDefaultLabels? own;
+
+  /// The defaults read for [own].
+  final UserRunDefaultsView? mine;
+
   static ConversationRun? of(BuildContext context, {required RuntimeState runtime, required ChatState chat, CompanyState? company}) {
     final snapshot = runtime.snapshot;
     final bloc = context.read<ChatBloc>();
@@ -2079,16 +2088,33 @@ class ConversationRun {
     final fallback = employeeId != null
         ? snapshot.employeeRun(employeeId, projectId: bloc.projectId ?? task?.projectId)
         : snapshot.projectRun(bloc.projectId!);
-    return ConversationRun(fallback: fallback, task: task, model: chat.runModel, effort: chat.runEffort);
+    // A session and a chat run on the reader's own login, so their own default applies.
+    final ownDefaults = bloc.ownRunDefaults;
+    return ConversationRun(
+      fallback: fallback,
+      task: task,
+      model: chat.runModel,
+      effort: chat.runEffort,
+      own: ownDefaults ? RunDefaultLabels.of('Your default', runtime.mine) : null,
+      mine: runtime.mine,
+    );
   }
 
   bool get effortShown => fallback.connection?.supportsEffort ?? true;
-  String? get defaultModel => fallback.model.value;
-  String? get defaultEffort => fallback.effort.value;
+  String? get defaultModel => own != null ? defaultModelOf(mine) : fallback.model.value;
+  String? get defaultEffort => own != null ? defaultEffortOf(mine) : fallback.effort.value;
 
   /// What the next answer runs on.
   String? get effectiveModel => model ?? task?.run.model ?? defaultModel;
   String? get effectiveEffort => effort ?? task?.run.effort ?? defaultEffort;
+
+  /// "Opus 5.5 · High" of the default, without whose it is; null while unknown.
+  String? get defaultLabel => defaultModel == null && defaultEffort == null
+      ? null
+      : [
+          if (defaultModel != null) ModelCatalog.friendly(defaultModel!),
+          if (effortShown && defaultEffort != null) ModelCatalog.effortLabel(defaultEffort),
+        ].join(' · ');
 
   /// Runs on something other than the default (a choice equal to it is none).
   bool get modelOverridden => effectiveModel != defaultModel;
@@ -2139,9 +2165,15 @@ class ConversationModelChip extends StatelessWidget {
     final run = _watchRun(context);
     final history = context.select<ChatBloc, bool>((b) => b.state.history);
     final overridden = run?.overridden ?? false;
-    final label = run == null || run.effectiveModel == null && !overridden
+    final own = run?.own;
+    final label = run == null
         ? 'Model'
-        : [runLabel(run.effectiveModel, run.effectiveEffort, effortShown: run.effortShown), if (overridden) 'override'].join(' · ');
+        // "Your default · Opus 5.5 · High", or just the values chosen here.
+        : own != null
+            ? (overridden ? runLabel(run.effectiveModel, run.effectiveEffort, effortShown: run.effortShown) : defaultLabel(own.whose, run.defaultLabel))
+            : run.effectiveModel == null && !overridden
+                ? 'Model'
+                : [runLabel(run.effectiveModel, run.effectiveEffort, effortShown: run.effortShown), if (overridden) 'override'].join(' · ');
     final avatar = Icon(Icons.auto_awesome_outlined, size: 16, color: overridden ? Tokens.accentText : Tokens.text2);
     final text = Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(color: overridden ? Tokens.accentText : Tokens.text2));
     final open = history ? null : () => _showConversationModelSheet(context);
@@ -2155,7 +2187,7 @@ class ConversationModelChip extends StatelessWidget {
               label: text,
               onPressed: open,
               deleteIcon: Icon(Icons.undo, size: 16, color: Tokens.accentText),
-              deleteButtonTooltipMessage: context.read<ChatBloc>().employeeId == null ? 'Back to project default' : 'Back to employee default',
+              deleteButtonTooltipMessage: run?.own?.reset ?? (context.read<ChatBloc>().employeeId == null ? 'Back to project default' : 'Back to employee default'),
               onDeleted: () => run!.reset(context, context.read<ChatBloc>()),
             )
           : ActionChip(key: const Key('conversation-model-chip'), avatar: avatar, label: text, onPressed: open),
@@ -2173,7 +2205,8 @@ void _showConversationModelSheet(BuildContext context) {
   final employeeId = chat.employeeId;
   final company = employeeId == null ? null : context.read<CompanyBloc>();
   final name = employeeId == null ? null : company?.state.employee(employeeId)?.name;
-  final whose = employeeId == null ? 'Project default' : 'Employee default';
+  final ownDefaults = chat.ownRunDefaults;
+  final whose = ownDefaults ? 'Your default' : (employeeId == null ? 'Project default' : 'Employee default');
   if (runtime.state.snapshot == null) {
     toast(context, runtime.state.loading ? 'Loading…' : 'Not available while offline.');
     return;
@@ -2214,23 +2247,34 @@ void _showConversationModelSheet(BuildContext context) {
                     child: Text(
                       [
                         if (connection != null) connection.displayName,
-                        name == null ? 'only this $scope; the default stays as it is' : 'only this $scope; $name\'s default stays as it is',
+                        ownDefaults
+                            ? 'only this $scope; your default stays as it is'
+                            : name == null ? 'only this $scope; the default stays as it is' : 'only this $scope; $name\'s default stays as it is',
                       ].join(' · '),
                       style: TextStyle(color: Tokens.muted, fontSize: 12.5),
                     ),
                   ),
-                  option(
-                    !run.overridden,
-                    '$whose (${runLabel(run.defaultModel, run.defaultEffort, effortShown: run.effortShown)})',
-                    detail: name == null ? null : 'Changed on $name\'s page',
-                    key: const Key('conversation-run-default'),
-                    onTap: () => run.reset(context, chat),
-                  ),
+                  if (ownDefaults)
+                    // "Use your default · Opus 5.5 · High"; it is changed in My defaults only.
+                    option(
+                      !run.overridden,
+                      defaultLabel(resetLabel(whose), run.defaultLabel),
+                      key: const Key('conversation-run-default'),
+                      onTap: () => run.reset(context, chat),
+                    )
+                  else
+                    option(
+                      !run.overridden,
+                      '$whose (${runLabel(run.defaultModel, run.defaultEffort, effortShown: run.effortShown)})',
+                      detail: name == null ? null : 'Changed on $name\'s page',
+                      key: const Key('conversation-run-default'),
+                      onTap: () => run.reset(context, chat),
+                    ),
                   if (run.overridden)
                     ListTile(
                       key: const Key('conversation-run-reset'),
                       leading: Icon(Icons.undo, color: Tokens.accentText),
-                      title: Text('Back to ${whose.toLowerCase()}', style: TextStyle(color: Tokens.accentText)),
+                      title: Text(ownDefaults ? resetLabel(whose) : 'Back to ${whose.toLowerCase()}', style: TextStyle(color: Tokens.accentText)),
                       onTap: () {
                         run.reset(context, chat);
                         Navigator.pop(sheet);
@@ -2244,11 +2288,16 @@ void _showConversationModelSheet(BuildContext context) {
                         detail: ModelCatalog.describe(m), onTap: () => choose(model: m, effort: run.effort)),
                   if (run.effortShown) ...[
                     const Eyebrow('Effort'),
-                    option(!run.effortOverridden, '$whose (${ModelCatalog.effortLabel(run.defaultEffort)})',
+                    option(
+                        !run.effortOverridden,
+                        ownDefaults
+                            ? defaultLabel(resetLabel(whose), ModelCatalog.effortLabel(run.defaultEffort))
+                            : '$whose (${ModelCatalog.effortLabel(run.defaultEffort)})',
                         onTap: () => choose(model: run.model, effort: run.effortReset)),
                     for (final (value, label, detail) in ModelCatalog.efforts)
                       option(run.effortOverridden && run.effectiveEffort == value, label, detail: detail, onTap: () => choose(model: run.model, effort: value)),
                   ],
+                  if (ownDefaults) ChangeMyDefaultsTile(sheet: sheet),
                 ],
               ),
             ),

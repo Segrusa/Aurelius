@@ -56,9 +56,13 @@ import {
 } from "./board-logic";
 import { type SessionSlots, TicketSessionBody } from "./chat";
 import { readOnlyBar } from "./chat-logic";
+import { EFFORTS } from "./dialog-logic";
 import { parseDeadline, parseLabels, useModels } from "./dialogs";
+import { effortName } from "./employee-logic";
 import { isQuick } from "./quick-logic";
 import { type Finish, FinishCard, finishRunText, useFinish } from "./review-finish";
+import { RunMenu, useRunDefaults } from "./run-default";
+import { chipLabel } from "./run-default-logic";
 import {
   DesignPagesSection,
   FilesWritten,
@@ -626,35 +630,45 @@ function RunChips({ t }: { t: TicketView }) {
   const { status } = useLinkState();
   const models = useModels();
   const write = useTicketWrite();
+  // The ticket runs on its login user's defaults: "Your default · …", or "Kim's default · …".
+  const labels = useRunDefaults({ id: t.login_user, username: t.login_username });
   if (readOnly(t, null) || status !== "online" || runLocked(t)) return null;
   const update = (run: TicketView["run"]) =>
     void write("ticket.update", { ticket_id: t.id, run }, { expectedVersion: t.version });
+  const of = (key: string) => (key === "default" ? null : key);
   return (
     <>
       {isQuick(t) ? null : (
-        <Menu
+        <RunMenu
           label="Mode"
-          value={t.run.mode ?? "default"}
+          quiet
+          value={t.run.mode}
           options={MODES}
-          onPick={(mode) => update({ ...t.run, mode: mode === "default" ? null : (mode as AgentMode) })}
-          trigger={
-            <Chip name="Mode" quiet>
-              {MODES.find((m) => m.key === (t.run.mode ?? "default"))?.label}
-            </Chip>
-          }
+          fallback={labels?.mode ?? "Owner's default"}
+          labels={labels}
+          onPick={(mode) => update({ ...t.run, mode: of(mode) as AgentMode | null })}
         />
       )}
-      <Menu
+      <RunMenu
         label="Model"
-        value={t.run.model ?? "default"}
+        quiet
+        value={t.run.model}
         options={models}
-        onPick={(model) => update({ ...t.run, model: model === "default" ? null : model })}
-        trigger={
-          <Chip name="Model" quiet>
-            {models.find((m) => m.key === (t.run.model ?? "default"))?.label ?? "Default"}
-          </Chip>
-        }
+        fallback={labels?.model ?? "Default"}
+        labels={labels}
+        onPick={(model) => update({ ...t.run, model: of(model) })}
       />
+      {labels ? (
+        <RunMenu
+          label="Effort"
+          quiet
+          value={t.run.effort}
+          options={EFFORTS.map((e) => ({ key: e, label: effortName(e) }))}
+          fallback={labels.effort}
+          labels={labels}
+          onPick={(effort) => update({ ...t.run, effort: of(effort) })}
+        />
+      ) : null}
     </>
   );
 }
@@ -749,8 +763,17 @@ function PropertiesTab({ detail, t, finish }: { detail: TicketDetail; t: TicketV
     { key: "none", label: "No one" },
   ];
   const branch = branchOf(t);
-  const modeLabel = MODES.find((m) => m.key === (t.run.mode ?? "default"))?.label ?? "Owner's default";
-  const modelLabel = models.find((m) => m.key === (t.run.model ?? "default"))?.label ?? "Default";
+  const labels = useRunDefaults({ id: t.login_user, username: t.login_username });
+  const modeLabel = chipLabel(
+    t.run.mode,
+    (m) => MODES.find((x) => x.key === m)?.label ?? m,
+    labels?.mode ?? "Owner's default",
+  );
+  const modelLabel = chipLabel(
+    t.run.model,
+    (m) => models.find((x) => x.key === m)?.label ?? m,
+    labels?.model ?? "Default",
+  );
   const usage = useTicketUsage(t);
   const root = detail.root_task ?? null;
   return (
@@ -785,9 +808,17 @@ function PropertiesTab({ detail, t, finish }: { detail: TicketDetail; t: TicketV
             </span>
           )}
         </SideRow>
-        <SideRow name="Mode · Model" title={`${modeLabel} · ${modelLabel}`}>
-          {`${modeLabel} · ${modelLabel}`}
-        </SideRow>
+        {labels ? (
+          <>
+            <SideRow name="Model">{modelLabel}</SideRow>
+            <SideRow name="Effort">{chipLabel(t.run.effort, effortName, labels.effort)}</SideRow>
+            <SideRow name="Mode">{modeLabel}</SideRow>
+          </>
+        ) : (
+          <SideRow name="Mode · Model" title={`${modeLabel} · ${modelLabel}`}>
+            {`${modeLabel} · ${modelLabel}`}
+          </SideRow>
+        )}
         {root ? <SideRow name="Started">{time(root.created_at_ms)}</SideRow> : null}
         <SideRow name="Runs on">
           {t.login_user === me ? "Your Claude login" : `${t.login_username}'s Claude login`}

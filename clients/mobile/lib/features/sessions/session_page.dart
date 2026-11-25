@@ -109,8 +109,10 @@ Future<void> showSessionProperties(BuildContext context, WorkSessionView session
       ('Project', Text(session.projectName)),
       if (session.branch case final branch?) ('Branch', Text(branch, maxLines: 1, overflow: TextOverflow.ellipsis)),
       ('Folder', Text(sessionFolder(session), maxLines: 2, overflow: TextOverflow.ellipsis)),
-      ('Model', Text(model == null ? 'Default' : ModelCatalog.friendly(model))),
-      if (run?.effortShown ?? true) ('Effort', Text(effort == null ? 'Default' : ModelCatalog.effortLabel(effort))),
+      // "Your default · Opus 5.5" without a choice here (a server with user_run_defaults).
+      ('Model', Text(run?.own != null && !run!.modelOverridden ? run.own!.model : model == null ? 'Default' : ModelCatalog.friendly(model), key: const ValueKey('session-prop-model'))),
+      if (run?.effortShown ?? true)
+        ('Effort', Text(run?.own != null && !run!.effortOverridden ? run.own!.effort : effort == null ? 'Default' : ModelCatalog.effortLabel(effort), key: const ValueKey('session-prop-effort'))),
       ('Mode', Text(chat.state.mode.label)),
       ('Started', Text(startedLabel(session.createdAtMs), style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()]))),
     ],

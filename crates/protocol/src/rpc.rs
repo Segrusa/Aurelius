@@ -506,6 +506,10 @@ pub mod feature {
     /// (protocol 5, additive): the session gets `ticket_created` at that message. A
     /// client without it makes such a ticket without `from_message`.
     pub const TICKET_FROM_SESSION: &str = "ticket_from_session";
+    /// `user.run_defaults_of { user_id }` (protocol 5, additive): the run
+    /// defaults of the board member whose login a ticket uses, for the label
+    /// "Kim's default · Sonnet 5.5". A client without it shows "Kim's default".
+    pub const RUN_DEFAULTS_OF: &str = "run_defaults_of";
 }
 
 /// Every feature this build has.
@@ -575,6 +579,7 @@ pub const FEATURES: &[&str] = &[
     feature::SIDE_QUESTION,
     feature::USER_RUN_DEFAULTS,
     feature::TICKET_FROM_SESSION,
+    feature::RUN_DEFAULTS_OF,
 ];
 
 /// The answer of `command.applied`.

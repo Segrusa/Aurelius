@@ -92,17 +92,17 @@ void main() {
       registerFallbackValue(const CompanyRefreshed());
     });
 
-    Future<void> pump(WidgetTester tester, {TaskRun conversationRun = const TaskRun(), List<TaskView> tasks = const []}) async {
+    Future<void> pump(WidgetTester tester, {TaskRun conversationRun = const TaskRun(), List<TaskView> tasks = const [], LinkState link = const LinkState(status: LinkStatus.online), UserRunDefaultsView? mine}) async {
       repo = MockRepository();
       when(() => repo.online).thenAnswer((_) => const Stream.empty());
       when(() => repo.chatChanges).thenAnswer((_) => const Stream.empty());
       when(() => repo.appends).thenAnswer((_) => const Stream.empty());
-      when(() => repo.linkState).thenReturn(const LinkState(status: LinkStatus.online));
+      when(() => repo.linkState).thenReturn(link);
       when(() => repo.messages('c1')).thenAnswer((_) async => snapshotOf('c1', run: conversationRun));
       when(() => repo.write(any(), idempotencyKey: any(named: 'idempotencyKey'), expectedVersion: any(named: 'expectedVersion'), retry: any(named: 'retry')))
           .thenAnswer((_) async => receiptOf(const CommandResultConversationRunSet(conversationId: 'c1')));
       final runtime = MockRuntimeBloc();
-      whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: RuntimeState(loading: false, snapshot: config()));
+      whenListen(runtime, const Stream<RuntimeState>.empty(), initialState: RuntimeState(loading: false, snapshot: config(), mine: mine));
       final company = MockCompanyBloc();
       whenListen(company, const Stream<CompanyState>.empty(), initialState: CompanyState(loading: false, employees: [employeeOf(id: employeeId, name: 'Iris')], tasks: tasks));
       // Owned by the provider: closed as the tree unmounts, inside the test's
@@ -134,6 +134,22 @@ void main() {
       });
       await tester.pump();
       expect(tester.widget(find.byKey(const Key('conversation-model-chip'))), isA<ActionChip>(), reason: 'follows the employee default again');
+    });
+
+    testWidgets('with My defaults the chip says Your default and its value, a choice only the value', (tester) async {
+      const link = LinkState(status: LinkStatus.online, features: ['user_run_defaults']);
+      const mine = UserRunDefaultsView(defaults: UserRunDefaults(effort: 'low'), model: 'sonnet');
+      await pump(tester, link: link, mine: mine);
+      expect(find.text('Your default · Sonnet 5.5 · Low'), findsOneWidget, reason: 'the board member\'s own default, not the employee\'s Opus');
+      expect(find.textContaining("Employee"), findsNothing);
+    });
+
+    testWidgets('with My defaults a choice for this chat shows only the value and resets to Your default', (tester) async {
+      const link = LinkState(status: LinkStatus.online, features: ['user_run_defaults']);
+      const mine = UserRunDefaultsView(defaults: UserRunDefaults(effort: 'low'), model: 'sonnet');
+      await pump(tester, conversationRun: const TaskRun(model: 'opus'), link: link, mine: mine);
+      expect(find.text('Opus 5.5 · Low'), findsOneWidget);
+      expect(tester.widget<InputChip>(find.byKey(const Key('conversation-model-chip'))).deleteButtonTooltipMessage, 'Use your default');
     });
 
     testWidgets('over a task\'s own model the undo pins the employee default', (tester) async {

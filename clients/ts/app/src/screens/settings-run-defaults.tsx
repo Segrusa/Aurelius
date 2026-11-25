@@ -15,8 +15,9 @@ import {
 
 const WIDTH = 260;
 
-/** The server keeps a model, effort and mode per board member. */
-export const USER_RUN_DEFAULTS_FEATURE = "user_run_defaults";
+import { USER_RUN_DEFAULTS_FEATURE } from "./run-default-logic";
+
+export { USER_RUN_DEFAULTS_FEATURE };
 
 /**
  * The board member's own model, effort, mode and subagent model: the runs of their tickets and

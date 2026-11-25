@@ -115,6 +115,7 @@ pub(super) async fn handle(shared: &Arc<Shared>, method: Method, reader: Option<
         Method::TicketMyTickets { project_id, include_done } => my_tickets(shared, reader, project_id, include_done).await,
         Method::UserRailPins => rail_pins(shared, reader).await,
         Method::UserRunDefaults => user_run_defaults(shared, reader).await,
+        Method::UserRunDefaultsOf { user_id } => user_run_defaults_of(shared, reader, user_id).await,
         Method::TicketHistory { project_id, employee_id, from_ms, to_ms, query, before_done_at_ms, before_number, limit } => {
             let before = before_done_at_ms.zip(before_number);
             let filter = aurelius_storage::history::Filter { project: project_id, employee: employee_id, from_ms, to_ms, query, before };
@@ -906,6 +907,16 @@ async fn code_review(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserI
 /// never of one named in a param.
 async fn user_run_defaults(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>) -> Result<ResponseBody, ProtocolError> {
     let Some(user) = reader else { return Err(ProtocolError::new(ErrorCode::BoardMemberRequired, "Run defaults are a board member's own.")) };
+    let store = shared.store().clone();
+    storage_task(move || store.read(|c| aurelius_application::run::connections::user_runs(c, user))).await.map(ResponseBody::UserRunDefaults)
+}
+
+/// `user.run_defaults_of { user_id }`: what a run on another board member's
+/// login comes to, for a board member who reads their ticket. An app has none.
+async fn user_run_defaults_of(shared: &Arc<Shared>, reader: Option<aurelius_domain::UserId>, user: aurelius_domain::UserId) -> Result<ResponseBody, ProtocolError> {
+    if reader.is_none() {
+        return Err(ProtocolError::new(ErrorCode::BoardMemberRequired, "Run defaults are for board members."));
+    }
     let store = shared.store().clone();
     storage_task(move || store.read(|c| aurelius_application::run::connections::user_runs(c, user))).await.map(ResponseBody::UserRunDefaults)
 }

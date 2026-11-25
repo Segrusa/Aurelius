@@ -13,6 +13,8 @@ import '../../data/views.dart';
 import '../company/company_bloc.dart';
 import '../connection/connection_bloc.dart';
 import '../markdown/links.dart';
+import '../my_defaults/run_default_chips.dart';
+import '../my_defaults/run_default_label.dart';
 import 'ticket_actions.dart';
 import 'ticket_bloc.dart';
 import 'ticket_card.dart' show startWith;
@@ -488,6 +490,8 @@ class TicketUnderInput extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final chips = runChips(ticket, quick: quickTaskOf(context, ticket));
+    // The ticket runs on its login user's defaults: "Your default · …" or "Kim's default · …".
+    final labels = watchRunDefaultLabels(context, loginId: ticket.loginUser, loginName: ticket.loginUsername);
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Column(
@@ -505,7 +509,7 @@ class TicketUnderInput extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     avatar: Icon(Icons.tune, size: 16, color: Tokens.text2),
-                    label: Text('Mode · ${modeChipLabel(ticket.run)}'),
+                    label: Text('Mode · ${modeChipLabel(ticket.run, labels?.mode ?? 'Default')}'),
                     onPressed: online ? () => chooseTicketMode(context, ticket) : null,
                   ),
                 if (chips.model)
@@ -514,8 +518,17 @@ class TicketUnderInput extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     avatar: Icon(Icons.memory, size: 16, color: Tokens.text2),
-                    label: Text('Model · ${modelChipLabel(ticket.run)}'),
+                    label: Text('Model · ${modelChipLabel(ticket.run, labels?.model ?? 'Default')}'),
                     onPressed: online ? () => chooseTicketModel(context, ticket) : null,
+                  ),
+                if (chips.model && labels != null)
+                  ActionChip(
+                    key: const ValueKey('chip-effort'),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    avatar: Icon(Icons.speed, size: 16, color: Tokens.text2),
+                    label: Text('Effort · ${effortChipLabel(ticket.run, labels.effort)}'),
+                    onPressed: online ? () => chooseTicketEffort(context, ticket) : null,
                   ),
               ],
             ),
@@ -535,8 +548,64 @@ class TicketUnderInput extends StatelessWidget {
   }
 }
 
-/// The Mode of [ticket]'s runs (`ticket.update { run }`): Default (the owner's own) or one of the modes.
+/// The labels of [ticket]'s defaults: its login user's.
+RunDefaultLabels? _labelsOf(BuildContext context, TicketView ticket) =>
+    readRunDefaultLabels(context, loginId: ticket.loginUser, loginName: ticket.loginUsername);
+
+/// The Effort of [ticket]'s runs (`ticket.update { run }`, a server with
+/// `user_run_defaults`): the default or one of the levels.
+Future<bool> chooseTicketEffort(BuildContext context, TicketView ticket) async {
+  final labels = _labelsOf(context, ticket);
+  if (labels == null) return false;
+  final picked = await showModalBottomSheet<(String?,)>(
+    context: context,
+    useRootNavigator: true,
+    showDragHandle: true,
+    isScrollControlled: true,
+    builder: (sheet) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            key: const ValueKey('effort-default'),
+            title: Text(labels.reset),
+            subtitle: Text(labels.effortValue ?? ''),
+            trailing: ticket.run.effort == null ? Icon(Icons.check, color: Tokens.accentText) : null,
+            onTap: () => Navigator.pop(sheet, (null,)),
+          ),
+          for (final (value, label, detail) in ModelCatalog.efforts)
+            ListTile(
+              key: ValueKey('effort-$value'),
+              title: Text(label),
+              subtitle: Text(detail),
+              trailing: ticket.run.effort == value ? Icon(Icons.check, color: Tokens.accentText) : null,
+              onTap: () => Navigator.pop(sheet, (value,)),
+            ),
+          ChangeMyDefaultsTile(sheet: sheet),
+        ],
+      ),
+    ),
+  );
+  if (picked == null || picked.$1 == ticket.run.effort || !context.mounted) return false;
+  final ok = await ticketWrite(
+    context,
+    ticketUpdate(ticketId: ticket.id, run: TaskRun(mode: ticket.run.mode, model: ticket.run.model, effort: picked.$1)),
+    expectedVersion: ticket.version,
+  );
+  if (ok && context.mounted) _reread(context);
+  return ok;
+}
+
+/// What the first row of a ticket's run sheet says: "Use your default" with
+/// the value, or on an older server "Default" with whose it was.
+(String, String) _defaultRow(RunDefaultLabels? labels, String value, String old) =>
+    labels == null ? ('Default', old) : (labels.reset, value);
+
+/// The Mode of [ticket]'s runs (`ticket.update { run }`): the default (the
+/// ticket's login user's, on an older server the owner's) or one of the modes.
 Future<bool> chooseTicketMode(BuildContext context, TicketView ticket) async {
+  final labels = _labelsOf(context, ticket);
+  final (title, detail) = _defaultRow(labels, labels?.modeValue ?? '', "The owner's own mode");
   final picked = await showModalBottomSheet<(AgentMode?,)>(
     context: context,
     useRootNavigator: true,
@@ -547,8 +616,8 @@ Future<bool> chooseTicketMode(BuildContext context, TicketView ticket) async {
         children: [
           ListTile(
             key: const ValueKey('mode-default'),
-            title: const Text('Default'),
-            subtitle: const Text("The owner's own mode"),
+            title: Text(title),
+            subtitle: Text(detail),
             trailing: ticket.run.mode == null ? Icon(Icons.check, color: Tokens.accentText) : null,
             onTap: () => Navigator.pop(sheet, (null,)),
           ),
@@ -560,6 +629,7 @@ Future<bool> chooseTicketMode(BuildContext context, TicketView ticket) async {
               trailing: ticket.run.mode == m ? Icon(Icons.check, color: Tokens.accentText) : null,
               onTap: () => Navigator.pop(sheet, (m,)),
             ),
+          if (labels != null) ChangeMyDefaultsTile(sheet: sheet),
         ],
       ),
     ),
@@ -588,6 +658,8 @@ Future<bool> chooseTicketModel(BuildContext context, TicketView ticket) async {
     return false;
   }
   if (!context.mounted) return false;
+  final labels = _labelsOf(context, ticket);
+  final (title, detail) = _defaultRow(labels, labels?.modelValue ?? '', "The owner's own model");
   final picked = await showModalBottomSheet<(String?,)>(
     context: context,
     useRootNavigator: true,
@@ -601,8 +673,8 @@ Future<bool> chooseTicketModel(BuildContext context, TicketView ticket) async {
           children: [
             ListTile(
               key: const ValueKey('model-default'),
-              title: const Text('Default'),
-              subtitle: const Text("The owner's own model"),
+              title: Text(title),
+              subtitle: Text(detail),
               trailing: ticket.run.model == null ? Icon(Icons.check, color: Tokens.accentText) : null,
               onTap: () => Navigator.pop(sheet, (null,)),
             ),
@@ -618,6 +690,7 @@ Future<bool> chooseTicketModel(BuildContext context, TicketView ticket) async {
                 trailing: ticket.run.model == m ? Icon(Icons.check, color: Tokens.accentText) : null,
                 onTap: () => Navigator.pop(sheet, (m,)),
               ),
+            if (labels != null) ChangeMyDefaultsTile(sheet: sheet),
           ],
         ),
       ),

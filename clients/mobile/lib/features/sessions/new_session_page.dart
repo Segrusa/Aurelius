@@ -26,26 +26,25 @@ import '../connection/connection_bloc.dart';
 import '../project/new_task_page.dart' show maxTaskFileBytes, maxTaskFiles;
 import '../runtime/runtime_bloc.dart';
 import 'session_rules.dart';
-import '../my_defaults/my_defaults_bloc.dart' show userRunDefaultsFeature;
+import '../my_defaults/run_default_chips.dart';
+import '../my_defaults/run_default_label.dart';
 
-/// The label of a run choice left to the employee (desktop: "Employee's default").
+/// The label of a run choice left to the employee on an older server (desktop: "Employee's default").
 const employeeDefault = "Employee's default";
-
-/// The label of a run choice left to the board member's own defaults (feature `user_run_defaults`).
-const myDefault = 'My default';
 
 /// The visible gap between the composer and the tab bar's glass.
 const _barGap = 10.0;
 
-/// The label of the run pill: the model, effort and mode that differ from the
-/// employee's own, or "Default" when none do.
-String runSummary({required String model, required String effort, required String mode}) {
+/// The label of the run pill: the model, effort and mode chosen for this
+/// start, or [fallback] when none are ("Your default · Opus 5.5"; "Default" on
+/// an older server).
+String runSummary({required String model, required String effort, required String mode, String fallback = 'Default'}) {
   final parts = [
     if (model != 'default') ModelCatalog.friendly(model),
     if (effort != 'default') ModelCatalog.effortLabel(effort),
     if (mode != 'default') AgentMode.fromJson(mode).label,
   ];
-  return parts.isEmpty ? 'Default' : parts.join(' · ');
+  return parts.isEmpty ? fallback : parts.join(' · ');
 }
 
 /// What the Chat tab starts: a work session, or a ticket (through New ticket).
@@ -334,7 +333,9 @@ class _NewSessionPageState extends State<NewSessionPage> {
   /// The run sheet: model, effort and mode in one slide-up sheet. A choice
   /// applies at once and the sheet stays open, so all three can be set in one go.
   Future<void> _pickRun(List<String> models) async {
-    final fallback = context.read<AureliusRepository>().linkState.has(userRunDefaultsFeature) ? myDefault : employeeDefault;
+    // A start runs on the reader's own login: "Use your default · Opus 5.5".
+    final labels = readRunDefaultLabels(context);
+    String fallback(String? Function(RunDefaultLabels) value) => labels == null ? employeeDefault : defaultLabel(labels.reset, value(labels));
     await showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
@@ -366,9 +367,10 @@ class _NewSessionPageState extends State<NewSessionPage> {
             child: ConstrainedBox(
               constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.8),
               child: ListView(shrinkWrap: true, children: [
-                section('Model', [('default', fallback), for (final m in models) (m, ModelCatalog.friendly(m))], _modelOf(models), (v) => _model = v),
-                section('Effort', [('default', fallback), for (final (v, label, _) in ModelCatalog.efforts) (v, label)], _effort, (v) => _effort = v),
-                section('Mode', [('default', fallback), for (final m in agentModes) (m.wire, m.label)], _mode, (v) => _mode = v),
+                section('Model', [('default', fallback((l) => l.modelValue)), for (final m in models) (m, ModelCatalog.friendly(m))], _modelOf(models), (v) => _model = v),
+                section('Effort', [('default', fallback((l) => l.effortValue)), for (final (v, label, _) in ModelCatalog.efforts) (v, label)], _effort, (v) => _effort = v),
+                section('Mode', [('default', fallback((l) => l.modeValue)), for (final m in agentModes) (m.wire, m.label)], _mode, (v) => _mode = v),
+                if (labels != null) ChangeMyDefaultsTile(sheet: sheet),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                   child: FilledButton(key: const ValueKey('run-sheet-done'), onPressed: () => Navigator.pop(sheet), child: const Text('Done')),
@@ -500,6 +502,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
     required bool can,
     required bool keyboard,
   }) {
+    final runLabels = watchRunDefaultLabels(context);
     // Just above the tab bar's glass; with the keyboard up the bar is under it, so only a margin.
     final bottom = keyboard ? 8.0 : MediaQuery.paddingOf(context).bottom - AppTabBar.clearTop + _barGap;
     final showProblem = _tried && problem != null;
@@ -530,7 +533,7 @@ class _NewSessionPageState extends State<NewSessionPage> {
                 child: _TrayChip(
                   key: const ValueKey('new-session-run'),
                   icon: CupertinoIcons.slider_horizontal_3,
-                  label: runSummary(model: model, effort: _effort, mode: _mode),
+                  label: runSummary(model: model, effort: _effort, mode: _mode, fallback: runLabels?.model ?? 'Default'),
                   onTap: () => _pickRun(models),
                 ),
               ),

@@ -154,6 +154,7 @@ describe("activeSessions", () => {
 describe("the run chips", () => {
   it("say the choice, or that the employee's own applies", () => {
     expect(runChipLabel(null)).toBe("Employee's default");
+    expect(runChipLabel(null, (v) => v, "Your default · Opus 5.5")).toBe("Your default · Opus 5.5");
     expect(runChipLabel("high")).toBe("high");
     expect(runChipLabel("opus", (m) => m.toUpperCase())).toBe("OPUS");
   });

@@ -41,8 +41,10 @@ import {
   ticketCreateParams,
   titleOfGoal,
 } from "./dialog-logic";
+import { effortName } from "./employee-logic";
 import { overlays, useOpenOverlay } from "./overlays-store";
 import { LAST_QUICK, QUICK_NOTE, quickAssignee, quickCreatable, quickCreateParams, quickProblem } from "./quick-logic";
+import { RunMenu, useRunDefaults } from "./run-default";
 import { modelName, useSetting } from "./settings-kit";
 import { NoConnectionNote, useNoConnection } from "./tickets-kit";
 
@@ -241,6 +243,8 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
   const projects = useProjects();
   const employees = useEmployees();
   const models = useModels();
+  // What they make runs on their own login: "Your default · …".
+  const runLabels = useRunDefaults();
   const [seed] = useState(() => overlays.prefill());
   const workspace = useWorkspace();
   const [projectId, setProjectId] = useState<string | null>(seed?.projectId ?? workspace.id);
@@ -428,12 +432,13 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
                 </Chip>
               }
             />
-            <Menu
+            <RunMenu
               label="Model"
               value={model}
               options={models}
+              fallback={runLabels?.model ?? "Default"}
+              labels={runLabels}
               onPick={setModel}
-              trigger={<Chip name="Model">{models.find((m) => m.key === model)?.label ?? "Default"}</Chip>}
             />
           </div>
         ) : null}
@@ -496,27 +501,21 @@ function NewTicketBody({ onClose }: { onClose: () => void }) {
                 onPick={setOwner}
                 trigger={<Chip name="Owner">{ownerName}</Chip>}
               />
-              <Menu
+              <RunMenu
                 label="Mode"
                 value={mode}
-                options={MODES.map((m) =>
-                  m.key === "default"
-                    ? { key: m.key as string, label: "Owner's default" }
-                    : { key: m.key as string, label: m.label },
-                )}
+                options={MODES.map((m) => ({ key: m.key as string, label: m.label }))}
+                fallback={runLabels?.mode ?? "Owner's default"}
+                labels={runLabels}
                 onPick={setMode}
-                trigger={
-                  <Chip name="Mode">
-                    {mode === "default" ? "Owner's default" : MODES.find((m) => m.key === mode)?.label}
-                  </Chip>
-                }
               />
-              <Menu
+              <RunMenu
                 label="Model"
                 value={model}
                 options={models}
+                fallback={runLabels?.model ?? "Default"}
+                labels={runLabels}
                 onPick={setModel}
-                trigger={<Chip name="Model">{models.find((m) => m.key === model)?.label ?? "Default"}</Chip>}
               />
             </div>
             <div {...stylex.props(styles.twoColumns)}>
@@ -580,6 +579,8 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
   const projects = useProjects();
   const employees = useEmployees();
   const models = useModels();
+  // What they make runs on their own login: "Your default · …".
+  const labels = useRunDefaults();
   const [goal, setGoal] = useState(() => overlays.prefill()?.description ?? "");
   const attach = useAttachments();
   const [effort, setEffort] = useState("default");
@@ -804,18 +805,21 @@ function GiveWorkBody({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <div {...stylex.props(styles.chips)}>
-          <Menu
+          <RunMenu
             label="Model"
             value={model}
             options={models}
+            fallback={labels?.model ?? "Default"}
+            labels={labels}
             onPick={setModel}
-            trigger={<Chip name="Model">{models.find((m) => m.key === model)?.label ?? "Default"}</Chip>}
           />
-          <Menu
+          <RunMenu
             label="Effort"
-            options={EFFORTS.map((e) => ({ key: e, label: e === "default" ? "Default" : e }))}
+            value={effort}
+            options={EFFORTS.map((e) => ({ key: e, label: labels ? effortName(e) : e }))}
+            fallback={labels?.effort ?? "Default"}
+            labels={labels}
             onPick={setEffort}
-            trigger={<Chip name="Effort">{effort === "default" ? "Default" : effort}</Chip>}
           />
           {quick ? null : (
             <Menu

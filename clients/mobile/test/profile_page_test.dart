@@ -107,6 +107,19 @@ void main() {
     });
   }
 
+  testWidgets('a server with My defaults has only My defaults; Model & effort stays for an old server (OPR-5 point 5)', (tester) async {
+    const mine = LinkState(status: LinkStatus.online, boardMembersExist: true, user: _alex, features: ['user_run_defaults', 'employee_run_overview']);
+    await pump(tester, link: mine);
+    expect(find.byKey(const ValueKey('settings-my-defaults')), findsOneWidget);
+    expect(find.byKey(const ValueKey('settings-employee-runs')), findsNothing);
+    expect(find.text('Per employee'), findsNothing);
+
+    const old = LinkState(status: LinkStatus.online, boardMembersExist: true, user: _alex, features: ['employee_run_overview']);
+    await pump(tester, link: old);
+    expect(find.byKey(const ValueKey('settings-my-defaults')), findsNothing);
+    expect(find.byKey(const ValueKey('settings-employee-runs')), findsOneWidget);
+  });
+
   testWidgets('without a signed-in board member there is no account part and no Sign out', (tester) async {
     await pump(tester, link: const LinkState(status: LinkStatus.online));
     expect(find.byKey(const ValueKey('account-sessions')), findsNothing);

@@ -12,6 +12,7 @@ import {
   remoteAccessDevices,
   runDefaultValue,
   screenUseRows,
+  sectionsFor,
   withRunDefault,
 } from "./settings-logic";
 
@@ -153,5 +154,17 @@ describe("my run defaults", () => {
       "Default · CLAUDE-OPUS-5-5 (connection's default)",
     );
     expect(defaultModelLabel(null, (m) => m)).toBe("Default · the connection's model");
+  });
+});
+
+describe("settings sections per server", () => {
+  const sections = [{ key: "run-defaults" }, { key: "employee-runs", replacedBy: "user_run_defaults" }];
+
+  it("drops Model & effort where My defaults replaced it", () => {
+    expect(sectionsFor(sections, ["user_run_defaults"]).map((s) => s.key)).toEqual(["run-defaults"]);
+  });
+
+  it("keeps it on an old server", () => {
+    expect(sectionsFor(sections, []).map((s) => s.key)).toEqual(["run-defaults", "employee-runs"]);
   });
 });

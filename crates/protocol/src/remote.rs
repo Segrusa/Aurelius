@@ -149,6 +149,8 @@ fn method_needs(method: &Method) -> Needs {
         | Method::UserRailPins
         // One's own run defaults.
         | Method::UserRunDefaults
+        // Another board member's run defaults, for the label of their ticket.
+        | Method::UserRunDefaultsOf { .. }
         | Method::UserLogin(_)
         | Method::UserLogout
         | Method::SessionList { .. }
@@ -712,6 +714,7 @@ mod tests {
         assert_eq!(required(&set(Some(AgentMode::Auto))), cap(Capability::Approve));
         assert_eq!(required(&set(Some(AgentMode::Plan))), cap(Capability::Chat));
         assert_eq!(required(&read(Method::UserRunDefaults)), cap(Capability::Read));
+        assert_eq!(required(&read(Method::UserRunDefaultsOf { user_id: aurelius_domain::UserId::new() })), cap(Capability::Read));
     }
 
     #[test]

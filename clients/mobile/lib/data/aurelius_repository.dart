@@ -168,6 +168,10 @@ class AureliusRepository {
   /// (feature `user_run_defaults`).
   Future<UserRunDefaultsView> myRunDefaults() async => (await _ask<ResponseBodyUserRunDefaults>(userRunDefaults())).value;
 
+  /// What a run on another board member's login comes to (feature
+  /// `run_defaults_of`), for "Kim's default · Sonnet 5.5" on their ticket.
+  Future<UserRunDefaultsView> runDefaultsOf(String userId) async => (await _ask<ResponseBodyUserRunDefaults>(userRunDefaultsOf(userId: userId))).value;
+
   /// Replace the signed-in board member's own run defaults as a whole.
   Future<Receipt> setMyRunDefaults(UserRunDefaults defaults) => write(userSetRunDefaults(defaults: defaults), retry: false);
 

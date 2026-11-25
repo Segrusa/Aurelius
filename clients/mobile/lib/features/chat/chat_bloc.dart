@@ -6,6 +6,7 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:uuid/uuid.dart';
 
+import '../my_defaults/my_defaults_bloc.dart' show userRunDefaultsFeature;
 import '../../core/bloc/transformers.dart';
 import '../../core/net/connection.dart';
 import '../../core/net/protocol.dart';
@@ -462,6 +463,10 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   }
 
   final AureliusRepository _repository;
+
+  /// The server keeps each board member's own run defaults (`user_run_defaults`):
+  /// a run without a choice here uses the reader's, "Your default · Opus 5.5".
+  bool get ownRunDefaults => _repository.linkState.has(userRunDefaultsFeature);
   final String? employeeId;
   final String? projectId;
 

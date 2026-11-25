@@ -12585,6 +12585,13 @@ sealed class Method {
         return const MethodUserRailPins();
       case 'user.run_defaults':
         return const MethodUserRunDefaults();
+      case 'user.run_defaults_of':
+        {
+          final src = (json['params'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+          return MethodUserRunDefaultsOf(
+          userId: (src['user_id'] as String),
+        );
+        }
       case 'user.whoami':
         return const MethodUserWhoami();
       case 'vault.audit':
@@ -14258,6 +14265,25 @@ final class MethodUserRunDefaults extends Method {
   @override
   Map<String, dynamic> toJson() => <String, dynamic>{
       'method': 'user.run_defaults',
+    };
+}
+
+/// What a run on another board member's login comes to without a choice of
+/// its own (feature `run_defaults_of`): shown as "Kim's default · Sonnet 5.5"
+/// on a ticket that runs on Kim's login. Board members only; not for apps.
+final class MethodUserRunDefaultsOf extends Method {
+  const MethodUserRunDefaultsOf({
+    required this.userId,
+  });
+
+  final String userId;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{
+      'method': 'user.run_defaults_of',
+      'params': <String, dynamic>{
+      'user_id': userId,
+    },
     };
 }
 

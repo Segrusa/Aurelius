@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../my_defaults/run_default_chips.dart';
 import '../../core/clipboard/image_clipboard.dart';
 import '../../core/theme/tokens.dart';
 import '../../core/widgets/ios.dart';
@@ -508,7 +509,7 @@ class _NewTicketPageState extends State<NewTicketPage> with WidgetsBindingObserv
                     Text('Mode', style: TextStyle(color: Tokens.label2, fontSize: 13)),
                     const SizedBox(height: 6),
                     Wrap(spacing: 8, children: [
-                      ChoiceChip(key: const ValueKey('new-ticket-mode-default'), label: const Text('Default'), selected: _mode == null, showCheckmark: false, onSelected: (_) => setState(() => _mode = null)),
+                      ChoiceChip(key: const ValueKey('new-ticket-mode-default'), label: Text(watchRunDefaultLabels(context)?.mode ?? 'Default'), selected: _mode == null, showCheckmark: false, onSelected: (_) => setState(() => _mode = null)),
                       for (final m in agentModes) ChoiceChip(key: ValueKey('new-ticket-mode-${m.wire}'), label: Text(m.label), selected: _mode == m, showCheckmark: false, onSelected: (_) => setState(() => _mode = m)),
                     ]),
                     if (_mode == AgentMode.plan) Padding(padding: const EdgeInsets.only(top: 6), child: Text('Stops in Plan review with a plan before anything changes.', style: TextStyle(color: Tokens.label2, fontSize: 13))),

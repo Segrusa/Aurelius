@@ -1032,6 +1032,11 @@ impl Client {
         self.read(Method::UserRunDefaults, body!(UserRunDefaults)).await
     }
 
+    /// What a run on `user`'s login comes to (`user.run_defaults_of`, feature `run_defaults_of`).
+    pub async fn user_run_defaults_of(&self, user: aurelius_domain::UserId) -> Result<aurelius_domain::user::UserRunDefaultsView, ClientError> {
+        self.read(Method::UserRunDefaultsOf { user_id: user }, body!(UserRunDefaults)).await
+    }
+
     /// Set the signed-in board member's own run defaults (`user.set_run_defaults`).
     pub async fn set_user_run_defaults(&self, defaults: aurelius_domain::user::UserRunDefaults) -> Result<CommandReceipt, ClientError> {
         self.execute(envelope(Command::SetUserRunDefaults(aurelius_domain::user::SetUserRunDefaults { defaults }), None)).await

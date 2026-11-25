@@ -142,3 +142,14 @@ export function withRunDefault(defaults: UserRunDefaults, field: RunDefaultField
 export function defaultModelLabel(model: string | null | undefined, name: (model: string) => string): string {
   return model ? `Default · ${name(model)} (connection's default)` : "Default · the connection's model";
 }
+
+/** A Settings section a newer server replaces: gone once the server has `replacedBy`. */
+export interface ReplaceableSection {
+  key: string;
+  replacedBy?: string;
+}
+
+/** The sections this server shows: an old place stays only where the server lacks what replaced it. */
+export function sectionsFor<T extends ReplaceableSection>(sections: T[], features: readonly string[]): T[] {
+  return sections.filter((s) => !s.replacedBy || !features.includes(s.replacedBy));
+}
