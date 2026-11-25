@@ -411,7 +411,9 @@ impl CommandService {
                     to_column(tx, state.id, ColumnKind::Done)?;
                     store::mark_done(tx, state.id)?;
                     e.moved(tx, state.column, ColumnKind::Done, by)?;
-                    e.push(tx, EventKind::TicketAccepted, json!({ "note": note, "by": by }))?;
+                    let source = e.push_id(tx, EventKind::TicketAccepted, json!({ "note": note, "by": by }))?;
+                    // Its worktrees go; branches with work stay for the Code tab (ticket #86).
+                    quick::request_cleanup(tx, &state, source, &command_id.to_string())?;
                     e.line(done_line(tx, state.id, by)?);
                     finish_then(tx, state.id, e, |tx| ticket_line::accept(tx, &st, state.id, user))
                 })
@@ -445,7 +447,8 @@ impl CommandService {
                 to_column(tx, state.id, ColumnKind::Backlog)?;
                 e.moved(tx, state.column, ColumnKind::Backlog, by)?;
                 let source = e.push_id(tx, EventKind::TicketCancelled, json!({ "by": by }))?;
-                // BR4: a quick task's worktree and branch go too (the client confirmed it).
+                // BR4: a quick task's worktree and branch go too (the client confirmed it); a
+                // ticket's worktrees go, its branches with work stay (ticket #86).
                 quick::request_cleanup(tx, &state, source, &command_id.to_string())?;
                 e.line(ticket_line::column_line(tx, state.id, Some(by), state.column, ColumnKind::Backlog, Some("cancelled the ticket"))?);
                 finish_then(tx, state.id, e, |tx| ticket_line::cancel(tx, &st, state.id, &command_id.to_string()))

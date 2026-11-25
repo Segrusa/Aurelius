@@ -24,7 +24,8 @@ use std::path::{Path, PathBuf};
 
 /// The daemon's job that merges an accepted quick task into its project's main.
 pub const QUICK_MERGE_JOB_KIND: &str = "ticket.quick_merge";
-/// The daemon's job that removes a cancelled quick task's worktree and branch (BR4).
+/// The daemon's job that removes a cancelled quick task's worktree and branch (BR4), or a
+/// cancelled or done ticket's worktrees (ticket #86).
 pub const QUICK_CLEANUP_JOB_KIND: &str = "ticket.quick_cleanup";
 
 /// ST-02 AC2: what `delegate_task` answers in a quick task's main task.
@@ -123,11 +124,10 @@ pub(crate) fn request_merge(tx: &Tx<'_>, state: &store::TicketState, by: Actor, 
     Ok(Ok(crate::conversation::discussion::ticket_line(tx, state.id, line, &format!("{name} approved the quick task: merging {branch} into main…"))?))
 }
 
-/// A cancel of a quick task (BR4), in its transaction: the daemon removes its worktree and branch.
+/// A cancel of a quick task (BR4), in its transaction: the daemon removes its worktree and
+/// branch. For a normal ticket's cancel or Done (ticket #86): the daemon removes the
+/// worktrees of its tasks and keeps their branches that have work of their own.
 pub(crate) fn request_cleanup(tx: &Tx<'_>, state: &store::TicketState, source: EventId, command: &str) -> Result<(), StorageError> {
-    if state.kind != TicketKind::Quick {
-        return Ok(());
-    }
     let job = format!("quick-cleanup:{}:{command}", state.id);
     aurelius_storage::events::insert_job(tx, &job, QUICK_CLEANUP_JOB_KIND, source, &job, &json!({ "ticket_id": state.id }))
 }
@@ -198,6 +198,21 @@ impl CommandService {
     pub fn quick_merge_finished(&self, ticket: TicketId, user: UserId, outcome: MergeOutcome) -> Result<(bool, Vec<EventNotice>), AppError> {
         let st = self.store().clone();
         self.store().write(move |tx| merge_finished(tx, &st, ticket, user, &outcome)).map_err(storage_error)
+    }
+
+    /// The worktrees of a normal ticket's tasks, to remove once it is no longer worked on
+    /// (cancelled or Done); none while it is in Todo or Doing again, or for a quick task.
+    pub fn ticket_worktrees(&self, ticket: TicketId) -> Result<Vec<aurelius_storage::work_places::WorkPlace>, AppError> {
+        let worktrees = aurelius_domain::work_place::worktrees_dir(self.store().root());
+        self.store()
+            .read(|c| {
+                let Some(state) = store::state(c, ticket)? else { return Ok(vec![]) };
+                if state.kind == TicketKind::Quick || (!state.archived && matches!(state.column, ColumnKind::Todo | ColumnKind::Doing)) {
+                    return Ok(vec![]);
+                }
+                aurelius_storage::work_places::of_ticket_tasks(c, &worktrees, ticket)
+            })
+            .map_err(storage_error)
     }
 
     /// The daemon could not remove a cancelled quick task's worktree or branch: the discussion says so.

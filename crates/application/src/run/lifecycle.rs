@@ -620,7 +620,7 @@ pub(crate) fn commit_end(tx: &aurelius_storage::Tx<'_>, store: &aurelius_storage
             // and an employee's own workspace.
             None => {
                 let own = store.root().join("workspaces").join(conversation_id.to_string());
-                let roots: Vec<std::path::PathBuf> = conv::work_folders(tx, conversation_id)?
+                let roots: Vec<std::path::PathBuf> = conv::work_folders(tx, &aurelius_domain::work_place::worktrees_dir(store.root()), conversation_id)?
                     .into_iter()
                     .map(std::path::PathBuf::from)
                     .chain(std::iter::once(own))

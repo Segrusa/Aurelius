@@ -13,5 +13,6 @@ pub mod plan;
 pub mod queue;
 pub mod session;
 pub mod trace;
+pub mod work_place;
 
 pub use plan::{ChatRunPlan, RunOutcome};

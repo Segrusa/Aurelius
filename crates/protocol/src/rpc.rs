@@ -473,11 +473,14 @@ pub mod feature {
     /// Design in New session.
     pub const DESIGN_SESSIONS: &str = "design_sessions";
     /// A work session on a branch of its own in the project's folder (protocol 5,
-    /// additive): `work_session.start` and `work_session.dispatch` take `own_branch`,
-    /// and `WorkSessionView::own_branch` says a session works so. The daemon checks the
-    /// branch out before each run, never while another run works in the folder or the
-    /// folder has uncommitted changes. A client without this feature does not offer it.
+    /// additive). No longer advertised since `WORKTREES_ONLY`: the server still takes
+    /// `own_branch` from older clients, but starts such a session in a worktree of its own.
     pub const SESSION_OWN_BRANCH: &str = "session_own_branch";
+    /// Every session and every task works in a worktree of its own (ticket #86, protocol 5,
+    /// additive): `work_session.start` and `work_session.dispatch` always make one, whatever
+    /// `worktree` and `own_branch` say, and an older session in the project's folder moves to
+    /// one at its next run. A client with this feature offers no choice of where a session works.
+    pub const WORKTREES_ONLY: &str = "worktrees_only";
     /// A paired device belongs to the board member who paired it (protocol 5, additive):
     /// `device.list` and `device.revoke` for the session's own devices,
     /// `RemoteClientView::paired_by`, and `remote.get_status` shows only the reader's
@@ -566,7 +569,7 @@ pub const FEATURES: &[&str] = &[
     feature::ARTIFACT_DRAFTS,
     feature::DESIGNS,
     feature::DESIGN_SESSIONS,
-    feature::SESSION_OWN_BRANCH,
+    feature::WORKTREES_ONLY,
     feature::OWN_DEVICES,
     feature::RAIL_PINS,
     feature::SIDE_QUESTION,

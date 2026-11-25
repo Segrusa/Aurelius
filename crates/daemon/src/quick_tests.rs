@@ -44,14 +44,14 @@ fn head(repo: &Path) -> String {
 #[test]
 fn a_worktree_is_made_on_a_new_branch_from_main_and_again_after_it_is_gone() {
     let (_dir, repo, worktree) = repo();
-    ensure_worktree(&repo, BRANCH, &worktree).unwrap();
+    ensure_worktree(&repo, BRANCH, &worktree, None).unwrap();
     assert_eq!(run(&worktree, &["symbolic-ref", "--short", "HEAD"]), BRANCH);
     assert_eq!(head(&worktree), head(&repo), "from main as it is");
-    ensure_worktree(&repo, BRANCH, &worktree).unwrap();
+    ensure_worktree(&repo, BRANCH, &worktree, None).unwrap();
     commit_in(&worktree, "a.txt", "a\n");
     let work = head(&worktree);
     cleanup_worktree_only(&repo, &worktree);
-    ensure_worktree(&repo, BRANCH, &worktree).unwrap();
+    ensure_worktree(&repo, BRANCH, &worktree, None).unwrap();
     assert_eq!(head(&worktree), work, "an existing branch keeps its commits");
 }
 
@@ -62,7 +62,7 @@ fn cleanup_worktree_only(repo: &Path, worktree: &Path) {
 #[test]
 fn an_approved_branch_is_merged_with_no_ff_and_the_ticket_number() {
     let (_dir, repo, worktree) = repo();
-    ensure_worktree(&repo, BRANCH, &worktree).unwrap();
+    ensure_worktree(&repo, BRANCH, &worktree, None).unwrap();
     commit_in(&worktree, "a.txt", "a\n");
     let MergeOutcome::Merged(commit) = merge(&repo, BRANCH, "Merge quick/ticket-7: Fix (ticket #7)") else { panic!("merged") };
     assert_eq!(commit, head(&repo));
@@ -76,7 +76,7 @@ fn an_approved_branch_is_merged_with_no_ff_and_the_ticket_number() {
 #[test]
 fn a_conflict_is_aborted_and_main_stays_as_it_was() {
     let (_dir, repo, worktree) = repo();
-    ensure_worktree(&repo, BRANCH, &worktree).unwrap();
+    ensure_worktree(&repo, BRANCH, &worktree, None).unwrap();
     commit_in(&worktree, "readme.md", "from the branch\n");
     fs::write(repo.join("readme.md"), "from main\n").unwrap();
     run(&repo, &["commit", "--quiet", "-am", "main moved on"]);
@@ -92,7 +92,7 @@ fn a_conflict_is_aborted_and_main_stays_as_it_was() {
 #[test]
 fn a_main_with_uncommitted_changes_is_not_merged_into() {
     let (_dir, repo, worktree) = repo();
-    ensure_worktree(&repo, BRANCH, &worktree).unwrap();
+    ensure_worktree(&repo, BRANCH, &worktree, None).unwrap();
     commit_in(&worktree, "a.txt", "a\n");
     fs::write(repo.join("readme.md"), "edited\n").unwrap();
     let before = head(&repo);
@@ -106,7 +106,7 @@ fn a_main_with_uncommitted_changes_is_not_merged_into() {
 #[test]
 fn a_branch_without_commits_is_a_plain_done() {
     let (_dir, repo, worktree) = repo();
-    ensure_worktree(&repo, BRANCH, &worktree).unwrap();
+    ensure_worktree(&repo, BRANCH, &worktree, None).unwrap();
     let before = head(&repo);
     assert_eq!(merge(&repo, BRANCH, "m"), MergeOutcome::NoCommits);
     assert_eq!(head(&repo), before);
@@ -124,7 +124,7 @@ fn a_missing_branch_is_not_merged() {
 #[test]
 fn a_project_folder_on_another_branch_is_not_merged_into() {
     let (_dir, repo, worktree) = repo();
-    ensure_worktree(&repo, BRANCH, &worktree).unwrap();
+    ensure_worktree(&repo, BRANCH, &worktree, None).unwrap();
     commit_in(&worktree, "a.txt", "a\n");
     run(&repo, &["checkout", "--quiet", "-b", "feature"]);
     let MergeOutcome::Failed { reason, .. } = merge(&repo, BRANCH, "m") else { panic!("refused") };
@@ -135,7 +135,7 @@ fn a_project_folder_on_another_branch_is_not_merged_into() {
 #[test]
 fn a_cancel_removes_the_worktree_and_the_branch_with_its_unmerged_work() {
     let (_dir, repo, worktree) = repo();
-    ensure_worktree(&repo, BRANCH, &worktree).unwrap();
+    ensure_worktree(&repo, BRANCH, &worktree, None).unwrap();
     commit_in(&worktree, "a.txt", "a\n");
     fs::write(worktree.join("b.txt"), "not committed\n").unwrap();
     let before = head(&repo);
@@ -152,18 +152,18 @@ fn a_missing_main_says_why_in_words_a_board_member_can_act_on() {
     let plain = dir.path().join("plain");
     fs::create_dir_all(&plain).unwrap();
     let worktree = dir.path().join("data/worktrees/session-1");
-    let why = ensure_worktree(&plain, "session/1", &worktree).unwrap_err();
+    let why = ensure_worktree(&plain, "session/1", &worktree, None).unwrap_err();
     assert!(why.contains("is not a git repository"), "{why}");
     // A repository without a commit yet.
     let empty = dir.path().join("empty");
     fs::create_dir_all(&empty).unwrap();
     run(&empty, &["init", "--quiet", "--initial-branch=main"]);
-    let why = ensure_worktree(&empty, "session/1", &worktree).unwrap_err();
+    let why = ensure_worktree(&empty, "session/1", &worktree, None).unwrap_err();
     assert!(why.contains("no commit yet"), "{why}");
     // A repository whose branch has another name: it is named.
     let (_dir, repo, worktree) = repo();
     run(&repo, &["branch", "-m", "main", "develop"]);
-    let why = ensure_worktree(&repo, BRANCH, &worktree).unwrap_err();
+    let why = ensure_worktree(&repo, BRANCH, &worktree, None).unwrap_err();
     assert!(why.contains("no main or master branch") && why.contains("develop"), "{why}");
     assert!(matches!(merge(&repo, BRANCH, "m"), MergeOutcome::Failed { reason, .. } if reason.contains("develop")));
 }
@@ -172,7 +172,7 @@ fn a_missing_main_says_why_in_words_a_board_member_can_act_on() {
 fn a_sessions_worktree_is_made_on_its_own_branch() {
     let (_dir, repo, _) = repo();
     let worktree = repo.parent().unwrap().join("data/worktrees/session-1a2b3c4d");
-    ensure_worktree(&repo, "session/1a2b3c4d", &worktree).unwrap();
+    ensure_worktree(&repo, "session/1a2b3c4d", &worktree, None).unwrap();
     assert_eq!(run(&worktree, &["symbolic-ref", "--short", "HEAD"]), "session/1a2b3c4d");
 }
 
@@ -183,59 +183,56 @@ fn branch_in(repo: &Path) -> String {
 }
 
 #[test]
-fn an_own_branch_is_made_from_what_the_folder_has_checked_out_and_switched_back_to() {
-    let (_dir, repo, _) = repo();
-    let first = head(&repo);
-    ensure_own_branch(&repo, OWN, false).unwrap();
-    assert_eq!(branch_in(&repo), OWN);
-    assert_eq!(head(&repo), first, "from main as it was");
+fn a_delegated_part_starts_from_the_branch_it_was_delegated_from() {
+    let (dir, repo, worktree) = repo();
+    ensure_worktree(&repo, "ticket/7", &worktree, None).unwrap();
+    commit_in(&worktree, "plan.md", "plan\n");
+    let part = dir.path().join("data/worktrees/ticket-7-1a2b3c4d");
+    ensure_worktree(&repo, "ticket/7-forge-1a2b3c4d", &part, Some("ticket/7")).unwrap();
+    assert_eq!(head(&part), head(&worktree), "from the ticket's branch, not from main");
+    // A base that does not exist (yet) falls back to main.
+    let other = dir.path().join("data/worktrees/task-1a2b3c4d");
+    ensure_worktree(&repo, "task/1a2b3c4d", &other, Some("ticket/404")).unwrap();
+    assert_eq!(head(&other), head(&repo));
+}
+
+#[test]
+fn files_sent_before_the_worktree_was_made_end_up_in_it() {
+    let (_dir, repo, worktree) = repo();
+    fs::create_dir_all(worktree.join(".aurelius/uploads")).unwrap();
+    fs::write(worktree.join(".aurelius/uploads/brief.pdf"), "pdf").unwrap();
+    ensure_worktree(&repo, BRANCH, &worktree, None).unwrap();
+    assert!(worktree.join(".git").exists() && worktree.join("readme.md").exists());
+    assert_eq!(fs::read_to_string(worktree.join(".aurelius/uploads/brief.pdf")).unwrap(), "pdf");
+    assert!(!worktree.with_extension(PENDING_EXTENSION).exists(), "nothing left aside");
+}
+
+#[test]
+fn an_older_own_branch_session_moves_out_of_the_project_folder_into_a_worktree() {
+    let (dir, repo, _) = repo();
+    run(&repo, &["switch", "--quiet", "-c", OWN]);
     commit_in(&repo, "a.txt", "a\n");
     let work = head(&repo);
-    // The board member went back to main in between; the next run is on its branch again.
-    run(&repo, &["switch", "--quiet", "main"]);
-    ensure_own_branch(&repo, OWN, false).unwrap();
-    assert_eq!((branch_in(&repo), head(&repo)), (OWN.to_owned(), work), "an existing branch keeps its commits");
+    release_branch(&repo, OWN, false).unwrap();
+    assert_eq!(branch_in(&repo), "main", "the project's folder is back on main");
+    let worktree = dir.path().join("data/worktrees/session-1a2b3c4d");
+    ensure_worktree(&repo, OWN, &worktree, None).unwrap();
+    assert_eq!((branch_in(&worktree), head(&worktree)), (OWN.to_owned(), work), "the session keeps its branch and commits");
 }
 
 #[test]
-fn a_folder_already_on_the_own_branch_is_left_alone_even_when_busy_or_changed() {
+fn the_project_folder_leaves_a_sessions_branch_only_when_idle_and_clean() {
     let (_dir, repo, _) = repo();
-    ensure_own_branch(&repo, OWN, false).unwrap();
-    fs::write(repo.join("readme.md"), "changed\n").unwrap();
-    ensure_own_branch(&repo, OWN, true).unwrap();
-    assert_eq!(fs::read_to_string(repo.join("readme.md")).unwrap(), "changed\n");
-}
-
-#[test]
-fn an_own_branch_is_not_checked_out_while_another_run_works_in_the_folder() {
-    let (_dir, repo, _) = repo();
-    let refused = ensure_own_branch(&repo, OWN, true).unwrap_err();
-    assert!(refused.contains("another run works") && refused.contains("on main"), "{refused}");
-    assert_eq!(branch_in(&repo), "main");
-    assert!(!branch_exists(&repo, OWN), "nothing made");
-}
-
-#[test]
-fn an_own_branch_is_not_checked_out_over_uncommitted_changes() {
-    let (_dir, repo, _) = repo();
+    run(&repo, &["switch", "--quiet", "-c", OWN]);
+    let refused = release_branch(&repo, OWN, true).unwrap_err();
+    assert!(refused.contains("another run works"), "{refused}");
     fs::write(repo.join("readme.md"), "half done\n").unwrap();
-    let refused = ensure_own_branch(&repo, OWN, false).unwrap_err();
-    assert!(refused.contains("uncommitted changes on main"), "{refused}");
-    assert_eq!(branch_in(&repo), "main");
-    assert_eq!(fs::read_to_string(repo.join("readme.md")).unwrap(), "half done\n", "the changes stay");
-    // A new file git does not track yet is no reason to refuse.
+    let refused = release_branch(&repo, OWN, false).unwrap_err();
+    assert!(refused.contains("uncommitted changes"), "{refused}");
+    assert_eq!((branch_in(&repo), fs::read_to_string(repo.join("readme.md")).unwrap()), (OWN.to_owned(), "half done\n".to_owned()), "nothing moved");
+    // On another branch the folder is left alone.
     run(&repo, &["checkout", "--", "readme.md"]);
-    fs::write(repo.join("notes.md"), "mine\n").unwrap();
-    ensure_own_branch(&repo, OWN, false).unwrap();
-    assert_eq!(branch_in(&repo), OWN);
-}
-
-#[test]
-fn an_own_branch_session_in_the_project_folder_still_gets_its_branch_checked_out() {
-    let (_dir, repo, _) = repo();
-    // The stored worktree of an own-branch session is the project's folder, which has `.git`.
-    assert_eq!(session_folder_step(true, &repo), SessionFolderStep::OwnBranch);
-    assert_eq!(session_folder_step(false, &repo), SessionFolderStep::Ready);
-    let missing = repo.parent().unwrap().join("data/worktrees/session-1a2b3c4d");
-    assert_eq!(session_folder_step(false, &missing), SessionFolderStep::MakeWorktree);
+    run(&repo, &["switch", "--quiet", "main"]);
+    release_branch(&repo, OWN, true).unwrap();
+    assert_eq!(branch_in(&repo), "main");
 }

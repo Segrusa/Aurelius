@@ -23,6 +23,7 @@ const THUMB_QUALITY: u8 = 80;
 pub async fn get(shared: &Arc<Shared>, id: String, offset: Option<u64>, max_side: Option<u32>) -> Result<UploadChunk, ProtocolError> {
     let Some((owner, index)) = parse_upload_id(&id) else { return Err(gone()) };
     let store = shared.store().clone();
+    let worktrees = aurelius_domain::work_place::worktrees_dir(shared.store().root());
     let found = spawn(move || {
         store
             .read(|c| {
@@ -33,7 +34,7 @@ pub async fn get(shared: &Arc<Shared>, id: String, offset: Option<u64>, max_side
                     UploadOwner::Idea(idea) => ideas::load(c, idea)?.and_then(|r| r.attachments).map(|a| (vec![a.folder], a.files)),
                     UploadOwner::Ticket(ticket) => tickets::attachments_of(c, ticket)?.map(|a| (vec![a.folder], a.files)),
                     UploadOwner::Message(message) => match conversations::message_uploads(c, message)? {
-                        Some((conversation, files)) => Some((conversations::work_folders(c, conversation)?, files)),
+                        Some((conversation, files)) => Some((conversations::work_folders(c, &worktrees, conversation)?, files)),
                         None => None,
                     },
                 })

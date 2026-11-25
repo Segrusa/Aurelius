@@ -66,7 +66,11 @@ fn setup() -> Setup {
     Setup { _dir: dir, service, repo, repo_folder, plain, user, other, orion }
 }
 
-/// A session in a worktree of its own, or else on a branch of its own: never in the project's folder as it is.
+fn worktrees(s: &Setup) -> std::path::PathBuf {
+    aurelius_domain::work_place::worktrees_dir(s.service.store().root())
+}
+
+/// A session as an older client asks for it: in a worktree of its own, or else on a branch of its own.
 fn start(project: ProjectId, employee: EmployeeId, worktree: bool) -> Command {
     Command::StartWorkSession(StartWorkSession { project_id: project, employee_id: employee, text: "Geef me een status van de web app.".into(), images: vec![], files: vec![], worktree, own_branch: !worktree, run: RunSettings::default(), confirm_secret: false, design: false })
 }
@@ -96,9 +100,10 @@ fn a_session_is_the_employees_conversation_in_the_project_without_a_ticket() {
     assert_eq!(title, "Geef me een status van de web app.");
     assert_eq!(tickets, 0, "no ticket");
     assert_eq!(run_conversation, conversation.to_string(), "its first message is being answered");
-    // It works in the project's folder itself.
-    let folders = s.service.store().read(|c| aurelius_storage::conversations::work_folders(c, conversation)).unwrap();
-    assert_eq!(folders.first().map(String::as_str), Some(s.repo_folder.to_string_lossy().as_ref()));
+    // It works in its own worktree, never in the project's folder (ticket #86).
+    let folders = s.service.store().read(|c| aurelius_storage::conversations::work_folders(c, &worktrees(&s), conversation)).unwrap();
+    let worktree = crate::conversation::work_session::worktree_path(s.service.store().root(), conversation);
+    assert_eq!(folders.first().map(String::as_str), Some(worktree.to_string_lossy().as_ref()));
 }
 
 #[test]
@@ -121,7 +126,7 @@ fn a_session_in_its_own_worktree_works_there_instead_of_in_the_project_folder() 
     let (worktree, branch) = session.worktree.clone().expect("a worktree");
     assert_eq!(branch, branch_of(conversation));
     assert_eq!(std::path::PathBuf::from(&worktree), crate::conversation::work_session::worktree_path(s.service.store().root(), conversation));
-    let folders = s.service.store().read(|c| aurelius_storage::conversations::work_folders(c, conversation)).unwrap();
+    let folders = s.service.store().read(|c| aurelius_storage::conversations::work_folders(c, &worktrees(&s), conversation)).unwrap();
     assert_eq!(folders.first(), Some(&worktree), "never the project's folder");
     assert!(!folders.contains(&s.repo_folder.to_string_lossy().into_owned()));
 }
@@ -137,19 +142,35 @@ fn a_worktree_needs_a_project_folder_that_is_a_git_repository() {
 }
 
 #[test]
-fn a_session_without_a_branch_or_worktree_of_its_own_is_refused() {
+fn every_session_gets_a_worktree_of_its_own_whatever_an_older_client_asks() {
     let s = setup();
-    let mut command = start(s.repo, s.orion, false);
-    if let Command::StartWorkSession(start) = &mut command {
-        start.own_branch = false;
+    for (worktree, own_branch) in [(false, false), (false, true), (true, true)] {
+        let mut command = start(s.repo, s.orion, worktree);
+        if let Command::StartWorkSession(start) = &mut command {
+            start.own_branch = own_branch;
+        }
+        let (conversation, _) = started(exec_as(&s, Some(s.user), command).unwrap());
+        let session = s.service.store().read(|c| aurelius_storage::work_sessions::of_conversation(c, conversation)).unwrap().unwrap();
+        let expected = crate::conversation::work_session::worktree_path(s.service.store().root(), conversation);
+        assert_eq!(session.worktree, Some((expected.to_string_lossy().into_owned(), branch_of(conversation))), "asked {worktree}/{own_branch}");
+        assert!(!session.own_branch, "never on its own branch in the project's folder");
     }
-    let refused = exec_as(&s, Some(s.user), command).unwrap_err();
-    assert!(refused.message.contains("branch of its own or in a worktree of its own"), "{}", refused.message);
-    let dispatch = Command::DispatchWorkSession(aurelius_domain::work_session::DispatchWorkSession { project_id: s.repo, text: "Kijk eens.".into(), images: vec![], files: vec![], worktree: false, own_branch: false, run: RunSettings::default(), confirm_secret: false, design: false });
-    let refused = exec_as(&s, Some(s.user), dispatch).unwrap_err();
-    assert!(refused.message.contains("branch of its own or in a worktree of its own"), "{}", refused.message);
-    let sessions: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'session'", [], |r| r.get(0))?)).unwrap();
-    assert_eq!(sessions, 0, "nothing was made");
+}
+
+#[test]
+fn files_with_a_sessions_first_message_go_into_its_worktree_folder() {
+    let s = setup();
+    let source = s._dir.path().join("brief.txt");
+    std::fs::write(&source, "the brief").unwrap();
+    let mut command = start(s.repo, s.orion, true);
+    if let Command::StartWorkSession(start) = &mut command {
+        start.files = vec![source.to_string_lossy().into_owned()];
+    }
+    let (conversation, _) = started(exec_as(&s, Some(s.user), command).unwrap());
+    let worktree = crate::conversation::work_session::worktree_path(s.service.store().root(), conversation);
+    let copied = worktree.join(crate::conversation::message_uploads::DIR).join("brief.txt");
+    assert_eq!(std::fs::read_to_string(copied).unwrap(), "the brief", "waiting there until the daemon makes the worktree around it");
+    assert!(!s.repo_folder.join(crate::conversation::message_uploads::DIR).exists(), "nothing in the project's folder");
 }
 
 #[test]
@@ -178,61 +199,56 @@ fn a_session_starts_with_the_chosen_mode_model_and_effort() {
 
 #[test]
 fn a_sessions_run_is_told_it_is_a_session_and_where_it_works() {
-    let folder = crate::run::plan::work_session_guidance(None, false, false);
+    let folder = crate::run::plan::work_session_guidance(None, false);
     assert!(folder.contains("## This is a work session") && folder.contains("no ticket") && folder.contains("project's folder itself"));
     assert!(!folder.contains("design session"), "a session that is no design");
-    let own = crate::run::plan::work_session_guidance(Some(("/data/worktrees/session-1a2b3c4d", "session/1a2b3c4d")), false, false);
+    let own = crate::run::plan::work_session_guidance(Some(("/data/worktrees/session-1a2b3c4d", "session/1a2b3c4d")), false);
     assert!(own.contains("/data/worktrees/session-1a2b3c4d") && own.contains("session/1a2b3c4d") && own.contains("never merge"));
 }
 
 #[test]
-fn a_session_on_its_own_branch_is_told_to_stay_on_it_in_the_project_folder() {
-    let own = crate::run::plan::work_session_guidance(Some(("/repo/planora", "session/1a2b3c4d")), true, false);
-    assert!(own.contains("project's folder /repo/planora") && own.contains("own branch session/1a2b3c4d") && own.contains("never switch branches"), "{own}");
-    assert!(!own.contains("worktree"), "{own}");
+fn an_older_session_in_the_project_folder_moves_to_a_worktree_of_its_own() {
+    let s = setup();
+    let (project, user, orion) = (s.repo, s.user, s.orion);
+    let folder = s.repo_folder.to_string_lossy().into_owned();
+    let (own, plain) = (ConversationId::new(), ConversationId::new());
+    s.service
+        .store()
+        .write(move |tx| {
+            aurelius_storage::work_sessions::insert(tx, own, project, orion, "On its branch", user, Some((&folder, &branch_of(own))), None, false, true)?;
+            aurelius_storage::work_sessions::insert(tx, plain, project, orion, "In the folder", user, None, None, false, false)
+        })
+        .unwrap();
+    for conversation in [own, plain] {
+        let place = s.service.work_place_of_run(conversation, None).unwrap().expect("a place");
+        let expected = crate::conversation::work_session::worktree_path(s.service.store().root(), conversation);
+        assert_eq!((place.worktree.clone(), place.branch.clone(), place.repo.clone()), (expected.clone(), branch_of(conversation), s.repo_folder.clone()));
+        assert_eq!(place.kind, crate::run::work_place::PlaceKind::Session { moves: true });
+        s.service.move_session_to_worktree(conversation, &place.worktree, &place.branch).unwrap();
+        let session = s.service.store().read(|c| aurelius_storage::work_sessions::of_conversation(c, conversation)).unwrap().unwrap();
+        assert_eq!(session.worktree, Some((expected.to_string_lossy().into_owned(), branch_of(conversation))));
+        assert!(!session.own_branch);
+        let moved = s.service.work_place_of_run(conversation, None).unwrap().unwrap();
+        assert_eq!(moved.kind, crate::run::work_place::PlaceKind::Session { moves: false }, "it stays there");
+    }
 }
 
-/// `start` on a branch of its own.
-fn start_on_own_branch(project: ProjectId, employee: EmployeeId) -> Command {
-    let mut command = start(project, employee, false);
+#[test]
+fn a_session_needs_a_git_folder_also_when_an_older_client_asks_for_its_own_branch() {
+    let s = setup();
+    let mut command = start(s.plain, s.orion, false);
     if let Command::StartWorkSession(start) = &mut command {
         start.own_branch = true;
     }
-    command
-}
-
-#[test]
-fn a_session_on_its_own_branch_works_in_the_project_folder_on_its_branch() {
-    let s = setup();
-    let (conversation, _) = started(exec_as(&s, Some(s.user), start_on_own_branch(s.repo, s.orion)).unwrap());
-    let session = s.service.store().read(|c| aurelius_storage::work_sessions::of_conversation(c, conversation)).unwrap().unwrap();
-    assert!(session.own_branch);
-    let project_folder = s.repo_folder.to_string_lossy().into_owned();
-    assert_eq!(session.worktree, Some((project_folder.clone(), branch_of(conversation))));
-    let folders = s.service.store().read(|c| aurelius_storage::conversations::work_folders(c, conversation)).unwrap();
-    assert_eq!(folders.first(), Some(&project_folder), "the project's folder itself");
-    let listed = s.service.store().read(|c| aurelius_storage::work_sessions::list(c, s.user, None)).unwrap();
-    assert!(listed.iter().any(|v| v.conversation_id == conversation && v.own_branch && v.branch.as_deref() == Some(branch_of(conversation).as_str())), "{listed:?}");
-}
-
-#[test]
-fn a_branch_of_its_own_needs_a_git_folder_and_goes_not_with_a_worktree() {
-    let s = setup();
-    let refused = exec_as(&s, Some(s.user), start_on_own_branch(s.plain, s.orion)).unwrap_err();
-    assert!(refused.message.contains("branch of its own needs") && refused.message.contains("git repository"), "{}", refused.message);
-    let mut both = start_on_own_branch(s.repo, s.orion);
-    if let Command::StartWorkSession(start) = &mut both {
-        start.worktree = true;
-    }
-    let refused = exec_as(&s, Some(s.user), both).unwrap_err();
-    assert!(refused.message.contains("not both"), "{}", refused.message);
+    let refused = exec_as(&s, Some(s.user), command).unwrap_err();
+    assert!(refused.message.contains("git repository"), "{}", refused.message);
     let sessions: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'session'", [], |r| r.get(0))?)).unwrap();
     assert_eq!(sessions, 0, "nothing was made");
 }
 
 #[test]
 fn a_design_sessions_run_is_told_to_make_html_pages_and_name_their_paths() {
-    let design = crate::run::plan::work_session_guidance(None, false, true);
+    let design = crate::run::plan::work_session_guidance(None, true);
     assert!(design.contains("## This is a work session") && design.contains("## This is a design session"), "{design}");
     assert!(design.contains("design/<kebab-name>.html") && design.contains("Name the full path"), "{design}");
 }
@@ -337,34 +353,6 @@ fn uploads_of(s: &Setup, conversation: ConversationId) -> Vec<String> {
 }
 
 #[test]
-fn a_sessions_first_message_copies_its_files_into_the_project_folder() {
-    let s = setup();
-    let mut command = start(s.repo, s.orion, false);
-    if let Command::StartWorkSession(start) = &mut command {
-        start.files = vec![outside_file(&s, "brief.md")];
-    }
-    let (conversation, _) = started(exec_as(&s, Some(s.user), command).unwrap());
-    let uploads = uploads_of(&s, conversation);
-    assert_eq!(uploads.len(), 1);
-    assert!(uploads[0].starts_with(".aurelius/uploads/") && uploads[0].ends_with(".md"), "{uploads:?}");
-    assert_eq!(std::fs::read_to_string(s.repo_folder.join(&uploads[0])).unwrap(), "notes");
-}
-
-#[test]
-fn files_with_the_first_message_of_a_session_in_a_worktree_are_refused_and_nothing_is_made() {
-    let s = setup();
-    let mut command = start(s.repo, s.orion, true);
-    if let Command::StartWorkSession(start) = &mut command {
-        start.files = vec![outside_file(&s, "brief.md")];
-    }
-    let refused = exec_as(&s, Some(s.user), command).unwrap_err();
-    assert!(refused.message.contains("later message"), "{}", refused.message);
-    let sessions: i64 = s.service.store().read(|c| Ok(c.query_row("SELECT COUNT(*) FROM conversations WHERE kind = 'session'", [], |r| r.get(0))?)).unwrap();
-    assert_eq!(sessions, 0);
-    assert!(!s.repo_folder.join(".aurelius").exists(), "no file copied");
-}
-
-#[test]
 fn chat_send_in_a_session_copies_its_files_into_the_work_folder_and_may_have_no_text() {
     let s = setup();
     let (conversation, _) = started(exec_as(&s, Some(s.user), start(s.repo, s.orion, false)).unwrap());
@@ -372,7 +360,9 @@ fn chat_send_in_a_session_copies_its_files_into_the_work_folder_and_may_have_no_
     exec_as(&s, Some(s.user), send).unwrap();
     let uploads = uploads_of(&s, conversation);
     assert_eq!(uploads.len(), 1);
-    assert!(s.repo_folder.join(&uploads[0]).is_file());
+    let worktree = crate::conversation::work_session::worktree_path(s.service.store().root(), conversation);
+    assert!(worktree.join(&uploads[0]).is_file(), "in the session's worktree folder");
+    assert!(!s.repo_folder.join(&uploads[0]).exists(), "not in the project's folder");
 }
 
 #[test]
@@ -417,9 +407,13 @@ fn writing_in_a_conversation_that_does_not_exist_is_not_found() {
     assert_eq!(refused.code, aurelius_domain::ErrorCode::NotFound);
 }
 
-/// The plan of the next run, as the daemon claims and prepares it.
+/// The plan of the next run, as the daemon claims and prepares it (after it made the
+/// sessions' worktrees: here only their folders, as git is the daemon's).
 fn next_plan(s: &Setup) -> crate::run::plan::ChatRunPlan {
     let job = s.service.store().write(|tx| aurelius_storage::queries::claim_due_job(tx, "test", aurelius_storage::now_ms(), 45_000, 4)).unwrap().expect("a job");
+    if let Some(conversation) = job.payload["conversation_id"].as_str().and_then(|c| ConversationId::parse(c).ok()) {
+        std::fs::create_dir_all(crate::conversation::work_session::worktree_path(s.service.store().root(), conversation).join(".git")).unwrap();
+    }
     s.service.prepare_chat_run(&job.payload).unwrap().expect("a run to prepare")
 }
 

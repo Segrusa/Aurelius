@@ -185,13 +185,12 @@ pub fn quick_task_guidance(number: u32, worktree: &std::path::Path) -> String {
 pub const DESIGN_SESSION_GUIDANCE: &str = "\n\n## This is a design session\nThe board member asked for a design: make it as HTML pages and show them, not as a description. Each page is one self-contained HTML file in design/<kebab-name>.html in your work folder: <!doctype html>, a short <title> that names the page for the board member (e.g. <title>Pricing page</title>; the app shows it instead of the file name), all CSS in <style> and all JS in inline <script>, nothing loaded from the internet (images as data: URIs or inline SVG, system fonts). One file per page; to change a page, overwrite the same file and keep its name. After you write or change a page, look at it with view_design (no question needed): check it at the desktop width and at a phone width (390), and fix what looks wrong before you answer. Name the full path of every page you made or changed in your answer: Aurelius keeps it with your answer and the board member sees it beside the conversation. Follow the project's design system, make it responsive, and use realistic content.";
 
 /// The section of a work session (feature `work_sessions`): no ticket, the board member
-/// directly, in the project's folder or the session's own worktree. A design session
-/// (`design`) also gets `DESIGN_SESSION_GUIDANCE`.
-pub fn work_session_guidance(worktree: Option<(&str, &str)>, own_branch: bool, design: bool) -> String {
+/// directly, in the session's own worktree (or, in a project without a git folder, in the
+/// project's folder). A design session (`design`) also gets `DESIGN_SESSION_GUIDANCE`.
+pub fn work_session_guidance(worktree: Option<(&str, &str)>, design: bool) -> String {
     let place = match worktree {
-        Some((folder, branch)) if own_branch => format!("You work in the project's folder {folder} on your own branch {branch}, which Aurelius checked out for you: commit your changes on that branch yourself; never switch branches, never touch main, never merge and never push unless the board member asks."),
         Some((folder, branch)) => format!("You work only in your own worktree {folder} on the branch {branch}: commit your changes there yourself; never touch the project's main branch or its folder, never merge and never push unless the board member asks."),
-        None => "You work in the project's folder itself, on whatever branch it has checked out; commit only when the board member asks.".to_owned(),
+        None => "You work in the project's folder itself (it is not a git repository).".to_owned(),
     };
     let design = if design { DESIGN_SESSION_GUIDANCE } else { "" };
     format!(
@@ -428,7 +427,7 @@ User question:
                     .or_else(|| config.persona_prompt.clone());
                 // An employee works in its task's project folder (and its own workspace, if
                 // any); in its chat with the user only in its own workspace.
-                let folders: Vec<std::path::PathBuf> = aurelius_storage::conversations::work_folders(conn, conversation_id)
+                let folders: Vec<std::path::PathBuf> = aurelius_storage::conversations::work_folders(conn, &aurelius_domain::work_place::worktrees_dir(store.root()), conversation_id)
                     .unwrap_or_default()
                     .into_iter()
                     .map(std::path::PathBuf::from)
@@ -452,23 +451,27 @@ User question:
                     Some(folder) if !folders.is_empty() && !folders.contains(folder) => folders.into_iter().chain(std::iter::once(folder.clone())).collect(),
                     _ => folders,
                 };
-                // A quick task (ticket #53) works in its own worktree, never in the project's folder (its main):
-                // that folder is swapped for the worktree, or left out while the worktree is missing.
-                let quick_task = match aurelius_storage::tickets::quick_of_conversation(conn, conversation_id)? {
-                    Some((ticket, number)) => {
-                        let project_folder = aurelius_storage::tickets::project_folder(conn, ticket)?.map(std::path::PathBuf::from);
-                        let worktree = crate::ticket::quick::worktree_path(store.root(), number);
-                        Some((number, worktree, project_folder))
-                    }
+                // A session or task in a git project works in its own worktree (ticket #86; a quick
+                // task's since #53), never in the project's folder (its main): that folder is
+                // swapped for the worktree, or left out while the worktree is missing. Files the
+                // board member attached to a ticket stay in the folder's uploads, which come along.
+                let place = crate::run::work_place::of_run(conn, store.root(), conversation_id, Some(run_id))?;
+                let quick_task = match &place {
+                    Some(p) => match p.kind {
+                        crate::run::work_place::PlaceKind::Ticket { number, quick: true, .. } => Some((number, p.worktree.clone())),
+                        _ => None,
+                    },
                     None => None,
                 };
-                let (folders, channel_folder) = match &quick_task {
-                    Some((_, worktree, project_folder)) => {
-                        let swap = |f: std::path::PathBuf| match project_folder {
-                            Some(p) if *p == f => worktree.is_dir().then(|| worktree.clone()),
-                            _ => Some(f),
-                        };
-                        (folders.into_iter().filter_map(swap).collect::<Vec<_>>(), channel_folder.and_then(swap))
+                let (folders, channel_folder) = match &place {
+                    Some(place) => {
+                        let swap = |f: std::path::PathBuf| if f == place.repo { place.worktree.is_dir().then(|| place.worktree.clone()) } else { Some(f) };
+                        let mut folders: Vec<std::path::PathBuf> = folders.into_iter().filter_map(swap).collect();
+                        let uploads = place.repo.join(crate::conversation::message_uploads::DIR);
+                        if !folders.is_empty() && uploads.is_dir() && !folders.contains(&uploads) {
+                            folders.push(uploads);
+                        }
+                        (folders, channel_folder.and_then(swap))
                     }
                     None => (folders, channel_folder),
                 };
@@ -584,8 +587,10 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                             }
                             text.push_str(crate::task::task_runs::TASK_GUIDANCE);
                             text.push_str(" Updates (results of colleagues) arrive here as [Task …] messages; the user may talk with you about the task here too.");
-                            if let Some((number, worktree, _)) = &quick_task {
-                                text.push_str(&quick_task_guidance(*number, worktree));
+                            match (&quick_task, &place) {
+                                (Some((number, worktree)), _) => text.push_str(&quick_task_guidance(*number, worktree)),
+                                (None, Some(place)) => text.push_str(&crate::run::work_place::guidance(place).unwrap_or_default()),
+                                (None, None) => {}
                             }
                             if management_mode {
                                 text.push_str(MODE_CHOICE_GUIDANCE);
@@ -595,8 +600,13 @@ You can look at the user's screen: list_windows lists the open windows, screensh
                     }
                     None => match &work_session {
                         Some(session) => {
-                            let worktree = session.worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str()));
-                            Some(format!("{}{}", system.unwrap_or_default(), work_session_guidance(worktree, session.own_branch, session.design)).trim().to_string())
+                            // Its worktree as the run sees it: an older session moved to one before this run.
+                            let worktree = match &place {
+                                Some(p) => Some((p.worktree.to_string_lossy().into_owned(), p.branch.clone())),
+                                None => session.worktree.clone(),
+                            };
+                            let worktree = worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str()));
+                            Some(format!("{}{}", system.unwrap_or_default(), work_session_guidance(worktree, session.design)).trim().to_string())
                         }
                         None => system,
                     },

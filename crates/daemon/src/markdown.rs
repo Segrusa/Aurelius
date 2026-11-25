@@ -34,6 +34,7 @@ async fn spawn<T: Send + 'static>(f: impl FnOnce() -> Result<T, ProtocolError> +
 /// The real work folders of the scope that exist on this computer, in order.
 async fn roots_of(shared: &Arc<Shared>, scope: FileScope) -> Result<Vec<PathBuf>, ProtocolError> {
     let store = shared.store().clone();
+    let worktrees = aurelius_domain::work_place::worktrees_dir(shared.store().root());
     let folders: Vec<String> = spawn(move || {
         store
             .read(|c| {
@@ -41,7 +42,7 @@ async fn roots_of(shared: &Arc<Shared>, scope: FileScope) -> Result<Vec<PathBuf>
                 Ok(match scope {
                     FileScope::Project { project_id } => tasks::work_folders(c, project_id, None)?,
                     // A ticket's discussion or a channel has no employee: it reads from its project's folder.
-                    FileScope::Conversation { conversation_id } => match conversations::work_folders(c, conversation_id)? {
+                    FileScope::Conversation { conversation_id } => match conversations::work_folders(c, &worktrees, conversation_id)? {
                         folders if folders.is_empty() => match conversations::project_id_of(c, conversation_id)? {
                             Some(project) => tasks::work_folders(c, project, None)?,
                             None => folders,
@@ -49,7 +50,7 @@ async fn roots_of(shared: &Arc<Shared>, scope: FileScope) -> Result<Vec<PathBuf>
                         folders => folders,
                     },
                     FileScope::Task { task_id } => match tasks::task_conversation(c, task_id)? {
-                        Some((id, _)) => conversations::work_folders(c, id)?,
+                        Some((id, _)) => conversations::work_folders(c, &worktrees, id)?,
                         None => vec![],
                     },
                 })

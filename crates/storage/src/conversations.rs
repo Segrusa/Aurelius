@@ -869,11 +869,12 @@ pub fn move_run_message_to_end(tx: &Transaction<'_>, run_id: RunId) -> Result<()
     Ok(())
 }
 
-/// Where an employee's conversation works: a task conversation in its project
-/// folder, then the employee's own workspace; an employee chat (no project) in
-/// the employee's own folder only (either may be missing). A standalone chat
-/// never works in one.
-pub fn work_folders(conn: &rusqlite::Connection, conversation: ConversationId) -> Result<Vec<String>, StorageError> {
+/// Where an employee's conversation works: a task conversation or work session in its
+/// own worktree (`work_places`, under `worktrees`) when the project's folder is a git
+/// repository, else in the project's folder; then the employee's own workspace. An
+/// employee chat (no project) works in the employee's own folder only (either may be
+/// missing). A standalone chat never works in one.
+pub fn work_folders(conn: &rusqlite::Connection, worktrees: &std::path::Path, conversation: ConversationId) -> Result<Vec<String>, StorageError> {
     let found: Option<(Option<String>, Option<String>)> = conn
         .query_row(
             "SELECT p.folder, m.folder FROM conversations c LEFT JOIN projects p ON p.id = c.project_id JOIN employees m ON m.id = c.employee_id
@@ -883,9 +884,10 @@ pub fn work_folders(conn: &rusqlite::Connection, conversation: ConversationId) -
         )
         .optional()?;
     if let Some((p, m)) = found {
-        // A work session with a worktree of its own works there instead of in the project's folder.
-        let p = match crate::work_sessions::of_conversation(conn, conversation)?.and_then(|s| s.worktree) {
-            Some((worktree, _)) => Some(worktree),
+        // A session or a task in a git project works in its own worktree, never in the
+        // project's folder (ticket #86): the folder stays on main.
+        let p = match crate::work_places::of_conversation(conn, worktrees, conversation)? {
+            Some(place) => Some(place.worktree.to_string_lossy().into_owned()),
             None => p,
         };
         return Ok([p, m].into_iter().flatten().collect());

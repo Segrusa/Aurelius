@@ -60,6 +60,7 @@ pub mod server_name;
 pub mod rail_pins;
 pub mod code_review;
 pub mod user_run_defaults;
+pub mod work_places;
 
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use std::path::{Path, PathBuf};

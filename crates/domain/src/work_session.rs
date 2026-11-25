@@ -1,10 +1,9 @@
 //! Work sessions (feature `work_sessions`): as in Claude Desktop, a board member
 //! starts work by typing. One employee works in one project's folder in a
 //! conversation of its own (kind `session`), without a ticket, triage or review.
-//! It works in the project's folder itself, or, when asked, in a worktree of its
-//! own on the branch `session/<last 8 of its id>` that the daemon makes before the first
-//! run, or in the project's folder on that branch of its own (`own_branch`), which the
-//! daemon checks out before each run. Later messages go in with `chat.send`; `work_session.list` lists them.
+//! It works in a worktree of its own on the branch `session/<last 8 of its id>` that the
+//! daemon makes before the first run (ticket #86, feature `worktrees_only`); an older
+//! session in the project's folder, or on its own branch there, moves to one at its next run. Later messages go in with `chat.send`; `work_session.list` lists them.
 //! With `work_session.dispatch` the dispatcher chooses the employee first.
 
 use crate::task::RunSettings;
@@ -21,18 +20,15 @@ pub struct StartWorkSession {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<String>,
     /// Files that belong to the first message (feature `chat_files`, see
-    /// `SendChatMessage::files`). Not with `worktree`: that folder does not exist yet.
+    /// `SendChatMessage::files`). They go into the session's worktree folder.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
-    /// Work in a worktree of its own instead of the project's folder. Needs a
-    /// project folder that is a git repository with a main branch.
+    /// Asked by older clients; every session works in a worktree of its own (feature
+    /// `worktrees_only`), which needs a project folder that is a git repository with a main branch.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub worktree: bool,
-    /// Work in the project's folder itself, on a branch of its own that the daemon
-    /// makes from what the folder has checked out (feature `session_own_branch`). Needs
-    /// a project folder that is a git repository; not with `worktree`. Each run is
-    /// refused while the folder has uncommitted changes on another branch, or while
-    /// another run works in it, because checking out changes the folder for everyone.
+    /// Asked by older clients (feature `session_own_branch`): the session gets a worktree of
+    /// its own instead (feature `worktrees_only`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub own_branch: bool,
     /// Mode, model and effort it starts with (empty: the employee's defaults).

@@ -22,25 +22,12 @@ use aurelius_storage::{StorageError, Tx};
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
 
-/// Refused: a worktree needs a project folder that is a git repository.
-pub const WORKTREE_NEEDS_GIT: &str = "A worktree of its own needs a project folder that is a git repository; set the project's folder to one.";
-
-/// Refused: a branch of its own needs a project folder that is a git repository.
-pub const OWN_BRANCH_NEEDS_GIT: &str = "A branch of its own needs a project folder that is a git repository; set the project's folder to one.";
+/// Refused: a session works in a worktree of its own (ticket #86), which needs a project
+/// folder that is a git repository.
+pub const WORKTREE_NEEDS_GIT: &str = "A session works in a worktree of its own, which needs a project folder that is a git repository; set the project's folder to one.";
 
 /// Refused: a design writes its pages, so its mode stays Auto.
 pub const DESIGN_STAYS_AUTO: &str = "A design session always works in Auto: it writes its pages, which Plan or Ask would stop.";
-
-/// Refused: a session works either in a worktree of its own or on its own branch.
-pub const WORKTREE_OR_OWN_BRANCH: &str = "Choose a worktree of its own or a branch of its own, not both.";
-
-/// Refused: a session never works on what the project's folder has checked out, so it
-/// needs a branch of its own or a worktree of its own.
-pub const BRANCH_OR_WORKTREE_NEEDED: &str = "A session works on a branch of its own or in a worktree of its own; choose one. Update the app if it does not offer them.";
-
-/// Refused: files with the first message of a session in a worktree of its own (that
-/// folder is made only before the first run).
-pub const FILES_NEED_FOLDER: &str = "Files can go with a later message of a session in its own worktree; start it without files, or on a branch of its own.";
 
 /// Why `user` cannot write in `conversation` now, if so: a work session of another
 /// board member (or one whose employee is not at work, or still being chosen), an
@@ -89,56 +76,50 @@ struct Start<'a> {
     text: &'a str,
     images: &'a [String],
     files: &'a [String],
-    worktree: bool,
-    own_branch: bool,
     run: &'a aurelius_domain::task::RunSettings,
     design: bool,
 }
 
 impl CommandService {
     pub(crate) fn start_work_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &StartWorkSession) -> Result<Committed, AppError> {
-        let start = Start { project_id: cmd.project_id, employee: Some(cmd.employee_id), text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, own_branch: cmd.own_branch, run: &cmd.run, design: cmd.design };
+        let start = Start { project_id: cmd.project_id, employee: Some(cmd.employee_id), text: &cmd.text, images: &cmd.images, files: &cmd.files, run: &cmd.run, design: cmd.design };
         self.start_session(ctx, envelope, hash, start)
     }
 
     /// `work_session.dispatch`: as `work_session.start`, and the dispatcher chooses who takes it (`session_dispatch`).
     pub(crate) fn dispatch_work_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: &DispatchWorkSession) -> Result<Committed, AppError> {
-        let start = Start { project_id: cmd.project_id, employee: None, text: &cmd.text, images: &cmd.images, files: &cmd.files, worktree: cmd.worktree, own_branch: cmd.own_branch, run: &cmd.run, design: cmd.design };
+        let start = Start { project_id: cmd.project_id, employee: None, text: &cmd.text, images: &cmd.images, files: &cmd.files, run: &cmd.run, design: cmd.design };
         self.start_session(ctx, envelope, hash, start)
     }
 
+    /// Every session works in a worktree of its own (ticket #86): `worktree` and
+    /// `own_branch` of older clients are taken, but a session never works in the project's
+    /// folder, on its own branch or on what that folder has checked out.
     fn start_session(&self, ctx: &CommandContext, envelope: &CommandEnvelope, hash: String, cmd: Start<'_>) -> Result<Committed, AppError> {
         let Some(user) = ctx.user_id else {
             return Err(domain_error(DomainError::BoardMemberRequired));
         };
         let text = aurelius_domain::conversation::validate_employee_message(cmd.text, cmd.images, cmd.files).map_err(domain_error)?;
         let run = cmd.run.validated().map_err(domain_error)?;
-        if cmd.worktree && cmd.own_branch {
-            return Err(domain_error(DomainError::OutOfRange { field: "own_branch".into(), detail: WORKTREE_OR_OWN_BRANCH.into() }));
-        }
-        if !cmd.worktree && !cmd.own_branch {
-            return Err(domain_error(DomainError::OutOfRange { field: "own_branch".into(), detail: BRANCH_OR_WORKTREE_NEEDED.into() }));
-        }
-        if cmd.worktree && !cmd.files.is_empty() {
-            return Err(domain_error(DomainError::OutOfRange { field: "files".into(), detail: FILES_NEED_FOLDER.into() }));
-        }
         let sources = crate::conversation::message_uploads::check(cmd.files)?;
         let images = crate::conversation::message_images::prepare(&self.store, cmd.images)?;
-        // Files go into the project's folder before the commit; a failed or replayed
-        // command removes them again (as a chat message does).
+        let conversation_id = ConversationId::new();
+        let worktree_folder = worktree_path(self.store.root(), conversation_id);
+        let worktree_text = worktree_folder.to_string_lossy().into_owned();
+        // Files go into the session's worktree folder before the commit (the daemon makes the
+        // worktree around them); a failed or replayed command removes them again (as a chat
+        // message does). Without a git folder the command is refused below and they go too.
         let uploaded = if sources.is_empty() {
             None
         } else {
-            let folders = self.store.read(|c| aurelius_storage::tasks::work_folders(c, cmd.project_id, cmd.employee)).map_err(storage_error)?;
-            let folder = crate::conversation::message_uploads::work_folder(&folders)?;
+            let worktrees = aurelius_domain::work_place::worktrees_dir(self.store.root());
+            let folder = crate::conversation::message_uploads::work_folder_in(&[worktree_folder.to_string_lossy().into_owned()], &worktrees)?;
             let uploads = crate::conversation::message_uploads::copy(&folder, &sources)?;
             Some((folder, uploads))
         };
         let uploads = uploaded.as_ref().map(|(_, u)| u.clone()).unwrap_or_default();
         let text_blob = self.store.blobs().put(text.as_bytes(), "text/plain; charset=utf-8").map_err(storage_error)?;
-        let (project_id, asked, worktree, own_branch, design) = (cmd.project_id, cmd.employee, cmd.worktree, cmd.own_branch, cmd.design);
-        let conversation_id = ConversationId::new();
-        let worktree_folder = worktree.then(|| worktree_path(self.store.root(), conversation_id));
+        let (project_id, asked, design) = (cmd.project_id, cmd.employee, cmd.design);
         let message_id = MessageId::new();
         let command_id = envelope.command_id;
         let meta = ctx.metadata();
@@ -167,26 +148,13 @@ impl CommandService {
                 LifecycleStatus::Paused => return Ok(Err(domain_error(DomainError::EmployeePaused))),
                 LifecycleStatus::Active => {}
             }
-            let worktree = match &worktree_folder {
-                // On its own branch: the "worktree" is the project's folder itself.
-                None if own_branch => {
-                    let project_folder: Option<String> = tx.query_row("SELECT folder FROM projects WHERE id = ?1", [project_id.to_string()], |r| r.get(0)).optional()?.flatten();
-                    match project_folder.filter(|f| crate::ticket::quick::is_git_folder(Path::new(f))) {
-                        Some(folder) => Some((folder, branch_of(conversation_id))),
-                        None => return Ok(Err(domain_error(DomainError::OutOfRange { field: "own_branch".into(), detail: OWN_BRANCH_NEEDS_GIT.into() }))),
-                    }
-                }
-                None => None,
-                Some(folder) => {
-                    let project_folder: Option<String> = tx.query_row("SELECT folder FROM projects WHERE id = ?1", [project_id.to_string()], |r| r.get(0)).optional()?.flatten();
-                    if !project_folder.is_some_and(|f| crate::ticket::quick::is_git_folder(Path::new(&f))) {
-                        return Ok(Err(domain_error(DomainError::OutOfRange { field: "worktree".into(), detail: WORKTREE_NEEDS_GIT.into() })));
-                    }
-                    Some((folder.to_string_lossy().into_owned(), branch_of(conversation_id)))
-                }
-            };
+            let project_folder: Option<String> = tx.query_row("SELECT folder FROM projects WHERE id = ?1", [project_id.to_string()], |r| r.get(0)).optional()?.flatten();
+            if !project_folder.is_some_and(|f| crate::ticket::quick::is_git_folder(Path::new(&f))) {
+                return Ok(Err(domain_error(DomainError::OutOfRange { field: "worktree".into(), detail: WORKTREE_NEEDS_GIT.into() })));
+            }
+            let worktree = (worktree_text, branch_of(conversation_id));
             let title = aurelius_domain::conversation::derive_title(&text);
-            aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, worktree.as_ref().map(|(f, b)| (f.as_str(), b.as_str())), dispatch, design, own_branch)?;
+            aurelius_storage::work_sessions::insert(tx, conversation_id, project_id, employee_id, &title, user, Some((worktree.0.as_str(), worktree.1.as_str())), dispatch, design, false)?;
             // A design writes its pages: Plan or Ask would stop it, so a design is always Auto.
             let mode = match (design, run.mode) {
                 (true, _) => aurelius_domain::autonomy::AgentMode::Auto,
@@ -208,13 +176,8 @@ impl CommandService {
             if dispatch.is_some() {
                 started["dispatch"] = true.into();
             }
-            if let Some((folder, branch)) = &worktree {
-                started["worktree"] = folder.clone().into();
-                started["branch"] = branch.clone().into();
-                if own_branch {
-                    started["own_branch"] = true.into();
-                }
-            }
+            started["worktree"] = worktree.0.clone().into();
+            started["branch"] = worktree.1.clone().into();
             let (_, mut n) = emit(tx, Ev {
                 aggregate_type: "conversation",
                 aggregate_id: conversation_id.to_string(),
@@ -270,6 +233,10 @@ impl CommandService {
             && committed.as_ref().map_or(true, |c| c.receipt.replayed)
         {
             crate::conversation::message_uploads::remove(folder, uploads);
+            // The folder made for them belongs to no session now.
+            if committed.is_err() && !worktree_folder.join(".git").exists() {
+                let _ = std::fs::remove_dir_all(&worktree_folder);
+            }
         }
         committed
     }
