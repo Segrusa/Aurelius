@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings redesign</title>
+<style>
+  :root {
+    color-scheme: light;
+    --body: #f6f6f5; --side: #f1f1f0; --card: #ffffff; --field: #f4f4f3;
+    --text: #1b1c1e; --text2: #55595f; --text3: #7a7e85;
+    --line: rgb(0 0 0 / 0.08); --line2: rgb(0 0 0 / 0.055); --line-em: rgb(0 0 0 / 0.13);
+    --hover: rgb(0 0 0 / 0.045); --on: rgb(0 0 0 / 0.065);
+    --accent: #17603f; --accent-text: #17603f; --accent-muted: rgb(23 96 63 / 0.09);
+    --warning: #9a5800; --warning-muted: rgb(196 122 0 / 0.09);
+    --error: #c2281c; --error-muted: rgb(194 40 28 / 0.07);
+    --info: #2d5bd0; --info-muted: rgb(45 91 208 / 0.08);
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  :root.dark {
+    color-scheme: dark;
+    --body: #0c0d0e; --side: #08090a; --card: #16171a; --field: #1d1e22;
+    --text: #edeef0; --text2: #a0a4ab; --text3: #7d828a;
+    --line: rgb(255 255 255 / 0.07); --line2: rgb(255 255 255 / 0.05); --line-em: rgb(255 255 255 / 0.11);
+    --hover: rgb(255 255 255 / 0.05); --on: rgb(255 255 255 / 0.075);
+    --accent: #1f7a4c; --accent-text: #5fcb95; --accent-muted: rgb(95 203 149 / 0.12);
+    --warning: #e8a84a; --warning-muted: rgb(229 162 58 / 0.1);
+    --error: #f08a8a; --error-muted: rgb(240 138 138 / 0.1);
+    --info: #7ea6f8; --info-muted: rgb(126 166 248 / 0.11);
+    --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--body); color: var(--text); font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; border-radius: 5px; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .faint { color: var(--text3); }
+  svg { flex-shrink: 0; }
+  .app { flex: 1; display: flex; min-height: 0; }
+
+  /* sidebar */
+  .side { width: 236px; flex-shrink: 0; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .side-top { padding: 10px 12px 6px; display: flex; flex-direction: column; gap: 8px; }
+  .back { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; color: var(--text2); text-decoration: none; font-weight: 500; }
+  .back:hover { background: var(--hover); color: var(--text); }
+  .search { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 9px; border-radius: 7px; background: var(--card); border: 1px solid var(--line); color: var(--text3); }
+  .search input { border: 0; background: transparent; outline: none; flex: 1; min-width: 0; color: var(--text); }
+  .search kbd { font: 11px var(--mono); color: var(--text3); border: 1px solid var(--line-em); border-radius: 4px; padding: 0 4px; }
+  nav { flex: 1; overflow: auto; padding: 6px 12px 12px; display: flex; flex-direction: column; gap: 14px; }
+  .grp-name { margin: 0 0 3px; padding: 0 8px; font-size: 11.5px; font-weight: 600; color: var(--text3); }
+  .grp { display: flex; flex-direction: column; gap: 1px; }
+  .nav-item { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text2); font-weight: 500; text-align: left; cursor: pointer; width: 100%; }
+  .nav-item:hover { background: var(--hover); color: var(--text); }
+  .nav-item[aria-current="page"] { background: var(--on); color: var(--text); }
+  .nav-item .ic { color: var(--text3); }
+  .nav-item[aria-current="page"] .ic { color: var(--text); }
+  .nav-item .lab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-item .out { color: var(--text3); }
+  .nav-item .chev { display: none; color: var(--text3); }
+  .flag { width: 7px; height: 7px; border-radius: 50%; }
+  .flag.warn { background: var(--warning); }
+  .flag.info { background: var(--info); }
+  .nav-empty { padding: 4px 8px; color: var(--text3); }
+  .side-foot { padding: 10px 20px 12px; font-size: 12px; color: var(--text3); display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--line2); }
+  .live { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-text); }
+
+  /* main */
+  main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .bar { height: 44px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 20px; border-bottom: 1px solid var(--line); color: var(--text3); }
+  .bar h1 { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+  .bar .up { display: none; }
+  .scroll { flex: 1; overflow: auto; }
+  .page { max-width: 720px; margin: 0 auto; padding: 28px 28px 64px; display: flex; flex-direction: column; gap: 26px; animation: enter 160ms cubic-bezier(.2,0,0,1); }
+  .page.wide { max-width: 1080px; }
+  @keyframes enter { from { opacity: 0; transform: translateY(4px); } }
+  @media (prefers-reduced-motion: reduce) { .page { animation: none; } }
+
+  .sec { display: flex; flex-direction: column; gap: 8px; }
+  .sec-h { display: flex; align-items: center; gap: 8px; padding: 0 2px; min-height: 28px; }
+  .sec-h h2 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--text2); }
+  .sec-h .n { color: var(--text3); font-size: 12px; }
+  .sec-h .grow { flex: 1; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 16px; min-height: 52px; padding: 10px 16px; }
+  .row + .row, .row + .more, .more + .row, .row + .foot, .row + .grid2 { border-top: 1px solid var(--line2); }
+  .row .lbl { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .row .t { font-weight: 500; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .row .s { color: var(--text3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .row .ctl { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .val { color: var(--text2); }
+  .foot { display: flex; gap: 8px; padding: 8px 10px; align-items: center; flex-wrap: wrap; }
+  .more { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 10px; background: var(--field); }
+
+  /* controls */
+  .btn { border: 1px solid var(--line-em); background: var(--card); border-radius: 7px; height: 28px; padding: 0 11px; cursor: pointer; font-weight: 500; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { color: var(--error); }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--text2); }
+  .btn.ghost:hover { background: var(--hover); color: var(--text); }
+  .btn.ghost.danger { color: var(--error); }
+  .sel, .inp { height: 30px; border: 1px solid var(--line); background: var(--field); border-radius: 7px; padding: 0 10px; min-width: 0; }
+  .sel { appearance: none; padding-right: 28px; cursor: pointer; font-weight: 500; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a7e85' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 9px center; }
+  .w220 { width: 220px; } .w180 { width: 180px; } .num { width: 72px; text-align: right; }
+  .unit { width: 22px; color: var(--text3); }
+  .inp:focus, .sel:focus { outline: 2px solid var(--accent-text); outline-offset: -1px; }
+  .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--field); border: 1px solid var(--line); }
+  .seg button { border: 0; background: transparent; border-radius: 6px; height: 24px; padding: 0 10px; cursor: pointer; color: var(--text2); font-size: 12.5px; font-weight: 500; }
+  .seg button[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .14); }
+  .sw { position: relative; width: 34px; height: 20px; border-radius: 999px; border: 0; background: var(--line-em); cursor: pointer; padding: 0; transition: background .15s; flex-shrink: 0; }
+  .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform .15s; }
+  .sw[aria-checked="true"] { background: var(--accent); }
+  .sw[aria-checked="true"]::after { transform: translateX(14px); }
+  .chip { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; background: var(--hover); color: var(--text2); }
+  .chip.ok { background: var(--accent-muted); color: var(--accent-text); }
+  .chip.warn { background: var(--warning-muted); color: var(--warning); }
+  .chip.bad { background: var(--error-muted); color: var(--error); }
+  .chip.info { background: var(--info-muted); color: var(--info); }
+  .chip .d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .mark { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0; }
+  .mark.lg { width: 40px; height: 40px; border-radius: 10px; font-size: 17px; }
+  .c1 { background: #17603f; } .c2 { background: #2f8fb8; } .c3 { background: #b0466b; } .c4 { background: #c2672b; } .c5 { background: #8a5cd0; } .c6 { background: #5b6170; }
+  .ico-box { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--field); color: var(--text2); flex-shrink: 0; }
+  .ico-box.lg { width: 40px; height: 40px; border-radius: 10px; }
+  .ico-box.info { background: var(--info-muted); color: var(--info); }
+
+  .note { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 10px; font-weight: 500; border: 1px solid transparent; }
+  .note.warn { background: var(--warning-muted); color: var(--warning); border-color: rgb(196 122 0 / .18); }
+  .note.info { background: var(--info-muted); color: var(--info); }
+  .note .grow { flex: 1; }
+
+  .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fact { padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .fact + .fact { border-left: 1px solid var(--line2); }
+  .fact .k { font-size: 12px; color: var(--text3); }
+  .fact .v { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hero { display: flex; gap: 14px; align-items: center; padding: 16px; border-bottom: 1px solid var(--line2); }
+  .hero .name { font-size: 15px; font-weight: 600; }
+  .hero .grow { flex: 1; min-width: 0; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; }
+  .grid2 .row { border-top: 1px solid var(--line2); }
+  .grid2 .row:nth-child(-n+2) { border-top: 0; }
+  .grid2 .row:nth-child(even) { border-left: 1px solid var(--line2); }
+  .notes-list { margin: 0; padding-left: 18px; color: var(--text2); }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px; }
+  .tag { display: inline-flex; align-items: center; gap: 6px; font: 12px var(--mono); padding: 3px 4px 3px 9px; border-radius: 6px; background: var(--field); border: 1px solid var(--line); max-width: 100%; }
+  .tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag button { border: 0; background: transparent; color: var(--text3); cursor: pointer; width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; padding: 0; flex-shrink: 0; }
+  .tag button:hover { background: var(--hover); color: var(--text); }
+
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; font-weight: 500; color: var(--text3); padding: 9px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 9px 16px; border-top: 1px solid var(--line2); vertical-align: middle; }
+  tr:first-child td { border-top: 0; }
+  td.when { color: var(--text3); white-space: nowrap; width: 1%; }
+  td.who { white-space: nowrap; width: 1%; }
+  td.who > span { display: inline-flex; gap: 7px; align-items: center; }
+  td.who .mark { width: 20px; height: 20px; font-size: 10px; border-radius: 5px; }
+  td.where { color: var(--text3); white-space: nowrap; width: 1%; }
+
+  dialog { border: 1px solid var(--line-em); border-radius: 14px; background: var(--card); color: var(--text); padding: 0; width: min(400px, calc(100vw - 32px)); box-shadow: 0 20px 60px rgb(0 0 0 / .25); }
+  dialog::backdrop { background: rgb(0 0 0 / .3); }
+  .dlg-h { padding: 16px 18px 4px; font-size: 15px; font-weight: 600; }
+  .dlg-b { padding: 12px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .dlg-b label { display: flex; flex-direction: column; gap: 5px; font-weight: 500; }
+  .dlg-b .inp { height: 34px; }
+  .dlg-f { padding: 12px 18px 16px; display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* phone */
+  @media (max-width: 720px) {
+    .side { width: 100%; border-right: 0; background: var(--body); }
+    .side-top { padding: 12px 16px 8px; }
+    .side-top .ttl { display: block; font-size: 28px; font-weight: 700; padding: 6px 2px 2px; }
+    .search { height: 36px; }
+    .search kbd { display: none; }
+    nav { padding: 6px 16px 24px; gap: 18px; }
+    .grp { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; gap: 0; }
+    .grp-name { padding: 0 4px 6px; text-transform: uppercase; letter-spacing: .04em; font-size: 11.5px; }
+    .grp-wrap { display: flex; flex-direction: column; }
+    .nav-item { height: 46px; border-radius: 0; padding: 0 14px; font-size: 15px; color: var(--text); }
+    .nav-item + .nav-item { border-top: 1px solid var(--line2); }
+    .nav-item[aria-current="page"] { background: transparent; }
+    .nav-item .ic, .nav-item[aria-current="page"] .ic { color: var(--text2); }
+    .nav-item .chev { display: block; }
+    .side-foot { justify-content: center; border-top: 0; }
+    main { display: none; }
+    body.in-page .side { display: none; }
+    body.in-page main { display: flex; }
+    .bar { height: 48px; padding: 0 8px; gap: 4px; }
+    .bar .crumb, .bar .sep { display: none; }
+    .bar .up { display: inline-flex; }
+    .bar h1 { font-size: 15px; }
+    .page { padding: 16px 16px 48px; gap: 22px; }
+    .row { flex-wrap: wrap; gap: 8px 12px; padding: 11px 14px; }
+    .row .lbl { min-width: 50%; }
+    .row .ctl { margin-left: auto; }
+    .row.stackable .ctl { width: 100%; }
+    .row.stackable .ctl .sel, .row.stackable .ctl .inp { flex: 1; width: auto; }
+    .row.stackable .ctl .seg { flex: 1; }
+    .row.stackable .ctl .seg button { flex: 1; }
+    .facts { grid-template-columns: 1fr; }
+    .fact { flex-direction: row; justify-content: space-between; }
+    .fact + .fact { border-left: 0; border-top: 1px solid var(--line2); }
+    .grid2 { grid-template-columns: 1fr; }
+    .grid2 .row:nth-child(2) { border-top: 1px solid var(--line2); }
+    .grid2 .row:nth-child(even) { border-left: 0; }
+    td.where, th.where { display: none; }
+    td, th { padding: 9px 12px; }
+  }
+  @media (min-width: 721px) { .side-top .ttl { display: none; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 20h20"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M9 7h1M14 7h1M9 11h1M14 11h1M9 15h1M14 15h1"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c1-3.5 3.5-5 6.5-5s5.5 1.5 6.5 5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 15c2 .6 3.2 2.2 3.6 5"/></symbol>
+    <symbol id="i-team" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="7" height="7" rx="2"/><rect x="14" y="4" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9z"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14.5 6.5a4 4 0 0 0 5 5L21 13l-8 8-3-3 6.5-6.5M14.5 6.5 13 5l-8 8 3 3"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 13 4-5"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <aside class="side">
+    <div class="side-top">
+      <a class="back" href="#"><svg width="14" height="14"><use href="#i-back"/></svg>Back to the app</a>
+      <div class="ttl">Settings</div>
+      <label class="search"><svg width="13" height="13"><use href="#i-search"/></svg><input id="q" placeholder="Search settings" aria-label="Search settings"><kbd>/</kbd></label>
+    </div>
+    <nav aria-label="Settings" id="nav">
+      <div class="grp-wrap" data-grp>
+        <p class="grp-name">You</p>
+        <div class="grp">
+          <button class="nav-item" data-to="account" data-keys="profile password sign out claude login devices sessions pair phone"><svg class="ic" width="15" height="15"><use href="#i-user"/></svg><span class="lab">Account</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="defaults" data-keys="my defaults model effort mode plan auto ask subagent"><svg class="ic" width="15" height="15"><use href="#i-sliders"/></svg><span class="lab">My defaults</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="device" data-keys="this device app appearance dark light theme shortcut hints start at sign-in background update version"><svg class="ic" width="15" height="15"><use href="#i-laptop"/></svg><span class="lab">This device</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+        </div>
+      </div>
+      <div class="grp-wrap" data-grp>
+        <p class="grp-name">Company</p>
+        <div class="grp">
+          <button class="nav-item" data-to="company" data-keys="company name management mode org chart tester testing background jobs memory consolidation"><svg class="ic" width="15" height="15"><use href="#i-building"/></svg><span class="lab">General</span><span class="flag warn" title="Needs you"></span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="members" data-keys="board members users add disable sessions owner"><svg class="ic" width="15" height="15"><use href="#i-users"/></svg><span class="lab">Board members</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <a class="nav-item" href="settings-company.html" style="text-decoration:none" data-keys="employees team org"><svg class="ic" width="15" height="15"><use href="#i-team"/></svg><span class="lab">Employees</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-company.html" style="text-decoration:none" data-keys="workspaces projects"><svg class="ic" width="15" height="15"><use href="#i-folder"/></svg><span class="lab">Workspaces</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-company.html" style="text-decoration:none" data-keys="guidelines rules"><svg class="ic" width="15" height="15"><use href="#i-book"/></svg><span class="lab">Guidelines</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-company.html" style="text-decoration:none" data-keys="memory remember"><svg class="ic" width="15" height="15"><use href="#i-book"/></svg><span class="lab">Memory</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+        </div>
+      </div>
+      <div class="grp-wrap" data-grp>
+        <p class="grp-name">Server</p>
+        <div class="grp">
+          <button class="nav-item" data-to="server" data-keys="server name update version restart shut down power pc other servers"><svg class="ic" width="15" height="15"><use href="#i-server"/></svg><span class="lab">Overview</span><span class="flag info" title="Update available"></span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="remote" data-keys="remote access tailscale pair device phone notifications apns push"><svg class="ic" width="15" height="15"><use href="#i-globe"/></svg><span class="lab">Remote &amp; phones</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="connections" data-keys="connections api key models company connection"><svg class="ic" width="15" height="15"><use href="#i-plug"/></svg><span class="lab">Connections</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="tools" data-keys="mcp tools servers browser always allowed safe"><svg class="ic" width="15" height="15"><use href="#i-tool"/></svg><span class="lab">Tools &amp; MCP</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="load" data-keys="load limits cpu memory runs at once compaction context tokens"><svg class="ic" width="15" height="15"><use href="#i-gauge"/></svg><span class="lab">Runs &amp; load</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="backups" data-keys="backups restore back up"><svg class="ic" width="15" height="15"><use href="#i-archive"/></svg><span class="lab">Backups</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="activity" data-keys="activity log audit history"><svg class="ic" width="15" height="15"><use href="#i-list"/></svg><span class="lab">Activity log</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+        </div>
+      </div>
+      <p class="nav-empty" id="none" hidden>Nothing found.</p>
+    </nav>
+    <div class="side-foot"><span class="live"></span>Remote · Northwind</div>
+  </aside>
+
+  <main>
+    <div class="bar">
+      <button class="btn ghost up" id="up" aria-label="Back to Settings"><svg width="16" height="16"><use href="#i-back"/></svg>Settings</button>
+      <span class="crumb">Settings</span><span class="sep">›</span><h1 id="title">Account</h1>
+    </div>
+    <div class="scroll" id="scroll">
+
+      <div class="page" data-page="account">
+        <div class="card">
+          <div class="hero">
+            <span class="mark lg c1">M</span>
+            <div class="grow"><div class="name">mira</div><div class="faint">Owner</div></div>
+            <button class="btn">Sign out</button>
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="t">Password</span><span class="s">Changed 23 days ago</span></div>
+            <div class="ctl"><button class="btn" data-toggle="pw">Change</button></div>
+          </div>
+          <div class="more" id="pw" hidden>
+            <input class="inp" type="password" placeholder="Current password" aria-label="Current password">
+            <input class="inp" type="password" placeholder="New password · at least 12 characters" aria-label="New password">
+            <input class="inp" type="password" placeholder="Repeat new password" aria-label="Repeat new password">
+            <div><button class="btn primary">Save password</button> <button class="btn ghost" data-toggle="pw">Cancel</button></div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Claude login</h2></div>
+          <div class="card">
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-plug"/></svg></div>
+              <div class="lbl"><span class="t">Connected <span class="chip ok"><span class="d"></span>Linked</span></span><span class="s">Checked 4 min ago</span></div>
+              <div class="ctl"><button class="btn">Reconnect</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Devices</h2><span class="n">4</span><span class="grow"></span><button class="btn"><svg width="12" height="12"><use href="#i-plus"/></svg>Add a device</button></div>
+          <div class="card">
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-laptop"/></svg></div>
+              <div class="lbl"><span class="t">Framework 13 <span class="chip ok">This device</span></span><span class="s">Desktop app · now</span></div>
+            </div>
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-phone"/></svg></div>
+              <div class="lbl"><span class="t">iPhone 16 Pro</span><span class="s">Paired · 3 min ago</span></div>
+              <div class="ctl"><button class="btn">Revoke</button></div>
+            </div>
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-laptop"/></svg></div>
+              <div class="lbl"><span class="t">MacBook Air</span><span class="s">Paired · yesterday</span></div>
+              <div class="ctl"><button class="btn">Revoke</button></div>
+            </div>
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-globe"/></svg></div>
+              <div class="lbl"><span class="t">Firefox on Linux</span><span class="s">Signed in · 4 days ago</span></div>
+              <div class="ctl"><button class="btn">Sign out</button></div>
+            </div>
+            <div class="foot"><button class="btn ghost danger">Sign out all other devices</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" data-page="defaults" hidden>
+        <div class="card">
+          <div class="row stackable">
+            <div class="lbl"><span class="t">Model</span></div>
+            <div class="ctl"><select class="sel w220" aria-label="Model"><option>Opus 5.5</option><option>Sonnet 5.5</option><option>Haiku 5.5</option><option>Fable 5.1</option></select></div>
+          </div>
+          <div class="row stackable">
+            <div class="lbl"><span class="t">Effort</span></div>
+            <div class="ctl"><div class="seg" role="group" aria-label="Effort"><button>Low</button><button>Medium</button><button aria-pressed="true">High</button><button>Max</button></div></div>
+          </div>
+          <div class="row stackable">
+            <div class="lbl"><span class="t">Mode</span></div>
+            <div class="ctl"><div class="seg" role="group" aria-label="Mode"><button aria-pressed="true">Ask</button><button>Plan</button><button>Auto</button></div></div>
+          </div>
+          <div class="row stackable">
+            <div class="lbl"><span class="t">Subagent model</span></div>
+            <div class="ctl"><select class="sel w220" aria-label="Subagent model"><option>Default · Sonnet</option><option>Opus 5.5</option><option>Haiku 5.5</option></select></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" data-page="device" hidden>
+        <div class="card">
+          <div class="row stackable">
+            <div class="lbl"><span class="t">Appearance</span></div>
+            <div class="ctl"><div class="seg" role="group" aria-label="Appearance"><button data-theme="system">System</button><button data-theme="light" aria-pressed="true">Light</button><button data-theme="dark">Dark</button></div></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="t">Always show shortcut hints</span></div>
+            <div class="ctl"><button class="sw" role="switch" aria-checked="false" aria-label="Always show shortcut hints"></button></div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Background</h2></div>
+          <div class="card">
+            <div class="row">
+              <div class="lbl"><span class="t">Start at sign-in</span></div>
+              <div class="ctl"><button class="sw" role="switch" aria-checked="true" aria-label="Start at sign-in"></button></div>
+            </div>
+            <div class="row">
+              <div class="lbl"><span class="t">Closing the window</span></div>
+              <div class="ctl"><span class="val">Work continues</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>App</h2></div>
+          <div class="card">
+            <div class="row">
+              <div class="lbl"><span class="t">Aurelius 0.31.2 <span class="chip ok">Up to date</span></span><span class="s">Checked 12 min ago</span></div>
+              <div class="ctl"><button class="btn">Check now</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" data-page="company" hidden>
+        <div class="card">
+          <div class="row stackable">
+            <div class="lbl"><span class="t">Company name</span></div>
+            <div class="ctl"><input class="inp w220" value="Northwind" aria-label="Company name"></div>
+          </div>
+          <div class="row">
+            <div class="lbl"><span class="t">Management team</span></div>
+            <div class="ctl"><span class="mark c5" title="Atlas">A</span><span class="val">Atlas</span></div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>How work flows</h2></div>
+          <div class="card">
+            <div class="row">
+              <div class="lbl"><span class="t">Follow the org chart</span></div>
+              <div class="ctl"><button class="sw" role="switch" aria-checked="true" aria-label="Follow the org chart"></button></div>
+            </div>
+            <div class="row">
+              <div class="lbl"><span class="t">Management chooses the mode</span></div>
+              <div class="ctl"><button class="sw" role="switch" aria-checked="false" aria-label="Management chooses the mode"></button></div>
+            </div>
+            <div class="row stackable">
+              <div class="lbl"><span class="t">Tester</span></div>
+              <div class="ctl"><select class="sel w220" aria-label="Tester"><option>None: no Testing step</option><option selected>Pulse</option><option>Trace</option></select></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Background jobs</h2></div>
+          <div class="card">
+            <div class="row">
+              <div class="ico-box" style="background:var(--warning-muted);color:var(--warning)"><svg width="15" height="15"><use href="#i-warn"/></svg></div>
+              <div class="lbl"><span class="t">No Claude login</span><span class="s">Memory consolidation waits for a login</span></div>
+              <div class="ctl"><button class="btn primary">Use my login</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" data-page="members" hidden>
+        <div class="sec">
+          <div class="sec-h"><h2>Board members</h2><span class="n">3</span><span class="grow"></span><button class="btn primary" id="add-member"><svg width="12" height="12"><use href="#i-plus"/></svg>Add board member</button></div>
+          <div class="card">
+            <div class="row">
+              <span class="mark c1">M</span>
+              <div class="lbl"><span class="t">mira <span class="chip">You</span></span><span class="s">Owner</span></div>
+            </div>
+            <div class="row">
+              <span class="mark c2">J</span>
+              <div class="lbl"><span class="t">jonas</span><span class="s">Active 2 h ago · 2 devices</span></div>
+              <div class="ctl"><button class="btn">Sessions</button><button class="btn ghost danger">Disable</button></div>
+            </div>
+            <div class="row" style="opacity:.6">
+              <span class="mark c6">E</span>
+              <div class="lbl"><span class="t">eva <span class="chip">Disabled</span></span><span class="s">Since 14 Nov</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" data-page="server" hidden>
+        <div class="card">
+          <div class="hero">
+            <div class="ico-box lg"><svg width="18" height="18"><use href="#i-server"/></svg></div>
+            <div class="grow"><div class="name">Northwind</div><div class="faint">Through remote access</div></div>
+            <span class="chip ok"><span class="d"></span>Connected</span>
+          </div>
+          <div class="facts">
+            <div class="fact"><span class="k">Version</span><span class="v">0.31.0</span></div>
+            <div class="fact"><span class="k">Running since</span><span class="v">3 days</span></div>
+            <div class="fact"><span class="k">Busy now</span><span class="v">2 runs · 0 waiting</span></div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Update</h2></div>
+          <div class="card">
+            <div class="row">
+              <div class="ico-box info"><svg width="15" height="15"><use href="#i-up"/></svg></div>
+              <div class="lbl"><span class="t">0.31.2 is available</span><span class="s">Checked 12 min ago</span></div>
+              <div class="ctl"><button class="btn ghost" data-toggle="notes">What's new</button><button class="btn primary">Update</button></div>
+            </div>
+            <div class="more" id="notes" hidden>
+              <ul class="notes-list">
+                <li>One model setting under My defaults.</li>
+                <li>The Plan card shows steps that run in parallel.</li>
+                <li>Review card: merge and finish in one place.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>This server</h2></div>
+          <div class="card">
+            <div class="row stackable">
+              <div class="lbl"><span class="t">Server name</span></div>
+              <div class="ctl"><input class="inp w220" value="Northwind" aria-label="Server name"></div>
+            </div>
+            <div class="row">
+              <div class="lbl"><span class="t">Restart server</span></div>
+              <div class="ctl"><button class="btn">Restart</button></div>
+            </div>
+            <div class="row">
+              <div class="lbl"><span class="t">Shut down this PC</span></div>
+              <div class="ctl"><button class="btn">When idle</button><button class="btn danger">Now</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Other servers</h2><span class="n">1</span></div>
+          <div class="card">
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-server"/></svg></div>
+              <div class="lbl"><span class="t">Home lab</span><span class="s">This computer · 6 days ago</span></div>
+              <div class="ctl"><button class="btn">Switch</button></div>
+            </div>
+            <div class="foot"><button class="btn ghost"><svg width="12" height="12"><use href="#i-plus"/></svg>Add a server</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" data-page="remote" hidden>
+        <div class="card">
+          <div class="row">
+            <div class="lbl"><span class="t">Remote access <span class="chip ok"><span class="d"></span>On</span></span><span class="s mono">northwind.tail3c9a.ts.net</span></div>
+            <div class="ctl"><button class="sw" role="switch" aria-checked="true" aria-label="Remote access"></button></div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Waiting for your answer</h2><span class="n">1</span></div>
+          <div class="card">
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-phone"/></svg></div>
+              <div class="lbl"><span class="t">Pixel 9</span><span class="s">Code 4812 · 1 min ago</span></div>
+              <div class="ctl"><button class="btn ghost">Refuse</button><button class="btn primary">Allow</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Devices without an owner</h2><span class="n">1</span></div>
+          <div class="card">
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-laptop"/></svg></div>
+              <div class="lbl"><span class="t">Office iMac</span><span class="s">Paired 2 Oct · 9 days ago</span></div>
+              <div class="ctl"><button class="btn">Revoke</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Phone notifications</h2></div>
+          <div class="card">
+            <div class="row">
+              <div class="lbl"><span class="t">Notifications to phones <span class="chip ok">On</span></span></div>
+              <div class="ctl"><button class="btn">Send a test</button></div>
+            </div>
+            <div class="row">
+              <div class="lbl"><span class="t">APNs key</span><span class="s mono">AuthKey_7KQ2D9.p8</span></div>
+              <div class="ctl"><button class="btn">Replace</button></div>
+            </div>
+            <div class="row stackable">
+              <div class="lbl"><span class="t">Team id</span></div>
+              <div class="ctl"><input class="inp w180 mono" value="R4HN52XQ7B" aria-label="Team id"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" data-page="connections" hidden>
+        <div class="card">
+          <div class="row stackable">
+            <div class="lbl"><span class="t">Company connection</span></div>
+            <div class="ctl"><select class="sel w220" aria-label="Company connection"><option>Claude logins</option><option>Anthropic API</option></select></div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Connections</h2><span class="n">3</span><span class="grow"></span><button class="btn"><svg width="12" height="12"><use href="#i-plus"/></svg>Add connection</button></div>
+          <div class="card">
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-user"/></svg></div>
+              <div class="lbl"><span class="t">Claude logins <span class="chip ok">Company</span></span><span class="s">4 models</span></div>
+            </div>
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-plug"/></svg></div>
+              <div class="lbl"><span class="t">Anthropic API</span><span class="s">Key <span class="mono">••••3f2a</span> · 4 models</span></div>
+              <div class="ctl"><button class="btn">Key</button><button class="btn ghost danger">Remove</button></div>
+            </div>
+            <div class="row">
+              <div class="ico-box"><svg width="15" height="15"><use href="#i-plug"/></svg></div>
+              <div class="lbl"><span class="t">Local Ollama <span class="chip bad">Unreachable</span></span><span class="s mono">localhost:11434</span></div>
+              <div class="ctl"><button class="btn">Retry</button><button class="btn ghost danger">Remove</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" data-page="tools" hidden>
+        <div class="card">
+          <div class="row">
+            <div class="lbl"><span class="t">Allow safe tools without asking</span><span class="s">Read, Grep, Glob, WebSearch</span></div>
+            <div class="ctl"><button class="sw" role="switch" aria-checked="true" aria-label="Allow safe tools without asking"></button></div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>MCP servers</h2><span class="n">3</span><span class="grow"></span><button class="btn"><svg width="12" height="12"><use href="#i-plus"/></svg>Add MCP server</button></div>
+          <div class="card">
+            <div class="row">
+              <div class="ico-box mono">gh</div>
+              <div class="lbl"><span class="t">github <span class="chip ok"><span class="d"></span>Connected</span></span><span class="s">24 tools</span></div>
+              <div class="ctl"><button class="btn ghost danger">Remove</button></div>
+            </div>
+            <div class="row">
+              <div class="ico-box mono">li</div>
+              <div class="lbl"><span class="t">linear <span class="chip warn">Needs login</span></span><span class="s">OAuth</span></div>
+              <div class="ctl"><button class="btn primary">Log in</button></div>
+            </div>
+            <div class="row">
+              <div class="ico-box mono">pw</div>
+              <div class="lbl"><span class="t">playwright <span class="chip ok"><span class="d"></span>Connected</span></span><span class="s">21 tools</span></div>
+              <div class="ctl"><button class="btn ghost danger">Remove</button></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Browser</h2></div>
+          <div class="card">
+            <div class="row stackable">
+              <div class="lbl"><span class="t">Drive with</span></div>
+              <div class="ctl"><select class="sel w220" aria-label="Drive with"><option>playwright</option><option>None</option></select></div>
+            </div>
+            <div class="row stackable">
+              <div class="lbl"><span class="t">Browser</span></div>
+              <div class="ctl"><select class="sel w220" aria-label="Browser"><option>Chromium (headless)</option><option>Chrome</option></select></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Always allowed tools</h2><span class="n">3</span></div>
+          <div class="card">
+            <div class="tags">
+              <span class="tag"><span>mcp__github__get_pull_request</span><button aria-label="Remove"><svg width="10" height="10"><use href="#i-x"/></svg></button></span>
+              <span class="tag"><span>mcp__github__list_issues</span><button aria-label="Remove"><svg width="10" height="10"><use href="#i-x"/></svg></button></span>
+              <span class="tag"><span>mcp__playwright__browser_snapshot</span><button aria-label="Remove"><svg width="10" height="10"><use href="#i-x"/></svg></button></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" data-page="load" hidden>
+        <div class="card">
+          <div class="row">
+            <div class="lbl"><span class="t">New runs start right away <span class="chip ok"><span class="d"></span>Open</span></span><span class="s">2 running · 0 waiting · CPU 38% · 21 GB free</span></div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Limits</h2></div>
+          <div class="card">
+            <div class="row">
+              <div class="lbl"><span class="t">Hold runs when the computer is busy</span></div>
+              <div class="ctl"><button class="sw" role="switch" aria-checked="true" aria-label="Hold runs when the computer is busy"></button></div>
+            </div>
+            <div class="grid2">
+              <div class="row"><div class="lbl"><span class="t">Max runs at once</span></div><div class="ctl"><input class="inp num" value="6" aria-label="Max runs at once"><span class="unit"></span></div></div>
+              <div class="row"><div class="lbl"><span class="t">Min free memory</span></div><div class="ctl"><input class="inp num" value="4" aria-label="Min free memory in GB"><span class="unit">GB</span></div></div>
+              <div class="row"><div class="lbl"><span class="t">Hold from CPU</span></div><div class="ctl"><input class="inp num" value="90" aria-label="Hold from CPU percent"><span class="unit">%</span></div></div>
+              <div class="row"><div class="lbl"><span class="t">Release below CPU</span></div><div class="ctl"><input class="inp num" value="70" aria-label="Release below CPU percent"><span class="unit">%</span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Context</h2></div>
+          <div class="card">
+            <div class="row">
+              <div class="lbl"><span class="t">Compact above</span></div>
+              <div class="ctl"><input class="inp num" value="160" aria-label="Compact above, thousands of tokens"><span class="faint">k tokens</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Running now</h2><span class="n">2</span></div>
+          <div class="card">
+            <div class="row">
+              <span class="mark c4">F</span>
+              <div class="lbl"><span class="t">Forge · #94 Vault export</span><span class="s">Ticket · 14 min</span></div>
+            </div>
+            <div class="row">
+              <span class="mark c3">P</span>
+              <div class="lbl"><span class="t">Pixel · Settings redesign</span><span class="s">Design session · 3 min</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page" data-page="backups" hidden>
+        <div class="card">
+          <div class="row">
+            <div class="ico-box"><svg width="15" height="15"><use href="#i-archive"/></svg></div>
+            <div class="lbl"><span class="t">Last backup 2 h ago</span><span class="s mono">~/.local/share/Aurelius/backups</span></div>
+            <div class="ctl"><button class="btn primary">Back up now</button></div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Backups</h2><span class="n">5</span></div>
+          <div class="card">
+            <div class="row"><div class="lbl"><span class="t">Today 09:00</span><span class="s">Daily · 48 MB</span></div><div class="ctl"><button class="btn">Restore</button></div></div>
+            <div class="row"><div class="lbl"><span class="t">Yesterday 09:00</span><span class="s">Daily · 47 MB</span></div><div class="ctl"><button class="btn">Restore</button></div></div>
+            <div class="row"><div class="lbl"><span class="t">23 Nov 16:42</span><span class="s">Before update 0.31.0 · 46 MB</span></div><div class="ctl"><button class="btn">Restore</button></div></div>
+            <div class="row"><div class="lbl"><span class="t">23 Nov 09:00</span><span class="s">Daily · 46 MB</span></div><div class="ctl"><button class="btn">Restore</button></div></div>
+            <div class="row"><div class="lbl"><span class="t">22 Nov 09:00</span><span class="s">Daily · 45 MB</span></div><div class="ctl"><button class="btn">Restore</button></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="page wide" data-page="activity" hidden>
+        <div class="filters">
+          <select class="sel" aria-label="Who"><option>Everyone</option><option>Board members</option><option>Employees</option></select>
+          <select class="sel" aria-label="What"><option>Everything</option><option>Settings</option><option>Tickets</option><option>Sign-ins</option></select>
+          <select class="sel" aria-label="When"><option>Last 7 days</option><option>Today</option><option>Last 30 days</option></select>
+        </div>
+        <div class="card">
+          <table>
+            <thead><tr><th>When</th><th>Who</th><th>What</th><th class="where">Where</th></tr></thead>
+            <tbody>
+              <tr><td class="when">10:42</td><td class="who"><span><span class="mark c1">M</span>mira</span></td><td>Changed My defaults: model Opus 5.5</td><td class="where">Settings</td></tr>
+              <tr><td class="when">10:15</td><td class="who"><span><span class="mark c4">F</span>Forge</span></td><td>Started a run on #94 Vault export</td><td class="where">Northwind</td></tr>
+              <tr><td class="when">09:58</td><td class="who"><span><span class="mark c2">J</span>jonas</span></td><td>Signed in on MacBook Air</td><td class="where">Remote</td></tr>
+              <tr><td class="when">09:00</td><td class="who"><span><span class="mark c6">S</span>Server</span></td><td>Daily backup · 48 MB</td><td class="where">Backups</td></tr>
+              <tr><td class="when">Yesterday</td><td class="who"><span><span class="mark c1">M</span>mira</span></td><td>Moved #93 to Done</td><td class="where">Aurelius</td></tr>
+              <tr><td class="when">Yesterday</td><td class="who"><span><span class="mark c5">O</span>Orion</span></td><td>Handed #93 to Bridge</td><td class="where">Aurelius</td></tr>
+              <tr><td class="when">23 Nov</td><td class="who"><span><span class="mark c1">M</span>mira</span></td><td>Disabled board member eva</td><td class="where">Settings</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="page" data-page="link" hidden>
+        <div class="note info"><span class="grow" id="link-text">Employees opens as its own page, outside Settings.</span></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<dialog id="dlg">
+  <div class="dlg-h">Add board member</div>
+  <div class="dlg-b">
+    <label>Name<input class="inp" autocomplete="off"></label>
+    <label>First password<input class="inp" type="password" placeholder="At least 12 characters"></label>
+    <label>Repeat password<input class="inp" type="password"></label>
+  </div>
+  <div class="dlg-f"><button class="btn ghost" id="dlg-cancel">Cancel</button><button class="btn primary" id="dlg-ok">Add</button></div>
+</dialog>
+
+<script>
+  var START = 'account', START_IN = false;
+  const nav = document.getElementById('nav');
+  const items = [...nav.querySelectorAll('.nav-item')];
+  const pages = [...document.querySelectorAll('[data-page]')];
+  const title = document.getElementById('title');
+  function open(page, key, push) {
+    pages.forEach(p => p.hidden = p.dataset.page !== page);
+    items.forEach(i => i.removeAttribute('aria-current'));
+    const it = items.find(i => (i.dataset.to || i.dataset.link) === key);
+    if (it) it.setAttribute('aria-current', 'page');
+    title.textContent = it ? it.querySelector('.lab').textContent : '';
+    document.getElementById('scroll').scrollTop = 0;
+    if (push) document.body.classList.add('in-page');
+  }
+  items.forEach(i => i.addEventListener('click', () => {
+    if (i.dataset.link) {
+      document.getElementById('link-text').textContent = i.querySelector('.lab').textContent + ' opens as its own page, outside Settings.';
+      open('link', i.dataset.link, true);
+    } else open(i.dataset.to, i.dataset.to, true);
+  }));
+  document.getElementById('up').addEventListener('click', () => document.body.classList.remove('in-page'));
+
+  const q = document.getElementById('q');
+  q.addEventListener('input', () => {
+    const v = q.value.trim().toLowerCase();
+    let any = false;
+    nav.querySelectorAll('[data-grp]').forEach(g => {
+      let n = 0;
+      g.querySelectorAll('.nav-item').forEach(i => {
+        const hit = !v || (i.textContent + ' ' + i.dataset.keys).toLowerCase().includes(v);
+        i.hidden = !hit; if (hit) n++;
+      });
+      g.hidden = n === 0; if (n) any = true;
+    });
+    document.getElementById('none').hidden = any;
+  });
+  document.addEventListener('keydown', e => { if (e.key === '/' && !/INPUT|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); q.focus(); } });
+
+  document.querySelectorAll('.sw').forEach(s => s.addEventListener('click', () => s.setAttribute('aria-checked', s.getAttribute('aria-checked') !== 'true')));
+  document.querySelectorAll('.seg').forEach(g => g.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    g.querySelectorAll('button').forEach(x => x.removeAttribute('aria-pressed')); b.setAttribute('aria-pressed', 'true');
+    if (b.dataset.theme) {
+      const dark = b.dataset.theme === 'dark' || (b.dataset.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.classList.toggle('dark', dark);
+    }
+  }));
+  document.querySelectorAll('[data-toggle]').forEach(b => b.addEventListener('click', () => { const t = document.getElementById(b.dataset.toggle); t.hidden = !t.hidden; }));
+  const dlg = document.getElementById('dlg');
+  document.getElementById('add-member').addEventListener('click', () => dlg.showModal());
+  document.getElementById('dlg-cancel').addEventListener('click', () => dlg.close());
+  document.getElementById('dlg-ok').addEventListener('click', () => dlg.close());
+
+  open(START, START, START_IN);
+</script>
+</body>
+</html>

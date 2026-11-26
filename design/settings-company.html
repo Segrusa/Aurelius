@@ -1,0 +1,1049 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings: Company and Knowledge</title>
+<style>
+  :root {
+    color-scheme: light;
+    --body: #f6f6f5; --side: #f1f1f0; --card: #ffffff; --field: #f4f4f3;
+    --text: #1b1c1e; --text2: #55595f; --text3: #7a7e85;
+    --line: rgb(0 0 0 / 0.08); --line2: rgb(0 0 0 / 0.055); --line-em: rgb(0 0 0 / 0.13);
+    --hover: rgb(0 0 0 / 0.045); --on: rgb(0 0 0 / 0.065);
+    --accent: #17603f; --accent-text: #17603f; --accent-muted: rgb(23 96 63 / 0.09);
+    --warning: #9a5800; --warning-muted: rgb(196 122 0 / 0.09);
+    --error: #c2281c; --error-muted: rgb(194 40 28 / 0.07);
+    --info: #2d5bd0; --info-muted: rgb(45 91 208 / 0.08);
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  :root.dark {
+    color-scheme: dark;
+    --body: #0c0d0e; --side: #08090a; --card: #16171a; --field: #1d1e22;
+    --text: #edeef0; --text2: #a0a4ab; --text3: #7d828a;
+    --line: rgb(255 255 255 / 0.07); --line2: rgb(255 255 255 / 0.05); --line-em: rgb(255 255 255 / 0.11);
+    --hover: rgb(255 255 255 / 0.05); --on: rgb(255 255 255 / 0.075);
+    --accent: #1f7a4c; --accent-text: #5fcb95; --accent-muted: rgb(95 203 149 / 0.12);
+    --warning: #e8a84a; --warning-muted: rgb(229 162 58 / 0.1);
+    --error: #f08a8a; --error-muted: rgb(240 138 138 / 0.1);
+    --info: #7ea6f8; --info-muted: rgb(126 166 248 / 0.11);
+    --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--body); color: var(--text); font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; border-radius: 5px; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .faint { color: var(--text3); }
+  svg { flex-shrink: 0; }
+  .app { flex: 1; display: flex; min-height: 0; }
+
+  /* sidebar */
+  .side { width: 236px; flex-shrink: 0; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .side-top { padding: 10px 12px 6px; display: flex; flex-direction: column; gap: 8px; }
+  .back { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; color: var(--text2); text-decoration: none; font-weight: 500; }
+  .back:hover { background: var(--hover); color: var(--text); }
+  .search { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 9px; border-radius: 7px; background: var(--card); border: 1px solid var(--line); color: var(--text3); }
+  .search input { border: 0; background: transparent; outline: none; flex: 1; min-width: 0; color: var(--text); }
+  .search kbd { font: 11px var(--mono); color: var(--text3); border: 1px solid var(--line-em); border-radius: 4px; padding: 0 4px; }
+  nav { flex: 1; overflow: auto; padding: 6px 12px 12px; display: flex; flex-direction: column; gap: 14px; }
+  .grp-name { margin: 0 0 3px; padding: 0 8px; font-size: 11.5px; font-weight: 600; color: var(--text3); }
+  .grp { display: flex; flex-direction: column; gap: 1px; }
+  .nav-item { display: flex; align-items: center; gap: 9px; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--text2); font-weight: 500; text-align: left; cursor: pointer; width: 100%; }
+  .nav-item:hover { background: var(--hover); color: var(--text); }
+  .nav-item[aria-current="page"] { background: var(--on); color: var(--text); }
+  .nav-item .ic { color: var(--text3); }
+  .nav-item[aria-current="page"] .ic { color: var(--text); }
+  .nav-item .lab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .nav-item .out { color: var(--text3); }
+  .nav-item .chev { display: none; color: var(--text3); }
+  .flag { width: 7px; height: 7px; border-radius: 50%; }
+  .flag.warn { background: var(--warning); }
+  .flag.info { background: var(--info); }
+  .nav-empty { padding: 4px 8px; color: var(--text3); }
+  .side-foot { padding: 10px 20px 12px; font-size: 12px; color: var(--text3); display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--line2); }
+  .live { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-text); }
+
+  /* main */
+  main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .bar { height: 44px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 20px; border-bottom: 1px solid var(--line); color: var(--text3); }
+  .bar h1 { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+  .bar .up { display: none; }
+  .scroll { flex: 1; overflow: auto; }
+  .page { max-width: 720px; margin: 0 auto; padding: 28px 28px 64px; display: flex; flex-direction: column; gap: 26px; animation: enter 160ms cubic-bezier(.2,0,0,1); }
+  .page.wide { max-width: 1080px; }
+  @keyframes enter { from { opacity: 0; transform: translateY(4px); } }
+  @media (prefers-reduced-motion: reduce) { .page { animation: none; } }
+
+  .sec { display: flex; flex-direction: column; gap: 8px; }
+  .sec-h { display: flex; align-items: center; gap: 8px; padding: 0 2px; min-height: 28px; }
+  .sec-h h2 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--text2); }
+  .sec-h .n { color: var(--text3); font-size: 12px; }
+  .sec-h .grow { flex: 1; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 16px; min-height: 52px; padding: 10px 16px; }
+  .row + .row, .row + .more, .more + .row, .row + .foot, .row + .grid2 { border-top: 1px solid var(--line2); }
+  .row .lbl { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .row .t { font-weight: 500; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .row .s { color: var(--text3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+  .row .ctl { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .val { color: var(--text2); }
+  .foot { display: flex; gap: 8px; padding: 8px 10px; align-items: center; flex-wrap: wrap; }
+  .more { padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 10px; background: var(--field); }
+
+  /* controls */
+  .btn { border: 1px solid var(--line-em); background: var(--card); border-radius: 7px; height: 28px; padding: 0 11px; cursor: pointer; font-weight: 500; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { color: var(--error); }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--text2); }
+  .btn.ghost:hover { background: var(--hover); color: var(--text); }
+  .btn.ghost.danger { color: var(--error); }
+  .sel, .inp { height: 30px; border: 1px solid var(--line); background: var(--field); border-radius: 7px; padding: 0 10px; min-width: 0; }
+  .sel { appearance: none; padding-right: 28px; cursor: pointer; font-weight: 500; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237a7e85' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 9px center; }
+  .w220 { width: 220px; } .w180 { width: 180px; } .num { width: 72px; text-align: right; }
+  .unit { width: 22px; color: var(--text3); }
+  .inp:focus, .sel:focus { outline: 2px solid var(--accent-text); outline-offset: -1px; }
+  .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--field); border: 1px solid var(--line); }
+  .seg button { display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; border-radius: 6px; height: 24px; padding: 0 10px; cursor: pointer; color: var(--text2); font-size: 12.5px; font-weight: 500; }
+  .seg button[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / .14); }
+  .sw { position: relative; width: 34px; height: 20px; border-radius: 999px; border: 0; background: var(--line-em); cursor: pointer; padding: 0; transition: background .15s; flex-shrink: 0; }
+  .sw::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform .15s; }
+  .sw[aria-checked="true"] { background: var(--accent); }
+  .sw[aria-checked="true"]::after { transform: translateX(14px); }
+  .chip { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; background: var(--hover); color: var(--text2); }
+  .chip.ok { background: var(--accent-muted); color: var(--accent-text); }
+  .chip.warn { background: var(--warning-muted); color: var(--warning); }
+  .chip.bad { background: var(--error-muted); color: var(--error); }
+  .chip.info { background: var(--info-muted); color: var(--info); }
+  .chip .d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .mark { width: 24px; height: 24px; border-radius: 6px; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0; }
+  .mark.lg { width: 40px; height: 40px; border-radius: 10px; font-size: 17px; }
+  .c1 { background: #17603f; } .c2 { background: #2f8fb8; } .c3 { background: #b0466b; } .c4 { background: #c2672b; } .c5 { background: #8a5cd0; } .c6 { background: #5b6170; }
+  .ico-box { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--field); color: var(--text2); flex-shrink: 0; }
+  .ico-box.lg { width: 40px; height: 40px; border-radius: 10px; }
+  .ico-box.info { background: var(--info-muted); color: var(--info); }
+
+  .note { display: flex; gap: 10px; align-items: center; padding: 10px 14px; border-radius: 10px; font-weight: 500; border: 1px solid transparent; }
+  .note.warn { background: var(--warning-muted); color: var(--warning); border-color: rgb(196 122 0 / .18); }
+  .note.info { background: var(--info-muted); color: var(--info); }
+  .note .grow { flex: 1; }
+
+  .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fact { padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .fact + .fact { border-left: 1px solid var(--line2); }
+  .fact .k { font-size: 12px; color: var(--text3); }
+  .fact .v { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hero { display: flex; gap: 14px; align-items: center; padding: 16px; border-bottom: 1px solid var(--line2); }
+  .hero .name { font-size: 15px; font-weight: 600; }
+  .hero .grow { flex: 1; min-width: 0; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; }
+  .grid2 .row { border-top: 1px solid var(--line2); }
+  .grid2 .row:nth-child(-n+2) { border-top: 0; }
+  .grid2 .row:nth-child(even) { border-left: 1px solid var(--line2); }
+  .notes-list { margin: 0; padding-left: 18px; color: var(--text2); }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px; }
+  .tag { display: inline-flex; align-items: center; gap: 6px; font: 12px var(--mono); padding: 3px 4px 3px 9px; border-radius: 6px; background: var(--field); border: 1px solid var(--line); max-width: 100%; }
+  .tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag button { border: 0; background: transparent; color: var(--text3); cursor: pointer; width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; padding: 0; flex-shrink: 0; }
+  .tag button:hover { background: var(--hover); color: var(--text); }
+
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; font-weight: 500; color: var(--text3); padding: 9px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 9px 16px; border-top: 1px solid var(--line2); vertical-align: middle; }
+  tr:first-child td { border-top: 0; }
+  td.when { color: var(--text3); white-space: nowrap; width: 1%; }
+  td.who { white-space: nowrap; width: 1%; }
+  td.who > span { display: inline-flex; gap: 7px; align-items: center; }
+  td.who .mark { width: 20px; height: 20px; font-size: 10px; border-radius: 5px; }
+  td.where { color: var(--text3); white-space: nowrap; width: 1%; }
+
+  dialog { border: 1px solid var(--line-em); border-radius: 14px; background: var(--card); color: var(--text); padding: 0; width: min(400px, calc(100vw - 32px)); box-shadow: 0 20px 60px rgb(0 0 0 / .25); }
+  dialog::backdrop { background: rgb(0 0 0 / .3); }
+  .dlg-h { padding: 16px 18px 4px; font-size: 15px; font-weight: 600; }
+  .dlg-b { padding: 12px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .dlg-b label { display: flex; flex-direction: column; gap: 5px; font-weight: 500; }
+  .dlg-b .inp { height: 34px; }
+  .dlg-f { padding: 12px 18px 16px; display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* phone */
+  @media (max-width: 720px) {
+    .side { width: 100%; border-right: 0; background: var(--body); }
+    .side-top { padding: 12px 16px 8px; }
+    .side-top .ttl { display: block; font-size: 28px; font-weight: 700; padding: 6px 2px 2px; }
+    .search { height: 36px; }
+    .search kbd { display: none; }
+    nav { padding: 6px 16px 24px; gap: 18px; }
+    .grp { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; gap: 0; }
+    .grp-name { padding: 0 4px 6px; text-transform: uppercase; letter-spacing: .04em; font-size: 11.5px; }
+    .grp-wrap { display: flex; flex-direction: column; }
+    .nav-item { height: 46px; border-radius: 0; padding: 0 14px; font-size: 15px; color: var(--text); }
+    .nav-item + .nav-item { border-top: 1px solid var(--line2); }
+    .nav-item[aria-current="page"] { background: transparent; }
+    .nav-item .ic, .nav-item[aria-current="page"] .ic { color: var(--text2); }
+    .nav-item .chev { display: block; }
+    .side-foot { justify-content: center; border-top: 0; }
+    main { display: none; }
+    body.in-page .side { display: none; }
+    body.in-page main { display: flex; }
+    .bar { height: 48px; padding: 0 8px; gap: 4px; }
+    .bar .crumb, .bar .sep { display: none; }
+    .bar .up { display: inline-flex; }
+    .bar h1 { font-size: 15px; }
+    .page { padding: 16px 16px 48px; gap: 22px; }
+    .row { flex-wrap: wrap; gap: 8px 12px; padding: 11px 14px; }
+    .row .lbl { min-width: 50%; }
+    .row .ctl { margin-left: auto; }
+    .row.stackable .ctl { width: 100%; }
+    .row.stackable .ctl .sel, .row.stackable .ctl .inp { flex: 1; width: auto; }
+    .row.stackable .ctl .seg { flex: 1; }
+    .row.stackable .ctl .seg button { flex: 1; }
+    .facts { grid-template-columns: 1fr; }
+    .fact { flex-direction: row; justify-content: space-between; }
+    .fact + .fact { border-left: 0; border-top: 1px solid var(--line2); }
+    .grid2 { grid-template-columns: 1fr; }
+    .grid2 .row:nth-child(2) { border-top: 1px solid var(--line2); }
+    .grid2 .row:nth-child(even) { border-left: 0; }
+    td.where, th.where { display: none; }
+    td, th { padding: 9px 12px; }
+  }
+  @media (min-width: 721px) { .side-top .ttl { display: none; } }
+
+  /* ---- Company & Knowledge additions ---- */
+  .page.mid { max-width: 920px; }
+  .crumb-link { color: var(--text3); text-decoration: none; cursor: pointer; border: 0; background: none; padding: 0; }
+  .crumb-link:hover { color: var(--text); text-decoration: underline; }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .toolbar .grow { flex: 1; }
+  .fsearch { display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 9px; border-radius: 7px; background: var(--field); border: 1px solid var(--line); color: var(--text3); width: 260px; }
+  .fsearch input { border: 0; background: transparent; outline: none; flex: 1; min-width: 0; color: var(--text); }
+  .lede { margin: -14px 2px 0; color: var(--text3); font-size: 12.5px; }
+
+  /* status */
+  .st { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text2); white-space: nowrap; }
+  .st .d { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); }
+  .st.work .d { background: var(--accent-text); box-shadow: 0 0 0 3px var(--accent-muted); animation: pulse 1.6s ease-in-out infinite; }
+  .st.you { color: var(--warning); font-weight: 500; } .st.you .d { background: var(--warning); }
+  .st.wait .d { background: var(--info); }
+  .st.paused { color: var(--text3); } .st.paused .d { background: transparent; border: 1.5px solid var(--text3); width: 8px; height: 8px; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  @media (prefers-reduced-motion: reduce) { .st.work .d { animation: none; } }
+
+  /* employee rows */
+  .emp { display: flex; align-items: center; gap: 12px; padding: 9px 16px; cursor: pointer; min-height: 50px; }
+  .emp + .emp, .gh + .emp { border-top: 1px solid var(--line2); }
+  .emp:hover { background: var(--hover); }
+  .emp .who { display: flex; align-items: center; gap: 10px; width: 230px; min-width: 0; flex-shrink: 0; }
+  .emp .nm { font-weight: 600; }
+  .emp .rl { color: var(--text3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .emp .who > span:not(.mark) { display: flex; flex-direction: column; min-width: 0; }
+  .emp .stc { width: 140px; flex-shrink: 0; }
+  .emp .on { flex: 1; min-width: 0; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .emp .on .tk { color: var(--text3); font-family: var(--mono); font-size: 11.5px; margin-right: 6px; }
+  .emp .gl { width: 92px; text-align: right; color: var(--text3); font-size: 12px; white-space: nowrap; }
+  .emp .pin { width: 26px; height: 26px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: var(--text3); display: grid; place-items: center; }
+  .emp .pin:hover { background: var(--on); color: var(--text); }
+  .emp .pin[aria-pressed="true"] { color: #c08a00; }
+  .gh { display: flex; align-items: center; gap: 8px; padding: 14px 16px 6px; font-size: 11.5px; font-weight: 600; color: var(--text3); letter-spacing: .03em; text-transform: uppercase; }
+  .gh:first-child { padding-top: 10px; }
+  .gh .n { font-weight: 500; }
+  .hdr { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--text3); }
+  .hdr .who { width: 230px; } .hdr .stc { width: 140px; } .hdr .on { flex: 1; } .hdr .gl { width: 92px; text-align: right; } .hdr .pin { width: 26px; }
+
+  /* proposals */
+  .prop { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+  .prop + .prop { border-top: 1px solid var(--line2); }
+  .prop .top { display: flex; align-items: center; gap: 10px; }
+  .prop .top .grow { flex: 1; min-width: 0; }
+  .prop .h { font-weight: 600; }
+  .prop .why { color: var(--text2); }
+  .prop .acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .diff { font: 12px/1.55 var(--mono); background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .diff .del { color: var(--error); background: var(--error-muted); display: block; }
+  .diff .add { color: var(--accent-text); background: var(--accent-muted); display: block; }
+  .diff .ctx { color: var(--text3); display: block; }
+  .wait-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warning); flex-shrink: 0; }
+
+  /* org chart */
+  .org { padding: 22px 16px 26px; overflow-x: auto; }
+  .tree, .tree ul { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; }
+  .tree { width: max-content; margin: 0 auto; }
+  .tree ul { padding-top: 18px; position: relative; }
+  .tree li { position: relative; padding: 18px 3px 0; display: flex; flex-direction: column; align-items: center; }
+  .tree > li { padding-top: 0; }
+  .tree ul::before { content: ""; position: absolute; top: 0; left: 50%; height: 18px; border-left: 1px solid var(--line-em); }
+  .tree li::before, .tree li::after { content: ""; position: absolute; top: 0; height: 18px; width: 50%; border-top: 1px solid var(--line-em); }
+  .tree li::before { right: 50%; } .tree li::after { left: 50%; border-left: 1px solid var(--line-em); }
+  .tree li:first-child::before, .tree li:last-child::after { border-top: 0; }
+  .tree li:first-child::after { border-top-left-radius: 6px; }
+  .tree li:last-child::before { border-right: 1px solid var(--line-em); border-top-right-radius: 6px; border-top: 1px solid var(--line-em); width: 50%; }
+  .tree li:only-child::before { display: none; } .tree li:only-child::after { border-top: 0; border-radius: 0; }
+  .tree > li::before, .tree > li::after { display: none; }
+  .tree ul.team { display: grid; grid-template-columns: repeat(4, auto); gap: 8px; padding: 26px 10px 0; position: relative; }
+  .tree ul.team::after { content: ""; position: absolute; top: 18px; left: 6px; right: 6px; height: calc(100% - 18px); border: 1px solid var(--line-em); border-radius: 10px; pointer-events: none; }
+  .tree ul.team > li { padding: 0; }
+  .tree ul.team > li::before, .tree ul.team > li::after { display: none; }
+  .tree ul.team > li:nth-child(-n+4) { padding-top: 6px; }
+  .tree ul.team > li:nth-last-child(-n+4) { padding-bottom: 8px; }
+  a.nav-item { text-decoration: none; }
+  .node { width: 106px; background: var(--card); border: 1px solid var(--line-em); border-radius: 10px; padding: 8px 10px; display: flex; gap: 8px; align-items: center; cursor: grab; text-align: left; }
+  .node:hover { border-color: var(--text3); }
+  .node.work { border-color: var(--accent-text); box-shadow: 0 0 0 3px var(--accent-muted); }
+  .node.you { border-color: var(--warning); box-shadow: 0 0 0 3px var(--warning-muted); }
+  .node.paused { opacity: .55; }
+  .node .mark { width: 20px; height: 20px; font-size: 10px; }
+  .node { padding: 7px 8px; gap: 7px; }
+  .node .t { display: flex; flex-direction: column; min-width: 0; }
+  .node .t b { font-size: 12.5px; }
+  .node .t span { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node.drop { outline: 2px dashed var(--accent-text); outline-offset: 2px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; padding: 10px 16px; border-top: 1px solid var(--line2); font-size: 12px; color: var(--text3); }
+
+  /* employee page */
+  .ehero { display: flex; gap: 14px; align-items: center; }
+  .ehero .grow { flex: 1; min-width: 0; }
+  .ehero h2 { margin: 0; font-size: 19px; font-weight: 650; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .ehero .sub { color: var(--text3); }
+  .ehero .acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-top: -10px; overflow-x: auto; scrollbar-width: none; }
+  .tabs button { border: 0; background: transparent; padding: 8px 12px; cursor: pointer; color: var(--text3); font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+  .tabs button:hover { color: var(--text); }
+  .tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--text); }
+  .tabs .cnt { font-size: 11px; color: var(--text3); }
+  .tabs .cnt.warn { color: var(--warning); font-weight: 600; }
+  .tabpanel { display: flex; flex-direction: column; gap: 26px; }
+  .field { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; }
+  .field + .field { border-top: 1px solid var(--line2); }
+  .field > .k { font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .field > .k .grow { flex: 1; }
+  .field .hint { color: var(--text3); font-size: 12px; }
+  textarea.inp { height: auto; padding: 8px 10px; resize: vertical; line-height: 1.5; width: 100%; font: 12.5px/1.55 var(--mono); }
+  textarea.inp.prose { font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .inp.full { width: 100%; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; }
+  .two .field:nth-child(even) { border-left: 1px solid var(--line2); }
+  .two .field:nth-child(n+3) { border-top: 1px solid var(--line2); }
+  .two .field + .field { border-top: 0; }
+  .two .field:nth-child(n+3) { border-top: 1px solid var(--line2); }
+  .savebar { position: sticky; bottom: 12px; display: flex; gap: 10px; align-items: center; padding: 8px 8px 8px 14px; background: var(--card); border: 1px solid var(--line-em); border-radius: 10px; box-shadow: 0 8px 24px rgb(0 0 0 / .12); }
+  .savebar .grow { flex: 1; color: var(--text2); }
+
+  .task { display: flex; gap: 12px; align-items: center; padding: 10px 16px; }
+  .task + .task { border-top: 1px solid var(--line2); }
+  .task .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .task .ti { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .task .me { color: var(--text3); font-size: 12px; }
+  .tk { font-family: var(--mono); font-size: 11.5px; color: var(--text3); }
+
+  .meter { height: 6px; border-radius: 999px; background: var(--field); border: 1px solid var(--line); overflow: hidden; }
+  .meter > i { display: block; height: 100%; background: var(--accent-text); border-radius: 999px; }
+  .meter.warn > i { background: var(--warning); }
+  .budget { padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+  .budget .l { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .budget .l b { font-weight: 600; }
+  .budget .l .grow { flex: 1; }
+
+  .chk { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+
+  .mem { padding: 11px 16px; display: flex; gap: 12px; align-items: flex-start; }
+  .mem + .mem { border-top: 1px solid var(--line2); }
+  .mem .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .mem .tx { color: var(--text); }
+  .mem .me { color: var(--text3); font-size: 12px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .mem .ctl { display: flex; gap: 4px; flex-shrink: 0; }
+  .kind { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 5px; background: var(--field); border: 1px solid var(--line); color: var(--text2); }
+
+  .editor { display: grid; grid-template-columns: 1fr 1fr; min-height: 300px; }
+  .editor textarea { border: 0; border-right: 1px solid var(--line2); border-radius: 0; background: var(--card); min-height: 300px; resize: none; outline: none; padding: 14px 16px; }
+  .preview { padding: 6px 18px 14px; overflow: auto; }
+  .preview h3 { font-size: 13.5px; margin: 12px 0 4px; }
+  .preview ul { margin: 0 0 6px; padding-left: 18px; color: var(--text2); }
+  .preview li { margin: 2px 0; }
+  .preview code { font: 12px var(--mono); background: var(--field); padding: 0 4px; border-radius: 4px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px 2px 3px; border-radius: 999px; background: var(--field); border: 1px solid var(--line); font-size: 12px; font-weight: 500; }
+  .pill .mark { width: 18px; height: 18px; font-size: 9px; border-radius: 50%; }
+  .pill.proj { padding-left: 8px; }
+  .marks { display: inline-flex; }
+  .marks .mark { width: 20px; height: 20px; font-size: 9px; border-radius: 50%; border: 2px solid var(--card); margin-left: -5px; }
+  .marks .mark:first-child { margin-left: 0; }
+  tr.click { cursor: pointer; }
+  tr.click:hover td { background: var(--hover); }
+  td .t { font-weight: 500; }
+  td .s { color: var(--text3); font-size: 12px; }
+  .secret { font-family: var(--mono); letter-spacing: .1em; color: var(--text3); }
+
+  dialog.wide { width: min(560px, calc(100vw - 32px)); }
+  .dlg-b .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .dlg-b .hint { color: var(--text3); font-size: 12px; font-weight: 400; }
+  .dlg-b textarea.inp { min-height: 90px; }
+
+  @media (max-width: 720px) {
+    .fsearch { width: auto; flex: 1; min-width: 160px; }
+    .toolbar .grow { display: none; }
+    .hdr { display: none; }
+    .emp { flex-wrap: wrap; gap: 4px 10px; padding: 10px 14px; }
+    .emp .who { width: auto; flex: 1; }
+    .emp .stc { width: auto; order: 2; }
+    .emp .pin { order: 3; }
+    .emp .on { flex-basis: 100%; order: 4; padding-left: 34px; font-size: 12.5px; margin-top: -2px; }
+    .emp .on.faint { display: none; }
+    #emp-filter { width: 100%; overflow-x: auto; scrollbar-width: none; }
+    .seg button { white-space: nowrap; flex-shrink: 0; }
+    #crumbs { display: none; }
+    .prop .top .chip { display: none; }
+    .emp .gl { display: none; }
+    .ehero { flex-wrap: wrap; }
+    .ehero .acts { width: 100%; justify-content: flex-start; }
+    .two { grid-template-columns: 1fr; }
+    .two .field:nth-child(even) { border-left: 0; }
+    .two .field + .field { border-top: 1px solid var(--line2); }
+    .editor { grid-template-columns: 1fr; }
+    .editor .preview { display: none; }
+    .editor textarea { border-right: 0; }
+    .prop .acts { justify-content: stretch; }
+    .prop .acts .btn { flex: 1; justify-content: center; }
+    .mem { flex-wrap: wrap; }
+    .mem .ctl { width: 100%; justify-content: flex-end; }
+    td.hide-s, th.hide-s { display: none; }
+    .dlg-b .row2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 20h20"/></symbol>
+    <symbol id="i-building" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M9 7h1M14 7h1M9 11h1M14 11h1M9 15h1M14 15h1"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c1-3.5 3.5-5 6.5-5s5.5 1.5 6.5 5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 15c2 .6 3.2 2.2 3.6 5"/></symbol>
+    <symbol id="i-team" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="7" height="7" rx="2"/><rect x="14" y="4" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9z"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0zM12 17v5"/></symbol>
+    <symbol id="i-tool" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14.5 6.5a4 4 0 0 0 5 5L21 13l-8 8-3-3 6.5-6.5M14.5 6.5 13 5l-8 8 3 3"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 18a9 9 0 1 1 16 0"/><path d="m12 13 4-5"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M7 17 17 7M9 7h8v8"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="2" width="12" height="20" rx="2.5"/><path d="M11 18h2"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 2.8 5.8 6.2.9-4.5 4.4 1 6.2L12 17.4 6.5 20.3l1-6.2L3 9.7l6.2-.9z"/></symbol>
+    <symbol id="i-star-f" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 2.8 5.8 6.2.9-4.5 4.4 1 6.2L12 17.4 6.5 20.3l1-6.2L3 9.7l6.2-.9z"/></symbol>
+    <symbol id="i-rules" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h5"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 1V5a2 2 0 0 0-3-1zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 1"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 20 4l-6 16-3-7z"/></symbol>
+    <symbol id="i-tree" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="5" rx="1"/><rect x="3" y="16" width="6" height="5" rx="1"/><rect x="15" y="16" width="6" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <aside class="side">
+    <div class="side-top">
+      <a class="back" href="#"><svg width="14" height="14"><use href="#i-back"/></svg>Back to the app</a>
+      <div class="ttl">Settings</div>
+      <label class="search"><svg width="13" height="13"><use href="#i-search"/></svg><input id="q" placeholder="Search settings" aria-label="Search settings"><kbd>/</kbd></label>
+    </div>
+    <nav aria-label="Settings" id="nav">
+      <div class="grp-wrap" data-grp>
+        <p class="grp-name">You</p>
+        <div class="grp">
+          <a class="nav-item" href="settings-redesign.html" data-keys="profile password sign out claude login devices"><svg class="ic" width="15" height="15"><use href="#i-user"/></svg><span class="lab">Account</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-redesign.html" data-keys="my defaults model effort mode"><svg class="ic" width="15" height="15"><use href="#i-sliders"/></svg><span class="lab">My defaults</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-redesign.html" data-keys="this device appearance dark light theme"><svg class="ic" width="15" height="15"><use href="#i-laptop"/></svg><span class="lab">This device</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+        </div>
+      </div>
+      <div class="grp-wrap" data-grp>
+        <p class="grp-name">Company</p>
+        <div class="grp">
+          <a class="nav-item" href="settings-redesign.html" data-keys="company name management background jobs"><svg class="ic" width="15" height="15"><use href="#i-building"/></svg><span class="lab">General</span><span class="flag warn" title="Needs you"></span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-redesign.html" data-keys="board members users"><svg class="ic" width="15" height="15"><use href="#i-users"/></svg><span class="lab">Board members</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <button class="nav-item" data-to="employees" data-keys="employees team org chart reports to hire proposal instructions pause archive"><svg class="ic" width="15" height="15"><use href="#i-team"/></svg><span class="lab">Employees</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="workspaces" data-keys="workspaces projects folder export pause archive"><svg class="ic" width="15" height="15"><use href="#i-folder"/></svg><span class="lab">Workspaces</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="guidelines" data-keys="guidelines rules coding starter set"><svg class="ic" width="15" height="15"><use href="#i-rules"/></svg><span class="lab">Guidelines</span><span class="flag warn" title="1 proposal waits for you"></span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+          <button class="nav-item" data-to="memory" data-keys="memory memories remember consolidate context decisions lessons"><svg class="ic" width="15" height="15"><use href="#i-brain"/></svg><span class="lab">Memory</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></button>
+        </div>
+      </div>
+      <div class="grp-wrap" data-grp>
+        <p class="grp-name">Server</p>
+        <div class="grp">
+          <a class="nav-item" href="settings-redesign.html" data-keys="server update restart"><svg class="ic" width="15" height="15"><use href="#i-server"/></svg><span class="lab">Overview</span><span class="flag info" title="Update available"></span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-redesign.html" data-keys="remote phones"><svg class="ic" width="15" height="15"><use href="#i-globe"/></svg><span class="lab">Remote &amp; phones</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-redesign.html" data-keys="connections api"><svg class="ic" width="15" height="15"><use href="#i-plug"/></svg><span class="lab">Connections</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-redesign.html" data-keys="mcp tools"><svg class="ic" width="15" height="15"><use href="#i-tool"/></svg><span class="lab">Tools &amp; MCP</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-redesign.html" data-keys="load limits compaction"><svg class="ic" width="15" height="15"><use href="#i-gauge"/></svg><span class="lab">Runs &amp; load</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-redesign.html" data-keys="backups restore"><svg class="ic" width="15" height="15"><use href="#i-archive"/></svg><span class="lab">Backups</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+          <a class="nav-item" href="settings-redesign.html" data-keys="activity log audit"><svg class="ic" width="15" height="15"><use href="#i-list"/></svg><span class="lab">Activity log</span><svg class="chev" width="14" height="14"><use href="#i-chev"/></svg></a>
+        </div>
+      </div>
+      <p class="nav-empty" id="none" hidden>Nothing found.</p>
+    </nav>
+    <div class="side-foot"><span class="live"></span>Remote · Northwind</div>
+  </aside>
+
+  <main>
+    <div class="bar">
+      <button class="btn ghost up" id="up" aria-label="Back"><svg width="16" height="16"><use href="#i-back"/></svg><span id="up-lab">Settings</span></button>
+      <span class="crumb">Settings</span><span class="sep">›</span><span id="crumbs"></span><h1 id="title">Employees</h1>
+    </div>
+    <div class="scroll" id="scroll">
+
+      <!-- ============ EMPLOYEES ============ -->
+      <div class="page wide" data-page="employees">
+        <section class="sec">
+          <div class="toolbar">
+            <label class="fsearch"><svg width="13" height="13"><use href="#i-search"/></svg><input placeholder="Search by name or role" aria-label="Search employees" id="emp-q"></label>
+            <div class="seg" id="emp-filter" role="group" aria-label="Show">
+              <button aria-pressed="true" data-f="all">All 14</button><button data-f="work">Working 4</button><button data-f="you">Waiting for you 1</button><button data-f="paused">Paused 1</button><button data-f="archived">Archived 2</button>
+            </div>
+            <span class="grow"></span>
+            <div class="seg" id="emp-view" role="group" aria-label="View">
+              <button aria-pressed="true" data-v="list"><svg width="13" height="13"><use href="#i-list"/></svg>List</button><button data-v="org"><svg width="13" height="13"><use href="#i-tree"/></svg>Org chart</button>
+            </div>
+            <button class="btn primary" data-dlg="dlg-emp"><svg width="12" height="12"><use href="#i-plus"/></svg>Add employee</button>
+          </div>
+
+          <div class="card" id="emp-list">
+            <div class="hdr"><span class="who">Name</span><span class="stc">Status</span><span class="on">Working on</span><span class="gl">Guidelines</span><span class="pin"></span></div>
+            <div class="gh">Pinned <span class="n">· 2</span></div>
+            <div class="emp" data-s="work" data-open="employee"><div class="who"><span class="mark c4">T</span><span><span class="nm">Titan</span><span class="rl">Tech Lead</span></span></div><div class="stc"><span class="st work"><span class="d"></span>Working</span></div><div class="on"><span class="tk">#93</span>Review OPR-5 point 5 before the merge</div><div class="gl">5 · 9 800 ch</div><button class="pin" aria-pressed="true" aria-label="Unpin Titan"><svg width="14" height="14"><use href="#i-star-f"/></svg></button></div>
+            <div class="emp" data-s="you" data-open="employee"><div class="who"><span class="mark c2">F</span><span><span class="nm">Flux</span><span class="rl">Frontend Developer</span></span></div><div class="stc"><span class="st you"><span class="d"></span>Waiting for you</span></div><div class="on"><span class="tk">#94</span>Which shortcut should open Search settings?</div><div class="gl">4 · 7 200 ch</div><button class="pin" aria-pressed="true" aria-label="Unpin Flux"><svg width="14" height="14"><use href="#i-star-f"/></svg></button></div>
+
+            <div class="gh">Management team <span class="n">· 1</span></div>
+            <div class="emp" data-s="free" data-open="employee"><div class="who"><span class="mark c6">A</span><span><span class="nm">Atlas</span><span class="rl">CEO Agent</span></span></div><div class="stc"><span class="st"><span class="d"></span>Available</span></div><div class="on faint">—</div><div class="gl">1 · 1 400 ch</div><button class="pin" aria-label="Pin Atlas"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+
+            <div class="gh">Reports to Atlas <span class="n">· 1</span></div>
+            <div class="emp" data-s="wait" data-open="employee"><div class="who"><span class="mark c1">O</span><span><span class="nm">Orion</span><span class="rl">Project Manager</span></span></div><div class="stc"><span class="st wait"><span class="d"></span>Waiting on Titan</span></div><div class="on"><span class="tk">#91</span>OPR-5: plan the clean-up of overlapping concepts</div><div class="gl">2 · 3 100 ch</div><button class="pin" aria-label="Pin Orion"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+
+            <div class="gh">Reports to Orion <span class="n">· 2</span></div>
+            <div class="emp" data-s="free" data-open="employee"><div class="who"><span class="mark c5">N</span><span><span class="nm">Nova</span><span class="rl">Business Analyst</span></span></div><div class="stc"><span class="st"><span class="d"></span>Available</span></div><div class="on faint">—</div><div class="gl">2 · 2 600 ch</div><button class="pin" aria-label="Pin Nova"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+            <div class="emp" data-s="work" data-open="employee"><div class="who"><span class="mark c3">P</span><span><span class="nm">Pixel</span><span class="rl">UI/UX Designer</span></span></div><div class="stc"><span class="st work"><span class="d"></span>Working</span></div><div class="on">Settings redesign: Employees and Knowledge</div><div class="gl">3 · 4 900 ch</div><button class="pin" aria-label="Pin Pixel"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+
+            <div class="gh">Reports to Titan <span class="n">· 8</span></div>
+            <div class="emp" data-s="work" data-open="employee"><div class="who"><span class="mark c4">F</span><span><span class="nm">Forge</span><span class="rl">Backend Developer</span></span></div><div class="stc"><span class="st work"><span class="d"></span>Working</span></div><div class="on"><span class="tk">#95</span>Migration 0031: versions for guideline links</div><div class="gl">5 · 11 200 ch</div><button class="pin" aria-label="Pin Forge"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+            <div class="emp" data-s="work" data-open="employee"><div class="who"><span class="mark c6">T</span><span><span class="nm">Trace</span><span class="rl">Code Review Engineer</span></span></div><div class="stc"><span class="st work"><span class="d"></span>Working</span></div><div class="on"><span class="tk">#93</span>Review ticket/93 against the acceptance criteria</div><div class="gl">4 · 6 300 ch</div><button class="pin" aria-label="Pin Trace"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+            <div class="emp" data-s="free" data-open="employee"><div class="who"><span class="mark c5">B</span><span><span class="nm">Bridge</span><span class="rl">Fullstack Developer</span></span></div><div class="stc"><span class="st wait"><span class="d"></span>Queued</span></div><div class="on"><span class="tk">#96</span>Mobile: Settings › Company on the phone</div><div class="gl">6 · 12 400 ch</div><button class="pin" aria-label="Pin Bridge"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+            <div class="emp" data-s="free" data-open="employee"><div class="who"><span class="mark c2">N</span><span><span class="nm">Nexus</span><span class="rl">API &amp; Integration Engineer</span></span></div><div class="stc"><span class="st"><span class="d"></span>Available</span></div><div class="on faint">—</div><div class="gl">4 · 6 800 ch</div><button class="pin" aria-label="Pin Nexus"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+            <div class="emp" data-s="free" data-open="employee"><div class="who"><span class="mark c1">S</span><span><span class="nm">Schema</span><span class="rl">Database Engineer</span></span></div><div class="stc"><span class="st"><span class="d"></span>Available</span></div><div class="on faint">—</div><div class="gl">5 · 8 900 ch</div><button class="pin" aria-label="Pin Schema"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+            <div class="emp" data-s="free" data-open="employee"><div class="who"><span class="mark c3">O</span><span><span class="nm">Orbit</span><span class="rl">DevOps Engineer</span></span></div><div class="stc"><span class="st"><span class="d"></span>Available</span></div><div class="on faint">—</div><div class="gl">3 · 4 100 ch</div><button class="pin" aria-label="Pin Orbit"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+            <div class="emp" data-s="paused" data-open="employee"><div class="who"><span class="mark c6">S</span><span><span class="nm">Sentinel</span><span class="rl">Security Engineer</span></span></div><div class="stc"><span class="st paused"><span class="d"></span>Paused</span></div><div class="on faint">Paused by you on 20 Nov</div><div class="gl">4 · 5 600 ch</div><button class="pin" aria-label="Pin Sentinel"><svg width="14" height="14"><use href="#i-star"/></svg></button></div>
+
+            <div class="gh" data-s="archived" hidden>Archived <span class="n">· 2</span></div>
+            <div class="emp" data-s="archived" hidden><div class="who"><span class="mark c6">P</span><span><span class="nm">Pulse</span><span class="rl">QA Engineer</span></span></div><div class="stc"><span class="st paused"><span class="d"></span>Archived 2 Nov</span></div><div class="on faint">History and conversations are kept</div><div class="gl"></div><button class="btn" style="height:26px">Restore</button></div>
+            <div class="emp" data-s="archived" hidden><div class="who"><span class="mark c6">L</span><span><span class="nm">Ledger</span><span class="rl">Release Manager</span></span></div><div class="stc"><span class="st paused"><span class="d"></span>Archived 14 Oct</span></div><div class="on faint">History and conversations are kept</div><div class="gl"></div><button class="btn" style="height:26px">Restore</button></div>
+            <div class="nav-empty" id="emp-none" hidden style="padding:16px">Nobody matches.</div>
+          </div>
+
+          <div class="card" id="emp-org" hidden>
+            <div class="org">
+              <ul class="tree">
+                <li><button class="node" data-open="employee"><span class="mark c6">A</span><span class="t"><b>Atlas</b><span>CEO Agent</span></span></button>
+                  <ul><li><button class="node" data-open="employee"><span class="mark c1">O</span><span class="t"><b>Orion</b><span>Project Manager</span></span></button>
+                    <ul>
+                      <li><button class="node" data-open="employee"><span class="mark c5">N</span><span class="t"><b>Nova</b><span>Business Analyst</span></span></button></li>
+                      <li><button class="node work" data-open="employee"><span class="mark c3">P</span><span class="t"><b>Pixel</b><span>UI/UX Designer</span></span></button></li>
+                      <li><button class="node work" data-open="employee"><span class="mark c4">T</span><span class="t"><b>Titan</b><span>Tech Lead</span></span></button>
+                        <ul class="team">
+                          <li><button class="node work" data-open="employee"><span class="mark c4">F</span><span class="t"><b>Forge</b><span>Backend</span></span></button></li>
+                          <li><button class="node you" data-open="employee"><span class="mark c2">F</span><span class="t"><b>Flux</b><span>Frontend</span></span></button></li>
+                          <li><button class="node" data-open="employee"><span class="mark c5">B</span><span class="t"><b>Bridge</b><span>Fullstack</span></span></button></li>
+                          <li><button class="node" data-open="employee"><span class="mark c2">N</span><span class="t"><b>Nexus</b><span>API</span></span></button></li>
+                          <li><button class="node" data-open="employee"><span class="mark c1">S</span><span class="t"><b>Schema</b><span>Database</span></span></button></li>
+                          <li><button class="node paused" data-open="employee"><span class="mark c6">S</span><span class="t"><b>Sentinel</b><span>Paused</span></span></button></li>
+                          <li><button class="node" data-open="employee"><span class="mark c3">O</span><span class="t"><b>Orbit</b><span>DevOps</span></span></button></li>
+                          <li><button class="node work" data-open="employee"><span class="mark c6">T</span><span class="t"><b>Trace</b><span>Review</span></span></button></li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li></ul>
+                </li>
+              </ul>
+            </div>
+            <div class="legend"><span class="st work"><span class="d"></span>Working</span><span class="st you"><span class="d"></span>Waiting for you</span><span class="st paused"><span class="d"></span>Paused</span><span class="grow" style="flex:1"></span><span>Drag a card onto another employee to change who it reports to.</span></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- ============ EMPLOYEE: FLUX ============ -->
+      <div class="page mid" data-page="employee" data-parent="employees" hidden>
+        <div class="ehero">
+          <span class="mark lg c2">F</span>
+          <div class="grow">
+            <h2>Flux <span class="st you"><span class="d"></span>Waiting for you</span></h2>
+            <div class="sub">Frontend Developer · reports to Titan</div>
+          </div>
+          <div class="acts">
+            <button class="btn" aria-pressed="true" title="Pinned in the list"><svg width="13" height="13" style="color:#c08a00"><use href="#i-star-f"/></svg>Pinned</button>
+            <button class="btn"><svg width="13" height="13"><use href="#i-pause"/></svg>Pause</button>
+            <button class="btn primary"><svg width="13" height="13"><use href="#i-send"/></svg>Give work</button>
+          </div>
+        </div>
+
+        <div class="tabs" role="tablist" id="emp-tabs">
+          <button role="tab" aria-selected="true" data-tab="t-work">Work <span class="cnt warn">1</span></button>
+          <button role="tab" data-tab="t-profile">Profile</button>
+          <button role="tab" data-tab="t-memory">Memory <span class="cnt">6</span></button>
+          <button role="tab" data-tab="t-guide">Guidelines <span class="cnt">4</span></button>
+          <button role="tab" data-tab="t-access">Access</button>
+        </div>
+
+        <!-- Work -->
+        <div class="tabpanel" id="t-work">
+          <section class="sec">
+            <div class="sec-h"><h2>Waiting for Flux</h2><span class="n">2</span></div>
+            <div class="card">
+              <div class="task"><span class="st you"><span class="d"></span></span><div class="grow"><span class="ti">Which shortcut should open Search settings?</span><span class="me"><span class="tk">#94</span> · Question for you · 12 min</span></div><button class="btn primary">Answer</button></div>
+              <div class="task"><span class="st wait"><span class="d"></span></span><div class="grow"><span class="ti">Handoff from Titan: fix the focus ring on the Org chart cards</span><span class="me"><span class="tk">#94</span> · Starts when this run ends · 3 min</span></div></div>
+            </div>
+          </section>
+          <section class="sec">
+            <div class="sec-h"><h2>Tasks</h2><span class="n">3 active · 41</span><span class="grow"></span><a class="btn ghost" href="#">Activity log ›</a></div>
+            <div class="card">
+              <div class="task"><span class="st work"><span class="d"></span></span><div class="grow"><span class="ti">Settings: Search field and keyboard shortcut</span><span class="me"><span class="tk">#94</span> · Aurelius · since 09:14</span></div><span class="chip">Running</span></div>
+              <div class="task"><span class="st wait"><span class="d"></span></span><div class="grow"><span class="ti">Mobile: one run-default label</span><span class="me"><span class="tk">#93</span> · Aurelius · in review by Trace</span></div><span class="chip info">In review</span></div>
+              <div class="task"><span class="st"><span class="d"></span></span><div class="grow"><span class="ti">Remove the Ideas client code on desktop</span><span class="me"><span class="tk">#92</span> · Aurelius · 22 Nov</span></div><span class="chip ok">Done</span></div>
+              <div class="foot"><button class="btn ghost">Show all 41 tasks</button></div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Profile -->
+        <div class="tabpanel" id="t-profile" hidden>
+          <section class="sec">
+            <div class="sec-h"><h2>Who</h2></div>
+            <div class="card two">
+              <label class="field"><span class="k">Name</span><input class="inp full" value="Flux" data-dirty></label>
+              <label class="field"><span class="k">Role</span><input class="inp full" value="Frontend Developer" data-dirty></label>
+              <label class="field"><span class="k">Title on the org chart</span><input class="inp full" placeholder="Optional, e.g. Head of design" data-dirty></label>
+              <label class="field"><span class="k">Reports to</span><select class="sel full" data-dirty><option>Titan · Tech Lead</option><option>Orion · Project Manager</option><option>Atlas · CEO Agent</option><option>Nobody (top of the org chart)</option></select></label>
+            </div>
+          </section>
+          <section class="sec">
+            <div class="sec-h"><h2>Description</h2><span class="n">Other employees read this to decide when to hand work to Flux</span></div>
+            <div class="card"><div class="field"><textarea class="inp prose" rows="3" data-dirty>Senior frontend developer. Builds the desktop app in clients/ts and the mobile app in clients/mobile. Hand over UI work with a design or clear acceptance criteria.</textarea></div></div>
+          </section>
+          <section class="sec">
+            <div class="sec-h"><h2>Instructions</h2><span class="n">version 7 · 1 840 characters</span><span class="grow"></span><button class="btn ghost" data-dlg="dlg-versions"><svg width="13" height="13"><use href="#i-clock"/></svg>Earlier versions</button></div>
+            <div class="card"><div class="field"><textarea class="inp" rows="11" data-dirty>Je bent Flux, een senior Frontend Developer.
+Je bent verantwoordelijk voor de ontwikkeling van de gebruikersinterface van softwareapplicaties.
+
+Je belangrijkste verantwoordelijkheden zijn:
+- Componenten bouwen volgens het design system.
+- Responsive layouts implementeren.
+- Toegankelijkheid bewaken (toetsenbord, contrast, schermlezers).
+- Volg de bestaande componenten.
+
+Je escaleert ontbrekende specs naar Titan.</textarea><span class="hint">Changes apply to new runs. A run that is going keeps what it started with.</span></div></div>
+          </section>
+          <section class="sec">
+            <div class="sec-h"><h2>Subagents</h2></div>
+            <div class="card">
+              <div class="row"><div class="lbl"><span class="t">Subagents of Flux</span></div><div class="ctl"><span class="val">Explore, Plan</span><button class="btn">Choose…</button></div></div>
+              <div class="row"><div class="lbl"><span class="t">Effort of subagents</span></div><div class="ctl"><select class="sel w180"><option>Follows Flux</option><option>Low</option><option>Medium</option><option>High</option></select></div></div>
+            </div>
+          </section>
+          <div class="savebar" id="savebar" hidden><span class="grow">You changed the profile of Flux.</span><button class="btn ghost" id="discard">Discard</button><button class="btn primary" id="save">Save</button></div>
+        </div>
+
+        <!-- Memory -->
+        <div class="tabpanel" id="t-memory" hidden>
+          <section class="sec">
+            <div class="sec-h"><h2>In use</h2><span class="n">6</span><span class="grow"></span><button class="btn ghost" data-go="memory">Open in Memory ›</button></div>
+            <div class="card">
+              <div class="mem"><div class="grow"><span class="tx">Run Flutter from ~/development/flutter/bin; it is not on PATH.</span><span class="me"><span class="kind">Knowledge</span>Aurelius · 18 Nov</span></div><div class="ctl"><button class="btn ghost">Revise</button><button class="btn ghost danger">Forget…</button></div></div>
+              <div class="mem"><div class="grow"><span class="tx">The board wants buttons and labels in English, the same words on desktop and mobile.</span><span class="me"><span class="kind">Decision</span>Aurelius · 12 Nov</span></div><div class="ctl"><button class="btn ghost">Revise</button><button class="btn ghost danger">Forget…</button></div></div>
+              <div class="mem"><div class="grow"><span class="tx">e2e screenshots go to target/&lt;task-id&gt;/ and never into the repository.</span><span class="me"><span class="kind">Lesson</span>Aurelius · 4 Nov</span></div><div class="ctl"><button class="btn ghost">Revise</button><button class="btn ghost danger">Forget…</button></div></div>
+              <div class="foot"><button class="btn ghost">Show 3 more</button></div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Guidelines -->
+        <div class="tabpanel" id="t-guide" hidden>
+          <div class="card">
+            <div class="budget">
+              <div class="l"><b>Every run of Flux gets 4 guidelines</b><span class="grow"></span><span class="mono">7 200 / 16 000 characters</span></div>
+              <div class="meter"><i style="width:45%"></i></div>
+              <span class="faint" style="font-size:12px">Guidelines of a workspace come on top while Flux works in it: Aurelius adds 2 (4 100 characters).</span>
+            </div>
+          </div>
+          <section class="sec">
+            <div class="sec-h"><h2>Linked</h2><span class="grow"></span><button class="btn ghost" data-go="guidelines">All guidelines ›</button><button class="btn" data-go="editor"><svg width="12" height="12"><use href="#i-plus"/></svg>New guideline</button></div>
+            <div class="card">
+              <table>
+                <thead><tr><th style="width:1%"></th><th>Guideline</th><th class="hide-s">Also for</th><th style="text-align:right">Size</th></tr></thead>
+                <tbody>
+                  <tr><td><input type="checkbox" class="chk" checked aria-label="Linked"></td><td><span class="t">Flutter and Dart (mobile app)</span></td><td class="hide-s"><span class="marks"><span class="mark c5">B</span></span></td><td class="mono" style="text-align:right">1 900</td></tr>
+                  <tr><td><input type="checkbox" class="chk" checked aria-label="Linked"></td><td><span class="t">TypeScript and React (desktop)</span></td><td class="hide-s"><span class="marks"><span class="mark c5">B</span><span class="mark c6">T</span></span></td><td class="mono" style="text-align:right">2 300</td></tr>
+                  <tr><td><input type="checkbox" class="chk" checked aria-label="Linked"></td><td><span class="t">Accessibility checklist</span></td><td class="hide-s"><span class="marks"><span class="mark c3">P</span></span></td><td class="mono" style="text-align:right">1 400</td></tr>
+                  <tr><td><input type="checkbox" class="chk" checked aria-label="Linked"></td><td><span class="t">Commits and branches</span> <span class="chip">Company</span></td><td class="hide-s"><span class="faint">Everyone</span></td><td class="mono" style="text-align:right">1 600</td></tr>
+                  <tr><td><input type="checkbox" class="chk" aria-label="Linked"></td><td><span class="t">Rust style</span></td><td class="hide-s"><span class="marks"><span class="mark c4">F</span><span class="mark c1">S</span><span class="mark c4">T</span></span></td><td class="mono" style="text-align:right">2 800</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <!-- Access -->
+        <div class="tabpanel" id="t-access" hidden>
+          <section class="sec">
+            <div class="sec-h"><h2>How Flux runs</h2></div>
+            <div class="card">
+              <div class="row stackable"><div class="lbl"><span class="t">Files</span></div><div class="ctl"><div class="seg"><button>Inherit</button><button>Read only</button><button aria-pressed="true">Read and edit</button></div></div></div>
+              <div class="row"><div class="lbl"><span class="t">Browser</span></div><div class="ctl"><button class="sw" role="switch" aria-checked="true" aria-label="Browser"></button></div></div>
+              <div class="row"><div class="lbl"><span class="t">See your screen</span></div><div class="ctl"><span class="chip">Asks each time</span><button class="sw" role="switch" aria-checked="false" aria-label="See your screen"></button></div></div>
+              <div class="row stackable"><div class="lbl"><span class="t">Provider</span></div><div class="ctl"><select class="sel w220"><option>Company default · Claude</option><option>Claude</option><option>Codex</option></select></div></div>
+              <div class="row"><div class="lbl"><span class="t">Model, effort and mode</span><span class="s">Each board member sets these once for every employee.</span></div><div class="ctl"><a class="btn ghost" href="settings-redesign.html">My defaults ›</a></div></div>
+            </div>
+          </section>
+          <section class="sec">
+            <div class="sec-h"><h2>Own folder</h2><span class="n">For chats. In a task the workspace folder applies.</span></div>
+            <div class="card">
+              <div class="row"><div class="lbl"><span class="t mono">~/Work/flux</span></div><div class="ctl"><button class="btn ghost">Open</button><button class="btn">Choose…</button></div></div>
+            </div>
+          </section>
+          <section class="sec">
+            <div class="sec-h"><h2>Stop or remove</h2></div>
+            <div class="card">
+              <div class="row"><div class="lbl"><span class="t">Pause Flux</span><span class="s">Starts no new work. Waiting items stay.</span></div><div class="ctl"><button class="btn">Pause</button></div></div>
+              <div class="row"><div class="lbl"><span class="t">Archive Flux</span><span class="s">Leaves the lists. History and conversations are kept, and you can restore it.</span></div><div class="ctl"><button class="btn danger" data-dlg="dlg-archive">Archive…</button></div></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- ============ GUIDELINES ============ -->
+      <div class="page wide" data-page="guidelines" hidden>
+        <p class="lede" style="margin-top:0">Rules every linked run gets on top of its instructions. At most 8 000 characters each, 16 000 per run.</p>
+        <section class="sec">
+          <div class="sec-h"><span class="wait-dot"></span><h2>Waiting for you</h2><span class="n">1</span></div>
+          <div class="card">
+            <div class="prop">
+              <div class="top"><span class="mark c4">T</span><div class="grow"><div class="h">Titan proposes a change to “Rust style”</div><div class="faint">Today 09:02 · v4 → v5 · +212 characters</div></div><span class="chip warn">Guideline</span></div>
+              <div class="why">Clippy warnings in touched code came back three times this week. This makes the rule explicit.</div>
+              <div class="acts"><button class="btn ghost">Reject</button><button class="btn primary" data-go="editor">Review…</button></div>
+            </div>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="toolbar">
+            <label class="fsearch"><svg width="13" height="13"><use href="#i-search"/></svg><input placeholder="Find… (@Forge, ▸Aurelius)" aria-label="Find guidelines"></label>
+            <div class="seg"><button aria-pressed="true">In use 9</button><button>Archived 2</button></div>
+            <span class="grow"></span>
+            <button class="btn primary" data-go="editor"><svg width="12" height="12"><use href="#i-plus"/></svg>New guideline</button>
+          </div>
+          <div class="card">
+            <table>
+              <thead><tr><th>Title</th><th>Applies to</th><th class="hide-s" style="text-align:right">Size</th><th class="hide-s">Updated</th></tr></thead>
+              <tbody>
+                <tr class="click" data-go="editor"><td><span class="t">Rust style</span> <span class="chip warn">1 proposal</span></td><td><span class="pills"><span class="pill"><span class="mark c4">F</span>Forge</span><span class="pill"><span class="mark c1">S</span>Schema</span><span class="faint">+3</span></span></td><td class="hide-s mono" style="text-align:right">2 800</td><td class="hide-s"><span class="s">Titan · v4 · 18 Nov</span></td></tr>
+                <tr class="click" data-go="editor"><td><span class="t">Commits and branches</span> <span class="chip">Company</span></td><td><span class="faint">Everyone</span></td><td class="hide-s mono" style="text-align:right">1 600</td><td class="hide-s"><span class="s">You · v3 · 12 Nov</span></td></tr>
+                <tr class="click" data-go="editor"><td><span class="t">Aurelius: layers and boundaries</span></td><td><span class="pills"><span class="pill proj">▸ Aurelius</span></span></td><td class="hide-s mono" style="text-align:right">1 900</td><td class="hide-s"><span class="s">You · v1 · 31 Oct</span></td></tr>
+                <tr class="click" data-go="editor"><td><span class="t">Aurelius: protocol and migrations</span></td><td><span class="pills"><span class="pill proj">▸ Aurelius</span></span></td><td class="hide-s mono" style="text-align:right">2 200</td><td class="hide-s"><span class="s">You · v1 · 31 Oct</span></td></tr>
+                <tr class="click" data-go="editor"><td><span class="t">TypeScript and React (desktop)</span></td><td><span class="pills"><span class="pill"><span class="mark c2">F</span>Flux</span><span class="pill"><span class="mark c5">B</span>Bridge</span><span class="pill"><span class="mark c6">T</span>Trace</span></span></td><td class="hide-s mono" style="text-align:right">2 300</td><td class="hide-s"><span class="s">Starter set · 31 Oct</span></td></tr>
+                <tr class="click" data-go="editor"><td><span class="t">Flutter and Dart (mobile app)</span></td><td><span class="pills"><span class="pill"><span class="mark c2">F</span>Flux</span><span class="pill"><span class="mark c5">B</span>Bridge</span></span></td><td class="hide-s mono" style="text-align:right">1 900</td><td class="hide-s"><span class="s">You · v2 · 5 Nov</span></td></tr>
+                <tr class="click" data-go="editor"><td><span class="t">Accessibility checklist</span></td><td><span class="pills"><span class="pill"><span class="mark c3">P</span>Pixel</span><span class="pill"><span class="mark c2">F</span>Flux</span></span></td><td class="hide-s mono" style="text-align:right">1 400</td><td class="hide-s"><span class="s">Pixel · v2 · 8 Nov</span></td></tr>
+                <tr class="click" data-go="editor"><td><span class="t">Security review</span></td><td><span class="pills"><span class="pill"><span class="mark c6">S</span>Sentinel</span><span class="pill"><span class="mark c6">T</span>Trace</span></span></td><td class="hide-s mono" style="text-align:right">2 100</td><td class="hide-s"><span class="s">Starter set · 31 Oct</span></td></tr>
+                <tr class="click" data-go="editor"><td><span class="t">Writing tickets</span></td><td><span class="faint">Not linked</span></td><td class="hide-s mono" style="text-align:right">900</td><td class="hide-s"><span class="s">Nova · v1 · 2 Nov</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- ============ GUIDELINE EDITOR ============ -->
+      <div class="page wide" data-page="editor" data-parent="guidelines" hidden>
+        <div class="note warn"><svg width="15" height="15"><use href="#i-warn"/></svg><span class="grow">Titan proposes version 5. The editor shows the proposal; the differences are marked in History.</span><button class="btn ghost">Show history</button></div>
+        <section class="sec">
+          <div class="toolbar">
+            <input class="inp" style="flex:1;min-width:200px;height:34px;font-size:15px;font-weight:600" value="Rust style" aria-label="Title">
+            <div class="seg" id="ed-view"><button>Write</button><button>Preview</button><button aria-pressed="true">Side by side</button></div>
+          </div>
+          <div class="card">
+            <div class="editor">
+              <textarea class="inp" aria-label="Text">### Rust style
+- Edition 2024; the toolchain is pinned in `rust-toolchain.toml`.
+- Format with rustfmt. Clippy gets no new warnings in the code you touched.
+- Run `cargo clippy -p &lt;crate&gt;` before you commit, not after review.
+- Limits and fixed values are named consts next to their type.
+- Errors are `thiserror` types. No `unwrap` outside tests.
+- Every `pub` item gets a `///` doc comment.</textarea>
+              <div class="preview">
+                <h3>Rust style</h3>
+                <ul><li>Edition 2024; the toolchain is pinned in <code>rust-toolchain.toml</code>.</li><li>Format with rustfmt. Clippy gets no new warnings in the code you touched.</li><li>Run <code>cargo clippy -p &lt;crate&gt;</code> before you commit, not after review.</li><li>Limits and fixed values are named consts next to their type.</li><li>Errors are <code>thiserror</code> types. No <code>unwrap</code> outside tests.</li><li>Every <code>pub</code> item gets a <code>///</code> doc comment.</li></ul>
+              </div>
+            </div>
+            <div class="budget" style="border-top:1px solid var(--line2)">
+              <div class="l"><span>3 012 / 8 000 characters · ≈ 760 tokens</span><span class="grow"></span><span class="faint">Largest run with this: Forge · 11 412 / 16 000</span></div>
+              <div class="meter"><i style="width:38%"></i></div>
+            </div>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="sec-h"><h2>Applies to</h2><span class="grow"></span><button class="btn">Change…</button></div>
+          <div class="card"><div class="tags" style="padding:12px 16px">
+            <span class="pill"><span class="mark c4">T</span>Titan</span><span class="pill"><span class="mark c4">F</span>Forge</span><span class="pill"><span class="mark c1">S</span>Schema</span><span class="pill"><span class="mark c2">N</span>Nexus</span><span class="pill"><span class="mark c6">T</span>Trace</span><span class="pill proj">▸ Orbit workspace</span>
+          </div></div>
+        </section>
+        <div class="savebar"><span class="grow">Version 4 is in use · proposal for version 5</span><button class="btn ghost danger">Archive…</button><button class="btn ghost">Reject</button><button class="btn primary">Approve</button></div>
+      </div>
+
+      <!-- ============ MEMORY ============ -->
+      <div class="page mid" data-page="memory" hidden>
+        <div class="toolbar">
+          <select class="sel" aria-label="Workspace"><option>Aurelius</option><option>Orbit</option><option>Segrusa website</option></select>
+          <select class="sel" aria-label="Context of"><option>Everyone</option><option>Flux</option><option>Forge</option><option>Titan</option></select>
+          <div class="seg" id="mem-view"><button aria-pressed="true">In use</button><button>History 38</button></div>
+          <span class="grow"></span>
+          <button class="btn" title="Merges memories that say the same; the old ones go to History">Consolidate</button>
+          <button class="btn primary" data-dlg="dlg-remember"><svg width="12" height="12"><use href="#i-plus"/></svg>Remember</button>
+        </div>
+
+        <div class="card">
+          <div class="budget">
+            <div class="l"><b>What a run in Aurelius gets</b><span class="grow"></span><span class="mono">2 340 / 4 000 tokens</span></div>
+            <div class="meter"><i style="width:58%"></i></div>
+            <span class="faint" style="font-size:12px">Plus the instructions (≈ 480 tokens) and the guidelines of the employee.</span>
+          </div>
+        </div>
+
+        <section class="sec">
+          <div class="sec-h"><h2>Always in context</h2><span class="n">4</span></div>
+          <div class="card">
+            <div class="mem"><div class="grow"><span class="tx">Aurelius is a Rust daemon with a TypeScript desktop app and a Flutter mobile app. The crates point one way: domain → storage → application → daemon.</span><span class="me"><span class="kind">Identity</span>Everyone · pinned</span></div><div class="ctl"><button class="btn ghost">Unpin</button><button class="btn ghost">Revise</button><button class="btn ghost danger">Forget…</button></div></div>
+            <div class="mem"><div class="grow"><span class="tx">Nothing is pushed or merged into main without a board member's explicit yes.</span><span class="me"><span class="kind">Decision</span>Everyone · pinned · 2 Nov</span></div><div class="ctl"><button class="btn ghost">Unpin</button><button class="btn ghost">Revise</button><button class="btn ghost danger">Forget…</button></div></div>
+            <div class="mem"><div class="grow"><span class="tx">Employees and Knowledge live in Settings under Company since 20 Nov.</span><span class="me"><span class="kind">Decision</span>Everyone · 20 Nov</span></div><div class="ctl"><button class="btn ghost">Pin</button><button class="btn ghost">Revise</button><button class="btn ghost danger">Forget…</button></div></div>
+            <div class="mem"><div class="grow"><span class="tx">Tests that copy a stopped daemon database use VACUUM INTO, not a file copy with WAL.</span><span class="me"><span class="kind">Lesson</span>Forge · 31 Oct</span></div><div class="ctl"><button class="btn ghost">Pin</button><button class="btn ghost">Revise</button><button class="btn ghost danger">Forget…</button></div></div>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="sec-h"><h2>Only when it fits the question</h2><span class="n">27</span></div>
+          <div class="card">
+            <div class="mem"><div class="grow"><span class="tx">Ticket #87 “Every employee may create tickets” is done: create_ticket is open in every context except Plan mode.</span><span class="me"><span class="kind">Summary</span>Everyone · 25 Nov</span></div><div class="ctl"><button class="btn ghost">Pin</button><button class="btn ghost">Revise</button><button class="btn ghost danger">Forget…</button></div></div>
+            <div class="mem"><div class="grow"><span class="tx">Run Flutter from ~/development/flutter/bin; it is not on PATH.</span><span class="me"><span class="kind">Knowledge</span>Flux · 18 Nov</span></div><div class="ctl"><button class="btn ghost">Pin</button><button class="btn ghost">Revise</button><button class="btn ghost danger">Forget…</button></div></div>
+            <div class="foot"><button class="btn ghost">Show 25 more</button></div>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="sec-h"><h2>Does not fit</h2><span class="n">5 · left out until there is room</span><span class="grow"></span><button class="btn ghost">Show</button></div>
+        </section>
+      </div>
+
+      <!-- ============ WORKSPACES ============ -->
+      <div class="page wide" data-page="workspaces" hidden>
+        <div class="toolbar">
+          <label class="fsearch"><svg width="13" height="13"><use href="#i-search"/></svg><input placeholder="Search workspaces" aria-label="Search workspaces"></label>
+          <div class="seg"><button aria-pressed="true">Active 3</button><button>Paused 1</button><button>Archived 2</button></div>
+          <span class="grow"></span>
+          <button class="btn primary"><svg width="12" height="12"><use href="#i-plus"/></svg>New workspace</button>
+        </div>
+        <div class="card">
+          <table>
+            <thead><tr><th>Workspace</th><th class="hide-s">People</th><th>Status</th><th class="hide-s">Last active</th><th style="width:1%"></th></tr></thead>
+            <tbody>
+              <tr class="click"><td><span class="t">Aurelius</span><div class="s mono">~/Work/Segrusa/Projects/Aurelius</div></td><td class="hide-s"><span class="marks"><span class="mark c4">T</span><span class="mark c2">F</span><span class="mark c4">F</span><span class="mark c3">P</span></span> <span class="faint">+6</span></td><td><span class="chip warn"><span class="d"></span>Needs you · 3</span></td><td class="hide-s faint">now</td><td><button class="btn ghost" aria-label="More"><svg width="14" height="14"><use href="#i-dots"/></svg></button></td></tr>
+              <tr class="click"><td><span class="t">Orbit</span><div class="s mono">~/Work/Segrusa/Projects/Orbit</div></td><td class="hide-s"><span class="marks"><span class="mark c3">O</span><span class="mark c4">F</span></span></td><td><span class="chip ok"><span class="d"></span>Working</span></td><td class="hide-s faint">12 min ago</td><td><button class="btn ghost" aria-label="More"><svg width="14" height="14"><use href="#i-dots"/></svg></button></td></tr>
+              <tr class="click"><td><span class="t">Segrusa website</span><div class="s mono">~/Work/Segrusa/Site</div></td><td class="hide-s"><span class="marks"><span class="mark c3">P</span></span></td><td><span class="chip">Quiet</span></td><td class="hide-s faint">19 Nov</td><td><button class="btn ghost" aria-label="More"><svg width="14" height="14"><use href="#i-dots"/></svg></button></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="lede" style="margin:0">A row opens the workspace’s own settings: name, folder, dispatcher, memory and export, archive.</p>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<dialog id="dlg-emp" class="wide">
+  <div class="dlg-h">Add employee</div>
+  <div class="dlg-b">
+    <label>Start from<select class="sel"><option>Blank</option><option>Backend Developer · hired as Forge</option><option>Code Review Engineer · hired as Trace</option></select></label>
+    <div class="row2">
+      <label>Name<input class="inp" placeholder="Name, for example Alex"></label>
+      <label>Role<input class="inp" placeholder="Product partner"></label>
+    </div>
+    <div class="row2">
+      <label>Reports to<select class="sel"><option>Titan · Tech Lead</option><option>Orion · Project Manager</option><option>Nobody (top of the org chart)</option></select></label>
+      <label>Files<select class="sel"><option>Inherit</option><option>Read only</option><option>Read and edit</option></select></label>
+    </div>
+    <label>Description <span class="hint">Other employees read this to decide when to hand work to this one.</span><textarea class="inp prose"></textarea></label>
+    <span class="hint">Instructions, guidelines and the rest are on the employee's page after Add.</span>
+  </div>
+  <div class="dlg-f"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-close>Add</button></div>
+</dialog>
+
+<dialog id="dlg-archive">
+  <div class="dlg-h">Archive Flux?</div>
+  <div class="dlg-b"><span>Flux starts no new work and leaves the lists. Conversations and history are kept. You find Flux again under Archived and can restore it there.</span></div>
+  <div class="dlg-f"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" style="background:var(--error);border-color:var(--error)" data-close>Archive</button></div>
+</dialog>
+
+<dialog id="dlg-versions" class="wide">
+  <div class="dlg-h">Earlier instructions of Flux</div>
+  <div class="dlg-b">
+    <div class="card">
+      <div class="row"><div class="lbl"><span class="t">Version 7 <span class="chip ok">Current</span></span><span class="s">Approved proposal of Orion · 18 Nov</span></div></div>
+      <div class="row"><div class="lbl"><span class="t">Version 6</span><span class="s">Edited by you · 9 Nov</span></div><div class="ctl"><button class="btn">Restore</button></div></div>
+      <div class="row"><div class="lbl"><span class="t">Version 5</span><span class="s">Restored from version 3 · 2 Nov</span></div><div class="ctl"><button class="btn">Restore</button></div></div>
+    </div>
+  </div>
+  <div class="dlg-f"><button class="btn primary" data-close>Done</button></div>
+</dialog>
+
+<dialog id="dlg-remember">
+  <div class="dlg-h">Remember for Aurelius</div>
+  <div class="dlg-b">
+    <label>Kind<div class="seg"><button aria-pressed="true">Knowledge</button><button>Decision</button></div></label>
+    <label>For<select class="sel"><option>Everyone</option><option>Flux</option><option>Forge</option></select></label>
+    <label>Text<textarea class="inp prose" placeholder="What every run in this workspace should know"></textarea></label>
+  </div>
+  <div class="dlg-f"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-close>Remember</button></div>
+</dialog>
+
+<script>
+  var START = 'employees', START_IN = false, START_TAB = null;
+  const nav = document.getElementById('nav');
+  const items = [...nav.querySelectorAll('.nav-item[data-to]')];
+  const pages = [...document.querySelectorAll('[data-page]')];
+  const title = document.getElementById('title');
+  const crumbs = document.getElementById('crumbs');
+  const upLab = document.getElementById('up-lab');
+  const NAMES = { employee: 'Flux', editor: 'Rust style' };
+  let current = START;
+  function lab(key) { const it = items.find(i => i.dataset.to === key); return it ? it.querySelector('.lab').textContent : ''; }
+  function open(page, push) {
+    current = page;
+    const pg = pages.find(p => p.dataset.page === page);
+    const parent = pg.dataset.parent;
+    pages.forEach(p => p.hidden = p !== pg);
+    items.forEach(i => i.toggleAttribute('aria-current', i.dataset.to === (parent || page)));
+    items.forEach(i => { if (i.hasAttribute('aria-current')) i.setAttribute('aria-current', 'page'); });
+    crumbs.innerHTML = '';
+    if (parent) {
+      const b = document.createElement('button'); b.className = 'crumb-link'; b.textContent = lab(parent);
+      b.onclick = () => open(parent, true);
+      crumbs.append(b); crumbs.insertAdjacentHTML('beforeend', ' <span class="sep" style="color:var(--text3)">›</span> ');
+      title.textContent = NAMES[page];
+      upLab.textContent = lab(parent);
+    } else { title.textContent = lab(page); upLab.textContent = 'Settings'; }
+    document.getElementById('scroll').scrollTop = 0;
+    if (push) document.body.classList.add('in-page');
+  }
+  items.forEach(i => i.addEventListener('click', () => open(i.dataset.to, true)));
+  document.getElementById('up').addEventListener('click', () => {
+    const pg = pages.find(p => p.dataset.page === current);
+    if (pg.dataset.parent) open(pg.dataset.parent, true); else document.body.classList.remove('in-page');
+  });
+  document.addEventListener('click', e => {
+    const o = e.target.closest('[data-open]'); if (o && !e.target.closest('.pin, .btn')) { open(o.dataset.open, true); return; }
+    const g = e.target.closest('[data-go]'); if (g) { open(g.dataset.go, true); return; }
+    const d = e.target.closest('[data-dlg]'); if (d) { document.getElementById(d.dataset.dlg).showModal(); return; }
+    const c = e.target.closest('[data-close]'); if (c) { c.closest('dialog').close(); return; }
+    const p = e.target.closest('.emp .pin'); if (p) { const on = p.getAttribute('aria-pressed') !== 'true'; p.setAttribute('aria-pressed', on); p.querySelector('use').setAttribute('href', on ? '#i-star-f' : '#i-star'); }
+  });
+
+  // employee list: filter, search, view
+  const list = document.getElementById('emp-list');
+  let filt = 'all';
+  function applyEmp() {
+    const v = document.getElementById('emp-q').value.trim().toLowerCase();
+    let shown = 0;
+    list.querySelectorAll('.emp').forEach(r => {
+      const s = r.dataset.s, arch = s === 'archived';
+      const okF = filt === 'all' ? !arch : filt === 'archived' ? arch : filt === 'work' ? s === 'work' : filt === 'you' ? s === 'you' : s === filt;
+      const okQ = !v || r.textContent.toLowerCase().includes(v);
+      r.hidden = !(okF && okQ); if (!r.hidden) shown++;
+    });
+    list.querySelectorAll('.gh').forEach(h => {
+      let n = h.nextElementSibling, any = false;
+      while (n && !n.classList.contains('gh')) { if (n.classList.contains('emp') && !n.hidden) any = true; n = n.nextElementSibling; }
+      h.hidden = !any;
+    });
+    document.getElementById('emp-none').hidden = shown > 0;
+  }
+  document.getElementById('emp-filter').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { filt = b.dataset.f; setTimeout(applyEmp); } });
+  document.getElementById('emp-q').addEventListener('input', applyEmp);
+  document.getElementById('emp-view').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const org = b.dataset.v === 'org';
+    document.getElementById('emp-org').hidden = !org; list.hidden = org;
+    document.getElementById('emp-filter').hidden = org;
+  });
+
+  // org chart: drag to change boss (demo)
+  let dragged = null;
+  document.querySelectorAll('.node').forEach(n => {
+    n.draggable = true;
+    n.addEventListener('dragstart', () => dragged = n);
+    n.addEventListener('dragover', e => { if (dragged && dragged !== n) { e.preventDefault(); n.classList.add('drop'); } });
+    n.addEventListener('dragleave', () => n.classList.remove('drop'));
+    n.addEventListener('drop', e => {
+      e.preventDefault(); n.classList.remove('drop');
+      if (!dragged || dragged.closest('li').contains(n)) return;
+      const li = n.closest('li'); let ul = li.querySelector(':scope > ul');
+      if (!ul) { ul = document.createElement('ul'); li.append(ul); }
+      const from = dragged.closest('li'), parentUl = from.parentElement;
+      ul.append(from); if (!parentUl.children.length) parentUl.remove();
+    });
+  });
+
+  // employee tabs
+  const tabs = document.getElementById('emp-tabs');
+  function openTab(id) {
+    tabs.querySelectorAll('button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === id));
+    document.querySelectorAll('[data-page="employee"] .tabpanel').forEach(p => p.hidden = p.id !== id);
+  }
+  tabs.addEventListener('click', e => { const b = e.target.closest('button'); if (b) openTab(b.dataset.tab); });
+  document.querySelectorAll('[data-dirty]').forEach(f => f.addEventListener('input', () => document.getElementById('savebar').hidden = false));
+  ['save', 'discard'].forEach(id => document.getElementById(id).addEventListener('click', () => document.getElementById('savebar').hidden = true));
+
+  // search in sidebar
+  const q = document.getElementById('q');
+  q.addEventListener('input', () => {
+    const v = q.value.trim().toLowerCase(); let any = false;
+    nav.querySelectorAll('[data-grp]').forEach(g => {
+      let n = 0;
+      g.querySelectorAll('.nav-item').forEach(i => { const hit = !v || (i.textContent + ' ' + i.dataset.keys).toLowerCase().includes(v); i.hidden = !hit; if (hit) n++; });
+      g.hidden = n === 0; if (n) any = true;
+    });
+    document.getElementById('none').hidden = any;
+  });
+  document.addEventListener('keydown', e => { if (e.key === '/' && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); q.focus(); } });
+
+  document.querySelectorAll('.sw').forEach(s => s.addEventListener('click', () => s.setAttribute('aria-checked', s.getAttribute('aria-checked') !== 'true')));
+  document.querySelectorAll('.seg').forEach(g => g.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    g.querySelectorAll('button').forEach(x => x.removeAttribute('aria-pressed')); b.setAttribute('aria-pressed', 'true');
+  }));
+  document.getElementById('ed-view').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const ed = document.querySelector('.editor'), m = b.textContent;
+    ed.style.gridTemplateColumns = m === 'Side by side' ? '' : '1fr';
+    ed.querySelector('textarea').hidden = m === 'Preview';
+    ed.querySelector('.preview').style.display = m === 'Write' ? 'none' : (m === 'Preview' ? 'block' : '');
+  });
+
+  open(START, START_IN);
+  if (START_TAB) openTab(START_TAB);
+</script>
+</body>
+</html>
