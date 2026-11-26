@@ -1,7 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import type { MemoryContextItem, MemoryView } from "@aurelius/protocol";
 import * as stylex from "@stylexjs/stylex";
@@ -12,25 +11,14 @@ import { useEmployees, useMemory, useMemoryContext, useProjects } from "../data"
 import { useAction } from "../keys/provider";
 import { toast } from "../ui/toast";
 import { consolidationScopes, memoryHistory, memoryKind, thousands } from "./knowledge-logic";
-import {
-  Confirm,
-  Eyebrow,
-  FormDialog,
-  failureOf,
-  Hint,
-  hhmm,
-  KnowledgeTabs,
-  Loading,
-  Page,
-  PageHead,
-  Problem,
-} from "./org-kit";
+import { Confirm, Eyebrow, FormDialog, failureOf, Hint, hhmm, Loading, Problem, shortDay } from "./org-kit";
+import { Grow, Meter, Segments, SettingsPage, Toolbar } from "./settings-frame";
 
 type MemoryTab = "context" | "history";
 
-const PANEL = "memory-panel";
+const _PANEL = "memory-panel";
 // Selector takes no empty value, so "no employee" needs a word of its own.
-const NO_EMPLOYEE = "no-employee";
+const _NO_EMPLOYEE = "no-employee";
 
 const styles = stylex.create({
   entry: {
@@ -152,9 +140,65 @@ const styles = stylex.create({
     lineHeight: 1.6,
     color: "var(--precision-text3)",
   },
+  card: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 12,
+    backgroundColor: "var(--color-background-card)",
+    boxShadow: "var(--precision-card-shadow)",
+  },
+  budget: { display: "flex", flexDirection: "column", gap: 8, paddingBlock: 12, paddingInline: 16 },
+  budgetLine: { display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 10 },
+  mono: { fontFamily: "var(--font-family-code)", fontSize: 12 },
+  grow: { flex: 1 },
+  sec: { display: "flex", flexDirection: "column", gap: 8 },
+  secHead: { display: "flex", minHeight: 28, alignItems: "center", gap: 8, paddingInline: 2 },
+  secTitle: { margin: 0, fontSize: 12.5, fontWeight: 600, color: "var(--color-text-secondary)" },
+  secNote: { fontSize: 12, color: "var(--precision-text3)" },
+  mem: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: 12,
+    paddingBlock: 11,
+    paddingInline: 16,
+    borderBlockStartWidth: { default: 1, ":first-child": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--precision-line2)",
+  },
+  memText: { display: "flex", minWidth: 0, flex: 1, flexDirection: "column", gap: 3 },
+  memMeta: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12,
+    color: "var(--precision-text3)",
+  },
+  memKind: {
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 5,
+    paddingInline: 7,
+    paddingBlock: 1,
+    backgroundColor: "var(--precision-sunk)",
+    fontSize: 11,
+    fontWeight: 600,
+    color: "var(--color-text-secondary)",
+  },
+  memActions: { display: "flex", flexShrink: 0, gap: 4 },
+  danger: { color: "var(--color-text-error)" },
+  foot: {
+    display: "flex",
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--precision-line2)",
+    paddingBlock: 8,
+    paddingInline: 10,
+  },
 });
-
-const NOTE = "What you remember here is used in the runs of this project.";
 
 export function Entry({
   m,
@@ -242,7 +286,7 @@ export function ReviseDialog({ m, onClose }: { m: MemoryView; onClose: () => voi
   );
 }
 
-function ContextRows({
+function _ContextRows({
   title,
   info,
   items,
@@ -270,37 +314,169 @@ function ContextRows({
   );
 }
 
-export function MemoryBody({
-  projectId,
-  chrome = true,
-  start = null,
+/** One memory as a row: its text, kind and who it is for, and Pin, Revise and Forget. */
+function MemoryRow({
+  text,
+  kind,
+  who,
+  m,
+  onPin,
+  onRevise,
+  onForget,
 }: {
-  projectId: string | null;
-  chrome?: boolean;
-  start?: string | null;
+  text: string;
+  kind: string;
+  who: string;
+  m: MemoryView | undefined;
+  onPin: (m: MemoryView) => void;
+  onRevise: (m: MemoryView) => void;
+  onForget: (m: MemoryView) => void;
 }) {
+  return (
+    <div {...stylex.props(styles.mem)}>
+      <div {...stylex.props(styles.memText)}>
+        <span>{text || <span {...stylex.props(styles.erased)}>(content erased)</span>}</span>
+        <span {...stylex.props(styles.memMeta)}>
+          <span {...stylex.props(styles.memKind)}>{kind}</span>
+          {who}
+        </span>
+      </div>
+      {m && m.status === "active" ? (
+        <div {...stylex.props(styles.memActions)}>
+          <Button size="sm" variant="ghost" label={m.pinned ? "Unpin" : "Pin"} onClick={() => onPin(m)} />
+          <Button size="sm" variant="ghost" label="Revise" onClick={() => onRevise(m)} />
+          <Button size="sm" variant="ghost" label="Forget…" onClick={() => onForget(m)} xstyle={styles.danger} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MemorySection({
+  title,
+  note,
+  action,
+  children,
+}: {
+  title: string;
+  note: string;
+  action?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section {...stylex.props(styles.sec)}>
+      <div {...stylex.props(styles.secHead)}>
+        <h2 {...stylex.props(styles.secTitle)}>{title}</h2>
+        <span {...stylex.props(styles.secNote)}>{note}</span>
+        <span {...stylex.props(styles.grow)} />
+        {action}
+      </div>
+      {children ? <div {...stylex.props(styles.card)}>{children}</div> : null}
+    </section>
+  );
+}
+
+const EVERYONE = "everyone";
+const SHOWN_AT_FIRST = 5;
+
+/** Remember: a kind, for whom, and the text. */
+function RememberDialog({
+  project,
+  projectName,
+  staff,
+  onClose,
+}: {
+  project: string;
+  projectName: string;
+  staff: { id: string; name: string }[];
+  onClose: () => void;
+}) {
+  const connection = useConnection();
+  const client = useQueryClient();
+  const [text, setText] = useState("");
+  const [kind, setKind] = useState<"project_knowledge" | "decision">("project_knowledge");
+  const [forWhom, setForWhom] = useState(EVERYONE);
+  const save = async () => {
+    try {
+      await connection.write(
+        "memory.remember",
+        {
+          scope: forWhom === EVERYONE ? { kind: "project", id: project } : { kind: "employee", id: forWhom },
+          kind,
+          content: text.trim(),
+          pinned: false,
+        },
+        { retry: false },
+      );
+      await client.invalidateQueries({ queryKey: ["memory"] });
+      toast("Remembered, with you as the source.");
+      onClose();
+    } catch (e) {
+      toast(failureOf(e));
+    }
+  };
+  return (
+    <FormDialog
+      title={`Remember for ${projectName}`}
+      width={420}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" label="Cancel" onClick={onClose} />
+          <Button variant="primary" label="Remember" isDisabled={text.trim() === ""} onClick={() => void save()} />
+        </>
+      }
+    >
+      <SegmentedControl label="Kind" size="sm" value={kind} onChange={(v) => setKind(v as typeof kind)}>
+        <SegmentedControlItem value="project_knowledge" label="Knowledge" />
+        <SegmentedControlItem value="decision" label="Decision" />
+      </SegmentedControl>
+      <Selector
+        label="For"
+        size="sm"
+        value={forWhom}
+        onChange={setForWhom}
+        options={[{ value: EVERYONE, label: "Everyone" }, ...staff.map((e) => ({ value: e.id, label: e.name }))]}
+      />
+      <TextArea
+        hasAutoFocus
+        label="Text"
+        rows={4}
+        placeholder="What every run in this workspace should know"
+        value={text}
+        onChange={setText}
+      />
+    </FormDialog>
+  );
+}
+
+/** Settings › Company › Memory: what a run in a workspace gets, and every memory with its actions. */
+export function MemoryBody({ projectId, start = null }: { projectId: string | null; start?: string | null }) {
   const connection = useConnection();
   const client = useQueryClient();
   const projects = useProjects();
   const employees = useEmployees();
   const [picked, setPicked] = useState<string | null>(start);
-  const project = projectId ?? picked ?? projects.data?.find((p) => p.status !== "archived")?.id ?? null;
+  const open = (projects.data ?? []).filter((p) => p.status !== "archived");
+  const project = picked ?? projectId ?? open[0]?.id ?? null;
+  const projectName = open.find((p) => p.id === project)?.name ?? "this workspace";
   const memory = useMemory(project);
   const staff = useMemo(
     () => (employees.data ?? []).filter((e) => e.projects_active.includes(project ?? "")),
     [employees.data, project],
   );
-  const [who, setWho] = useState<string | null | undefined>(undefined);
-  const contextEmployee = who === undefined ? (staff[0]?.id ?? null) : who;
+  const [who, setWho] = useState<string>(EVERYONE);
+  const contextEmployee = who === EVERYONE ? null : who;
   const context = useMemoryContext(project, contextEmployee);
   const [tab, setTab] = useState<MemoryTab>("context");
-  const [text, setText] = useState("");
-  const [kind, setKind] = useState<"project_knowledge" | "decision">("project_knowledge");
+  const [remembering, setRemembering] = useState(false);
   const [revising, setRevising] = useState<MemoryView | null>(null);
   const [forgetting, setForgetting] = useState<MemoryView | null>(null);
+  const [moreRelevant, setMoreRelevant] = useState(false);
   const [overOpen, setOverOpen] = useState(false);
   const items = memory.data ?? [];
   const history = useMemo(() => memoryHistory(items), [items]);
+  const byId = useMemo(() => new Map(items.map((m) => [m.id, m])), [items]);
   const refresh = () => client.invalidateQueries({ queryKey: ["memory"] });
   const act = async (run: () => Promise<unknown>, done?: string) => {
     try {
@@ -310,20 +486,6 @@ export function MemoryBody({
     } catch (e) {
       toast(failureOf(e));
     }
-  };
-  const remember = () => {
-    if (!project || text.trim() === "") return;
-    const content = text.trim();
-    setText("");
-    void act(
-      () =>
-        connection.write(
-          "memory.remember",
-          { scope: { kind: "project", id: project }, kind, content, pinned: false },
-          { retry: false },
-        ),
-      "Saved to project memory, with you as the source.",
-    );
   };
   const consolidate = async () => {
     if (!project) return;
@@ -344,186 +506,198 @@ export function MemoryBody({
       toast(failureOf(e));
     }
   };
-  const shownItems = tab === "history" ? history : items.filter((m) => m.status === "active");
-  const [chosen, setChosen] = useState<string | null>(null);
-  const current = shownItems.find((m) => m.id === chosen) ?? shownItems[0] ?? null;
-  const step = (by: number) => {
-    const next = shownItems[(current ? shownItems.indexOf(current) : -1) + by];
-    if (next) setChosen(next.id);
-  };
-  useAction("SelectNext", () => step(1));
-  useAction("SelectPrev", () => step(-1));
-  useAction("RemoveMemory", () => {
-    if (current?.status === "active") setForgetting(current);
-    else if (current) toast("This item is no longer active.");
-  });
   const pin = (m: MemoryView) =>
     act(
       () => connection.write("memory.pin", { memory_id: m.id, pinned: !m.pinned }, { retry: false }),
       m.pinned ? "Unpinned." : "Pinned: always included as context.",
     );
-  useAction("TogglePin", () => {
-    if (current) void pin(current);
-  });
   useAction("Filter1", () => setTab("context"));
   useAction("Filter3", () => setTab("history"));
   const ctx = context.data;
   const place = (p: string) => (ctx?.items ?? []).filter((i) => i.placement === p);
-  const budget = Math.max(1, ctx?.memory_budget_tokens ?? 1);
-  const over = (ctx?.always_tokens ?? 0) > budget;
-  const tabs: { key: MemoryTab; label: string; n?: number }[] = [
-    { key: "context", label: "In context" },
-    { key: "history", label: "History", n: history.length },
-  ];
+  const inContext = new Set((ctx?.items ?? []).map((i) => i.memory_id));
+  const others = items.filter((m) => m.status === "active" && !inContext.has(m.id));
+  const whoOf = (name: string | null | undefined, pinned: boolean, at?: number) =>
+    [name ?? "Everyone", pinned ? "pinned" : null, at ? shortDay(at) : null].filter(Boolean).join(" · ");
+  const row = (i: MemoryContextItem) => {
+    const m = byId.get(i.memory_id);
+    return (
+      <MemoryRow
+        key={i.memory_id}
+        text={i.content}
+        kind={memoryKind(m ?? { kind: i.kind })}
+        who={whoOf(i.employee_name, i.pinned, m?.created_at_ms)}
+        m={m}
+        onPin={(x) => void pin(x)}
+        onRevise={setRevising}
+        onForget={setForgetting}
+      />
+    );
+  };
+  const relevant = place("when_relevant");
+  const over = place("over_budget");
   return (
-    <Page>
-      {chrome ? (
-        <PageHead title="Knowledge" tabs={<KnowledgeTabs />}>
-          {/* A workspace is one project: nothing to choose. */}
-          {projectId ? null : (
+    <SettingsPage title="Memory" width="mid">
+      {!project && projects.data ? (
+        <p {...stylex.props(styles.empty)}>Make a workspace first: memory belongs to a workspace.</p>
+      ) : (
+        <>
+          <Toolbar>
             <Selector
-              label="Memory of"
+              label="Workspace"
               isLabelHidden
               size="sm"
+              variant="secondary"
               value={project ?? ""}
               onChange={(v) => {
                 setPicked(v);
-                setWho(undefined);
+                setWho(EVERYONE);
               }}
-              options={(projects.data ?? [])
-                .filter((p) => p.status !== "archived")
-                .map((p) => ({ value: p.id, label: p.name }))}
+              options={open.map((p) => ({ value: p.id, label: p.name }))}
             />
-          )}
-          <Button size="sm" label="Consolidate" isDisabled={!project} onClick={() => void consolidate()} />
-        </PageHead>
-      ) : null}
-      {!project && projects.data ? (
-        <p {...stylex.props(styles.empty)}>Make a project first: memory belongs to a project.</p>
-      ) : (
-        <div {...stylex.props(styles.split)}>
-          <div {...stylex.props(styles.main)}>
-            <TabList role="tablist" aria-label="Memory" hasDivider value={tab} onChange={(v) => setTab(v as MemoryTab)}>
-              {tabs.map((t) => (
-                <Tab
-                  key={t.key}
-                  value={t.key}
-                  label={t.label}
-                  panelId={PANEL}
-                  {...(t.n ? { endContent: <span>{t.n}</span> } : {})}
-                />
-              ))}
-            </TabList>
-            <div id={PANEL} role="tabpanel" {...stylex.props(styles.panel)}>
-              {memory.isPending ? <Loading /> : null}
-              {tab === "history" && memory.data ? (
-                history.length === 0 ? (
-                  <p {...stylex.props(styles.empty)}>Nothing superseded, rejected or forgotten yet.</p>
-                ) : (
-                  history.map((m) => (
-                    <Entry key={m.id} m={m} selected={m.id === current?.id} onSelect={() => setChosen(m.id)} />
-                  ))
-                )
-              ) : null}
-              {tab === "context" ? (
-                <div {...stylex.props(styles.column)}>
-                  <div {...stylex.props(styles.contextHead)}>
-                    <Selector
-                      label="Context of"
-                      size="sm"
-                      value={contextEmployee ?? NO_EMPLOYEE}
-                      onChange={(v) => setWho(v === NO_EMPLOYEE ? null : v)}
-                      options={[
-                        ...staff.map((e) => ({ value: e.id, label: e.name })),
-                        { value: NO_EMPLOYEE, label: "No employee" },
-                      ]}
-                    />
-                    {ctx ? (
-                      <>
-                        <span>
-                          {ctx.system_tokens ? `Instructions ~${thousands(ctx.system_tokens)} tokens · ` : ""}Memory{" "}
-                          {thousands(ctx.always_tokens)} / {thousands(ctx.memory_budget_tokens)} tokens
-                        </span>
-                        <span {...stylex.props(styles.meter)}>
-                          <span
-                            {...stylex.props(styles.meterFill, over && styles.meterOver)}
-                            style={{ width: `${Math.min(100, (ctx.always_tokens / budget) * 100)}%` }}
-                          />
-                        </span>
-                      </>
-                    ) : null}
+            <Selector
+              label="Context of"
+              isLabelHidden
+              size="sm"
+              variant="secondary"
+              value={who}
+              onChange={setWho}
+              options={[{ value: EVERYONE, label: "Everyone" }, ...staff.map((e) => ({ value: e.id, label: e.name }))]}
+            />
+            <Segments
+              label="Show"
+              options={[
+                { value: "context", label: "In use" },
+                { value: "history", label: `History ${history.length}` },
+              ]}
+              value={tab}
+              onChange={setTab}
+            />
+            <Grow />
+            <Button
+              size="sm"
+              label="Consolidate"
+              tooltip="Merges memories that say the same; the old ones go to History"
+              isDisabled={!project}
+              onClick={() => void consolidate()}
+            />
+            <Button
+              size="sm"
+              variant="primary"
+              label="Remember"
+              isDisabled={!project}
+              onClick={() => setRemembering(true)}
+            />
+          </Toolbar>
+          {memory.isPending ? <Loading /> : null}
+          {tab === "history" && memory.data ? (
+            history.length === 0 ? (
+              <p {...stylex.props(styles.empty)}>Nothing superseded, rejected or forgotten yet.</p>
+            ) : (
+              <div {...stylex.props(styles.card)}>
+                {history.map((m) => (
+                  <MemoryRow
+                    key={m.id}
+                    text={m.content}
+                    kind={`${memoryKind(m)} · ${m.status}`}
+                    who={whoOf(m.employee_name, m.pinned, m.created_at_ms)}
+                    m={undefined}
+                    onPin={() => undefined}
+                    onRevise={() => undefined}
+                    onForget={() => undefined}
+                  />
+                ))}
+              </div>
+            )
+          ) : null}
+          {tab === "context" ? (
+            <>
+              {ctx ? (
+                <div {...stylex.props(styles.card, styles.budget)}>
+                  <div {...stylex.props(styles.budgetLine)}>
+                    <b>What a run in {projectName} gets</b>
+                    <span {...stylex.props(styles.grow)} />
+                    <span {...stylex.props(styles.mono)}>
+                      {thousands(ctx.always_tokens)} / {thousands(ctx.memory_budget_tokens)} tokens
+                    </span>
                   </div>
-                  {context.isPending ? <Loading /> : null}
-                  {context.error ? <Problem>{context.error.message}</Problem> : null}
-                  {ctx && ctx.items.length === 0 ? (
-                    <p {...stylex.props(styles.empty)}>No memory yet for this employee. Use Remember.</p>
-                  ) : null}
-                  {ctx ? (
-                    <>
-                      <ContextRows
-                        title={`ALWAYS IN CONTEXT · ${place("always").length} · ${thousands(ctx.always_tokens)} TOKENS`}
-                        items={place("always")}
-                      />
-                      <ContextRows
-                        title={`ONLY WHEN RELEVANT TO THE QUESTION · ${place("when_relevant").length}`}
-                        info="Added only when the question matches and budget is left."
-                        items={place("when_relevant")}
-                        dim={styles.dim75}
-                      />
-                      {place("over_budget").length > 5 && !overOpen ? (
-                        <div {...stylex.props(styles.expander)}>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            label={`▸ Does not fit the budget · ${place("over_budget").length}`}
-                            onClick={() => setOverOpen(true)}
-                          />
-                        </div>
-                      ) : (
-                        <ContextRows
-                          title={`DOES NOT FIT THE BUDGET · ${place("over_budget").length}`}
-                          info="Not sent; the employee can still find these with recall."
-                          items={place("over_budget")}
-                          dim={styles.dim55}
-                        />
-                      )}
-                    </>
-                  ) : null}
-                  <div {...stylex.props(styles.active)}>
-                    <Eyebrow>ACTIVE MEMORIES</Eyebrow>
-                  </div>
-                  {items
-                    .filter((m) => m.status === "active")
-                    .map((m) => (
-                      <Entry key={m.id} m={m} selected={m.id === current?.id} onSelect={() => setChosen(m.id)}>
-                        <Button size="sm" label="Revise" onClick={() => setRevising(m)} />
-                        <Button size="sm" label={m.pinned ? "Unpin" : "Pin"} onClick={() => void pin(m)} />
-                        <Button size="sm" variant="destructive" label="Forget…" onClick={() => setForgetting(m)} />
-                      </Entry>
-                    ))}
+                  <Meter used={ctx.always_tokens} limit={ctx.memory_budget_tokens} label="Memory in context" />
+                  <span {...stylex.props(styles.secNote)}>
+                    {ctx.system_tokens
+                      ? `Plus the instructions (≈ ${thousands(ctx.system_tokens)} tokens) and `
+                      : "Plus "}
+                    the guidelines of the employee.
+                  </span>
                 </div>
               ) : null}
-            </div>
-          </div>
-          <aside aria-label="Remember" {...stylex.props(styles.aside)}>
-            <TextArea
-              label="Remember for this project"
-              rows={4}
-              placeholder="For example: publishing requires a prior review"
-              value={text}
-              onChange={setText}
-            />
-            <SegmentedControl label="Kind" size="sm" value={kind} onChange={(v) => setKind(v as typeof kind)}>
-              <SegmentedControlItem value="project_knowledge" label="Knowledge" />
-              <SegmentedControlItem value="decision" label="Decision" />
-            </SegmentedControl>
-            <div>
-              <Button size="sm" variant="primary" label="Remember" isDisabled={text.trim() === ""} onClick={remember} />
-            </div>
-            <p {...stylex.props(styles.remember)}>{NOTE}</p>
-          </aside>
-        </div>
+              {context.error ? <Problem>{context.error.message}</Problem> : null}
+              {ctx && ctx.items.length === 0 && others.length === 0 ? (
+                <p {...stylex.props(styles.empty)}>No memory yet. Use Remember.</p>
+              ) : null}
+              {place("always").length > 0 ? (
+                <MemorySection title="Always in context" note={String(place("always").length)}>
+                  {place("always").map(row)}
+                </MemorySection>
+              ) : null}
+              {relevant.length > 0 ? (
+                <MemorySection title="Only when it fits the question" note={String(relevant.length)}>
+                  {(moreRelevant ? relevant : relevant.slice(0, SHOWN_AT_FIRST)).map(row)}
+                  {relevant.length > SHOWN_AT_FIRST && !moreRelevant ? (
+                    <div {...stylex.props(styles.foot)}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        label={`Show ${relevant.length - SHOWN_AT_FIRST} more`}
+                        onClick={() => setMoreRelevant(true)}
+                      />
+                    </div>
+                  ) : null}
+                </MemorySection>
+              ) : null}
+              {over.length > 0 ? (
+                <MemorySection
+                  title="Does not fit"
+                  note={`${over.length} · left out until there is room`}
+                  action={
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      label={overOpen ? "Hide" : "Show"}
+                      onClick={() => setOverOpen(!overOpen)}
+                    />
+                  }
+                >
+                  {overOpen ? over.map(row) : null}
+                </MemorySection>
+              ) : null}
+              {others.length > 0 ? (
+                <MemorySection title="For other employees" note={String(others.length)}>
+                  {others.map((m) => (
+                    <MemoryRow
+                      key={m.id}
+                      text={m.content}
+                      kind={memoryKind(m)}
+                      who={whoOf(m.employee_name, m.pinned, m.created_at_ms)}
+                      m={m}
+                      onPin={(x) => void pin(x)}
+                      onRevise={setRevising}
+                      onForget={setForgetting}
+                    />
+                  ))}
+                </MemorySection>
+              ) : null}
+            </>
+          ) : null}
+        </>
       )}
+      {remembering && project ? (
+        <RememberDialog
+          project={project}
+          projectName={projectName}
+          staff={staff}
+          onClose={() => setRemembering(false)}
+        />
+      ) : null}
       {revising ? <ReviseDialog m={revising} onClose={() => setRevising(null)} /> : null}
       {forgetting ? (
         <Confirm
@@ -542,6 +716,6 @@ export function MemoryBody({
           }}
         />
       ) : null}
-    </Page>
+    </SettingsPage>
   );
 }

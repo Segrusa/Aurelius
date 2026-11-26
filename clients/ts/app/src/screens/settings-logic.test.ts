@@ -1,6 +1,8 @@
 import type { EmployeeRunLine, RemoteClientView } from "@aurelius/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  agoText,
+  choiceToStore,
   compactFieldOf,
   compactThresholdOf,
   defaultEffortLabel,
@@ -9,10 +11,14 @@ import {
   effortOptions,
   employeeRunHint,
   inSettingsArea,
+  pressedChoice,
   remoteAccessDevices,
   runDefaultValue,
   screenUseRows,
+  sectionKeyOf,
   sectionsFor,
+  settingMatches,
+  uptimeText,
   withRunDefault,
 } from "./settings-logic";
 
@@ -166,5 +172,52 @@ describe("settings sections per server", () => {
 
   it("keeps it on an old server", () => {
     expect(sectionsFor(sections, []).map((s) => s.key)).toEqual(["run-defaults", "employee-runs"]);
+  });
+});
+
+describe("settings redesign", () => {
+  const now = Date.UTC(2026, 10, 25, 12, 0);
+  const min = 60_000;
+
+  it("opens the regrouped page for an old link and leaves a current one alone", () => {
+    expect(sectionKeyOf("app")).toBe("device");
+    expect(sectionKeyOf("run-defaults")).toBe("defaults");
+    expect(sectionKeyOf("servers")).toBe("server");
+    expect(sectionKeyOf("mcp")).toBe("tools");
+    expect(sectionKeyOf("compaction")).toBe("load");
+    expect(sectionKeyOf("account")).toBe("account");
+    expect(sectionKeyOf("employee-runs")).toBe("employee-runs");
+  });
+
+  it("finds an entry by its label or one of its words, whatever the case", () => {
+    expect(settingMatches("Runs & load", "load limits cpu compaction", "")).toBe(true);
+    expect(settingMatches("Runs & load", "load limits cpu compaction", "COMPACT")).toBe(true);
+    expect(settingMatches("Runs & load", "load limits cpu compaction", " runs ")).toBe(true);
+    expect(settingMatches("Backups", "restore", "tailscale")).toBe(false);
+  });
+
+  it("says how long ago in the words of the design", () => {
+    expect(agoText(null, now)).toBe("never");
+    expect(agoText(now - 20_000, now)).toBe("now");
+    expect(agoText(now - 4 * min, now)).toBe("4 min ago");
+    expect(agoText(now - 125 * min, now)).toBe("2 h ago");
+    expect(agoText(now - 30 * 60 * min, now)).toBe("yesterday");
+    expect(agoText(now - 9 * 24 * 60 * min, now)).toBe("9 days ago");
+  });
+
+  it("says how long the server runs", () => {
+    expect(uptimeText(undefined, now)).toBe("Unknown");
+    expect(uptimeText(now - 12 * min, now)).toBe("12 min");
+    expect(uptimeText(now - 5 * 60 * min, now)).toBe("5 h");
+    expect(uptimeText(now - 3 * 24 * 60 * min, now)).toBe("3 days");
+  });
+
+  it("shows Default as what it comes to, and stores the default again when that is picked", () => {
+    expect(pressedChoice("default", "ask")).toBe("ask");
+    expect(pressedChoice("default", null)).toBeNull();
+    expect(pressedChoice("plan", "ask")).toBe("plan");
+    expect(choiceToStore("ask", "ask")).toBe("default");
+    expect(choiceToStore("high", "medium")).toBe("high");
+    expect(choiceToStore("high", null)).toBe("high");
   });
 });

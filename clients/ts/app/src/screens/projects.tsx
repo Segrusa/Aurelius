@@ -19,9 +19,11 @@ import { toast } from "../ui/toast";
 import { useWorkspace } from "../workspace";
 import { pinnedFirst, togglePin } from "./employee-logic";
 import { pinKey, usePins, useStoredPins } from "./employees";
-import { Confirm, Empty, FormDialog, failureOf, Hint, KnowledgeTabs, Page, PageHead, Problem } from "./org-kit";
+import { Confirm, Empty, FormDialog, failureOf, Hint, Page, PageHead, Problem } from "./org-kit";
 import { useFolderChooser } from "./run-tools";
-import { focusField } from "./settings-kit";
+import { FindField, Grow, Lede, Segments, SettingsPage, Toolbar } from "./settings-frame";
+import { Chip, focusField } from "./settings-kit";
+import { agoText } from "./settings-logic";
 import { VaultBody } from "./vault";
 import { chosenRail, openProjects, RAIL_PINS, RAIL_PINS_FEATURE, railPins } from "./workspace-logic";
 import { WorkspaceSettingsBody } from "./workspace-settings";
@@ -40,9 +42,19 @@ const styles = stylex.create({
   peopleColumn: { width: 180, minWidth: 180, maxWidth: 180 },
   waitingColumn: { width: 120, minWidth: 120, maxWidth: 120 },
   activeColumn: { width: 110, minWidth: 110, maxWidth: 110 },
-  statusColumn: { width: 110, minWidth: 110, maxWidth: 110 },
+  statusColumn: { width: 150, minWidth: 150, maxWidth: 150 },
   moreColumn: { width: 64, minWidth: 64, maxWidth: 64 },
-  row: { height: 60 },
+  row: { height: 56, cursor: "pointer" },
+  folder: { fontFamily: "var(--font-family-code)", fontSize: 12 },
+  card: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 12,
+    backgroundColor: "var(--color-background-card)",
+    boxShadow: "var(--precision-card-shadow)",
+  },
   selected: { backgroundColor: "var(--color-overlay-hover)" },
   selectedEdge: { boxShadow: "inset 2px 0 0 var(--color-text-accent)" },
   projectCell: { display: "flex", minWidth: 0, alignItems: "center", gap: 12 },
@@ -84,11 +96,11 @@ const styles = stylex.create({
 });
 
 const COUNT_WORDS = ["", "One", "Two", "Three"];
-const people = (n: number, working: number) =>
+const _people = (n: number, working: number) =>
   n === 0
     ? "Nobody yet"
     : `${COUNT_WORDS[n] ?? n} employee${n === 1 ? "" : "s"}${working ? ` · ${working} working` : ""}`;
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+const _plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 const isActive = (t: TaskView) => !["succeeded", "failed", "cancelled"].includes(t.status) || Boolean(t.live_run);
 
 /**
@@ -294,7 +306,7 @@ function useProjectActions(project: ProjectSummary | null, onEdit: () => void, o
   return { options, pick, confirm };
 }
 
-const DIM = "var(--precision-text3)";
+const _DIM = "var(--precision-text3)";
 
 function ProjectRow({
   project,
@@ -316,77 +328,75 @@ function ProjectRow({
   const navigate = useNavigate();
   const employees = useEmployees();
   const team = (employees.data ?? []).filter((e) => e.projects_active.includes(project.id) && e.status !== "archived");
-  const working = team.filter((e) => e.working).length;
   const active = tasks.filter(isActive).length;
   const need = waiting.approvals + waiting.decisions;
-  const status =
-    project.status === "paused"
-      ? { label: "Paused", color: DIM }
-      : need > 0
-        ? { label: `Needs you · ${need}`, color: "var(--color-text-warning)" }
-        : active > 0
-          ? { label: "Working", color: "var(--color-text-accent)" }
-          : { label: "Quiet", color: DIM };
-  const wait =
-    need === 0
-      ? "Nothing waiting"
-      : [
-          waiting.approvals ? plural(waiting.approvals, "approval") : null,
-          waiting.decisions ? plural(waiting.decisions, "decision") : null,
-        ]
-          .filter(Boolean)
-          .join(", ");
+  const last = tasks.reduce((at, t) => Math.max(at, t.updated_at_ms), 0);
+  const chip =
+    project.status === "archived" ? (
+      <Chip>Archived</Chip>
+    ) : project.status === "paused" ? (
+      <Chip>Paused</Chip>
+    ) : need > 0 ? (
+      <Chip tone="warn" dot>{`Needs you · ${need}`}</Chip>
+    ) : active > 0 ? (
+      <Chip tone="ok" dot>
+        Working
+      </Chip>
+    ) : (
+      <Chip>Quiet</Chip>
+    );
   const { options, pick, confirm } = useProjectActions(
     project,
     onEdit,
     () => void navigate({ to: "/knowledge/$tab", params: { tab: "memory" }, search: { project: project.id } }),
   );
   return (
-    <TableRow {...stylex.props(stylex.defaultMarker(), styles.row, selected && styles.selected)}>
+    <TableRow
+      onClick={() => void navigate({ to: "/projects/$id", params: { id: project.id } })}
+      {...stylex.props(stylex.defaultMarker(), styles.row, selected && styles.selected)}
+    >
       <TableCell xstyle={selected ? styles.selectedEdge : undefined}>
-        <span {...stylex.props(styles.projectCell)}>
-          <Mark letter={initial(project.name)} color={markColor(project.id)} size={28} radius={7} />
-          <span {...stylex.props(styles.minZero)}>
-            <Link to="/projects/$id" params={{ id: project.id }} {...stylex.props(styles.projectName)}>
-              {project.name}
-            </Link>
-            <span {...stylex.props(styles.line)}>{project.description || "No description"}</span>
-          </span>
+        <span {...stylex.props(styles.minZero)}>
+          <Link
+            to="/projects/$id"
+            params={{ id: project.id }}
+            onClick={(e) => e.stopPropagation()}
+            {...stylex.props(styles.projectName)}
+          >
+            {project.name}
+          </Link>
+          <span {...stylex.props(styles.line, styles.folder)}>{project.folder || "No folder"}</span>
         </span>
         {confirm}
       </TableCell>
       <TableCell>
         <span {...stylex.props(styles.marks)}>
           {team.slice(0, 4).map((e) => (
-            <Mark key={e.id} letter={initial(e.name)} color={markColor(e.id)} size={16} radius={4} />
+            <Mark key={e.id} letter={initial(e.name)} color={markColor(e.id)} size={20} radius={10} />
           ))}
           {team.length > 4 ? <span {...stylex.props(styles.moreMarks)}>+{team.length - 4}</span> : null}
         </span>
-        <span {...stylex.props(styles.line)}>{people(team.length, working)}</span>
+      </TableCell>
+      <TableCell>{chip}</TableCell>
+      <TableCell>
+        <span {...stylex.props(styles.small)}>{last ? agoText(last, Date.now()) : "—"}</span>
       </TableCell>
       <TableCell>
-        <span {...stylex.props(styles.small)}>{wait}</span>
-      </TableCell>
-      <TableCell>
-        <span {...stylex.props(styles.small)}>{plural(active, "active task")}</span>
-      </TableCell>
-      <TableCell>
-        <span {...stylex.props(styles.small)} style={{ color: status.color }}>
-          {status.label}
-        </span>
-      </TableCell>
-      <TableCell>
-        <span {...stylex.props(styles.actions)}>
-          <button
-            type="button"
-            aria-label={`${pinned ? "Unpin" : "Pin"} ${project.name}`}
-            aria-pressed={pinned}
-            title={pinned ? "Unpin from your rail" : "Pin to your rail"}
-            onClick={onPin}
-            {...stylex.props(styles.pin, pinned && styles.pinned)}
-          >
-            {pinned ? "★" : "☆"}
-          </button>
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: only stops the row from opening. */}
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: as above. */}
+        <span onClick={(e) => e.stopPropagation()} {...stylex.props(styles.actions)}>
+          {project.status === "archived" ? null : (
+            <button
+              type="button"
+              aria-label={`${pinned ? "Unpin" : "Pin"} ${project.name}`}
+              aria-pressed={pinned}
+              title={pinned ? "Unpin from your rail" : "Pin to your rail"}
+              onClick={onPin}
+              {...stylex.props(styles.pin, pinned && styles.pinned)}
+            >
+              {pinned ? "★" : "☆"}
+            </button>
+          )}
           <Menu
             label={`More for ${project.name}`}
             options={options}
@@ -399,6 +409,9 @@ function ProjectRow({
   );
 }
 
+type WorkspaceFilter = "active" | "paused" | "archived";
+
+/** Settings › Company › Workspaces: every workspace, to find, filter and open its own settings. */
 export function ProjectsScreen() {
   const navigate = useNavigate();
   const projects = useProjects();
@@ -406,7 +419,21 @@ export function ProjectsScreen() {
   const rail = useRailPins();
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState(0);
-  const list = useMemo(() => pinnedFirst(openProjects(projects.data ?? []), rail.pins), [projects.data, rail.pins]);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<WorkspaceFilter>("active");
+  const all = projects.data ?? [];
+  const countOf = (f: WorkspaceFilter) => all.filter((p) => p.status === f).length;
+  const list = useMemo(
+    () =>
+      pinnedFirst(
+        all.filter(
+          (p) =>
+            p.status === filter && (query.trim() === "" || p.name.toLowerCase().includes(query.trim().toLowerCase())),
+        ),
+        rail.pins,
+      ),
+    [all, filter, query, rail.pins],
+  );
   const forProject = (id: string) => (tasks.data ?? []).filter((t) => t.project_id === id);
   const waitingOf = (id: string) => {
     const mine = forProject(id);
@@ -424,32 +451,50 @@ export function ProjectsScreen() {
     if (p) void navigate({ to: "/projects/$id", params: { id: p.id } });
   });
   return (
-    <Page>
-      <PageHead title="Workspaces" tabs={<KnowledgeTabs />}>
-        <Button size="sm" variant="primary" label="New project" onClick={() => setAdding(true)} />
-      </PageHead>
-      <div {...stylex.props(styles.scroll)}>
-        {projects.data && list.length === 0 ? (
-          <Empty
-            title="Begin with what is in your control."
-            description="Create a project to give an employee a mandate."
-          >
-            <Button variant="primary" label="New project" onClick={() => setAdding(true)} />
-          </Empty>
-        ) : null}
-        {list.length > 0 ? (
+    <SettingsPage title="Workspaces" width="wide">
+      <Toolbar>
+        <FindField label="Search workspaces" placeholder="Search workspaces" value={query} onChange={setQuery} grow />
+        <Segments
+          label="Show"
+          options={[
+            { value: "active", label: `Active ${countOf("active")}` },
+            { value: "paused", label: `Paused ${countOf("paused")}` },
+            { value: "archived", label: `Archived ${countOf("archived")}` },
+          ]}
+          value={filter}
+          onChange={setFilter}
+        />
+        <Grow />
+        <Button size="sm" variant="primary" label="New workspace" onClick={() => setAdding(true)} />
+      </Toolbar>
+      {projects.data && all.length === 0 ? (
+        <Empty
+          title="Begin with what is in your control."
+          description="Create a workspace to give an employee a mandate."
+        >
+          <Button variant="primary" label="New workspace" onClick={() => setAdding(true)} />
+        </Empty>
+      ) : null}
+      {all.length > 0 ? (
+        <div {...stylex.props(styles.card)}>
           <Table density="compact" hasHover xstyle={styles.table}>
             <TableHeader>
               <TableRow isHeaderRow>
-                <TableHeaderCell xstyle={styles.headCell}>Project</TableHeaderCell>
+                <TableHeaderCell xstyle={styles.headCell}>Workspace</TableHeaderCell>
                 <TableHeaderCell xstyle={[styles.headCell, styles.peopleColumn]}>People</TableHeaderCell>
-                <TableHeaderCell xstyle={[styles.headCell, styles.waitingColumn]}>Waiting</TableHeaderCell>
-                <TableHeaderCell xstyle={[styles.headCell, styles.activeColumn]}>Active</TableHeaderCell>
                 <TableHeaderCell xstyle={[styles.headCell, styles.statusColumn]}>Status</TableHeaderCell>
+                <TableHeaderCell xstyle={[styles.headCell, styles.activeColumn]}>Last active</TableHeaderCell>
                 <TableHeaderCell xstyle={styles.moreColumn} />
               </TableRow>
             </TableHeader>
             <TableBody>
+              {list.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5}>
+                    <span {...stylex.props(styles.small)}>No workspace matches.</span>
+                  </TableCell>
+                </TableRow>
+              ) : null}
               {list.map((p, i) => (
                 <ProjectRow
                   key={p.id}
@@ -464,10 +509,11 @@ export function ProjectsScreen() {
               ))}
             </TableBody>
           </Table>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
+      <Lede>A row opens the workspace’s own settings: name, folder, dispatcher, memory and export, archive.</Lede>
       {adding ? <NewProject onClose={() => setAdding(false)} /> : null}
-    </Page>
+    </SettingsPage>
   );
 }
 

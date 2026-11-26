@@ -9,11 +9,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, Fragment, useEffect, useState } from "react";
 import { useConnection, useLinkState } from "../connection";
 import { useAction, useKeyContext } from "../keys/provider";
+import { Icon } from "../ui/icons";
 import { FormDialog } from "./org-kit";
 import {
   bytes,
+  Chip,
   ConfirmButton,
+  Foot,
   Group,
+  IconBox,
   Keyed,
   Muted,
   modelName,
@@ -24,11 +28,14 @@ import {
   SmallButton,
   Switch,
   TextInput,
+  type Tone,
   useChange,
   useSetting,
   when,
 } from "./settings-kit";
-import { compactFieldOf, compactThresholdOf } from "./settings-logic";
+import { agoText, compactFieldOf, compactThresholdOf } from "./settings-logic";
+import { USER_RUN_DEFAULTS_FEATURE } from "./settings-run-defaults";
+import { DefaultConnection } from "./settings-workspace";
 
 const TEXT3 = "var(--precision-text3)";
 
@@ -69,6 +76,62 @@ const styles = stylex.create({
   status: { fontSize: 12, color: "var(--color-text-secondary)" },
   quiet: { margin: 0, color: TEXT3 },
   contents: { display: "contents" },
+  tags: { display: "flex", flexWrap: "wrap", gap: 6, paddingBlock: 12, paddingInline: 16 },
+  tag: {
+    display: "inline-flex",
+    maxWidth: "100%",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: 6,
+    paddingBlock: 3,
+    paddingInlineStart: 9,
+    paddingInlineEnd: 4,
+    backgroundColor: "var(--precision-sunk)",
+    fontFamily: "var(--font-family-code)",
+    fontSize: 12,
+  },
+  tagName: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  tagRemove: {
+    display: "grid",
+    width: 18,
+    height: 18,
+    flexShrink: 0,
+    placeItems: "center",
+    cursor: "pointer",
+    borderWidth: 0,
+    borderRadius: 4,
+    padding: 0,
+    backgroundColor: { default: "transparent", ":hover": "var(--color-overlay-hover)" },
+    color: { default: TEXT3, ":hover": "var(--color-text-primary)" },
+  },
+  grid2: {
+    display: "grid",
+    gridTemplateColumns: { default: "1fr 1fr", "@media (max-width: 720px)": "1fr" },
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--precision-line2)",
+    listStyle: "none",
+  },
+  cell: {
+    display: "flex",
+    minHeight: 52,
+    alignItems: "center",
+    gap: 8,
+    paddingBlock: 10,
+    paddingInline: 16,
+    outlineStyle: "none",
+    borderBlockStartWidth: { default: 1, ":nth-child(-n+2)": 0 },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--precision-line2)",
+    borderInlineStartWidth: { default: 0, ":nth-child(even)": 1 },
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: "var(--precision-line2)",
+  },
+  cellLabel: { minWidth: 0, flex: 1, fontWeight: 500 },
+  unit: { width: 22, color: TEXT3 },
 });
 
 const PROVIDERS: { key: ProviderKind; label: string; about: string }[] = [
@@ -168,7 +231,7 @@ function ApiKey({ id, has }: { id: string; has: boolean }) {
   if (!open)
     return (
       <Keyed action="SettingsKey" chord="S">
-        <SmallButton onClick={() => setOpen(true)}>{has ? "Replace API key" : "API key"}</SmallButton>
+        <SmallButton onClick={() => setOpen(true)}>{has ? "Key" : "Add key"}</SmallButton>
       </Keyed>
     );
   const close = () => {
@@ -211,8 +274,17 @@ function ApiKey({ id, has }: { id: string; has: boolean }) {
   );
 }
 
+/** A connection's state as a chip; a ready one needs none. */
+const CONNECTION_STATES: Record<string, { label: string; tone: Tone } | undefined> = {
+  needs_auth: { label: "Needs a key", tone: "warn" },
+  unavailable: { label: "Unreachable", tone: "bad" },
+  disconnected: { label: "Disconnected", tone: "plain" },
+};
+
+/** Server › Connections: the company connection and every connection with its key and state. */
 export function ConnectionsSection() {
   const connection = useConnection();
+  const { features } = useLinkState();
   const { busy, error, run } = useChange();
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -220,33 +292,51 @@ export function ConnectionsSection() {
     "connections",
     async () => expectBody(await connection.call("connection.list"), "connections").value,
   );
+  const connections = list.data?.connections ?? [];
+  const chosen = list.data?.defaults.find((d) => d.purpose === "employee" && d.scope.kind === "global")?.settings
+    .connection;
+  const companyId = chosen?.mode === "value" ? chosen.value : connections[0]?.id;
   return (
     <>
-      <Group title="Connections">
+      {features.includes(USER_RUN_DEFAULTS_FEATURE) ? <DefaultConnection /> : null}
+      <Group
+        title="Connections"
+        count={connections.length}
+        action={
+          <Keyed action="SettingsNew" chord="N">
+            <SmallButton onClick={() => setAdding(true)}>Add connection</SmallButton>
+          </Keyed>
+        }
+      >
         {list.data?.connections.length === 0 ? <Row title="No connections yet." /> : null}
-        {(list.data ?? { connections: [] }).connections.map((c) => {
+        {connections.map((c) => {
           const needsKey = c.provider === "anthropic_api" || c.provider === "openai_api";
+          const state = CONNECTION_STATES[c.status];
+          const models = `${c.models.length} model${c.models.length === 1 ? "" : "s"}`;
           return (
             <Fragment key={c.id}>
               <Row
                 joined={open === c.id}
-                title={
-                  <button
-                    type="button"
-                    aria-expanded={open === c.id}
-                    onClick={() => setOpen(open === c.id ? null : c.id)}
-                    {...stylex.props(styles.open)}
-                  >
-                    {open === c.id ? "▾" : "▸"} {c.display_name}
-                  </button>
+                start={
+                  <IconBox>
+                    <Icon name={c.provider === "claude_code" ? "user" : "plug"} />
+                  </IconBox>
                 }
-                hint={[
-                  c.status,
-                  c.default_model ? modelName(c.default_model) : null,
-                  `Checked ${when(c.last_verified_ms)}`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
+                title={
+                  <>
+                    <button
+                      type="button"
+                      aria-expanded={open === c.id}
+                      onClick={() => setOpen(open === c.id ? null : c.id)}
+                      {...stylex.props(styles.open)}
+                    >
+                      {c.display_name}
+                    </button>
+                    {c.id === companyId ? <Chip tone="ok">Company</Chip> : null}
+                    {state ? <Chip tone={state.tone}>{state.label}</Chip> : null}
+                  </>
+                }
+                hint={needsKey && c.has_secret ? `Key set · ${models}` : (c.runtime_path ?? models)}
               >
                 {needsKey ? <ApiKey id={c.id} has={c.has_secret} /> : null}
                 <Keyed action="SettingsVerify" chord="V">
@@ -256,7 +346,7 @@ export function ConnectionsSection() {
                       void run(() => connection.write("connection.verify", { connection_id: c.id }, { retry: false }))
                     }
                   >
-                    Check
+                    {c.status === "unavailable" ? "Retry" : "Check"}
                   </SmallButton>
                 </Keyed>
                 <Keyed action="SettingsRemove" chord="Del">
@@ -271,7 +361,7 @@ export function ConnectionsSection() {
                 </Keyed>
               </Row>
               {open === c.id ? (
-                <Part xstyle={styles.details}>
+                <Part>
                   <dl {...stylex.props(styles.facts)}>
                     <dt {...stylex.props(styles.fact)}>Status</dt>
                     <dd {...stylex.props(styles.value)}>
@@ -298,6 +388,8 @@ export function ConnectionsSection() {
                     ) : null}
                     <dt {...stylex.props(styles.fact)}>Available</dt>
                     <dd {...stylex.props(styles.value)}>{c.models.map(modelName).join(", ") || "None"}</dd>
+                    <dt {...stylex.props(styles.fact)}>Checked</dt>
+                    <dd {...stylex.props(styles.value)}>{when(c.last_verified_ms)}</dd>
                     <dt {...stylex.props(styles.fact)}>Id</dt>
                     <dd {...stylex.props(styles.mono)}>{c.id}</dd>
                   </dl>
@@ -307,20 +399,11 @@ export function ConnectionsSection() {
           );
         })}
       </Group>
-      <div>
-        <Keyed action="SettingsNew" chord="N">
-          <SmallButton kind="primary" onClick={() => setAdding(true)}>
-            Add connection…
-          </SmallButton>
-        </Keyed>
-      </div>
       {adding ? <AddConnectionDialog onClose={() => setAdding(false)} /> : null}
       <Problem error={list.error ?? error} />
     </>
   );
 }
-
-const MCP_AUTH: Record<string, string> = { authorized: "Connected", needs_login: "Needs login" };
 
 function Browser() {
   const connection = useConnection();
@@ -536,27 +619,36 @@ function AlwaysAllowed() {
     "always_allow",
     async () => expectBody(await connection.call("mcp_always_allow.list"), "mcp_always_allow").value.tools,
   );
+  const tools = list.data ?? [];
   return (
-    <Group title="Always allowed tools">
-      <Row title="These MCP tools run without asking, in every project." hint="Plan mode still blocks them." />
+    <Group title="Always allowed tools" count={tools.length}>
       {list.data?.length === 0 ? (
         <Row title="No tools yet." hint="Choose 'Always allow' on an MCP tool's approval to add one." />
       ) : null}
-      {(list.data ?? []).map((tool) => (
-        <Row key={tool} title={<span {...stylex.props(styles.monoTool)}>{tool}</span>}>
-          <SmallButton
-            disabled={busy}
-            onClick={() => void run(() => connection.write("mcp_always_allow.remove", { tool }, { retry: false }))}
-          >
-            Remove
-          </SmallButton>
-        </Row>
-      ))}
+      {tools.length > 0 ? (
+        <li {...stylex.props(styles.tags)}>
+          {tools.map((tool) => (
+            <span key={tool} {...stylex.props(styles.tag)}>
+              <span {...stylex.props(styles.tagName)}>{tool}</span>
+              <button
+                type="button"
+                aria-label={`Remove ${tool}`}
+                disabled={busy}
+                onClick={() => void run(() => connection.write("mcp_always_allow.remove", { tool }, { retry: false }))}
+                {...stylex.props(styles.tagRemove)}
+              >
+                <Icon name="close" size={10} weight={2} />
+              </button>
+            </span>
+          ))}
+        </li>
+      ) : null}
       <Problem error={list.error ?? error} />
     </Group>
   );
 }
 
+/** Server › Tools & MCP: safe tools, MCP servers, the browser and the tools always allowed. */
 export function McpSection() {
   const connection = useConnection();
   const { busy, error, run } = useChange();
@@ -566,6 +658,7 @@ export function McpSection() {
     async () => expectBody(await connection.call("auto_allow.get_setting"), "auto_allow_setting").value,
   );
   const servers = list.data?.servers ?? [];
+  const missing = list.data?.missing ?? [];
   const [adding, setAdding] = useState(false);
   const [login, setLogin] = useState<string | null>(null);
   const setEnabled = (name: string, on: boolean) => {
@@ -574,7 +667,7 @@ export function McpSection() {
   };
   return (
     <>
-      <Group title="Tools">
+      <Group>
         <Row title="Allow safe tools without asking" hint={auto.data?.tools?.join(", ")}>
           <Switch
             label="Allow safe tools without asking"
@@ -586,21 +679,45 @@ export function McpSection() {
           />
         </Row>
       </Group>
-      <Browser />
-      <Group title="MCP servers">
-        {servers.length === 0 && (list.data?.missing ?? []).length === 0 ? <Row title="No MCP servers yet." /> : null}
-        {(list.data?.missing ?? []).map((name) => (
+      <Group
+        title="MCP servers"
+        count={servers.length}
+        action={
+          <Keyed action="SettingsNew" chord="N">
+            <SmallButton onClick={() => setAdding(true)}>Add MCP server</SmallButton>
+          </Keyed>
+        }
+      >
+        {servers.length === 0 && missing.length === 0 ? <Row title="No MCP servers yet." /> : null}
+        {missing.map((name) => (
           <Row key={name} title={name} hint="Claude Code no longer has this server." />
         ))}
         {servers.map((s) => (
           <Row
             key={s.name}
-            title={s.name}
-            hint={`${s.summary}${MCP_AUTH[s.auth ?? ""] ? ` · ${MCP_AUTH[s.auth ?? ""]}` : ""}`}
+            start={<IconBox>{s.name.slice(0, 2).toLowerCase()}</IconBox>}
+            title={
+              <>
+                {s.name}
+                {s.auth === "authorized" ? (
+                  <Chip tone="ok" dot>
+                    Connected
+                  </Chip>
+                ) : null}
+                {s.auth === "needs_login" ? <Chip tone="warn">Needs login</Chip> : null}
+                {s.enabled ? null : <Chip>Off</Chip>}
+              </>
+            }
+            hint={s.summary}
           >
-            {s.auth === "needs_login" ? <SmallButton onClick={() => setLogin(s.name)}>Log in</SmallButton> : null}
+            {s.auth === "needs_login" ? (
+              <SmallButton kind="primary" onClick={() => setLogin(s.name)}>
+                Log in
+              </SmallButton>
+            ) : null}
             {s.auth === "authorized" ? (
               <SmallButton
+                kind="ghost"
                 disabled={busy}
                 onClick={() => void run(() => connection.write("mcp.logout", { name: s.name }, { retry: false }))}
               >
@@ -624,13 +741,7 @@ export function McpSection() {
           </Row>
         ))}
       </Group>
-      <div>
-        <Keyed action="SettingsNew" chord="N">
-          <SmallButton kind="primary" onClick={() => setAdding(true)}>
-            Add MCP server…
-          </SmallButton>
-        </Keyed>
-      </div>
+      <Browser />
       <AlwaysAllowed />
       {adding ? <AddMcp onClose={() => setAdding(false)} /> : null}
       {login ? <McpLoginDialog name={login} onClose={() => setLogin(null)} /> : null}
@@ -639,17 +750,29 @@ export function McpSection() {
   );
 }
 
+/** Server › Backups: the last backup, Back up now, and every backup to restore. */
 export function BackupsSection() {
   const connection = useConnection();
   const { busy, error, run } = useChange();
   const list = useSetting("backups", async () => expectBody(await connection.call("backup.list"), "backups").value);
   const data = list.data;
+  const backups = data?.backups ?? [];
+  const last = backups.reduce<number | null>((at, b) => Math.max(at ?? 0, b.created_at_ms), null);
   return (
     <>
       <Group>
-        <Row title="Back up now" hint={data?.folder}>
+        <Row
+          start={
+            <IconBox>
+              <Icon name="archive" />
+            </IconBox>
+          }
+          title={last ? `Last backup ${agoText(last, Date.now())}` : "No backup yet"}
+          hint={data?.folder ? <span {...stylex.props(styles.monoTool)}>{data.folder}</span> : undefined}
+        >
           <Keyed action="SettingsBackupNow" chord="B">
             <SmallButton
+              kind="primary"
               disabled={busy}
               onClick={() =>
                 void run(() => connection.write("backup.create", undefined, { retry: false, timeoutMs: 600_000 }))
@@ -676,17 +799,18 @@ export function BackupsSection() {
         ) : null}
         {data?.restore_pending ? <Row title="A restore waits for the next start" hint={data.restore_pending} /> : null}
       </Group>
-      <Group title="Backups">
+      <Group title="Backups" count={backups.length}>
         {data?.backups.length === 0 ? <Row title="No backups yet." /> : null}
-        {(data?.backups ?? []).map((b) => (
+        {backups.map((b) => (
           <Row
             key={b.id}
             title={when(b.created_at_ms)}
-            hint={`${b.kind === "daily" ? "daily" : "manual"} · ${bytes(b.bytes)} · ${b.files} files · version ${b.app_version}`}
+            hint={`${b.kind === "daily" ? "Daily" : "Manual"} · ${bytes(b.bytes)} · version ${b.app_version}`}
           >
             <Keyed action="SettingsRestore" chord="R">
               <ConfirmButton
                 label="Restore"
+                kind="secondary"
                 question={`Restore the backup of ${when(b.created_at_ms)}? Aurelius restarts and today's data is replaced.`}
                 disabled={busy}
                 onConfirm={() => void run(() => connection.write("backup.restore", { id: b.id }, { retry: false }))}
@@ -700,11 +824,11 @@ export function BackupsSection() {
   );
 }
 
-const LIMITS: { key: "cpu_high" | "cpu_low" | "mem_min_mb" | "max_runs"; label: string; hint: string }[] = [
-  { key: "max_runs", label: "Max runs at once", hint: "At most." },
-  { key: "cpu_high", label: "Hold from CPU", hint: "Percent." },
-  { key: "cpu_low", label: "Release below CPU", hint: "Percent." },
-  { key: "mem_min_mb", label: "Min free memory", hint: "GB." },
+const LIMITS: { key: "cpu_high" | "cpu_low" | "mem_min_mb" | "max_runs"; label: string; unit: string }[] = [
+  { key: "max_runs", label: "Max runs at once", unit: "" },
+  { key: "mem_min_mb", label: "Min free memory", unit: "GB" },
+  { key: "cpu_high", label: "Hold from CPU", unit: "%" },
+  { key: "cpu_low", label: "Release below CPU", unit: "%" },
 ];
 
 /** Memory is kept in MB on the wire and written in GB. */
@@ -719,7 +843,7 @@ function RunningNow() {
   const open = (jobs.data ?? []).filter((j) => j.state === "leased" || j.state === "ready");
   if (open.length === 0) return null;
   return (
-    <Group title="Running now">
+    <Group title="Running now" count={open.length}>
       {open.map((j) => (
         <Row key={j.id} title={j.label} hint={j.reason ?? j.kind}>
           <span {...stylex.props(styles.status)}>{j.state === "leased" ? "Running" : "Waiting"}</span>
@@ -729,7 +853,7 @@ function RunningNow() {
   );
 }
 
-export function LoadSection() {
+function Load() {
   const connection = useConnection();
   const client = useQueryClient();
   const { busy, error, run } = useChange();
@@ -759,24 +883,36 @@ export function LoadSection() {
     if (invalid) return;
     if (await run(() => connection.write("load.set_limits", changes, { retry: false }))) setDraft({});
   };
+  const held = data?.gate === "held";
   return (
     <>
-      <RunningNow />
-      <Group title="Now">
+      <Group>
         <Row
-          title={data?.gate === "held" ? "New runs are waiting" : "New runs start right away"}
-          hint={data ? `${data.held} waiting · ${data.running} running` : undefined}
-        >
-          {data ? (
-            <span {...stylex.props(styles.status)}>
-              CPU {Math.round(data.cpu_pct)}% · {bytes(data.mem_free_mb * 1024 * 1024)} free of{" "}
-              {bytes(data.mem_total_mb * 1024 * 1024)}
-            </span>
-          ) : null}
-        </Row>
+          title={
+            <>
+              {held ? "New runs are waiting" : "New runs start right away"}
+              {data ? (
+                held ? (
+                  <Chip tone="warn" dot>
+                    Held
+                  </Chip>
+                ) : (
+                  <Chip tone="ok" dot>
+                    Open
+                  </Chip>
+                )
+              ) : null}
+            </>
+          }
+          hint={
+            data
+              ? `${data.running} running · ${data.held} waiting · CPU ${Math.round(data.cpu_pct)}% · ${bytes(data.mem_free_mb * 1024 * 1024)} free`
+              : undefined
+          }
+        />
       </Group>
       <form onSubmit={(e) => void save(e)} {...stylex.props(styles.contents)}>
-        <Group title="CPU and memory">
+        <Group title="Limits">
           <Row title="Hold runs when the computer is busy">
             <Keyed action="LoadToggleEnabled" chord="Alt E">
               <Switch
@@ -789,43 +925,57 @@ export function LoadSection() {
               />
             </Keyed>
           </Row>
-          {LIMITS.map(({ key, label, hint }) => (
-            <Row key={key} title={label} hint={hint}>
-              <TextInput
-                label={label}
-                type="number"
-                min={0}
-                step="any"
-                width={90}
-                value={draft[key] ?? shownLimit(key, data?.limits[key])}
-                onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
-              />
-            </Row>
-          ))}
+          <li {...stylex.props(styles.grid2)}>
+            {LIMITS.map(({ key, label, unit }) => (
+              <div key={key} data-setting-row tabIndex={-1} {...stylex.props(styles.cell)}>
+                <span {...stylex.props(styles.cellLabel)}>{label}</span>
+                <TextInput
+                  label={unit ? `${label} (${unit})` : label}
+                  type="number"
+                  min={0}
+                  step="any"
+                  width={72}
+                  value={draft[key] ?? shownLimit(key, data?.limits[key])}
+                  onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+                />
+                <span {...stylex.props(styles.unit)}>{unit}</span>
+              </div>
+            ))}
+          </li>
+          {Object.keys(changes).length > 0 ? (
+            <Foot>
+              <Keyed action="LoadSave" chord="Ctrl S">
+                <SmallButton kind="primary" type="submit" disabled={busy || invalid !== null}>
+                  Save limits
+                </SmallButton>
+              </Keyed>
+            </Foot>
+          ) : null}
         </Group>
-        {Object.keys(changes).length > 0 ? (
-          <div>
-            <Keyed action="LoadSave" chord="Ctrl S">
-              <SmallButton kind="primary" type="submit" disabled={busy || invalid !== null}>
-                Save limits
-              </SmallButton>
-            </Keyed>
-          </div>
-        ) : null}
       </form>
       <Problem error={load.error ?? invalid ?? error} />
     </>
   );
 }
 
-export function CompactionSection() {
+/** Server › Runs & load: whether runs start, the load limits, context compaction, what runs now. */
+export function RunsAndLoadSection() {
   const { features } = useLinkState();
-  return features.includes("compaction_setting") ? (
-    <CompactionThreshold />
-  ) : (
-    <Group>
-      <Muted>This server compacts a session above 120k tokens. Update the server to choose when.</Muted>
-    </Group>
+  return (
+    <>
+      <Load />
+      {features.includes("compaction_setting") ? (
+        <CompactionThreshold />
+      ) : (
+        <Group title="Context">
+          <Row
+            title="Compact above"
+            hint="This server compacts a session above 120k tokens. Update the server to choose."
+          />
+        </Group>
+      )}
+      <RunningNow />
+    </>
   );
 }
 
@@ -852,39 +1002,40 @@ function CompactionThreshold() {
   return (
     <>
       <form onSubmit={submit} {...stylex.props(styles.contents)}>
-        <Group>
+        <Group title="Context">
           <Row
-            title="Compact the context above (thousands of tokens)"
+            title="Compact above"
             hint={
               data
-                ? `Before its next turn a session whose context grew past this is summarised. Default ${compactFieldOf(data.default_tokens)}, from ${compactFieldOf(data.min_tokens)} to ${compactFieldOf(data.max_tokens)}; 0: never. Claude Code still compacts by itself when the model's context window is full.`
+                ? `Default ${compactFieldOf(data.default_tokens)}k, from ${compactFieldOf(data.min_tokens)}k to ${compactFieldOf(data.max_tokens)}k; 0: never.`
                 : undefined
             }
           >
+            {data && data.threshold_tokens !== data.default_tokens && draft === null ? (
+              <SmallButton kind="ghost" disabled={busy} onClick={() => void save(data.default_tokens)}>
+                Use the default
+              </SmallButton>
+            ) : null}
             <TextInput
-              label="Compact the context above (thousands of tokens)"
+              label="Compact above, thousands of tokens"
               type="number"
               min={0}
               step={1}
-              width={90}
+              width={72}
               value={field}
               disabled={busy || !data}
               onChange={(e) => setDraft(e.target.value)}
             />
-            {data && data.threshold_tokens !== data.default_tokens && draft === null ? (
-              <SmallButton disabled={busy} onClick={() => void save(data.default_tokens)}>
-                Use the default
-              </SmallButton>
-            ) : null}
+            <span {...stylex.props(styles.quiet)}>k tokens</span>
           </Row>
+          {draft !== null && typeof parsed === "number" && parsed !== data?.threshold_tokens ? (
+            <Foot>
+              <SmallButton kind="primary" type="submit" disabled={busy}>
+                Save
+              </SmallButton>
+            </Foot>
+          ) : null}
         </Group>
-        {draft !== null && typeof parsed === "number" && parsed !== data?.threshold_tokens ? (
-          <div>
-            <SmallButton kind="primary" type="submit" disabled={busy}>
-              Save
-            </SmallButton>
-          </div>
-        ) : null}
       </form>
       <Problem error={setting.error ?? invalid ?? error} />
     </>

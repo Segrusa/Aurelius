@@ -88,20 +88,28 @@ export const choiceLine = (
   name: (value: string) => string = (v) => v,
 ): string => (choice === "inherit" ? inheritLabel(inherited) : name(choice));
 
-export type EmployeeTab = "inbox" | "memory" | "guidelines" | "settings";
+export type EmployeeTab = "work" | "profile" | "memory" | "guidelines" | "access";
 
-/** The employee page's tabs. An older server has no mailbox or no guidelines to show. */
-export function employeeTabs(queue: boolean, guidelines: boolean): { key: EmployeeTab; label: string }[] {
+/** The employee page's tabs (design/settings-company.html). An older server has no guidelines to show. */
+export function employeeTabs(guidelines: boolean): { key: EmployeeTab; label: string }[] {
   return [
-    ...(queue ? [{ key: "inbox" as const, label: "Inbox" }] : []),
+    { key: "work", label: "Work" },
+    { key: "profile", label: "Profile" },
     { key: "memory", label: "Memory" },
     ...(guidelines ? [{ key: "guidelines" as const, label: "Guidelines" }] : []),
-    { key: "settings", label: "Settings" },
+    { key: "access", label: "Access" },
   ];
 }
 
-export const isEmployeeTab = (value: unknown): value is EmployeeTab =>
-  value === "inbox" || value === "memory" || value === "guidelines" || value === "settings";
+/** Old links still open a tab: Inbox is now Work, Settings is now Profile. */
+const OLD_TABS: Record<string, EmployeeTab> = { inbox: "work", settings: "profile" };
+
+/** The tab a link's `tab` asks for, or null when it names none. */
+export function employeeTabOf(value: unknown): EmployeeTab | null {
+  if (typeof value !== "string") return null;
+  if (["work", "profile", "memory", "guidelines", "access"].includes(value)) return value as EmployeeTab;
+  return OLD_TABS[value] ?? null;
+}
 
 /** What the dot and word beside an employee say (U6). Colors are CSS values. */
 export interface EmployeeState {
@@ -273,3 +281,55 @@ const INSTRUCTIONS_PREVIEW_CHARS = 1200;
  */
 export const instructionsFold = (text: string) =>
   text.split("\n").length > INSTRUCTIONS_PREVIEW_LINES || text.length > INSTRUCTIONS_PREVIEW_CHARS;
+
+/** The filters of Settings › Employees: everyone still here, or one state. */
+export type EmployeeFilter = "all" | "work" | "you" | "paused" | "archived";
+
+/** Which filter an employee falls under besides All; archived employees only show under Archived. */
+export function employeeFilterOf(e: Pick<EmployeeSummary, "status" | "working" | "activity_state">): EmployeeFilter {
+  if (e.status === "archived") return "archived";
+  if (e.status === "paused") return "paused";
+  const label = employeeState(e).label;
+  if (label === "Working") return "work";
+  return label === "Waiting for you" ? "you" : "all";
+}
+
+/** Whether `e` shows under `filter`. */
+export function inEmployeeFilter(
+  e: Pick<EmployeeSummary, "status" | "working" | "activity_state">,
+  filter: EmployeeFilter,
+): boolean {
+  const of = employeeFilterOf(e);
+  return filter === "all" ? of !== "archived" : of === filter;
+}
+
+/** How many employees each filter shows, for the counts on its button. */
+export function employeeFilterCounts(
+  all: Pick<EmployeeSummary, "status" | "working" | "activity_state">[],
+): Record<EmployeeFilter, number> {
+  const counts: Record<EmployeeFilter, number> = { all: 0, work: 0, you: 0, paused: 0, archived: 0 };
+  for (const e of all) {
+    for (const f of Object.keys(counts) as EmployeeFilter[]) if (inEmployeeFilter(e, f)) counts[f] += 1;
+  }
+  return counts;
+}
+
+/**
+ * Whether `employee` may report to `boss` after a drag on the org chart: not to itself, and not to
+ * someone who already reports to it, directly or further down (that would make a loop).
+ */
+export function canReportTo(
+  all: Pick<EmployeeSummary, "id" | "reports_to">[],
+  employee: string,
+  boss: string,
+): boolean {
+  if (employee === boss) return false;
+  const seen = new Set<string>();
+  let at: string | null | undefined = boss;
+  while (at && !seen.has(at)) {
+    if (at === employee) return false;
+    seen.add(at);
+    at = all.find((e) => e.id === at)?.reports_to;
+  }
+  return all.find((e) => e.id === employee)?.reports_to !== boss;
+}

@@ -153,3 +153,59 @@ export interface ReplaceableSection {
 export function sectionsFor<T extends ReplaceableSection>(sections: T[], features: readonly string[]): T[] {
   return sections.filter((s) => !s.replacedBy || !features.includes(s.replacedBy));
 }
+
+/** Where an old Settings link lands now that the pages are regrouped (Settings redesign, ticket #94). */
+export const SECTION_ALIASES: Readonly<Record<string, string>> = {
+  app: "device",
+  "run-defaults": "defaults",
+  servers: "server",
+  mcp: "tools",
+  compaction: "load",
+};
+
+/** The page an old or current section key opens. */
+export function sectionKeyOf(key: string): string {
+  return SECTION_ALIASES[key] ?? key;
+}
+
+/** Whether a Settings entry matches what was typed in Search settings: its label or one of its words. */
+export function settingMatches(label: string, keywords: string, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return q === "" || `${label} ${keywords}`.toLowerCase().includes(q);
+}
+
+/** "now", "4 min ago", "2 h ago", "yesterday", "9 days ago": how long ago, as Settings words it. */
+export function agoText(ms: number | null | undefined, now: number): string {
+  if (!ms) return "never";
+  const minutes = Math.floor(Math.max(0, now - ms) / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+/** "3 days", "5 h", "12 min": how long the server has been running. */
+export function uptimeText(startedMs: number | null | undefined, now: number): string {
+  if (!startedMs) return "Unknown";
+  const minutes = Math.floor(Math.max(0, now - startedMs) / 60_000);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "1 day" : `${days} days`;
+}
+
+/**
+ * The segment a choice shows as pressed: the stored value, or `fallback` when nothing is stored
+ * (My defaults shows Ask, or the model's own effort, for "Default").
+ */
+export function pressedChoice(stored: string, fallback: string | null | undefined): string | null {
+  return stored === "default" ? (fallback ?? null) : stored;
+}
+
+/** What pressing a segment stores: `default` when it is what Default comes to anyway. */
+export function choiceToStore(picked: string, fallback: string | null | undefined): string {
+  return picked === fallback ? "default" : picked;
+}

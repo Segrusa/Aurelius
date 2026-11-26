@@ -30,7 +30,7 @@ import { activityFilters } from "./screens/activity-logic";
 import { BoardScreen } from "./screens/board";
 import { CodeScreen } from "./screens/code";
 import { DesignsScreen } from "./screens/designs";
-import { type EmployeeTab, isEmployeeTab } from "./screens/employee-logic";
+import { type EmployeeTab, employeeTabOf } from "./screens/employee-logic";
 import { EmployeePage } from "./screens/employee-page";
 import { EmployeesScreen, OrgChartScreen } from "./screens/employees";
 import { Frame } from "./screens/frame";
@@ -172,8 +172,10 @@ const orgChart = createRoute({ getParentRoute: () => root, path: "/employees/org
 const employee = createRoute({
   getParentRoute: () => root,
   path: "/employees/$id",
-  validateSearch: (search: Record<string, unknown>): { tab?: EmployeeTab } =>
-    isEmployeeTab(search.tab) ? { tab: search.tab } : {},
+  validateSearch: (search: Record<string, unknown>): { tab?: EmployeeTab } => {
+    const tab = employeeTabOf(search.tab);
+    return tab ? { tab } : {};
+  },
   component: function EmployeeRoute() {
     const { id } = employee.useParams();
     const { tab } = employee.useSearch();
